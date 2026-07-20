@@ -150,8 +150,10 @@ pub enum ExponentClass {
 /// that class can still evaluate by carrying its own cited exponent
 /// ([`PhaseConductivity::measured_exponent_a`]), which is the per-phase route the refusal text has always told
 /// callers to take and which nothing implemented until now. MgO is the live case: its `a = 0.9` is a cited
-/// per-phase determination, so a fetched per-phase exponent column restores the ladder's overlap sentinel
-/// without anyone choosing a class number.
+/// per-phase determination, so a fetched per-phase exponent column restores the SIMPLE class's only overlap
+/// point without anyone choosing a class number. That is what the unset class exponent blocks, and it is not
+/// the ladder's only overlap point: four complex-class phases carry both rungs and evaluate today, which is
+/// the sample [`derived_estimator_bands`] measures the estimator's band from.
 pub fn lattice_exponent_class(atoms_per_primitive_cell: i32) -> ExponentClass {
     if atoms_per_primitive_cell < 1 {
         return ExponentClass::NotALattice;
@@ -491,12 +493,230 @@ pub enum EstimatorBand {
     /// resolves through Slack's rung carrying this is refused
     /// ([`ConductivityRefusal::NoEstimatorBand`]) rather than aggregated at zero width.
     ///
-    /// This is the DEFAULT the banked loader writes, and the refusal is therefore the default path, because
-    /// the width is a RESERVED value the owner has not set:
-    /// `conductivity.slack_estimator_band_factor` in `calibration/reserved.toml`. Fabricating one here to keep
-    /// the aggregate answering would understate an estimator's error at exactly the site that exists to
-    /// declare it.
+    /// THIS USED TO BE WHAT THE BANKED LOADER WROTE for every phase it built, because the width was a
+    /// reserved value nobody had set. It is now what the loader writes only where the ladder's own overlap
+    /// cannot measure a band for the phase's class ([`derived_estimator_bands`]): no phase in the class
+    /// carries both rungs, or the moduli table the estimator's Debye temperature derives from was not
+    /// supplied. Fabricating a width here would understate an estimator's error at exactly the site that
+    /// exists to declare it, so the absence still refuses.
     NotSupplied,
+}
+
+/// ONE EXPONENT CLASS'S ESTIMATOR BAND, MEASURED OFF THE LADDER'S OWN OVERLAP POINTS rather than declared.
+///
+/// WHY THIS EXISTS. The estimator rung's width used to be a reserved value
+/// (`conductivity.slack_estimator_band_factor`), and the basis recorded against it named the measurement
+/// that would retire it: [`rung_disagreement_ratio`] over every phase carrying BOTH rungs, distributed by
+/// cell class. That measurement is what this computes, so the width is an observation and no longer an
+/// owner decision. It carried one false premise while it stood, that periclase was the only such phase
+/// banked, and the count is FIVE.
+///
+/// THE SHAPE IS ONE-SIDED HIGH, and both the physics and the observation say so. Slack's single-scattering
+/// form overstates a cell with many optical branches by construction, and every ratio the banked columns
+/// produce is above one, so the estimate is a ceiling and the band reaches downward from it.
+/// [`EstimatorBand::UpperBoundFactor`] is the shape that says that.
+///
+/// THE FACTOR IS THE WIDEST RATIO OBSERVED IN THE CLASS, which is what an envelope means: a one-sided bound
+/// with factor `f` covers an observation of ratio `r` exactly when `f >= r`, so the maximum is the smallest
+/// factor that covers the class and any smaller one would exclude a phase the ladder has measured. Nothing
+/// is interpolated and no functional form in the cell count is fitted: two phases share a band exactly when
+/// [`lattice_exponent_class`] puts them in one class, and the class boundary is Hofmeister's, read from that
+/// classifier rather than restated here.
+///
+/// THE SAMPLE IS SMALL AND THE FIELDS SAY SO. [`Self::sample_size`], [`Self::observed_min_ratio`],
+/// [`Self::observed_max_ratio`] and [`Self::phases`] travel with the band so a reader can see how thin the
+/// evidence is rather than reading a bare factor. On the banked columns today the complex class rests on
+/// FOUR phases and the simple class on ONE.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DerivedEstimatorBand {
+    /// The class this envelope covers, as [`lattice_exponent_class`] returns it. Carried rather than a cell
+    /// count, because the class IS the grouping and a count would invite a reader to interpolate between
+    /// two of them.
+    pub class: ExponentClass,
+    /// The band itself, one-sided high at [`Self::observed_max_ratio`]. [`EstimatorBand::NotSupplied`] when
+    /// the class's observations do not support that shape, which is the case where the widest ratio sits
+    /// BELOW one: the estimator would then be under-predicting and a one-sided HIGH bound would be the
+    /// wrong claim, so the class hands back no band and a phase in it refuses by name. No class in the
+    /// banked columns reaches that branch today.
+    pub band: EstimatorBand,
+    /// How many phases in this class carried BOTH rungs. This is the number that says how much the band is
+    /// worth, and it is small.
+    pub sample_size: usize,
+    /// The NARROWEST estimator-over-measured ratio observed in the class. Reported beside the widest so the
+    /// spread the class covers is visible rather than collapsed into the bound.
+    pub observed_min_ratio: Fixed,
+    /// The WIDEST ratio observed, which IS the band's factor.
+    pub observed_max_ratio: Fixed,
+    /// The phases the envelope was measured on, in the banked column's canonical order, so the band names
+    /// the population that convicted it rather than arriving as a bare number.
+    pub phases: Vec<String>,
+}
+
+/// Slack's MEAN ATOMIC MASS for a phase (amu): the phase's molar mass over its atoms per formula unit.
+///
+/// Extracted rather than written twice, because the estimator anchor and the band derived from that anchor
+/// have to read ONE definition. Two copies of this arithmetic would be the same-rung duplicate defect this
+/// module's header forbids, one level down.
+///
+/// `None` when the molar mass does not resolve, when the composition names no atoms, or on a fixed-point
+/// intermediate leaving the window.
+// @derives: a phase's mean atomic mass (amu), Slack's M_bar <- the phase registry's own composition + the periodic table's atomic masses
+fn phase_mean_atomic_mass_amu(
+    phase: &civsim_physics::petrology_data::Phase,
+    periodic: &PeriodicTable,
+) -> Option<Fixed> {
+    let molar = civsim_physics::petrology::phase_molar_mass(phase, periodic)?;
+    let atoms: u32 = phase.composition.iter().map(|(_, c)| *c).sum();
+    if atoms == 0 {
+        return None;
+    }
+    molar.checked_div(Fixed::from_int(atoms as i32))
+}
+
+/// DERIVE the estimator rung's band, per exponent class, FROM THE LADDER'S OWN OVERLAP POINTS.
+///
+/// One pass over the banked conductivity column. A phase enters the measurement when BOTH rungs evaluate on
+/// it: a measured `kappa_298` anchor, and Slack's magnitude assembled from exactly the columns
+/// [`phase_conductivity_from_banked`] assembles it from (the banked Grueneisen gamma, the registry's molar
+/// mass and molar volume, and the elastic Debye temperature derived off the moduli table). The ratio of the
+/// two is [`rung_disagreement_ratio`], the diagnostic this module has always computed and never consumed.
+/// Phases are grouped by [`lattice_exponent_class`], and each class's envelope is the widest ratio in it.
+///
+/// WHAT THE BANKED COLUMNS SAY TODAY, stated as the measurement rather than as a claim about Slack in
+/// general. Five phases resolve both rungs. In the COMPLEX class (`n >= 6`): corundum at `1.74`, fayalite
+/// at `2.28`, forsterite at `2.70` and enstatite at `4.69`. In the SIMPLE class (`n <= 2`): periclase alone,
+/// at `2.07`. Every one is above one, so Slack over-predicts in every case the ladder can check, which is
+/// the one-sidedness the estimator's own docstring asserts on physical grounds.
+///
+/// THE HONEST LIMITS, and they are the reason the sample size travels with the band:
+///   - FOUR POINTS carry the complex class and ONE carries the simple class. An envelope over four
+///     observations is an envelope over four observations. The module's own cited complex-cell exhibit,
+///     rutile at roughly `43` against a measured `9` (a factor near `4.78`), sits just ABOVE the widest
+///     ratio the four reach, which is direct evidence that four points do not bound the class. Rutile is
+///     not widened into the envelope because it is not a banked row: folding a docstring figure into a
+///     measurement over the columns would be the fabrication the derivation exists to end.
+///   - THE MEASURED ANCHORS ARE NOT ONE SPECIMEN FORM. The banked column carries `kappa_specimen_form` per
+///     row, and the four complex-class anchors split two ways: corundum is a dense polycrystal, while
+///     forsterite, fayalite and enstatite are needle-probe determinations on finely ground samples. The
+///     dense-polycrystal point is the narrowest ratio of the four and the three ground-sample points are
+///     the three widest. This module cannot separate specimen form from model error inside a ratio, so the
+///     envelope carries both.
+///   - ENSTATITE, THE WIDEST POINT, RIDES A DIFFERENT GRUENEISEN RUNG. It is the one overlap phase whose
+///     banked row carries no thermodynamic gamma, so its gamma comes from the Gruneisen ladder's own
+///     ESTIMATOR rung (`gamma_eos_debye`, at `0.67`, the lowest in the set). Slack's magnitude FALLS with
+///     gamma across the whole banked range: the `1/gamma^2` denominator dominates the weak Morelli-Slack
+///     prefactor correction, and the net factor `correction(gamma)/gamma^2` runs `3.01` at `0.67` down to
+///     `0.55` at `1.54`. So a low gamma raises the estimate and widens the ratio, and the top of the
+///     envelope carries the Gruneisen estimator's error as well as Slack's. It is kept rather than dropped:
+///     the ladder reads whatever gamma rung a phase's row supplies, so this is a path the estimator really
+///     takes, and discarding an inconvenient observation would delete the tail of the distribution the
+///     measurement exists to report.
+///
+/// EVERY ONE OF THOSE THREE WIDENS THE BAND rather than narrowing it, and a one-sided upper bound that is
+/// too wide is a weaker claim than the evidence supports rather than a stronger one. What the sample cannot
+/// do is promise a phase outside it stays inside the envelope.
+///
+/// Returns one entry per class that produced at least one observation, in first-observation order over the
+/// column's canonical key walk, so the result is deterministic (Principle 3). An empty result means no phase
+/// in the banked columns carries both rungs, and every estimator-rung phase then refuses by name.
+// @derives: the estimator rung's per-class uncertainty band <- the estimator-over-measured ratios of every banked phase carrying BOTH rungs, grouped by the cited exponent class
+pub fn derived_estimator_bands(
+    conductivity: &PhaseConductivityTable,
+    gruneisen: &GruneisenTable,
+    moduli: &civsim_physics::mineral_moduli::MineralModuli,
+    registry: &PhaseRegistry,
+    periodic: &PeriodicTable,
+) -> Vec<DerivedEstimatorBand> {
+    // (class, narrowest, widest, phases), accumulated in first-observation order.
+    let mut groups: Vec<(ExponentClass, Fixed, Fixed, Vec<String>)> = Vec::new();
+    for row in conductivity.rows() {
+        let name = row.name.as_str();
+        // Both rungs, or no observation. Each `continue` below is a phase that carries one rung and not
+        // the other, which is the ordinary case rather than an error: it is why the sample is five.
+        let Some(measured) = row.kappa_298 else {
+            continue;
+        };
+        let Some((gamma, _rung)) = gruneisen.gamma(name) else {
+            continue;
+        };
+        let Some(phase) = registry.phase(name) else {
+            continue;
+        };
+        let Some(mass) = phase_mean_atomic_mass_amu(phase, periodic) else {
+            continue;
+        };
+        let Some(volume) = crate::thermoelastic::atomic_volume_angstrom3(name, registry) else {
+            continue;
+        };
+        let Some(debye) = crate::thermoelastic::derived_elastic_debye_temperature(
+            name, registry, moduli, periodic,
+        ) else {
+            continue;
+        };
+        let Some(estimator) = estimator_anchor_298(
+            gamma,
+            mass,
+            debye.kelvin(),
+            volume,
+            row.atoms_per_primitive_cell,
+        ) else {
+            continue;
+        };
+        let Some(ratio) = rung_disagreement_ratio(measured, estimator) else {
+            continue;
+        };
+        let class = lattice_exponent_class(row.atoms_per_primitive_cell);
+        match groups.iter_mut().find(|(c, _, _, _)| *c == class) {
+            Some((_, min, max, phases)) => {
+                if ratio < *min {
+                    *min = ratio;
+                }
+                if ratio > *max {
+                    *max = ratio;
+                }
+                phases.push(row.name.clone());
+            }
+            None => groups.push((class, ratio, ratio, vec![row.name.clone()])),
+        }
+    }
+    groups
+        .into_iter()
+        .map(|(class, min, max, phases)| DerivedEstimatorBand {
+            class,
+            // The envelope, and the guard on its shape. A widest ratio below one would mean the estimator
+            // sits under the measured rung across the whole class, which a one-sided HIGH bound cannot
+            // express and which `EstimatorBand`'s own factor rule (at least one) forbids. The class then
+            // hands back no band and its phases refuse by name, rather than being handed a factor that
+            // inverts the interval or one clamped up to one to keep the aggregate answering.
+            band: if max >= Fixed::ONE {
+                EstimatorBand::UpperBoundFactor(max)
+            } else {
+                EstimatorBand::NotSupplied
+            },
+            sample_size: phases.len(),
+            observed_min_ratio: min,
+            observed_max_ratio: max,
+            phases,
+        })
+        .collect()
+}
+
+/// The derived envelope covering a cell count, or `None` when no class in the measurement covers it.
+///
+/// It takes a computed list rather than the tables, so a caller holding one can query it repeatedly at no
+/// cost. That is an affordance of this signature and not a claim about
+/// [`phase_conductivity_from_banked`], which derives the list on every call: the measurement is a walk of
+/// the banked column, and on the eight rows banked today that walk is small enough that the loader pays it
+/// per phase rather than threading a cache through a public signature.
+///
+/// The match is on the CLASS [`lattice_exponent_class`] assigns the count, never on the count itself, so
+/// this adds no second boundary beside the cited one.
+pub fn derived_estimator_band_for_cell(
+    bands: &[DerivedEstimatorBand],
+    atoms_per_primitive_cell: i32,
+) -> Option<&DerivedEstimatorBand> {
+    let class = lattice_exponent_class(atoms_per_primitive_cell);
+    bands.iter().find(|b| b.class == class)
 }
 
 /// One phase's conductivity inputs: everything the per-phase ladder needs, plus the phase's name so a refusal can
@@ -511,10 +731,14 @@ pub struct PhaseConductivity {
     /// The measured anchor's symmetric half-width band, in W/(m*K), ADDITIVE (unlike the estimator rung's
     /// multiplicative factor, because a measured row reports an absolute uncertainty).
     pub kappa_298_band: Option<Fixed>,
-    /// The band on Slack's estimator rung, supplied by the caller because its magnitude is class-dependent and
-    /// ONE-SIDED on a complex cell (see [`estimator_anchor_298`]). Never defaulted to a width here: a fabricated
-    /// band would understate an estimator's error exactly where the aggregate most needs to declare it, so the
-    /// absent case is [`EstimatorBand::NotSupplied`] and it REFUSES.
+    /// The band on Slack's estimator rung, class-dependent and ONE-SIDED on a complex cell (see
+    /// [`estimator_anchor_298`]). Never defaulted to a width: a fabricated band would understate an estimator's
+    /// error exactly where the aggregate most needs to declare it, so the absent case is
+    /// [`EstimatorBand::NotSupplied`] and it REFUSES.
+    ///
+    /// [`phase_conductivity_from_banked`] DERIVES this from the ladder's own overlap points
+    /// ([`derived_estimator_bands`]); a caller hand-building a row supplies it, and a caller with no basis for
+    /// one supplies [`EstimatorBand::NotSupplied`] rather than a guess.
     pub estimator_band: EstimatorBand,
     /// This phase's OWN cited temperature exponent `a`, when a source determines one for it, bypassing the
     /// class-keyed classifier entirely.
@@ -785,8 +1009,9 @@ pub enum ConductivityRefusal {
     },
     /// The phase resolved through SLACK'S ESTIMATOR rung and no usable band came with it, so the aggregate
     /// would have reported a several-fold one-sided uncertainty as a zero-width number. Refused rather than
-    /// widened by a fabricated factor: the width is the reserved value
-    /// `conductivity.slack_estimator_band_factor`.
+    /// widened by a fabricated factor. The width is DERIVED where the ladder's own overlap can measure it
+    /// ([`derived_estimator_bands`]), so reaching this refusal from the banked loader means the phase's class
+    /// has no overlap point at all.
     NoEstimatorBand {
         /// The phase the census named.
         phase: String,
@@ -863,8 +1088,10 @@ impl fmt::Display for ConductivityRefusal {
                     "census phase {phase} resolved through Slack's ESTIMATOR rung and declared no band. That \
                      rung carries a several-fold error, one-sided on a complex cell (rutile, ~43 against a \
                      measured ~9), so aggregating it at zero width would report an estimate as a measurement. \
-                     The width is reserved (conductivity.slack_estimator_band_factor); refused rather than \
-                     fabricated (Principle 11)."
+                     The width DERIVES from the ladder's own overlap points where its exponent class has any \
+                     (derived_estimator_bands); this phase's class has none, so the fetch is a measured \
+                     kappa_298 anchor on a phase in that class whose Slack columns also resolve. Refused \
+                     rather than fabricated (Principle 11)."
                 ),
                 Some(factor) => write!(
                     f,
@@ -1014,13 +1241,19 @@ fn solve_bruggeman(components: &[(Fixed, Fixed)]) -> Option<Fixed> {
 /// Debye temperature from tables this function already holds (below). The estimator rung DOES fire from this
 /// loader now, for any phase with no measured anchor, which is the spinel and hematite case the census reaches.
 ///
-/// SO THE ESTIMATOR BAND IS THE REMAINING ABSENCE, and it is [`EstimatorBand::NotSupplied`] here for the reason
-/// the three inputs used to be `None`: no cited width exists to read. Slack's declared error is a factor, and
-/// the only figures this module can cite for it are the ~3x its own docstring declares for simple cells and the
-/// single complex-cell exhibit (rutile at ~43 against a measured ~9). Choosing a factor between those would be
-/// authoring the very number the band exists to declare, so the width is reserved
-/// (`conductivity.slack_estimator_band_factor`) and a phase that resolves through Slack REFUSES by name until
-/// it is set. That refusal is a behaviour change from a silent zero-width band, and it is the intended one.
+/// AND THE ESTIMATOR BAND IS DERIVED HERE TOO, which retires the last absence on this rung. It was
+/// [`EstimatorBand::NotSupplied`] for the reason the three inputs above used to be `None`, that no cited width
+/// existed to read, and the width was reserved as `conductivity.slack_estimator_band_factor` while it stood.
+/// The measurement that retires it was already in this module and never consumed:
+/// [`rung_disagreement_ratio`] over the phases carrying BOTH rungs, grouped by cell class
+/// ([`derived_estimator_bands`]). Five phases resolve both, four of them in the complex class, and every ratio
+/// is above one, so the band is a one-sided upper bound measured off the ladder's own overlap rather than a
+/// factor chosen between two cited figures. The sample is small and the derived band carries its own size and
+/// range so a reader can see that; the honest limits are on [`derived_estimator_bands`].
+///
+/// WITHOUT THE MODULI TABLE there is no band and no estimator rung either, so the absence costs nothing: the
+/// elastic Debye temperature derives off `moduli`, so a `None` there leaves `debye_temperature_k` absent and
+/// a phase with no measured anchor refuses with [`ConductivityRefusal::NoRung`] before any band is read.
 ///
 /// `expansivity_integral` stays the caller's own, for the reason the field's own docstring gives: only the
 /// caller knows whether its expansivity is constant over the range it is integrating.
@@ -1068,21 +1301,27 @@ pub fn phase_conductivity_from_banked(
     // and this module's own law documentation says so: "the built shear-aware `Theta_D`, which IS the
     // acoustic average". The entropy-fit effective temperature in `thermoelastic_anchors` would be the wrong
     // one, and the two are separate types precisely so that choice has to be made deliberately.
-    let mean_atomic_mass_amu = civsim_physics::petrology::phase_molar_mass(phase, periodic)
-        .and_then(|m| {
-            let atoms: u32 = phase.composition.iter().map(|(_, c)| *c).sum();
-            if atoms == 0 {
-                None
-            } else {
-                m.checked_div(Fixed::from_int(atoms as i32))
-            }
-        });
+    let mean_atomic_mass_amu = phase_mean_atomic_mass_amu(phase, periodic);
     let atomic_volume_angstrom3 =
         crate::thermoelastic::atomic_volume_angstrom3(phase_name, registry);
     let debye_temperature_k = moduli.and_then(|m| {
         crate::thermoelastic::derived_elastic_debye_temperature(phase_name, registry, m, periodic)
             .map(|t| t.kelvin())
     });
+    // THE BAND, MEASURED OFF THE SAME COLUMNS. The envelope is a property of the class rather than of this
+    // phase, so it is derived over the whole banked column and then read at this phase's class. It is set on
+    // every row, including a row that carries a measured anchor and will therefore never consult it, because
+    // the field states what band this phase's estimator rung WOULD carry and `NotSupplied` on a class the
+    // ladder can measure would be a false absence.
+    let estimator_band = match moduli {
+        Some(m) => {
+            let bands = derived_estimator_bands(conductivity, gruneisen, m, registry, periodic);
+            derived_estimator_band_for_cell(&bands, atoms_per_primitive_cell)
+                .map(|b| b.band)
+                .unwrap_or(EstimatorBand::NotSupplied)
+        }
+        None => EstimatorBand::NotSupplied,
+    };
     let bears_ferrous_iron = matches!(
         iron_valence_state(&phase.composition, periodic),
         IronValence::Ferrous | IronValence::Mixed
@@ -1091,8 +1330,7 @@ pub fn phase_conductivity_from_banked(
         name: phase_name.to_string(),
         kappa_298,
         kappa_298_band,
-        // NOT a width, and NOT a zero width: the declaration that nobody supplied one. See the docstring.
-        estimator_band: EstimatorBand::NotSupplied,
+        estimator_band,
         // No per-phase exponent column is banked, so the classifier decides for every phase today. MgO's
         // cited a = 0.9 is the first row a fetch would put here.
         measured_exponent_a: None,
@@ -1962,9 +2200,12 @@ mod tests {
                 declared_factor: None,
             }
         );
+        // The refusal names the FETCH that closes it. It used to name the width as reserved, and that stopped
+        // being true when the band became a measurement over the banked overlap points: the way past this
+        // refusal is now a measured anchor on a phase in the class, never an owner decision.
         assert!(
-            refusal.to_string().contains("reserved"),
-            "the refusal names the width as reserved rather than missing: {refusal}"
+            refusal.to_string().contains("kappa_298 anchor"),
+            "the refusal names the fetch that closes it rather than a value to set: {refusal}"
         );
 
         // A factor below one would invert the interval, so it is refused rather than reordered.
@@ -2035,6 +2276,257 @@ mod tests {
         assert_eq!(
             sym.band_down, agg.band_down,
             "the two shapes agree on the downward excursion and differ only above"
+        );
+    }
+
+    /// The five overlap ratios, recomputed HERE from the public per-phase entry points rather than read back
+    /// out of [`derived_estimator_bands`], so the assertions below are an independent check of the grouping
+    /// and the envelope rather than a restatement of them.
+    fn overlap_ratios() -> Vec<(String, i32, Fixed)> {
+        let conductivity =
+            PhaseConductivityTable::standard().expect("the cited conductivity column loads");
+        let gruneisen = GruneisenTable::standard().expect("the Grueneisen table loads");
+        let registry = PhaseRegistry::standard().expect("the phase registry loads");
+        let periodic = PeriodicTable::standard().expect("the periodic table loads");
+        let moduli = civsim_physics::mineral_moduli::MineralModuli::standard()
+            .expect("the mineral-moduli table loads");
+        let mut out = Vec::new();
+        for row in conductivity.rows() {
+            let name = row.name.as_str();
+            let (Some(measured), Some((gamma, _))) = (row.kappa_298, gruneisen.gamma(name)) else {
+                continue;
+            };
+            let (Some(phase), Some(volume)) = (
+                registry.phase(name),
+                crate::thermoelastic::atomic_volume_angstrom3(name, &registry),
+            ) else {
+                continue;
+            };
+            let (Some(mass), Some(debye)) = (
+                super::phase_mean_atomic_mass_amu(phase, &periodic),
+                crate::thermoelastic::derived_elastic_debye_temperature(
+                    name, &registry, &moduli, &periodic,
+                ),
+            ) else {
+                continue;
+            };
+            let Some(estimator) = estimator_anchor_298(
+                gamma,
+                mass,
+                debye.kelvin(),
+                volume,
+                row.atoms_per_primitive_cell,
+            ) else {
+                continue;
+            };
+            if let Some(ratio) = rung_disagreement_ratio(measured, estimator) {
+                out.push((row.name.clone(), row.atoms_per_primitive_cell, ratio));
+            }
+        }
+        out
+    }
+
+    /// THE RESERVED WIDTH WAS DERIVABLE ALL ALONG, and this is the measurement that says so. The retired
+    /// entry's own basis named it: the estimator-over-measured ratio for every phase carrying BOTH rungs,
+    /// distributed by cell class. That basis also claimed periclase was the only such phase banked, and this
+    /// test convicts the claim: FIVE phases resolve both rungs.
+    ///
+    /// Every assertion here is structural or recomputed. The counts, the class membership and the coverage
+    /// come from [`overlap_ratios`], which walks the banked columns through the same public entry points and
+    /// never consults the object under test.
+    #[test]
+    fn the_estimator_band_is_the_ladders_own_overlap_envelope_grouped_by_the_cited_class() {
+        let conductivity =
+            PhaseConductivityTable::standard().expect("the cited conductivity column loads");
+        let gruneisen = GruneisenTable::standard().expect("the Grueneisen table loads");
+        let registry = PhaseRegistry::standard().expect("the phase registry loads");
+        let periodic = PeriodicTable::standard().expect("the periodic table loads");
+        let moduli = civsim_physics::mineral_moduli::MineralModuli::standard()
+            .expect("the mineral-moduli table loads");
+        let bands =
+            derived_estimator_bands(&conductivity, &gruneisen, &moduli, &registry, &periodic);
+
+        let observed = overlap_ratios();
+        assert_eq!(
+            observed.len(),
+            5,
+            "five banked phases carry BOTH rungs, against the retired entry's claim of one: {observed:?}"
+        );
+        // ONE-SIDED HIGH IS AN OBSERVATION rather than a physical argument alone: Slack over-predicts every phase
+        // the ladder can check. A ratio below one anywhere would make the shape wrong.
+        for (name, _, ratio) in &observed {
+            assert!(
+                *ratio > Fixed::ONE,
+                "{name}'s estimator sits above its measured rung, which is what makes the band one-sided \
+                 high, got {}",
+                ratio.to_f64_lossy()
+            );
+        }
+
+        // THE GROUPING IS THE CLASSIFIER'S, so the expected membership is computed from it rather than from
+        // a cell-count boundary restated here.
+        for band in &bands {
+            let mine: Vec<&(String, i32, Fixed)> = observed
+                .iter()
+                .filter(|(_, n, _)| lattice_exponent_class(*n) == band.class)
+                .collect();
+            assert_eq!(
+                band.sample_size,
+                mine.len(),
+                "the {:?} envelope counts exactly the observations the classifier puts in it",
+                band.class
+            );
+            assert_eq!(
+                band.phases.len(),
+                band.sample_size,
+                "the named population and the sample size are the same set"
+            );
+            for (name, _, _) in &mine {
+                assert!(
+                    band.phases.contains(name),
+                    "{name} is in the {:?} class, so the envelope must name it: {:?}",
+                    band.class,
+                    band.phases
+                );
+            }
+            // The envelope IS the extremes of its own class, computed here from the independent walk.
+            let widest = mine
+                .iter()
+                .map(|(_, _, r)| *r)
+                .fold(ZERO, |a, r| if r > a { r } else { a });
+            let narrowest =
+                mine.iter()
+                    .map(|(_, _, r)| *r)
+                    .fold(Fixed::MAX, |a, r| if r < a { r } else { a });
+            assert_eq!(band.observed_max_ratio, widest);
+            assert_eq!(band.observed_min_ratio, narrowest);
+            assert_eq!(
+                band.band,
+                EstimatorBand::UpperBoundFactor(widest),
+                "the band is one-sided high at the widest ratio the class produced"
+            );
+
+            // AND IT COVERS THE CLASS. A one-sided bound with factor f puts the truth in [anchor/f, anchor],
+            // so every measured anchor in the class must sit at or above its own estimate divided by f. This
+            // is the property the maximum is chosen FOR, checked rather than assumed.
+            for (name, n, ratio) in &mine {
+                assert!(
+                    *ratio <= band.observed_max_ratio,
+                    "{name} (n = {n}) must sit inside its class's envelope, {} against {}",
+                    ratio.to_f64_lossy(),
+                    band.observed_max_ratio.to_f64_lossy()
+                );
+            }
+        }
+
+        // NO CROSS-CLASS POOLING. The simple class's single point must not be inside the complex envelope and
+        // the two must be separate entries, because pooling them to fatten the sample would author a class
+        // boundary the cited calibration does not draw.
+        let complex = derived_estimator_band_for_cell(&bands, 14)
+            .expect("spinel's complex class carries an envelope");
+        let simple = derived_estimator_band_for_cell(&bands, 2)
+            .expect("periclase's simple class carries its own");
+        assert_eq!(
+            complex.class,
+            ExponentClass::Complex(Fixed::from_ratio(33, 100))
+        );
+        assert_eq!(simple.class, ExponentClass::SimpleReserved);
+        assert_eq!(
+            complex.sample_size, 4,
+            "four banked phases sit in the complex class: {:?}",
+            complex.phases
+        );
+        assert_eq!(
+            simple.sample_size, 1,
+            "periclase is the only simple-class phase banked, so its envelope rests on ONE point"
+        );
+        assert!(
+            !complex.phases.contains(&"periclase".to_string()),
+            "periclase's simple-class point must not be dropped into the complex class"
+        );
+
+        // A CELL COUNT THE CITED SET DOES NOT PLACE GETS NO BAND, because it gets no class either. The
+        // lookup reads the classifier, so the 2 < n < 6 gap has no envelope to find.
+        for n in 3..=5 {
+            assert!(
+                derived_estimator_band_for_cell(&bands, n).is_none(),
+                "n = {n} sits in the gap the cited set does not place, so no class envelope covers it"
+            );
+        }
+
+        // THE MAGNITUDE IS PHYSICAL rather than merely self-consistent: the class envelope must be a
+        // several-fold one-sided width, which is what Slack's own docstring describes, and not a factor near
+        // one (which would say the estimator needs no band) nor an absurd one.
+        let widest = complex.observed_max_ratio.to_f64_lossy();
+        assert!(
+            (1.5..10.0).contains(&widest),
+            "the complex class's envelope is a several-fold overstatement, got {widest}"
+        );
+    }
+
+    /// SPINEL IS THE PHASE THE RESERVED WIDTH WAS BLOCKING, and it is the end-to-end proof that the width
+    /// no longer has to be reserved. It is the one census phase with banked Slack columns and NO measured
+    /// anchor, so it is the only phase in the table that reaches the estimator rung from the banked loader,
+    /// and until the envelope was derived it refused by name with [`ConductivityRefusal::NoEstimatorBand`].
+    ///
+    /// Against the pre-derivation code every assertion below fails at the first one: the loader wrote
+    /// [`EstimatorBand::NotSupplied`] for every phase it built.
+    #[test]
+    fn the_banked_loader_hands_spinel_a_derived_band_instead_of_refusing() {
+        let conductivity =
+            PhaseConductivityTable::standard().expect("the cited conductivity column loads");
+        let gruneisen = GruneisenTable::standard().expect("the Grueneisen table loads");
+        let registry = PhaseRegistry::standard().expect("the phase registry loads");
+        let periodic = PeriodicTable::standard().expect("the periodic table loads");
+        let moduli = civsim_physics::mineral_moduli::MineralModuli::standard()
+            .expect("the mineral-moduli table loads");
+
+        let spinel = phase_conductivity_from_banked(
+            "spinel",
+            &conductivity,
+            &gruneisen,
+            Some(&moduli),
+            &registry,
+            &periodic,
+            ZERO,
+        )
+        .expect("spinel assembles from the banked columns");
+        assert!(
+            spinel.kappa_298.is_none(),
+            "spinel is the census phase with no measured anchor, which is why it reaches the estimator rung"
+        );
+        let factor = match spinel.estimator_band {
+            EstimatorBand::UpperBoundFactor(f) => f,
+            other => panic!(
+                "the estimator rung's band is DERIVED from the ladder's own overlap and is one-sided high, \
+                 got {other:?}"
+            ),
+        };
+        assert!(
+            factor >= Fixed::ONE,
+            "a band factor is a multiplier of at least one, got {}",
+            factor.to_f64_lossy()
+        );
+
+        // AND THE REFUSAL IS GONE. This is the behaviour the province field was blocked on.
+        let agg = assemblage_conductivity(
+            &borrow(&[(spinel, Fixed::ONE)]),
+            hofmeister_reference_temperature_k(),
+        )
+        .expect("a derived band resolves the estimator rung")
+        .expect("a census with positive weight returns a value");
+        assert_eq!(
+            agg.measured_weight_fraction, ZERO,
+            "none of this census resolved on a measured anchor, and the aggregate must say so"
+        );
+        assert_eq!(
+            agg.band_up, ZERO,
+            "the derived band is one-sided high, so the interval reaches nothing above the estimate"
+        );
+        assert!(
+            agg.band_down > ZERO,
+            "a one-sided high band still carries a real downward excursion, got {:?}",
+            agg.band_down
         );
     }
 
@@ -2129,8 +2621,9 @@ mod tests {
     }
 
     /// A PHASE'S OWN CITED EXPONENT BEATS THE CLASSIFIER, which is the route both refusal messages have always
-    /// told callers to take and which nothing implemented. It is what keeps the ladder's overlap sentinel
-    /// reachable while the simple class's exponent is reserved: MgO carries a cited `a = 0.9`.
+    /// told callers to take and which nothing implemented. It is what keeps the SIMPLE class's only overlap
+    /// point reachable while that class's exponent is reserved: MgO carries a cited `a = 0.9`. The complex
+    /// class's four overlap points need no such route, because their class exponent is cited.
     #[test]
     fn a_phase_carrying_its_own_cited_exponent_evaluates_where_the_class_refuses() {
         // A simple-class phase with no per-phase exponent refuses, naming the reserved value.

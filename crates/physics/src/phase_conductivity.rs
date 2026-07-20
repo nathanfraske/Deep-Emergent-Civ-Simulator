@@ -389,6 +389,19 @@ impl PhaseConductivityTable {
             .and_then(|r| r.kappa_298.map(|k| (k, r.kappa_298_band)))
     }
 
+    /// EVERY banked row, in canonical-key order.
+    ///
+    /// The walk is a `BTreeMap` walk over the canonical keys, so it is ordered by key and NOT by the
+    /// file's line order. That matters for determinism (Principle 3): a consumer folding over these rows
+    /// gets the same sequence whoever edits the data file and wherever they insert a block.
+    ///
+    /// This exists because a consumer that needs a statistic ACROSS the column, rather than one phase's
+    /// row, cannot assemble one from [`Self::row`] without a list of names to ask for, and a hardcoded
+    /// name list inside such a consumer would go stale the moment a phase is banked.
+    pub fn rows(&self) -> impl Iterator<Item = &PhaseConductivityRow> + '_ {
+        self.rows.values()
+    }
+
     /// How many phases the table carries.
     pub fn len(&self) -> usize {
         self.rows.len()
@@ -473,8 +486,10 @@ mod tests {
                 "{phase} has n = {n}, inside the 2 < n < 6 gap the cited calibration cannot place"
             );
         }
-        // Periclase is the only simple-class phase, so it is the ladder's only overlap sentinel: the
-        // one row where both rungs evaluate and their disagreement can be reported at all.
+        // Periclase is the only SIMPLE-class phase, so it is the only overlap point that class has. The
+        // note here used to call it the ladder's only overlap sentinel outright, and that was measured
+        // false: FIVE banked phases carry both rungs, four of them in the complex class, which is what
+        // `civsim_materials::conductivity::derived_estimator_bands` reads to size the estimator's band.
         assert_eq!(t.atoms_per_primitive_cell("periclase"), Some(2));
     }
 

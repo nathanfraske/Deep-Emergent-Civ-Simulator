@@ -377,23 +377,33 @@ mod tests {
         let floor = real_floor();
         let joined =
             JoinedRegister::build(&cal, &floor).expect("the fold succeeds, no id collision");
-        // 233 calibration entries + 243 floor grades, no calibration/floor id collision.
+        // 232 calibration entries + 243 floor grades, no calibration/floor id collision.
         //
         // The calibration count moved 229 -> 233: three from the conductivity ladder, which surfaced values it had
         // been supplying itself: the Slack estimator's band, the simple-class temperature exponent, and the
         // ambient-frame pressure slack. Each is reserved and UNSET, so the count rising is the honest
         // direction. This assertion is a ratchet on the manifest's size rather than a fact about the world,
         // and it moves whenever a value stops being silently supplied.
+        //
+        // It then moved 233 -> 232, which is the OTHER honest direction and the rarer one: the Slack
+        // estimator's band was RETIRED rather than set, because the measurement its own basis named turned
+        // out to be computable off the banked columns today (conductivity::derived_estimator_bands, the
+        // estimator-over-measured ratio of every phase carrying both ladder rungs, grouped by cell class).
+        // A value leaving this manifest by being derived is the only kind of shrinkage that is not a loss.
+        //
+        // The honesty number below did NOT move with it, and that is consistent rather than a coincidence:
+        // that entry carried provenance = "estimator", and the authoring surface counts only Closure and
+        // Authored effective provenance, so a retired estimator was never on it.
         assert_eq!(
             cal.iter().count(),
-            233,
-            "the calibration manifest has 233 entries"
+            232,
+            "the calibration manifest has 232 entries"
         );
         assert_eq!(floor.grades.len(), 243, "the floor register has 243 grades");
         assert_eq!(
             joined.len(),
-            476,
-            "the joined register is the two node sets with no id collision (233 + 243)"
+            475,
+            "the joined register is the two node sets with no id collision (232 + 243)"
         );
     }
 

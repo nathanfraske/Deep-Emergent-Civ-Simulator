@@ -3045,26 +3045,46 @@ provenance = "contingency"
 
 # --- Thermal-conductivity ladder (crates/materials/src/conductivity.rs) ---
 #
-# Three values the ladder needs and does not have. Each was previously supplied by the code itself: two as
-# silent defaults that read as certainty (a zero-width band, a point pressure frame) and one as an
-# unattributed number inside a classifier. All three now refuse until set, which is the fail-loud sentinel
-# in the form this crate can carry: civsim-materials does not depend on civsim-foundation, so it cannot read
-# this manifest, and the in-code expression of "reserved and unset" is a named refusal rather than a loader
-# error.
-
-[[reserved]]
-id = "conductivity.slack_estimator_band_factor"
-basis = "the multiplicative width of Slack's estimator rung, AND its shape (symmetric, or a one-sided upper bound), per cell class. The two cited figures it must sit between, both held in this repo: Slack's own declared roughly 3x on SIMPLE cells, which the form claims as its validity band and which is roughly symmetric; and the single COMPLEX-cell exhibit, rutile predicted at ~43 against a measured ~9, a factor of 4.8 that is one-sided HIGH because the single-scattering form overstates a cell with many optical branches by construction. The complex class is the one a silicate mantle sits in and it has exactly ONE exhibit, so setting the complex factor from that alone generalizes from a sample of one, which is the honest limit on any number chosen today. THE MEASUREMENT THAT RETIRES THIS VALUE IS ALREADY BUILT: rung_disagreement_ratio computes estimator-over-measured for every phase carrying BOTH a measured kappa_298 and Slack's banked columns, and the distribution of those ratios BY CELL CLASS is the band, derived from observation rather than declared. Periclase is the only such phase banked today (the ladder's overlap sentinel), so the fetch that retires this is more measured kappa_298 rows on phases whose Slack columns also resolve. Until it is set, a phase resolving through the estimator rung is refused by name (ConductivityRefusal::NoEstimatorBand) rather than aggregated at zero width, which is what the previous Option<Fixed> default did: it reported a several-fold one-sided estimate with the band of a measurement."
-status = "reserved"
-value = ""
-unit = "factor"
-source = "crates/materials/src/conductivity.rs EstimatorBand, PhaseConductivity::estimator_band; crates/materials/src/properties.rs lattice_thermal_conductivity_w_per_m_k"
-category = "derivable"
-provenance = "estimator"
+# Two values the ladder needs and does not have. Each was previously supplied by the code itself: one as a
+# silent default that read as certainty (a point pressure frame) and one as an unattributed number inside a
+# classifier. Both now refuse until set, which is the fail-loud sentinel in the form this crate can carry:
+# civsim-materials does not depend on civsim-foundation, so it cannot read this manifest, and the in-code
+# expression of "reserved and unset" is a named refusal rather than a loader error.
+#
+# conductivity.slack_estimator_band_factor RETIRED (2026-07-20, derive audit): the multiplicative width of
+# Slack's estimator rung is no longer an owner decision. It DERIVES through
+# conductivity::derived_estimator_bands, which is precisely the measurement the retired entry's own basis
+# named: rung_disagreement_ratio (estimator over measured) for every banked phase carrying BOTH rungs,
+# grouped by the exponent class lattice_exponent_class already assigns, with each class's band the widest
+# ratio it produced. The shape is one-sided HIGH because every observed ratio is above one, which is the
+# overstatement Slack's single-scattering form makes on a complex cell by construction.
+#
+# THE ENTRY CARRIED A FALSE PREMISE while it stood, and correcting it is what made the derivation possible:
+# it said "Periclase is the only such phase banked today", and FIVE phases resolve both rungs. Measured
+# against the banked columns: corundum 1.74, periclase 2.07, fayalite 2.28, forsterite 2.70 and enstatite
+# 4.69. Periclase (n = 2) is the SIMPLE class and the other four (n = 10, 28, 28, 80) are the COMPLEX class,
+# so the complex envelope a silicate mantle reads rests on four points spanning 1.74 to 4.69, and the simple
+# envelope on periclase alone.
+#
+# THE HONEST LIMITS TRAVEL WITH THE BAND rather than being recorded only here: DerivedEstimatorBand carries
+# the sample size, the observed range and the phases the envelope was measured on. Four points do not bound
+# a class, and the module's own cited rutile exhibit (~43 against a measured ~9, a factor near 4.78) sits
+# just above the widest of the four, which is the evidence for that. Two further heterogeneities are inside
+# the ratios and cannot be separated out of them: the measured anchors are not one specimen form (corundum
+# is a dense polycrystal, the three olivine and pyroxene rows are needle-probe determinations on finely
+# ground samples), and enstatite, the widest point, is the one overlap phase whose gamma comes from the
+# Gruneisen ladder's ESTIMATOR rung rather than a thermodynamic measurement. Both widen the envelope rather
+# than narrowing it, so the derived band is a weaker claim than the evidence supports rather than a
+# stronger one. Each is stated at derived_estimator_bands.
+#
+# What still closes the remaining width is the fetch the retired entry named: more measured kappa_298 rows
+# on phases whose Slack columns also resolve. That now sharpens a derived band instead of informing an owner
+# decision. Removed rather than left a fail-loud sentinel for a value the engine no longer authors, the same
+# treatment as physiology.reserve_capacity_per_mass and physiology.intake_yield above.
 
 [[reserved]]
 id = "conductivity.simple_class_temperature_exponent"
-basis = "Hofmeister's temperature exponent a in kappa_lat ~ (298/T)^a for the SIMPLE lattice class (n <= 2 atoms per primitive cell). The cited set brackets this class and pins nothing inside it: ice at 612/T (a ~ 1) and MgO at a = 0.9 are two independent determinations that DISAGREE, and the complex-silicate a = 0.33 is a separate determination that says nothing about this class. The code carried 0.95, the arithmetic midpoint of the bracketing pair, attributed to neither and sitting inside a classifier that refuses its neighbouring 2 < n < 6 band for exactly that reason. The hidden width is real rather than cosmetic: across the bracketing pair the lattice conductivity at 1600 K moves by roughly 18 percent, reported as a point value with no band. Setting it means deciding which determination governs a class, or declaring the class itself banded and letting the width travel. RETIREMENT, and it is the better outcome than setting this: a per-phase cited exponent column, read through PhaseConductivity::measured_exponent_a, at which point the class value is never consulted for a phase that carries its own. MgO's a = 0.9 is the first row such a fetch would hold, and banking it restores the ladder's only overlap sentinel (periclase is the sole simple-class phase in the registry) without anyone choosing a class number at all."
+basis = "Hofmeister's temperature exponent a in kappa_lat ~ (298/T)^a for the SIMPLE lattice class (n <= 2 atoms per primitive cell). The cited set brackets this class and pins nothing inside it: ice at 612/T (a ~ 1) and MgO at a = 0.9 are two independent determinations that DISAGREE, and the complex-silicate a = 0.33 is a separate determination that says nothing about this class. The code carried 0.95, the arithmetic midpoint of the bracketing pair, attributed to neither and sitting inside a classifier that refuses its neighbouring 2 < n < 6 band for exactly that reason. The hidden width is real rather than cosmetic: across the bracketing pair the lattice conductivity at 1600 K moves by roughly 18 percent, reported as a point value with no band. Setting it means deciding which determination governs a class, or declaring the class itself banded and letting the width travel. RETIREMENT, and it is the better outcome than setting this: a per-phase cited exponent column, read through PhaseConductivity::measured_exponent_a, at which point the class value is never consulted for a phase that carries its own. MgO's a = 0.9 is the first row such a fetch would hold, and banking it restores the SIMPLE class's only overlap point (periclase is the sole simple-class phase in the registry) without anyone choosing a class number at all. This clause read 'the ladder's only overlap sentinel' until 2026-07-20; the estimator-band derivation measured five phases carrying both rungs, so what periclase's unset class exponent blocks is the simple class's single point, not the ladder's only one."
 status = "reserved"
 value = ""
 unit = "exponent"

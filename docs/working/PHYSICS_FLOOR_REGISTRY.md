@@ -17,7 +17,7 @@ The lists below are GENERATED from `crates/physics/data/*.toml`, `crates/physics
 
 ## Deriving substrates (check here BEFORE authoring: what the world derives, and where)
 
-The 110 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
+The 112 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
 
 ### `crates/core/src/fixed.rs`
 
@@ -34,12 +34,14 @@ The 110 deriving subsystems below live OUTSIDE the authored floor. Each produces
 - soil-nutrient recovery (the matter cycle corpse -> decompose -> soil -> productivity) <- local conditions (moisture, oxygen, warmth via a Liebig minimum) x the standing decomposer biomass. Decomposition is NOT universally good and NOT an authored recovery time: it is condition-gated and life-gated, so an anaerobic or decomposer-poor world recovers differently (the axis set is data, not the hardcoded moisture-oxygen-warmth triad). (`crates/foundation/src/decompose.rs:145`)
 ### `crates/materials/src/conductivity.rs`
 
-- lattice thermal conductivity k(T) at the anchor's own ambient pressure frame <- a measured kappa_298 anchor + the banked Grueneisen parameter + the caller's expansivity integral (measured rung) (`crates/materials/src/conductivity.rs:208`)
-- the radiative conductivity an Fe2+-bearing phase gains at high T, on a fit SCOPED to Terran silicates <- temperature (`crates/materials/src/conductivity.rs:280`)
-- a phase's conductivity at a temperature <- its ladder rung's anchor, band and exponent (`crates/materials/src/conductivity.rs:562`)
-- a phase's ladder inputs <- the banked crystallographic, Grueneisen and phase-registry columns + charge balance (`crates/materials/src/conductivity.rs:1027`)
-- a rock's effective thermal conductivity at the anchors' ambient pressure frame <- the per-phase conductivity ladder + the world's own mineral census (Bruggeman self-consistent EMT) (`crates/materials/src/conductivity.rs:1117`)
-- a rock's effective thermal conductivity in a checked pressure frame <- the per-phase conductivity ladder + the world's own mineral census + the anchors' measured frame (Bruggeman self-consistent EMT) (`crates/materials/src/conductivity.rs:1155`)
+- lattice thermal conductivity k(T) at the anchor's own ambient pressure frame <- a measured kappa_298 anchor + the banked Grueneisen parameter + the caller's expansivity integral (measured rung) (`crates/materials/src/conductivity.rs:210`)
+- the radiative conductivity an Fe2+-bearing phase gains at high T, on a fit SCOPED to Terran silicates <- temperature (`crates/materials/src/conductivity.rs:282`)
+- a phase's mean atomic mass (amu), Slack's M_bar <- the phase registry's own composition + the periodic table's atomic masses (`crates/materials/src/conductivity.rs:563`)
+- the estimator rung's per-class uncertainty band <- the estimator-over-measured ratios of every banked phase carrying BOTH rungs, grouped by the cited exponent class (`crates/materials/src/conductivity.rs:622`)
+- a phase's conductivity at a temperature <- its ladder rung's anchor, band and exponent (`crates/materials/src/conductivity.rs:786`)
+- a phase's ladder inputs <- the banked crystallographic, Grueneisen and phase-registry columns + charge balance (`crates/materials/src/conductivity.rs:1260`)
+- a rock's effective thermal conductivity at the anchors' ambient pressure frame <- the per-phase conductivity ladder + the world's own mineral census (Bruggeman self-consistent EMT) (`crates/materials/src/conductivity.rs:1355`)
+- a rock's effective thermal conductivity in a checked pressure frame <- the per-phase conductivity ladder + the world's own mineral census + the anchors' measured frame (Bruggeman self-consistent EMT) (`crates/materials/src/conductivity.rs:1393`)
 ### `crates/materials/src/freezer.rs`
 
 - the bulk sound speed <- bulk modulus + density (`crates/materials/src/freezer.rs:176`)
