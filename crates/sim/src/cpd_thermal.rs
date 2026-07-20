@@ -23,7 +23,8 @@
 //! input here rather than a kernel, pending the primary equations.
 //!
 //! Grounded in the gas-starved CPD model of Canup and Ward (2002, 2006) with the Makalkin and Dorofeeva thermal
-//! structure, as reproduced by Schneeberger and Mousis (2024, arXiv:2411.13351; receipts in the scope doc). The
+//! structure, as reproduced by Schneeberger and Mousis (2025, PSJ 6:23, DOI 10.3847/PSJ/ad9de1; preprint
+//! arXiv:2411.13351; receipts in the scope doc). The
 //! Keplerian frequency around the planet is REUSED from [`crate::astro::kepler_orbital_period_seconds`] and the
 //! CPD outer (centrifugal) radius from [`crate::astro::centrifugal_radius_au`], never re-derived here.
 //!
@@ -38,7 +39,7 @@ use civsim_core::Fixed;
 
 use crate::astro::kepler_orbital_period_seconds;
 
-// FLAGGED RESEARCH QUESTION (not built): the GAS-FLUX GEOMETRY FACTOR `Lambda(r)/l` (Schneeberger and Mousis 2024
+// FLAGGED RESEARCH QUESTION (not built): the GAS-FLUX GEOMETRY FACTOR `Lambda(r)/l` (Schneeberger and Mousis 2025
 // Eqs. 4, 5, 6), the radial profile of the viscously-spreading gas that multiplies the surface density and this
 // flux. As PRINTED, the inside-`R_c` branch (Eq. 4) and the outside-`R_c` branch (Eq. 5) do NOT meet at the
 // centrifugal radius: at `r = R_c` the inside carries `sqrt(R_p/R_c)` and `(4/5)sqrt(R_c/r_d)` where the outside
@@ -51,7 +52,7 @@ use crate::astro::kepler_orbital_period_seconds;
 // Recorded in `docs/working/CPD_THERMAL_STRUCTURE_SCOPE.md` as the first research flag of the CPD thermal sub-arc.
 
 /// The VISCOUS HEATING FLUX `F_vis = (3 / (8 pi)) (Lambda/l) Mdot Omega_K^2` of the CPD (Schneeberger and Mousis
-/// 2024 Equation 19, after Makalkin and Dorofeeva 2014), returned as `log10(F_vis / (W m^-2))`. This is the
+/// 2025, PSJ 6:23, Equation 19, after Makalkin and Dorofeeva 2014), returned as `log10(F_vis / (W m^-2))`. This is the
 /// accretional dissipation the CPD's own viscously-spreading gas releases, the dominant heat source of the inner
 /// disc and one of the three fluxes that set the surface temperature (the accretion and planet-irradiation fluxes
 /// are the siblings, the latter awaiting the planet's formation luminosity, a named further-down rung).
