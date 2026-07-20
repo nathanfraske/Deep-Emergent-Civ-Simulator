@@ -158,6 +158,12 @@ fn retrograde_circular_fraction() -> Fixed {
 /// retrograde one, so a retrograde moon is stable to roughly twice the prograde reach (the standard
 /// prograde/retrograde asymmetry; a retrograde captured moon like Triton can sit far out). These are cited
 /// literature constants for zero eccentricity; [`stable_orbit_fraction_ecc`] carries the eccentricity terms.
+///
+/// This is a CITED FIT BY DESIGN, not a value awaiting an in-engine derivation. The satellite stability boundary is
+/// a chaotic-dynamics result (Lyapunov-sensitive), so under the Chaos Protocol (the assembly ruling: chaos is
+/// SAMPLED from a derived measure, never integrated as a fixed-point path integral of a chaotic trajectory, which is
+/// a byte-neutrality landmine) the legal rung is the published N-body fit, not a trajectory integration here. A
+/// future derive-first sweep should read this fit as the derived measure, not flag it as an authored constant.
 pub fn stable_orbit_fraction(prograde: bool) -> Fixed {
     if prograde {
         prograde_circular_fraction()
@@ -313,10 +319,23 @@ pub fn tidal_recession_rate(
 /// `log10_a_m`, `log10_mean_motion` for `n` in rad/s) and the result is `log10(E_dot / W)`, assembled as a weighted
 /// SUM of logs with NO exponentiation, so nothing unrepresentable ever forms (the same log-carry discipline the
 /// wide-magnitude quantities in [`crate::astro`] and [`crate::giants`] use). The three dimensionless inputs (`k2`,
-/// `q_factor`, `eccentricity`) are order-unity and enter linearly. Using `G M_planet = n^2 a^3` to remove `G` and
-/// one power of `M_planet`, the evaluated form is the G-free `E_dot = (21/2) (k2/Q) M_planet R_moon^5 n^3 e^2 / a^3`
-/// (identical to the `G M^2 ... n / a^6` form to <1e-9, and G-free in the same spirit as the recession rate, which
-/// takes `n` rather than reconstructing it from `G`).
+/// `q_factor`, `eccentricity`) are order-unity and enter linearly.
+///
+/// THE KEPLER FOLD, why the code and the cited Eq. 1 look different but are the same expression. Kepler's third law
+/// with the moon mass negligible against the planet, `n^2 a^3 = G M_planet`, substituted into Eq. 1 does four
+/// things at once: it eliminates `G`, drops `M_planet` from the square to the first power, raises `n` from the
+/// first power to the third, and halves the `a` exponent from `-6` to `-3`. So the evaluated form is the G-free
+/// `E_dot = (21/2) (k2/Q) M_planet R_moon^5 n^3 e^2 / a^3`, IDENTICAL to Eq. 1 to <1e-9 on a numeric cross-check.
+/// The four apparent disagreements between the code and the cited extract (no `G`, `M` against `M^2`, `n^3` against
+/// `n`, `a^-3` against `a^-6`) are that one fold, not a defect. This is G-free in the same spirit as the recession
+/// rate, which also takes `n` rather than reconstructing it from `G`.
+///
+/// THE PREMISE THE FOLD CARRIES, and the caller contract. Because the fold leaves NO `G` and NO second `M_planet`
+/// in the code, nothing downstream can catch an inconsistent frequency, so `log10_mean_motion` MUST be the
+/// KEPLERIAN mean motion for the `a` and `M_planet` also passed, `n = sqrt(G M_planet / a^3)`, with the moon mass
+/// negligible against the planet. A caller that passes an observed or perturbed mean motion, or a moon massive
+/// enough that `n^2 a^3 = G(M_planet + m_moon)` binds, gets a silently wrong heat with no refusal. Derive `n` from
+/// the same `a` and `M_planet` (through the Keplerian period), never from an independent measurement.
 ///
 /// The `21/2` is the standard algebra of the small-eccentricity, degree-2, constant-Q expansion (the counterpart
 /// of the `3` in the recession form), cited, not authored. Everything else is the moon's or the orbit's own datum:
