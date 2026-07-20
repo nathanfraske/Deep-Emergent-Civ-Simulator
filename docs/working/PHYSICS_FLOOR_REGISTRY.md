@@ -120,8 +120,8 @@ The 82 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - the stellar rotation period at a target age Omega_star(t) <- the gyrochronological spin-down P_ref*(t/t_ref)^n aged forward from a reference epoch, over the cited braking exponent, valid only after the disk-release onset (`crates/sim/src/astro.rs:2369`)
 ### `crates/sim/src/deeptime.rs`
 
-- the deep-time Nusselt prefactor <- the convection-scaling band at the model's own internal-heating fraction (`crates/sim/src/deeptime.rs:1197`)
-- one province's SI convection column <- the derived thermal cluster, the planet's own depth and gravity, and the per-province radiogenic energy (`crates/sim/src/deeptime.rs:1238`)
+- the deep-time Nusselt prefactor <- the convection-scaling band at the model's own internal-heating fraction (`crates/sim/src/deeptime.rs:1228`)
+- one province's SI convection column <- the derived thermal cluster, the planet's own depth and gravity, and the per-province radiogenic energy (`crates/sim/src/deeptime.rs:1269`)
 ### `crates/sim/src/environ.rs`
 
 - local water presence, rainfall, evaporation, runoff <- Clausius-Clapeyron saturation(local temperature) + Dalton evaporation + condensation where moisture exceeds saturation + downhill routing to the lowest neighbour. Water is NOT authored per cell; it falls out of temperature and terrain. (`crates/sim/src/environ.rs:1552`)

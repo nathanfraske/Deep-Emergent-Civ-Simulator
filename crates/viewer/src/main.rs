@@ -2459,8 +2459,19 @@ fn step_provinces(prov: &mut DeepTimeProvinces, steps: usize) {
             &prov.melt,
             DEEP_TIME_MYR_PER_TICK,
         ) {
-            Some(next) => prov.state = next,
-            None => break,
+            Ok(next) => prov.state = next,
+            // A REFUSAL STOPS DEEP TIME AND SAYS SO. This used to break on a bare `None`, so a world whose
+            // interior could no longer step simply stopped evolving with nothing on the screen or the console
+            // to distinguish that from a world that had finished. The refusal is typed now
+            // (`DeepTimeRefusal`), so the stop names which column and which invariant, and a viewer session
+            // that quietly froze its geology becomes a reported event rather than a puzzle.
+            Err(refusal) => {
+                eprintln!(
+                    "deep time stopped after {} Myr: {refusal:?}",
+                    prov.state.elapsed_myr.to_f64_lossy()
+                );
+                break;
+            }
         }
         // THE BOMBARDMENT is a SEPARATE step term after the interior/volcanism step (deeptime keeps them apart so a
         // non-bombarding run replays bit-for-bit): it draws this tick's impacts from the accretion-tail flux and

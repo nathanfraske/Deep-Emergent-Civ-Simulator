@@ -497,14 +497,46 @@ pub fn crust_growth(
 /// crust stock ([`thickness_km_from_areal_mass`]) rather than accumulated beside it, so the geometry the isostasy
 /// floats stays a function of the ledger and the two cannot drift apart. A conversion that overflows or a column
 /// with no source left HOLDS that column (no transfer, no crust), never a fabricated one.
+/// WHY A DEEP-TIME STEP REFUSED. Every arm is a stop, and none of them is a state a caller may confuse with
+/// a world that simply did not change.
+///
+/// # WHY THIS REPLACED AN `Option` AND A HOLD
+///
+/// The per-column convection step used to read `convection_step_si(col, p).unwrap_or(*col)`, under a comment
+/// arguing that the parameters were validated when the province field was built, so a refusal here was "an
+/// arithmetic backstop and not a path the physics takes". VALIDATION AT CONSTRUCTION DOES NOT PROVE EVERY
+/// LATER STATE REMAINS IN SCOPE: the column evolves, its temperature moves every tick, and a state reachable
+/// after a thousand steps can leave the domain that the initial one sat inside. When that happened the fallback
+/// asserted "this column did not evolve", which is a PHYSICAL claim the arithmetic had no basis for, and it
+/// would have been invisible because a held column looks exactly like a cold one.
+///
+/// Measured before the change rather than assumed: over both pinned scenarios the refusal path is taken ZERO
+/// times, so making it loud is byte-neutral today. That it does not fire on two worlds is what makes it
+/// UNTESTED rather than what makes it safe.
+///
+/// The transaction is ATOMIC in the refusal: one column that cannot step refuses the whole tick, because a
+/// state with some columns advanced and one held is a world that never existed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeepTimeRefusal {
+    /// No column parameters were supplied, so there is nothing to step.
+    NoColumnParams,
+    /// The areal-mass ledger does not cover every column, so the transaction has no stock to balance over.
+    LedgerDoesNotCoverEveryColumn,
+    /// A column's convection step left the representable window or its own domain. Carries the column index so
+    /// the failure is locatable rather than merely reported.
+    ColumnStepRefused { index: usize },
+    /// A column's crust-thickness readout refused after the melt transaction moved its mass.
+    ThicknessReadoutRefused { index: usize },
+}
+
 pub fn step_deep_time(
     state: &DeepTimeState,
     column_params: &[SiColumnParams],
     melt: &MeltParams,
     dt_myr: Fixed,
-) -> Option<DeepTimeState> {
+) -> Result<DeepTimeState, DeepTimeRefusal> {
     if column_params.is_empty() {
-        return None;
+        return Err(DeepTimeRefusal::NoColumnParams);
     }
     // The ledger must cover every column, else the transaction has no stock to balance over for some cell. A
     // caller mismatch is refused loud rather than partly-transacted.
@@ -513,7 +545,7 @@ pub fn step_deep_time(
         || state.crust_areal_mass.len() != n
         || state.source_areal_mass.len() != n
     {
-        return None;
+        return Err(DeepTimeRefusal::LedgerDoesNotCoverEveryColumn);
     }
     let per_column = column_params.len() == state.columns.len();
     let columns: Vec<ColumnState> = state
@@ -526,12 +558,11 @@ pub fn step_deep_time(
             } else {
                 &column_params[0]
             };
-            // A refusal HOLDS the column rather than fabricating a step. The parameters were validated
-            // when the province field was built (an unresolvable assemblage refuses the whole field), so
-            // this is an arithmetic backstop and not a path the physics takes.
-            convection_step_si(col, p).unwrap_or(*col)
+            // A refusal REFUSES THE TICK, carrying which column could not step. It used to hold the column
+            // instead, which stated that the column did not evolve; see `DeepTimeRefusal`.
+            convection_step_si(col, p).ok_or(DeepTimeRefusal::ColumnStepRefused { index: i })
         })
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
     // THE VOLCANISM, AS A TRANSACTION. Each column's stepped interior temperature asks for a crust increment
     // (relaxing toward the equilibrium the column supports, so a made crust stays and does not un-form when the
     // mantle cools). That increment is then PAID FOR out of the column's own source stock: converted to an areal
@@ -565,12 +596,12 @@ pub fn step_deep_time(
         // The thickness is the crust stock's READOUT, re-read each tick rather than accumulated beside it. A
         // refusal holds the previous thickness rather than reporting a crust the stock does not back.
         let next_thickness = thickness_km_from_areal_mass(next_crust, melt.crust_density_kg_per_m3)
-            .unwrap_or(prev_thickness);
+            .ok_or(DeepTimeRefusal::ThicknessReadoutRefused { index: i })?;
         crust_thickness_km.push(next_thickness);
         crust_areal_mass.push(next_crust);
         source_areal_mass.push(next_source);
     }
-    Some(DeepTimeState {
+    Ok(DeepTimeState {
         columns,
         crust_thickness_km,
         crust_areal_mass,
@@ -2062,9 +2093,8 @@ mod tests {
                 &[mantle_params(50)],
                 &melt_params(),
                 Fixed::from_int(50)
-            )
-            .is_none(),
-            "a short source stock fails loud"
+            ) == Err(DeepTimeRefusal::LedgerDoesNotCoverEveryColumn),
+            "a short source stock fails loud, and SAYS which invariant broke"
         );
         let mut state = young_state(4, 1800);
         state.crust_areal_mass.pop();
@@ -2074,9 +2104,8 @@ mod tests {
                 &[mantle_params(50)],
                 &melt_params(),
                 Fixed::from_int(50)
-            )
-            .is_none(),
-            "a short crust stock fails loud"
+            ) == Err(DeepTimeRefusal::LedgerDoesNotCoverEveryColumn),
+            "a short crust stock fails loud, and SAYS which invariant broke"
         );
     }
 
@@ -2096,7 +2125,8 @@ mod tests {
     fn an_empty_parameter_set_fails_loud() {
         let start = young_state(3, 1500);
         assert!(
-            step_deep_time(&start, &[], &melt_params(), Fixed::from_int(100)).is_none(),
+            step_deep_time(&start, &[], &melt_params(), Fixed::from_int(100))
+                == Err(DeepTimeRefusal::NoColumnParams),
             "no parameters to step against fails loud, never a silent no-op"
         );
     }
