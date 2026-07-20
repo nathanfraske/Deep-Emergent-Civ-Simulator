@@ -12,7 +12,7 @@ Custody is one of three. `in_repo`: bytes held in-tree, checksum verifiable with
 witness. `external`: bytes in local custody outside the repo, checksum plus archive snapshot.
 The licence decides which is permitted; see `docs/working/FETCH_PIPELINE_PLAN.md` section 3.
 
-**37 sources** (10 registry, 27 mirrored).
+**38 sources** (11 registry, 27 mirrored).
 
 ## Registry (hand-maintained)
 
@@ -51,6 +51,18 @@ Jha, S., Harry, D. L. and Schutt, D. L., 2017, Toolbox for Analysis of Flexural 
 - custody: external
 - licence (redistribution unconfirmed): Gold open access (GSA Geosphere). The specific licence instrument is NOT stated in the source entry and has not been verified, so redistribution is unconfirmed and `redistributable` is deliberately absent rather than assumed from open-access status. Free-to-read is not free-to-redistribute.
 - free route (author-copy): https://derekschutt.wordpress.com/wp-content/uploads/2018/01/flexural_modeling_geosphere_2017.pdf
+
+### `henning_2009_tidal_heating`
+
+Henning, W.G., O'Connell, R.J. & Sasselov, D.D., 2009, Tidally Heated Terrestrial Exoplanets: Viscoelastic Response Models, Astrophysical Journal 707, 1000-1015, DOI 10.1088/0004-637X/707/2/1000, arXiv:0912.1907. Their Equation (1) is the standard fixed-Q synchronous-eccentric tidal heating rate, derived in Murray, C.D. & Dermott, S.F., 1999, Solar System Dynamics, Cambridge University Press, ISBN 978-0-521-57597-4, chapter 4, and Peale, S.J. & Cassen, P., 1978, Contribution of tidal dissipation to lunar thermal history, Icarus 36, 245-269, DOI 10.1016/0019-1035(78)90109-4, with the Io application in Peale, Cassen & Reynolds 1979, Science 203, 892-894, DOI 10.1126/science.203.4383.892.
+
+- sha256: `3db06bf4fd28826472b5a12d1135618e043e91a57497550cc7b520c24321d9bc`
+- archived: https://web.archive.org/web/20240430060355/https://arxiv.org/pdf/0912.1907
+- scope: The degree-2, fixed-Q, homogeneous, spin-synchronous, small-eccentricity leading-term tidal heat production rate E_dot = (21/2)(k2/Q) G M_pri^2 R_sec^5 n e^2 / a^6 (watts), with k2, Q and R the tidally deformed SECONDARY's (the moon's) and M_pri the PRIMARY's (the planet's). Holds for a moon at or near synchronous rotation and small eccentricity; the frequency- and temperature-dependent viscoelastic regime this paper develops PAST Equation (1) is out of scope for this leading analytic form.
+- custody: witness
+- licence (**NOT redistributable**): arXiv non-exclusive distribution licence (arxiv.org/licenses/nonexclusive-distrib/1.0), read from the abstract page for this submission on 2026-07-20: it grants arXiv the right to distribute and does NOT grant this project third-party redistribution rights, so no bytes are held in-tree. redistributable = false is the conservative and correct reading. The equation itself is an uncopyrightable analytic fact, so reading and citing it is safe independently of the redistribution question, which is why it is held as citation-plus-witness against the durable public archive rather than in-repo.
+- licence evidence: https://arxiv.org/abs/0912.1907 displays a 'view license' link to http://arxiv.org/licenses/nonexclusive-distrib/1.0/ (the arXiv non-exclusive distribution licence); no alternative Creative Commons licence is shown for this submission.
+- free route (preprint-server): https://arxiv.org/abs/0912.1907
 
 ### `janaf`
 

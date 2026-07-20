@@ -295,6 +295,74 @@ pub fn tidal_recession_rate(
     Some(ln_rate.exp())
 }
 
+// @sources: henning_2009_tidal_heating
+/// The TIDAL HEATING POWER dissipated INSIDE a synchronously rotating moon on an eccentric orbit, returned as
+/// `log10(E_dot / watt)`. The heat production rate is
+/// `E_dot = (21/2) (k2/Q) (G M_planet^2 R_moon^5 n e^2) / a^6` (Murray & Dermott 1999/2005 chapter 4; Peale &
+/// Cassen 1978, Icarus 36, 245; the Io application Peale, Cassen & Reynolds 1979, Science 203, 892; the form read
+/// dual-channel from Henning, O'Connell & Sasselov 2009, ApJ 707, 1000, arXiv:0912.1907v1 Eq. (1), witness sha256
+/// `3db06bf4...` byte-identical to Wayback `20240430060355`, recorded in `PIPELINE_FETCHES.md` section 8b).
+///
+/// This is the SIBLING of [`tidal_recession_rate`] and its OPPOSITE face: recession raises the tide on the PLANET
+/// and reads the PLANET's `k2`/`Q`/`R`; heating dissipates in the MOON and reads the MOON's `k2`/`Q`/`R`. So the
+/// two consume different bodies' parameters, and a caller must not cross them.
+///
+/// UNITS and log-domain. Unlike the recession rate, tidal heating is NOT a dimensionless ratio: it produces watts,
+/// so the caller supplies SI. Io-class heating is ~1e14 W and `R_moon^5` is ~1e31, both far past the Q32.32
+/// ceiling, so the four DIMENSIONAL inputs enter as their base-10 logs (`log10_m_planet_kg`, `log10_r_moon_m`,
+/// `log10_a_m`, `log10_mean_motion` for `n` in rad/s) and the result is `log10(E_dot / W)`, assembled as a weighted
+/// SUM of logs with NO exponentiation, so nothing unrepresentable ever forms (the same log-carry discipline the
+/// wide-magnitude quantities in [`crate::astro`] and [`crate::giants`] use). The three dimensionless inputs (`k2`,
+/// `q_factor`, `eccentricity`) are order-unity and enter linearly. Using `G M_planet = n^2 a^3` to remove `G` and
+/// one power of `M_planet`, the evaluated form is the G-free `E_dot = (21/2) (k2/Q) M_planet R_moon^5 n^3 e^2 / a^3`
+/// (identical to the `G M^2 ... n / a^6` form to <1e-9, and G-free in the same spirit as the recession rate, which
+/// takes `n` rather than reconstructing it from `G`).
+///
+/// The `21/2` is the standard algebra of the small-eccentricity, degree-2, constant-Q expansion (the counterpart
+/// of the `3` in the recession form), cited, not authored. Everything else is the moon's or the orbit's own datum:
+/// `k2`/`Q` are the MOON's reserved-with-basis material response supplied at the call site (a stiff rock moon, a
+/// dissipative icy moon, and a magma-ocean moon differ only in these two numbers), never authored here.
+///
+/// SCOPE: the fixed-Q, homogeneous, spin-synchronous, small-eccentricity LEADING term. A body far from synchronous
+/// rotation, at high eccentricity, or with a strongly frequency- or temperature-dependent `Q` (the viscoelastic
+/// regime) departs from this baseline, a named follow-on rung. This returns the heat PRODUCTION rate only; coupling
+/// it to the moon's thermal state, surface flux, or habitability needs a moon thermal substrate, a further rung.
+/// ADMITS THE ALIEN: every input is a per-body datum on the argument list, so an exotic moon is a data row, never a
+/// new path. `None` on a non-positive `k2`, `q_factor`, or `eccentricity` (a circular orbit raises no eccentricity
+/// tide, so the leading-order heat is zero and its `log10` is undefined), or on an overflow. DORMANT: no pinned run
+/// path calls this, so the run pins hold bit-exact.
+pub fn tidal_heating_power_log10(
+    k2: Fixed,
+    q_factor: Fixed,
+    eccentricity: Fixed,
+    log10_m_planet_kg: Fixed,
+    log10_r_moon_m: Fixed,
+    log10_a_m: Fixed,
+    log10_mean_motion: Fixed,
+) -> Option<Fixed> {
+    if k2 <= Fixed::ZERO || q_factor <= Fixed::ZERO || eccentricity <= Fixed::ZERO {
+        return None;
+    }
+    // log10(E_dot/W) = log10(21/2) + log10(k2) - log10(Q) + 2 log10(e)
+    //                  + log10(M_planet) + 5 log10(R_moon) + 3 log10(n) - 3 log10(a).
+    // The dimensionless factors (21/2, k2, Q, e) are converted to base-10 via ln/ln10; the four dimensional
+    // factors already arrive as base-10 logs. Nothing is exponentiated, so the ~10^15 W ceiling never bites.
+    let ln10 = Fixed::from_int(10).ln();
+    let log10 = |x: Fixed| -> Option<Fixed> { x.ln().checked_div(ln10) };
+    let two = Fixed::from_int(2);
+    let three = Fixed::from_int(3);
+    let five = Fixed::from_int(5);
+    let acc = log10(Fixed::from_ratio(21, 2))?
+        .checked_add(log10(k2)?)?
+        .checked_sub(log10(q_factor)?)?
+        .checked_add(two.checked_mul(log10(eccentricity)?)?)?
+        .checked_add(log10_m_planet_kg)?
+        .checked_add(five.checked_mul(log10_r_moon_m)?)?
+        .checked_add(three.checked_mul(log10_mean_motion)?)?
+        .checked_sub(three.checked_mul(log10_a_m)?)?;
+    Some(acc)
+}
+
 /// The TIDAL-SURVIVAL verdict for a candidate moon over the system age, the shared post-condition every branch
 /// of the moon dispatch closes on (circumplanetary-disk, giant-impact, capture). A moon is [`Retained`] only if
 /// it forms in the stable band (above the Roche disruption floor, below the Domingos stable Hill fraction) and
@@ -758,5 +826,170 @@ mod tests {
         );
         assert!(tidal_survival(Fixed::ZERO, roche, stable, corotation, rate, age).is_none());
         assert!(tidal_survival(a, roche, stable, corotation, rate, Fixed::ZERO).is_none());
+    }
+
+    /// An INDEPENDENT f64 reference for the heating rate, computed from the witness's ORIGINAL Equation (1) form
+    /// `E_dot = (21/2)(k2/Q) G M^2 R^5 n e^2 / a^6` (Henning et al. 2009 Eq. 1), NOT the kernel's G-free
+    /// rearrangement. Agreement between the two therefore convicts the kernel of matching the vendored equation,
+    /// not merely of matching itself. Returns `(log10(E_dot), log10 M, log10 R, log10 a, log10 n)` in SI.
+    fn eq1_reference(
+        m_planet_kg: f64,
+        r_moon_m: f64,
+        a_m: f64,
+        e: f64,
+        k2: f64,
+        q: f64,
+    ) -> (f64, f64, f64, f64, f64) {
+        let g = 6.674e-11_f64;
+        let n = (g * m_planet_kg / a_m.powi(3)).sqrt();
+        let e_dot =
+            (21.0 / 2.0) * (k2 / q) * g * m_planet_kg.powi(2) * r_moon_m.powi(5) * n * e * e
+                / a_m.powi(6);
+        (
+            e_dot.log10(),
+            m_planet_kg.log10(),
+            r_moon_m.log10(),
+            a_m.log10(),
+            n.log10(),
+        )
+    }
+
+    /// Io around Jupiter reproduces the tidal heat production rate of the witness's Equation (1) to fixed-point
+    /// tolerance, cross-checked against the independent f64 reference in its original (non-G-free) form. With a
+    /// fiducial `k2/Q ~ 3e-4` the rate is `~1.9e12` W (`log10 ~ 12.27`), the physical order of magnitude for Io.
+    #[test]
+    fn io_reproduces_the_witness_heating_rate() {
+        let (log10_e_ref, log10_m, log10_r, log10_a, log10_n) =
+            eq1_reference(1.898e27, 1.822e6, 4.217e8, 0.0041, 0.03, 100.0);
+        // Pass the SI magnitudes as base-10 logs (their linear SI values overflow Q32.32); k2/Q/e are order-unity.
+        let got = tidal_heating_power_log10(
+            r(3, 100),            // k2 = 0.03
+            Fixed::from_int(100), // Q = 100
+            r(41, 10000),         // e = 0.0041
+            r((log10_m * 1e6) as i64, 1_000_000),
+            r((log10_r * 1e6) as i64, 1_000_000),
+            r((log10_a * 1e6) as i64, 1_000_000),
+            r((log10_n * 1e6) as i64, 1_000_000),
+        )
+        .expect("Io heating evaluates");
+        assert!(
+            (got.to_f64_lossy() - log10_e_ref).abs() < 1e-3,
+            "kernel log10(E_dot)={} vs independent Eq.1 reference log10={}",
+            got.to_f64_lossy(),
+            log10_e_ref
+        );
+        // Physical anchor: Io-class heating is in the terawatt-to-hundred-terawatt decade (log10 ~ 12 to 14).
+        assert!(
+            got.to_f64_lossy() > 11.0 && got.to_f64_lossy() < 15.0,
+            "Io heating sits in the expected 10^12 to 10^14 W band, got 10^{}",
+            got.to_f64_lossy()
+        );
+    }
+
+    /// ADMITS THE ALIEN: a different moon (denser, icier, higher eccentricity, its own k2/Q) around an Earth-mass
+    /// planet is just a different set of numbers through the same law, and it too matches the independent reference.
+    #[test]
+    fn an_alien_moon_is_a_data_row_not_a_new_path() {
+        let (log10_e_ref, log10_m, log10_r, log10_a, log10_n) =
+            eq1_reference(5.972e24, 2.5e6, 1.0e9, 0.02, 0.015, 40.0);
+        let got = tidal_heating_power_log10(
+            r(15, 1000), // k2 = 0.015
+            Fixed::from_int(40),
+            r(2, 100), // e = 0.02
+            r((log10_m * 1e6) as i64, 1_000_000),
+            r((log10_r * 1e6) as i64, 1_000_000),
+            r((log10_a * 1e6) as i64, 1_000_000),
+            r((log10_n * 1e6) as i64, 1_000_000),
+        )
+        .expect("alien-moon heating evaluates");
+        assert!(
+            (got.to_f64_lossy() - log10_e_ref).abs() < 1e-3,
+            "alien kernel log10={} vs reference log10={}",
+            got.to_f64_lossy(),
+            log10_e_ref
+        );
+    }
+
+    /// The eccentricity dependence is exactly `e^2`: doubling the eccentricity raises `log10(E_dot)` by
+    /// `2*log10(2) ~ 0.602`, the signature of the small-e leading term, and heating rises monotonically with `e`.
+    #[test]
+    fn heating_scales_as_eccentricity_squared() {
+        let base = tidal_heating_power_log10(
+            r(3, 100),
+            Fixed::from_int(100),
+            r(41, 10000),
+            r(27_278_300, 1_000_000),
+            r(6_260_550, 1_000_000),
+            r(8_625_000, 1_000_000),
+            r(-4_386_160, 1_000_000),
+        )
+        .unwrap();
+        let doubled_e = tidal_heating_power_log10(
+            r(3, 100),
+            Fixed::from_int(100),
+            r(82, 10000), // e doubled
+            r(27_278_300, 1_000_000),
+            r(6_260_550, 1_000_000),
+            r(8_625_000, 1_000_000),
+            r(-4_386_160, 1_000_000),
+        )
+        .unwrap();
+        let delta = doubled_e.to_f64_lossy() - base.to_f64_lossy();
+        let two_log10_2 = 2.0 * 2.0_f64.log10();
+        assert!(
+            (delta - two_log10_2).abs() < 1e-3,
+            "doubling e adds 2*log10(2)={two_log10_2} to log10(E_dot), got {delta}"
+        );
+        assert!(doubled_e > base, "heating rises with eccentricity");
+    }
+
+    /// Determinism (Principle 3) and fail-soft: identical inputs give the identical `log10`, and a non-positive
+    /// `k2`, `Q`, or `eccentricity` (a circular orbit raises no eccentricity tide) returns `None`, never a
+    /// fabricated value.
+    #[test]
+    fn heating_is_deterministic_and_fails_soft() {
+        let args = (
+            r(3, 100),
+            Fixed::from_int(100),
+            r(41, 10000),
+            r(27_278_300, 1_000_000),
+            r(6_260_550, 1_000_000),
+            r(8_625_000, 1_000_000),
+            r(-4_386_160, 1_000_000),
+        );
+        assert_eq!(
+            tidal_heating_power_log10(args.0, args.1, args.2, args.3, args.4, args.5, args.6),
+            tidal_heating_power_log10(args.0, args.1, args.2, args.3, args.4, args.5, args.6)
+        );
+        assert!(tidal_heating_power_log10(
+            Fixed::ZERO,
+            args.1,
+            args.2,
+            args.3,
+            args.4,
+            args.5,
+            args.6
+        )
+        .is_none());
+        assert!(tidal_heating_power_log10(
+            args.0,
+            Fixed::ZERO,
+            args.2,
+            args.3,
+            args.4,
+            args.5,
+            args.6
+        )
+        .is_none());
+        assert!(tidal_heating_power_log10(
+            args.0,
+            args.1,
+            Fixed::ZERO,
+            args.3,
+            args.4,
+            args.5,
+            args.6
+        )
+        .is_none());
     }
 }
