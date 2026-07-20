@@ -17,7 +17,7 @@ The lists below are GENERATED from `crates/physics/data/*.toml`, `crates/physics
 
 ## Deriving substrates (check here BEFORE authoring: what the world derives, and where)
 
-The 69 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
+The 70 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
 
 ### `crates/foundation/src/clock.rs`
 
@@ -74,15 +74,16 @@ The 69 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - the log-domain Stokes settling velocity <- the buoyancy, gravity, parcel scale and log viscosity (`crates/physics/src/laws.rs:3827`)
 ### `crates/physics/src/moment_equivalence.rs`
 
-- the moment-equivalent rigidity in internal units <- the bending moment and the curvature (`crates/physics/src/moment_equivalence.rs:1080`)
-- the line-load curvature at the deflection's first zero crossing <- the load, flexural parameter and rigidity (`crates/physics/src/moment_equivalence.rs:1193`)
-- the stiffest rigidity the column could carry <- the envelope's own depth domain and the elastic constants (`crates/physics/src/moment_equivalence.rs:1349`)
-- the moment-equivalent plate under a line load <- the yield envelope, the elastic constants, the restoring modulus and the load (`crates/physics/src/moment_equivalence.rs:1370`)
-- the load's curvature-demand constant <- the line-load intensity and the restoring modulus (`crates/physics/src/moment_equivalence.rs:1448`)
-- the moment-equivalent plate <- the yield envelope, the elastic constants and the load's own moment demand (`crates/physics/src/moment_equivalence.rs:1495`)
-- the axisymmetric moment operator's coefficient <- the Poisson ratio and the Kelvin functions at the first zero crossing (`crates/physics/src/moment_equivalence.rs:1712`)
-- the axisymmetric curvature <- the point load, the rigidity and the moment operator's coefficient (`crates/physics/src/moment_equivalence.rs:1729`)
-- the axisymmetric driving curvature at the first zero crossing <- the point load, the rigidity and the Poisson ratio (`crates/physics/src/moment_equivalence.rs:1747`)
+- the moment-equivalent rigidity in internal units <- the bending moment and the curvature (`crates/physics/src/moment_equivalence.rs:1081`)
+- the moment-equivalent elastic thickness <- the internal rigidity and the declared modulus pair (`crates/physics/src/moment_equivalence.rs:1164`)
+- the line-load curvature at the deflection's first zero crossing <- the load, flexural parameter and rigidity (`crates/physics/src/moment_equivalence.rs:1240`)
+- the stiffest rigidity the column could carry <- the envelope's own depth domain and the elastic constants (`crates/physics/src/moment_equivalence.rs:1429`)
+- the moment-equivalent plate under a line load <- the yield envelope, the elastic constants, the restoring modulus and the load (`crates/physics/src/moment_equivalence.rs:1450`)
+- the load's curvature-demand constant <- the line-load intensity and the restoring modulus (`crates/physics/src/moment_equivalence.rs:1528`)
+- the moment-equivalent plate <- the yield envelope, the elastic constants and the load's own moment demand (`crates/physics/src/moment_equivalence.rs:1575`)
+- the axisymmetric moment operator's coefficient <- the Poisson ratio and the Kelvin functions at the first zero crossing (`crates/physics/src/moment_equivalence.rs:1794`)
+- the axisymmetric curvature <- the point load, the rigidity and the moment operator's coefficient (`crates/physics/src/moment_equivalence.rs:1811`)
+- the axisymmetric driving curvature at the first zero crossing <- the point load, the rigidity and the Poisson ratio (`crates/physics/src/moment_equivalence.rs:1829`)
 ### `crates/physics/src/petrology.rs`
 
 - an assemblage's mean atomic mass <- its own molar amounts + the registry compositions + the periodic masses (`crates/physics/src/petrology.rs:490`)

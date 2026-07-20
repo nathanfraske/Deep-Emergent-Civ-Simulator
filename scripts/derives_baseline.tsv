@@ -876,6 +876,8 @@ crates/physics/src/moment_equivalence.rs	point_load_reported_curvature_at_first_
 crates/physics/src/moment_equivalence.rs	point_load_reported_curvature_coefficient	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/moment_equivalence.rs	referee_conductive_lid_base	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/moment_equivalence.rs	rigidity_band	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/moment_equivalence.rs	rigidity_band_internal	accessor	returns the two stored edge rigidities in the internal units they are held in; no conversion and no derivation
+crates/physics/src/moment_equivalence.rs	rigidity_gpa_km3	accessor	unit readout of the stored internal rigidity, fallible because `GPa km^3` cannot express a sluggish world's plate
 crates/physics/src/moment_equivalence.rs	sample	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/moment_equivalence.rs	solve_line_load	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/moment_equivalence.rs	solve_line_load_banded	grandfathered	predates the derives-coverage gate; unclassified

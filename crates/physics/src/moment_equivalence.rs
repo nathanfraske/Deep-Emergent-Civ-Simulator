@@ -962,10 +962,11 @@ pub enum MomentEquivalenceRefusal {
     /// A BANDED SOLVE'S RIGIDITY BAND CAME OUT UNORDERED: the low `V*` edge returned a rigidity ABOVE the high
     /// edge, contradicting the monotonicity the interval-arithmetic license rests on. Never observed in the banked
     /// data or the adversarial sweep, and if it ever fires it is the license itself failing, which the ruling says
-    /// is a stop rather than a swap. Carries both rigidities so the violation is inspectable.
+    /// is a stop rather than a swap. Carries both rigidities, IN INTERNAL UNITS so the violation is inspectable
+    /// even for a plate too stiff for `GPa km^3` (see [`MomentEquivalentPlate::rigidity_internal`]).
     BandRigidityUnordered {
-        low_gpa_km3: Fixed,
-        high_gpa_km3: Fixed,
+        low_internal: Fixed,
+        high_internal: Fixed,
     },
     /// The fixed-point arithmetic left the representable window.
     NotRepresentable,
@@ -1143,6 +1144,52 @@ pub fn elastic_thickness_km(
     Some(cube.powf(Fixed::from_ratio(1, 3)))
 }
 
+/// [`elastic_thickness_km`] FROM AN INTERNAL RIGIDITY, which is the form the solve's own output takes.
+///
+/// # THE SCALE FACTOR IS A PERFECT CUBE AND THAT IS NOT A COINCIDENCE
+///
+/// `D = 32768 D_hat` and `32768 = 32^3`, so the cube root splits EXACTLY: `T_e = 32 cbrt(12 (1 - nu^2) D_hat /
+/// E)`. The internal length unit is 32 km, and a rigidity is a stress times a length cubed, so the cube root of
+/// the rigidity scale is bound to be the length scale. Nothing is approximated at the boundary and no reader
+/// has to trust a decimal: the whole conversion is [`crate::flexure::scaled::external_length`] applied to a
+/// thickness computed in internal units, which is the same route every other quantity in this module takes.
+///
+/// IT IS ALSO THE RANGE-SAFE ORDER, and that is the point rather than a bonus. Forming `D` first to reuse the
+/// dimensional function is what fails: the sluggish column's `D` does not fit in `Fixed` at all, so a helper
+/// that converted before taking the root would refuse a thickness that is a perfectly ordinary 648 km. Taking
+/// the root in internal units and scaling the ROOT keeps every intermediate inside the window.
+///
+/// `E` needs no conversion: the internal stress unit is one gigapascal, so a modulus in `GPa` is already
+/// internal. `None` on a non-positive rigidity or modulus, or `|nu| >= 1`.
+// @derives: the moment-equivalent elastic thickness <- the internal rigidity and the declared modulus pair
+fn elastic_thickness_km_from_internal(
+    rigidity_internal: Fixed,
+    youngs_modulus_gpa: Fixed,
+    poisson_ratio: Fixed,
+) -> Option<Fixed> {
+    if rigidity_internal <= ZERO
+        || youngs_modulus_gpa <= ZERO
+        || youngs_modulus_gpa > Fixed::from_int(crate::flexure::MAX_YOUNGS_MODULUS_GPA)
+        || poisson_ratio.abs() > crate::flexure::max_poisson_ratio_magnitude()
+    {
+        return None;
+    }
+    let nu2 = poisson_ratio.checked_mul(poisson_ratio)?;
+    let one_minus_nu2 = Fixed::ONE.checked_sub(nu2)?;
+    if one_minus_nu2 <= ZERO {
+        return None;
+    }
+    // The dimensional sibling's own hygiene: divide by the modulus FIRST, before the factor of twelve.
+    let cube = rigidity_internal
+        .checked_div(youngs_modulus_gpa)?
+        .checked_mul(Fixed::from_int(12))?
+        .checked_mul(one_minus_nu2)?;
+    if cube <= ZERO {
+        return None;
+    }
+    crate::flexure::scaled::external_length(cube.powf(Fixed::from_ratio(1, 3)))
+}
+
 /// THE LINE-LOAD CURVATURE AT THE FIRST ZERO CROSSING, analytic.
 ///
 /// # WHY THE FIRST ZERO CROSSING AND NOT THE PEAK
@@ -1231,9 +1278,26 @@ pub(crate) fn scaled_line_load_curvature_at_first_zero_crossing(
 /// A CONVERGED PER-LOAD MOMENT EQUIVALENCE, carrying its chord.
 #[derive(Clone, Copy, Debug)]
 pub struct MomentEquivalentPlate {
-    /// THE CANONICAL OUTPUT: the moment-equivalent flexural rigidity (`GPa km^3`). See the module header for why
-    /// this is primary and `T_e` is not.
-    pub rigidity_gpa_km3: Fixed,
+    /// THE CANONICAL OUTPUT: the moment-equivalent flexural rigidity, IN INTERNAL UNITS (`1 GPa * (32 km)^3`).
+    /// See the module header for why the rigidity is primary and `T_e` is not.
+    ///
+    /// # WHY THE CANONICAL CARRIER IS INTERNAL AND THE DIMENSIONAL READOUT IS FALLIBLE
+    ///
+    /// It used to be a `Fixed` in the caller's `GPa km^3`, and for a SLUGGISH world that currency cannot hold
+    /// the answer. The engine's own Mars-class column (a 739.4 km conductive lid, derived from `ln Ra = 8.926`
+    /// against `ln Ra_crit = 7.443`, itself low because the derived viscosity is high at about `4e23 Pa s`)
+    /// solves cleanly to `d_hat = 88747` and is `2.908e9 GPa km^3`, against a `Fixed::MAX` of `2.147e9`. The
+    /// SOLVE never had a problem: the bracket, the moment, the crossing and the equivalence are all comfortably
+    /// representable internally. Only the conversion back out overflowed, so a converged answer was thrown away
+    /// at the last step and reported as [`MomentEquivalenceRefusal::NotRepresentable`], which reads as "this
+    /// world has no plate" when what happened is "this plate does not fit in the unit the output was declared
+    /// in". A world stiff enough to matter was exactly the world the type refused to describe.
+    ///
+    /// The internal unit system was introduced for this and the fix carries it all the way through, so the same
+    /// rule the bracket's ceiling already followed now governs the answer: IT EXISTS HERE OR IT DOES NOT EXIST.
+    /// [`MomentEquivalentPlate::rigidity_gpa_km3`] is the dimensional readout and it is `Option`, because for
+    /// some real worlds that number does not exist while the plate does.
+    pub rigidity_internal: Fixed,
     /// The curvature the equivalence was read at (the first zero crossing of the deflection).
     pub curvature: FibreCurvature,
     /// The neutral surface the moment was taken about (km).
@@ -1250,13 +1314,29 @@ pub struct MomentEquivalentPlate {
 }
 
 impl MomentEquivalentPlate {
+    /// THE DIMENSIONAL READOUT: the rigidity in the caller's `GPa km^3`, or `None` where that unit cannot hold
+    /// it. See [`MomentEquivalentPlate::rigidity_internal`] for why this is fallible and the internal carrier is
+    /// not: a `None` here is a REPRESENTATION limit of the output unit and never a failed solve, so a caller
+    /// that only wants to compare or to go on computing should read the internal value and stay in it.
+    pub fn rigidity_gpa_km3(&self) -> Option<Fixed> {
+        crate::flexure::scaled::external_rigidity(self.rigidity_internal)
+    }
+
     /// `T_e` (km) at a DECLARED modulus pair. A display statistic; see [`elastic_thickness_km`].
+    ///
+    /// It reads the INTERNAL rigidity rather than the dimensional one, so a plate too stiff for `GPa km^3` still
+    /// reports its thickness: `T_e` is a cube root and lands near 646 km for the sluggish column whose `D` does
+    /// not fit at all, which is the whole reason the readout above is the fallible one and this is not.
     pub fn elastic_thickness_km(
         &self,
         youngs_modulus_gpa: Fixed,
         poisson_ratio: Fixed,
     ) -> Option<Fixed> {
-        elastic_thickness_km(self.rigidity_gpa_km3, youngs_modulus_gpa, poisson_ratio)
+        elastic_thickness_km_from_internal(
+            self.rigidity_internal,
+            youngs_modulus_gpa,
+            poisson_ratio,
+        )
     }
 }
 
@@ -1533,8 +1613,10 @@ fn solve_by_curvature_bracket(
             return Err(MomentEquivalenceRefusal::LoadExceedsElasticSupport);
         }
         Ok(MomentEquivalentPlate {
-            rigidity_gpa_km3: crate::flexure::scaled::external_rigidity(d_hat)
-                .ok_or(MomentEquivalenceRefusal::NotRepresentable)?,
+            // THE ANSWER STAYS IN THE UNIT THAT HOLDS IT. Converting to `GPa km^3` here used to be the last
+            // step, and it discarded a converged solve for the one world class that most needs one: see
+            // `MomentEquivalentPlate::rigidity_internal`. The dimensional value is a fallible READOUT now.
+            rigidity_internal: d_hat,
             curvature,
             neutral_depth_km: z_n,
             moment: reading,
@@ -2005,11 +2087,25 @@ pub enum TeBias {
 
 impl BandedMomentEquivalentPlate {
     /// THE CANONICAL BANDED OUTPUT: the rigidity band `[D(V*_low), D(V*_high)]` (`GPa km^3`).
-    pub fn rigidity_band(&self) -> RigidityBand {
-        RigidityBand {
-            low_gpa_km3: self.low.rigidity_gpa_km3,
-            high_gpa_km3: self.high.rigidity_gpa_km3,
-        }
+    ///
+    /// FALLIBLE, and the refusal is a real one rather than a representation nuisance. [`RigidityBand`] exists to
+    /// compare the engine's plate against PUBLISHED hindcast rows, which are quoted in `GPa km^3` through their
+    /// own modulus pair, so the band is meaningfully dimensional and stays so. A world whose plate does not fit
+    /// in that unit (see [`MomentEquivalentPlate::rigidity_internal`]) cannot be set beside that literature in
+    /// it, and saying `None` is the honest answer rather than a comparison quietly made in the wrong currency.
+    /// The plate itself is unaffected and its internal rigidity is exact; only this comparison declines.
+    pub fn rigidity_band(&self) -> Option<RigidityBand> {
+        Some(RigidityBand {
+            low_gpa_km3: self.low.rigidity_gpa_km3()?,
+            high_gpa_km3: self.high.rigidity_gpa_km3()?,
+        })
+    }
+
+    /// THE INTERNAL-UNIT BAND, which always exists when both edges solved: `[D_hat(V*_low), D_hat(V*_high)]`.
+    /// This is what a caller that goes on to COMPUTE with the band should read, leaving [`Self::rigidity_band`]
+    /// for the comparison against dimensional literature.
+    pub fn rigidity_band_internal(&self) -> (Fixed, Fixed) {
+        (self.low.rigidity_internal, self.high.rigidity_internal)
     }
 
     /// The `V*` LOW-edge plate (weaker, lower rigidity).
@@ -2024,8 +2120,12 @@ impl BandedMomentEquivalentPlate {
 
     /// Whether the band collapsed to a point: the shallow column, where the two edges converged to the same
     /// rigidity to the bit because the brittle branch floored the envelope identically across the span.
+    ///
+    /// Read off the INTERNAL rigidities, which is what makes this total rather than fallible. Degeneracy is a
+    /// question about the two edges agreeing, and they either agree or they do not whether or not the value they
+    /// agree on fits in `GPa km^3`.
     pub fn is_degenerate(&self) -> bool {
-        self.rigidity_band().is_degenerate()
+        self.low.rigidity_internal == self.high.rigidity_internal
     }
 
     /// The DISPLAY-THICKNESS band (km) at a DECLARED modulus pair, low edge below high. A statistic, carrying its
@@ -2172,10 +2272,14 @@ fn combine_band_edges(
         (Ok(low), Ok(high)) => {
             // THE ORDERING, CHECKED. A larger `V*` is a stronger ductile branch is a larger moment is a larger
             // rigidity; if that fails here the interval-arithmetic license has failed and this stops.
-            if low.rigidity_gpa_km3 > high.rigidity_gpa_km3 {
+            // Compared in INTERNAL units: the scale factor is positive, so it preserves the order exactly, and
+            // reading it here keeps the check total. A world whose rigidity does not fit in `GPa km^3` must
+            // still have its band ordering refereed, and a comparison that could not be made would have been
+            // the one place this stop could go quiet.
+            if low.rigidity_internal > high.rigidity_internal {
                 return Err(MomentEquivalenceRefusal::BandRigidityUnordered {
-                    low_gpa_km3: low.rigidity_gpa_km3,
-                    high_gpa_km3: high.rigidity_gpa_km3,
+                    low_internal: low.rigidity_internal,
+                    high_internal: high.rigidity_internal,
                 });
             }
             Ok(BandedMomentEquivalentPlate {
@@ -2951,6 +3055,16 @@ mod tests {
     }
     fn f64_of(x: Fixed) -> f64 {
         x.to_f64_lossy()
+    }
+
+    /// THE DIMENSIONAL RIGIDITY OF A FIXTURE PLATE. Every plate these tests build is Earth-class or
+    /// Mars-class and its `D` fits in the caller's `GPa km^3`, so the readout is unwrapped here once rather
+    /// than at fifty call sites. The column that does NOT fit is the subject of
+    /// `the_sluggish_lid_solves_where_its_own_ceiling_used_to_overflow`, which reads the internal rigidity on
+    /// purpose and is the reason the accessor is fallible at all.
+    fn d_ext(p: &MomentEquivalentPlate) -> Fixed {
+        p.rigidity_gpa_km3()
+            .expect("this fixture's plate fits in the caller's GPa km^3")
     }
 
     /// McNutt and Menard's own worked illustration (their p. 366): a plate of thickness `H` with a UNIFORM yield
@@ -3881,6 +3995,117 @@ mod tests {
     }
 
     #[test]
+    fn the_sluggish_lid_solves_where_its_own_ceiling_used_to_overflow() {
+        // SEAM C'S MEASURED REFUSAL, KEPT AS A GATE. Mapping the flexure chain end to end on this world's own
+        // derived column found it running as far as the moment-equivalent solve and then failing with
+        // `NotRepresentable`. The cause was arithmetic and it sat in the BRACKET'S CEILING rather than in any
+        // answer: the fully-elastic rigidity `D = E T_e^3 / (12 (1 - nu^2))` over the envelope's whole domain, at
+        // `E = 120 GPa` and a 739.4 km lid, is `4.31e9 GPa km^3` against a `Fixed::MAX` of `2.147e9`. Over by
+        // exactly 2.0x, and only in the starting guess: every PHYSICAL elastic thickness is comfortably
+        // representable (10 km gives 1.07e4, 100 km gives 1.07e7) and the largest representable one is 586 km.
+        //
+        // The internal unit system dissolved it by carrying that ceiling in `32 km / 1 GPa` units, where the same
+        // rigidity is about `1.3e5` with three decades of headroom. THIS TEST EXISTS SO THE FIX CANNOT SILENTLY
+        // REGRESS, and so the CEILING'S REPRESENTABILITY is checked on a lid thick enough to convict it: a kernel
+        // exercised only on Earth-class lids never meets this case, and this column is the one the engine runs.
+        //
+        // The lid is 739 km because the world is SLUGGISH rather than because anything is wrong: `ln Ra = 8.926`
+        // is low because the derived viscosity is high (`ln eta = 54.3`, about `4e23 Pa s`). The column is
+        // self-consistent, and a bound that falls out of it is the physics rather than a number to tune away.
+        let volumes = [table2_volume_fixture()];
+        let creep = [CreepCandidate {
+            row: hk_dry_dislocation(),
+            volumes: &volumes,
+        }];
+        // The derived column's own readings: 220 K at the surface, 437.9 K at 100 km.
+        let geotherm = |z_km: Fixed| {
+            steady_conductive_geotherm(
+                Fixed::from_int(220),
+                Fixed::from_ratio(4379, 10),
+                Fixed::from_int(100),
+                z_km,
+                Fixed::from_int(3300),
+                ZERO,
+                Fixed::from_int(3),
+            )
+        };
+        // DERIVED FROM THE WORLD'S OWN RAYLEIGH NUMBER, never declared: `1212.2 * exp(-(8.926 - 7.443)/3)`.
+        let lid_base = ConductiveLidBase::from_ln_rayleigh(
+            Fixed::from_ratio(12122, 10),
+            Fixed::from_ratio(8926, 1000),
+            Fixed::from_ratio(7443, 1000),
+        )
+        .expect("a convecting layer has a conductive boundary layer");
+        assert!(
+            (f64_of(lid_base.depth_km()) - 739.4).abs() < 1.0,
+            "the derived lid base is Seam C's measured 739.4 km, got {}",
+            f64_of(lid_base.depth_km())
+        );
+        let envelope = LithosphereEnvelope {
+            friction: rock_friction_law(),
+            density_kg_m3: Fixed::from_int(3300),
+            gravity_m_s2: Fixed::from_ratio(371, 100), // Mars-class
+            geotherm_k: &geotherm,
+            creep: &creep,
+            chord: test_chord(),
+            lid_base,
+        };
+        // A mountain-belt line load: `rho g h w` for a 5 km relief over a 100 km width at Mars gravity is about
+        // `5.4e12 N/m`, which is `5.4 GPa km` in the kernel's own currency.
+        let solved = solve_line_load_banded(
+            &envelope,
+            128,
+            Fixed::from_int(120),      // E (GPa), the derived pair's modulus
+            Fixed::from_ratio(1, 4),   // nu
+            Fixed::from_ratio(33, 10), // delta_rho in 1000 kg/m^3
+            Fixed::from_ratio(371, 100_000), // g in km/s^2
+            Fixed::from_ratio(54, 10), // V0 in GPa km
+            test_chord(),
+        );
+        let band =
+            solved.expect("the sluggish column solves; only its READOUT unit was ever the problem");
+
+        // THE PLATE EXISTS. Both edges converged, and their rigidities are ordinary internal numbers.
+        let (lo, hi) = band.rigidity_band_internal();
+        assert!(
+            lo > ZERO && hi >= lo,
+            "a converged band is positive and ordered: [{}, {}] internal",
+            f64_of(lo),
+            f64_of(hi)
+        );
+
+        // AND ITS DIMENSIONAL READOUT REFUSES, which is the honest half. `D` here is about `2.9e9 GPa km^3`
+        // against a `Fixed::MAX` of `2.147e9`, so the number does not exist in that unit while the plate does.
+        // The band declines with it, because a comparison against literature quoted in `GPa km^3` cannot be
+        // made for a plate that unit cannot hold.
+        assert!(
+            band.low_edge().rigidity_gpa_km3().is_none(),
+            "this plate is stiffer than `GPa km^3` can express, so the readout must decline rather than wrap"
+        );
+        assert!(
+            band.rigidity_band().is_none(),
+            "the dimensional band declines with its edges"
+        );
+
+        // THE THICKNESS STILL READS, because a cube root brings it back inside the window: about 648 km for a
+        // 739 km lid, which is the plate being nearly the whole lid rather than an anomaly. This is what makes
+        // the fallible readout a REPRESENTATION boundary rather than a failed solve.
+        let te = band
+            .low_edge()
+            .elastic_thickness_km(Fixed::from_int(120), Fixed::from_ratio(1, 4))
+            .expect("the thickness is a cube root and lands well inside the window");
+        assert!(
+            (f64_of(te) - 648.0).abs() < 25.0,
+            "the sluggish column's moment-equivalent thickness is near 648 km, got {}",
+            f64_of(te)
+        );
+        assert!(
+            f64_of(te) < f64_of(band.low_edge().neutral_depth_km) * 2.0 + 100.0,
+            "and it is a plate inside its own lid rather than one larger than the column it came from"
+        );
+    }
+
+    #[test]
     fn the_all_brittle_thin_lid_is_unreachable_the_founding_case() {
         // BLOCK-2 RECEIPT (owner ruling 2026-07-18): the finding graduated from narrative to a measured number.
         // THE MECHANISM, stated so the instance generalizes: a lid is all-brittle iff its base sits ABOVE the
@@ -4688,11 +4913,11 @@ mod tests {
                 panic!("the {what} ceiling must still find the crossing, got {e:?}")
             });
             assert_eq!(
-                other.rigidity_gpa_km3,
-                derived.rigidity_gpa_km3,
+                other.rigidity_internal,
+                derived.rigidity_internal,
                 "the {what} ceiling must reach the SAME crossing to the bit: {} against {}",
-                f64_of(other.rigidity_gpa_km3),
-                f64_of(derived.rigidity_gpa_km3)
+                f64_of(other.rigidity_internal),
+                f64_of(derived.rigidity_internal)
             );
             assert_eq!(
                 other.curvature, derived.curvature,
@@ -4797,7 +5022,7 @@ mod tests {
                 test_chord(),
             )
             .ok()
-            .map(|p| p.rigidity_gpa_km3)
+            .and_then(|p| p.rigidity_gpa_km3())
         };
         let solved_point = |p: i32| {
             solve_point_load(
@@ -4808,7 +5033,7 @@ mod tests {
                 test_chord(),
             )
             .ok()
-            .map(|p| p.rigidity_gpa_km3)
+            .and_then(|p| p.rigidity_gpa_km3())
         };
 
         let table: [(Golden, Option<Fixed>); 19] = [
@@ -4882,18 +5107,18 @@ mod tests {
             // --- THE MARS-CLASS THICK LID, the case the migration exists for ---
             (
                 g_solver("mars_solve(1 MPa)", 90464063791263, 90464050806784),
-                mars_solve(1).ok().map(|p| p.rigidity_gpa_km3),
+                mars_solve(1).ok().and_then(|p| p.rigidity_gpa_km3()),
             ),
             (
                 g_solver("mars_solve(10 MPa)", 903394585771031804, 903362227058868224),
-                mars_solve(10).ok().map(|p| p.rigidity_gpa_km3),
+                mars_solve(10).ok().and_then(|p| p.rigidity_gpa_km3()),
             ),
             // THE HEADLINE ROW. Pre-migration this refused; the walk started from a CLAMPED 207 km trial and
             // climbed, and its third iteration formed `8 D` past `Fixed::MAX`. It now starts from the full
             // 739.4 km fully elastic plate, descends, and converges to a rigidity the caller's own unit holds.
             (
                 g_none("mars_solve(15 MPa)", Some(4424041792589004800)),
-                mars_solve(15).ok().map(|p| p.rigidity_gpa_km3),
+                mars_solve(15).ok().and_then(|p| p.rigidity_gpa_km3()),
             ),
             // THE REFUSAL THAT STAYED, AND CHANGED ITS MEANING ENTIRELY. Pre-migration this died on its
             // SECOND iteration, where `alpha` had grown past 650 km and `8 D` passed `Fixed::MAX` while every
@@ -4905,20 +5130,29 @@ mod tests {
             // rescaling of the internal arithmetic can lift.
             (
                 g_none("mars_solve(50 MPa)", None),
-                mars_solve(50).ok().map(|p| p.rigidity_gpa_km3),
+                mars_solve(50).ok().and_then(|p| p.rigidity_gpa_km3()),
             ),
         ];
         for (row, value) in &table {
             check_golden(row, *value);
         }
 
-        // AND THE REFUSAL IS THE ARITHMETIC ONE, named, so a later build that refuses for a DIFFERENT
-        // reason cannot pass this table by also returning nothing.
-        assert_eq!(
-            mars_solve(50).err(),
-            Some(MomentEquivalenceRefusal::NotRepresentable),
-            "the Mars-class 50 MPa column refuses because an INTERMEDIATE left the window, not because the \
-             envelope or the load did anything physical"
+        // AND THE ROW IS EMPTY FOR A NAMED REASON, so a later build that returns nothing for a DIFFERENT reason
+        // cannot pass this table by also returning nothing. The reason is no longer a refusal: the column
+        // CONVERGES and only its dimensional readout declines. The assertion that used to stand here said the
+        // column "refuses because an INTERMEDIATE left the window", which contradicted the comment four lines
+        // above it saying the refusal was the ANSWER not fitting. The comment was right, and the answer now
+        // survives in the unit that holds it.
+        let plate = mars_solve(50)
+            .expect("the 50 MPa column converges; its READOUT is what cannot be expressed");
+        assert!(
+            plate.rigidity_gpa_km3().is_none(),
+            "the row is empty because `4.31e9 GPa km^3` does not fit, never because the solve failed"
+        );
+        assert!(
+            plate.rigidity_internal > ZERO,
+            "and the plate behind the empty row is a real one: {} internal",
+            f64_of(plate.rigidity_internal)
         );
     }
 
@@ -4967,7 +5201,7 @@ mod tests {
             let plate = mars_solve(yield_mpa).unwrap_or_else(|e| {
                 panic!("the {yield_mpa} MPa Mars column must solve, got {e:?}")
             });
-            let d = f64_of(plate.rigidity_gpa_km3);
+            let d = f64_of(d_ext(&plate));
             assert!(
                 (low..=high).contains(&d),
                 "the {yield_mpa} MPa Mars column converges near {low}, read {d}"
@@ -5010,12 +5244,76 @@ mod tests {
         .expect("the amplitude that used to overflow");
         assert!(f64_of(amplitude) > ZERO.to_f64_lossy());
 
-        // THE REMAINING REFUSAL IS THE OUTPUT'S. At 50 MPa this plate does not yield at all, so its
-        // moment-equivalent rigidity is its fully elastic rigidity and that number is 4.31e9.
-        assert_eq!(
-            mars_solve(50).err(),
-            Some(MomentEquivalenceRefusal::NotRepresentable),
-            "a Mars column too strong to yield converges to a rigidity larger than GPa km^3 can express"
+        // THE OUTPUT'S REFUSAL IS GONE, AND THIS IS WHERE IT WAS PINNED. At 50 MPa this plate does not yield at
+        // all, so its moment-equivalent rigidity IS its fully elastic rigidity, `4.31e9 GPa km^3`, which is
+        // twice what `Fixed` holds in the caller's unit. The diagnosis here was right and was written down
+        // correctly ("THE REMAINING REFUSAL IS THE OUTPUT'S"), and then the refusal was asserted as though it
+        // were behaviour, which is how a known limitation stops being visible: the suite goes green and the
+        // stop reads as intentional. The solve was never in trouble. Carrying the ANSWER in the same internal
+        // units the bracket's ceiling already used lifts it, and what remains is a readout that declines.
+        let plate = mars_solve(50)
+            .expect("a plate too strong to yield still converges, to its own ceiling");
+        assert!(
+            plate.rigidity_gpa_km3().is_none(),
+            "and its dimensional readout is what declines: `4.31e9` does not fit in `GPa km^3`"
+        );
+        // IT CONVERGED TO THE CEILING ITSELF, which is the check that this is the unyielded plate rather than
+        // merely some representable number: an envelope the load never yields returns the fully elastic
+        // rigidity the bracket opened at.
+        let ceiling = fully_elastic_internal_rigidity(
+            &mars_thick_lid_profile(50),
+            Fixed::from_int(120),
+            Fixed::from_ratio(25, 100),
+        )
+        .expect("the ceiling is representable internally");
+        let mut gaps: Vec<f64> = Vec::new();
+        for steps in [300u32, 600, 1200, 2400] {
+            let prof = EnvelopeProfile::sample(
+                &UniformYieldEnvelope {
+                    yield_gpa: Fixed::from_ratio(50, 1000),
+                    thickness_km: Fixed::from_ratio(7394, 10),
+                },
+                steps,
+            )
+            .expect("samples");
+            let c = fully_elastic_internal_rigidity(
+                &prof,
+                Fixed::from_int(120),
+                Fixed::from_ratio(25, 100),
+            )
+            .expect("ceiling");
+            let solved = solve_line_load(
+                &prof,
+                Fixed::from_int(120),
+                Fixed::from_ratio(25, 100),
+                Fixed::from_ratio(337, 100),
+                Fixed::from_ratio(37, 10000),
+                Fixed::from_int(80),
+                test_chord(),
+            )
+            .expect("converges");
+            let rel = (f64_of(solved.rigidity_internal) - f64_of(c)).abs() / f64_of(c);
+            gaps.push(rel);
+        }
+        // SECOND ORDER, MEASURED RATHER THAN ASSERTED BY TOLERANCE. The sampled moment does not reproduce the
+        // closed-form elastic rigidity exactly at any finite grid, and picking a tolerance that the 600-step
+        // fixture happens to clear would prove nothing about which of the two is right. Halving the step
+        // QUARTERS the gap, at 4.00 every time across 300/600/1200/2400, which is the trapezoidal rule's own
+        // order and identifies the discrepancy as discretization: the plate converges ONTO its ceiling, so an
+        // unyielded plate is its own elastic ceiling and the residue is the integral's grid.
+        for pair in gaps.windows(2) {
+            let ratio = pair[0] / pair[1];
+            assert!(
+                (ratio - 4.0).abs() < 0.2,
+                "halving the step must quarter the gap (second order), got {ratio:.3} from {:.3e} to {:.3e}",
+                pair[0],
+                pair[1]
+            );
+        }
+        assert!(
+            gaps.last().copied().expect("swept") < 1e-6,
+            "and the finest grid's residue is small in absolute terms too, got {:.3e}",
+            gaps.last().copied().expect("swept")
         );
     }
 
@@ -5391,22 +5689,20 @@ mod tests {
         // THE FIXED POINT IS A FIXED POINT: re-entering the converged rigidity reproduces it, which is the
         // property the loop claims rather than merely the number it stopped at.
         let alpha = crate::flexure::flexural_parameter(
-            plate.rigidity_gpa_km3,
+            d_ext(&plate),
             Fixed::from_ratio(33, 10),
             Fixed::from_ratio(98, 10000),
         )
         .unwrap();
-        let k = line_load_curvature_at_first_zero_crossing(load, alpha, plate.rigidity_gpa_km3)
-            .unwrap();
+        let k = line_load_curvature_at_first_zero_crossing(load, alpha, d_ext(&plate)).unwrap();
         let z_n = neutral_surface_depth_km(&profile, k, lit_e(), lit_nu()).unwrap();
         let m = bending_moment(&profile, k, z_n, lit_e(), lit_nu()).unwrap();
         let d_again = equivalent_rigidity(m.moment, k).unwrap();
         assert!(
-            (f64_of(d_again) - f64_of(plate.rigidity_gpa_km3)).abs()
-                < f64_of(plate.rigidity_gpa_km3) * 1e-6,
+            (f64_of(d_again) - f64_of(d_ext(&plate))).abs() < f64_of(d_ext(&plate)) * 1e-6,
             "re-entering the converged rigidity reproduces it: {} against {}",
             f64_of(d_again),
-            f64_of(plate.rigidity_gpa_km3)
+            f64_of(d_ext(&plate))
         );
 
         // The curvature it settled at is concave-down (a downward load read at its first zero crossing), and the
@@ -5418,14 +5714,14 @@ mod tests {
         let elastic_ceiling =
             crate::flexure::flexural_rigidity(lit_e(), lit_nu(), Fixed::from_int(40)).unwrap();
         assert!(
-            plate.rigidity_gpa_km3 > ZERO,
+            d_ext(&plate) > ZERO,
             "a converged plate has a positive rigidity, got {}",
-            f64_of(plate.rigidity_gpa_km3)
+            f64_of(d_ext(&plate))
         );
         assert!(
-            f64_of(plate.rigidity_gpa_km3) < f64_of(elastic_ceiling) * 0.9,
+            f64_of(d_ext(&plate)) < f64_of(elastic_ceiling) * 0.9,
             "this load really does yield the plate: {} against the unyielded ceiling {}",
-            f64_of(plate.rigidity_gpa_km3),
+            f64_of(d_ext(&plate)),
             f64_of(elastic_ceiling)
         );
 
@@ -5443,10 +5739,10 @@ mod tests {
         )
         .expect("a gentle load converges");
         assert!(
-            (f64_of(gentle.rigidity_gpa_km3) - f64_of(elastic_ceiling)).abs()
+            (f64_of(d_ext(&gentle)) - f64_of(elastic_ceiling)).abs()
                 < f64_of(elastic_ceiling) * 1e-4,
             "a load too gentle to yield reads the unyielded column: {} against {}",
-            f64_of(gentle.rigidity_gpa_km3),
+            f64_of(d_ext(&gentle)),
             f64_of(elastic_ceiling)
         );
 
@@ -5688,11 +5984,11 @@ mod tests {
         // curvature, so `M / kappa_eff` is load-free up to the trapezoid's and the neutral-surface bisection's
         // own last-bit rounding (a few parts in 1e6), not a physical load dependence.
         assert!(
-            (f64_of(elastic.rigidity_gpa_km3) - f64_of(elastic_big.rigidity_gpa_km3)).abs()
-                < f64_of(elastic.rigidity_gpa_km3) * 1e-4,
+            (f64_of(d_ext(&elastic)) - f64_of(d_ext(&elastic_big))).abs()
+                < f64_of(d_ext(&elastic)) * 1e-4,
             "the elastic limit is independent of the load magnitude: {} against {}",
-            f64_of(elastic.rigidity_gpa_km3),
-            f64_of(elastic_big.rigidity_gpa_km3)
+            f64_of(d_ext(&elastic)),
+            f64_of(d_ext(&elastic_big))
         );
 
         // YIELDING: a large point load bends the 500 MPa / 40 km plate into its own yielding, so the rigidity
@@ -5707,9 +6003,9 @@ mod tests {
         let ceiling =
             crate::flexure::flexural_rigidity(lit_e(), lit_nu(), Fixed::from_int(40)).unwrap();
         assert!(
-            f64_of(plate.rigidity_gpa_km3) < f64_of(ceiling) * 0.95,
+            f64_of(d_ext(&plate)) < f64_of(ceiling) * 0.95,
             "this point load yields the plate: {} against the unyielded ceiling {}",
-            f64_of(plate.rigidity_gpa_km3),
+            f64_of(d_ext(&plate)),
             f64_of(ceiling)
         );
         assert!(
@@ -5718,17 +6014,15 @@ mod tests {
         );
         // The fixed point re-enters: recompute the curvature at the converged rigidity and re-solve; the rigidity
         // reproduces, which is the property the loop claims rather than the number it stopped at.
-        let k = point_load_curvature_at_first_zero_crossing(load, plate.rigidity_gpa_km3, lit_nu())
-            .unwrap();
+        let k = point_load_curvature_at_first_zero_crossing(load, d_ext(&plate), lit_nu()).unwrap();
         let z_n = neutral_surface_depth_km(&profile, k, lit_e(), lit_nu()).unwrap();
         let m = bending_moment(&profile, k, z_n, lit_e(), lit_nu()).unwrap();
         let d_again = equivalent_rigidity(m.moment, k).unwrap();
         assert!(
-            (f64_of(d_again) - f64_of(plate.rigidity_gpa_km3)).abs()
-                < f64_of(plate.rigidity_gpa_km3) * 1e-6,
+            (f64_of(d_again) - f64_of(d_ext(&plate))).abs() < f64_of(d_ext(&plate)) * 1e-6,
             "re-entering the converged rigidity reproduces it: {} against {}",
             f64_of(d_again),
-            f64_of(plate.rigidity_gpa_km3)
+            f64_of(d_ext(&plate))
         );
         // The chord rides with the answer.
         assert_eq!(plate.chord.class, LoadClassId(1));
@@ -6212,7 +6506,7 @@ mod tests {
             solve_line_load_banded(&env, 600, lit_e(), lit_nu(), dr, g, load, test_chord())
                 .expect("both edges of the V* band converge on this deep lid");
 
-        let band = banded.rigidity_band();
+        let band = banded.rigidity_band().expect("fixture band is dimensional");
         assert!(
             band.low() < band.high(),
             "the deep column's rigidity is a real band: [{}, {}] GPa km^3",
@@ -6226,11 +6520,10 @@ mod tests {
         // BOTH EDGES ARE FIXED POINTS: re-entering each converged rigidity reproduces it, which is the property
         // the solve claims rather than the number it stopped at.
         for plate in [banded.low_edge(), banded.high_edge()] {
-            let alpha = crate::flexure::flexural_parameter(plate.rigidity_gpa_km3, dr, g).unwrap();
-            let k = line_load_curvature_at_first_zero_crossing(load, alpha, plate.rigidity_gpa_km3)
-                .unwrap();
+            let alpha = crate::flexure::flexural_parameter(d_ext(&plate), dr, g).unwrap();
+            let k = line_load_curvature_at_first_zero_crossing(load, alpha, d_ext(&plate)).unwrap();
             // Each edge owns its OWN profile; re-derive it to re-enter the fixed point at that edge.
-            let end = if plate.rigidity_gpa_km3 == banded.low_edge().rigidity_gpa_km3 {
+            let end = if d_ext(&plate) == d_ext(banded.low_edge()) {
                 VolumeEnd::Low
             } else {
                 VolumeEnd::High
@@ -6245,10 +6538,9 @@ mod tests {
             let m = bending_moment(&profile, k, z_n, lit_e(), lit_nu()).unwrap();
             let d_again = equivalent_rigidity(m.moment, k).unwrap();
             assert!(
-                (f64_of(d_again) - f64_of(plate.rigidity_gpa_km3)).abs()
-                    < f64_of(plate.rigidity_gpa_km3) * 1e-6,
+                (f64_of(d_again) - f64_of(d_ext(&plate))).abs() < f64_of(d_ext(&plate)) * 1e-6,
                 "each edge is a fixed point: re-entering {} reproduces it, got {}",
-                f64_of(plate.rigidity_gpa_km3),
+                f64_of(d_ext(&plate)),
                 f64_of(d_again)
             );
         }
@@ -6670,12 +6962,22 @@ mod tests {
         assert!(
             banded.is_degenerate(),
             "an all-brittle column is V*-independent, so its rigidity band is a point: [{}, {}]",
-            f64_of(banded.rigidity_band().low()),
-            f64_of(banded.rigidity_band().high())
+            f64_of(
+                banded
+                    .rigidity_band()
+                    .expect("fixture band is dimensional")
+                    .low()
+            ),
+            f64_of(
+                banded
+                    .rigidity_band()
+                    .expect("fixture band is dimensional")
+                    .high()
+            )
         );
         assert_eq!(
-            banded.low_edge().rigidity_gpa_km3,
-            banded.high_edge().rigidity_gpa_km3,
+            d_ext(banded.low_edge()),
+            d_ext(banded.high_edge()),
             "the two edges agree to the bit where the span cannot move the answer"
         );
     }
@@ -6688,7 +6990,7 @@ mod tests {
         // end-to-end path in `solve_line_load_banded`'s own doc; here the pure combinator's arms are exercised
         // with synthetic edge results, so no arm is dead-untested.
         let plate = |d: i64| MomentEquivalentPlate {
-            rigidity_gpa_km3: Fixed::from_int(d as i32),
+            rigidity_internal: Fixed::from_int(d as i32),
             curvature: FibreCurvature::from_upward_deflection(Fixed::from_ratio(-1, 2000)),
             neutral_depth_km: Fixed::from_int(20),
             moment: MomentReading {
@@ -6706,15 +7008,20 @@ mod tests {
 
         // BOTH Ok and ordered: a band, low below high.
         let band = combine_band_edges(Ok(plate(300_000)), Ok(plate(500_000))).expect("band");
-        assert_eq!(band.rigidity_band().low(), Fixed::from_int(300_000));
-        assert_eq!(band.rigidity_band().high(), Fixed::from_int(500_000));
+        // READ INTERNALLY, because this test is about the COMBINATOR'S ordering logic and its synthetic plates
+        // are stiffer than `GPa km^3` can express (`300_000` internal is `9.8e9`). Asserting through the
+        // dimensional readout would make an ordering test fail on a representation boundary it is not about.
+        assert_eq!(
+            band.rigidity_band_internal(),
+            (Fixed::from_int(300_000), Fixed::from_int(500_000))
+        );
 
         // BOTH Ok but UNORDERED: the monotonicity license failed, a stop rather than a swap.
         assert_eq!(
             combine_band_edges(Ok(plate(500_000)), Ok(plate(300_000))).unwrap_err(),
             MomentEquivalenceRefusal::BandRigidityUnordered {
-                low_gpa_km3: Fixed::from_int(500_000),
-                high_gpa_km3: Fixed::from_int(300_000),
+                low_internal: Fixed::from_int(500_000),
+                high_internal: Fixed::from_int(300_000),
             },
             "an unordered band stops rather than silently swapping"
         );
