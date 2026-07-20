@@ -8,13 +8,13 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Active arcs
 
-- 2026-07-19  Mountains / mid-band (increment 3) -> fixture cluster retired, deep-time runs on derived physics; Seams C/D next -> `claude/fixture-cluster-prep`, `HANDOFFS.md`
+- 2026-07-19  Seam D kernel built, flexural relief has a forebulge; producer-side wiring next -> `crates/physics/src/flexural_relief.rs`, `HANDOFFS.md`
 - 2026-07-19  Lane A flexure unit-system migration, Mars solves end to end -> `docs/working/FLEXURE_REPRESENTATION_DESIGN.md`
 - 2026-07-19  Lane B stagnant-lid: max(C1,C2) combinator + typed scope preflight built; production returns the typed refusal, run-path wiring unbuilt -> `crates/physics/src/convection_scaling.rs`
 - 2026-07-19  Lane C(i) global residual body count derived; per-target allocation is the open lever -> `crates/sim/src/smallbody.rs`
 - 2026-07-19  Lane D crust/mantle areal-mass ledger, growth is a transaction -> `crates/sim/src/deeptime.rs`
-- 2026-07-19  FLAGGED `Fixed::powf` rails silently at the representability edge, 85 call sites -> `crates/core/src/fixed.rs`
-- 2026-07-19  #212 disk-evolution arc: request changes, two blockers after remediation -> `docs/working/PR212_ARC_AUDIT.md`
+- 2026-07-19  `Fixed::powf` audit done, 43 production sites, 2 railing defects fixed -> `docs/working/POWF_CALL_SITE_AUDIT.md`
+- 2026-07-19  #212 verified merge-safe but BLOCKED by permission classifier, needs owner; PR body stale -> `docs/working/PR212_INTEGRATION_SCOPE.md`
 - 2026-07-19  Lane integration order: kernels parallel, run-path serialized on deeptime.rs + main.rs -> `docs/working/GEODYNAMICS_LANE_MAP.md`
 - 2026-07-18  Remote agent #201 (disk-evolution wire) lands large and often -> rebase-onto-main integration, keep viewer/physics lanes disjoint.
 - 2026-07-18  Arc AFTER the crust (perpetual dynamics, atmosphere keystone, hydrosphere) -> plan in `PHYSICS_SUBSTRATE_ROADMAP.md`.
