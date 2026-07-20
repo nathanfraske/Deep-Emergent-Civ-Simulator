@@ -17,8 +17,10 @@
 //! temperature sets where water ice condenses, and so the satellites' rock-versus-ice composition. The full
 //! midplane temperature is a COUPLED implicit solve (the temperature sets the viscosity, surface density, and
 //! opacity that set the temperature); this module builds the grounded STANDALONE primitives the solve composes,
-//! one focused concern at a time, never a grab bag. This slice is the VISCOUS HEATING flux, the dominant heat
-//! source of the inner disc. The gas-flux geometry factor that feeds it was a flagged found-seam (its printed
+//! one focused concern: the THREE HEAT FLUXES of the surface-temperature sum (Eq. 18), the viscous
+//! ([`viscous_heating_flux_from_transport`]), accretion ([`accretion_heating_flux_log10`]), and planet-irradiation
+//! ([`planet_irradiation_flux_log10`]) fluxes. The viscous flux is the dominant heat source of the inner disc; its
+//! gas-flux geometry factor that feeds it was a flagged found-seam (its printed
 //! branches do not meet at the centrifugal radius); it is now DERIVED, continuous at the centrifugal radius, by
 //! [`crate::cpd_transport`] from the conservation solve, and [`viscous_heating_flux_from_transport`] consumes that
 //! solved geometry factor. The legacy [`viscous_heating_flux_log10`] retains the raw algebra taking the factor as
@@ -60,7 +62,8 @@ use crate::astro::kepler_orbital_period_seconds;
 /// 2025, PSJ 6:23, Equation 19, after Makalkin and Dorofeeva 2014), returned as `log10(F_vis / (W m^-2))`. This is the
 /// accretional dissipation the CPD's own viscously-spreading gas releases, the dominant heat source of the inner
 /// disc and one of the three fluxes that set the surface temperature (the accretion and planet-irradiation fluxes
-/// are the siblings, the latter awaiting the planet's formation luminosity, a named further-down rung).
+/// are the siblings [`accretion_heating_flux_log10`] and [`planet_irradiation_flux_log10`], the latter consuming
+/// the giant's formation luminosity from [`crate::giants::formation_accretion_luminosity_log10_watts`]).
 ///
 /// The Keplerian angular frequency around the planet is DERIVED by reusing [`kepler_orbital_period_seconds`]:
 /// `Omega_K = 2 pi / P`. Inputs: `geometry_factor` the dimensionless `Lambda/l` gas-flux profile (a caller input,
@@ -167,6 +170,106 @@ pub fn viscous_heating_flux_from_transport(
         orbit.log10_omega_s_inv,
     )?;
     Some(CpdViscousHeatingFlux::Log10PerFaceWm2(flux))
+}
+
+/// `log10` of a positive `Fixed`, or `None` if it is not positive. The shared base-ten log the flux kernels use.
+fn log10_pos(v: Fixed) -> Option<Fixed> {
+    if v <= Fixed::ZERO {
+        return None;
+    }
+    v.ln().checked_div(Fixed::from_int(10).ln())
+}
+
+/// `log10` of a floor-constant decimal string, read through the sanctioned `ln_of_decimal` path (never an inline
+/// decimal parse, which the Stone 0 constructor gate rejects): `log10(x) = ln(x) / ln 10`.
+fn log10_decimal(s: &str) -> Option<Fixed> {
+    civsim_physics::saha::ln_of_decimal(s)?.checked_div(Fixed::from_int(10).ln())
+}
+
+/// The ACCRETION HEATING FLUX `F_acc = (X_d chi G M_p Mdot) / (4 pi R_c^2 r) exp(-r^2 / R_c^2)` (Schneeberger and
+/// Mousis 2025 Equation 20, after Makalkin and Dorofeeva 2014), the second of the three heat fluxes of Eq. 18,
+/// returned as `log10(F_acc / (W m^-2))`. This is the heat the gas releases as it accretes onto the CPD, peaked in
+/// the inner disc and cut off beyond the centrifugal radius by the Gaussian in `r/R_c`.
+///
+/// `x = r / R_c` is the dimensionless radius (the transport state's coordinate); `log10_mdot_kg_s` the accretion
+/// rate `log10(Mdot / (kg s^-1))`; `planet_mass_solar` the planet mass in solar masses; `centrifugal_radius_au`
+/// the centrifugal radius `R_c` in AU; `metallicity_xd` the PSN metallicity `X_d` and `dust_enrichment_ratio` the
+/// CPD dust enrichment `chi`, both dimensionless caller inputs reserved-with-basis at the call site. Computed in
+/// the log domain (the accretion rate and the wide `G M_p` overflow Q32.32). `None` on a non-positive input or an
+/// overflow.
+pub fn accretion_heating_flux_log10(
+    x: Fixed,
+    log10_mdot_kg_s: Fixed,
+    planet_mass_solar: Fixed,
+    centrifugal_radius_au: Fixed,
+    metallicity_xd: Fixed,
+    dust_enrichment_ratio: Fixed,
+) -> Option<Fixed> {
+    if x <= Fixed::ZERO
+        || planet_mass_solar <= Fixed::ZERO
+        || centrifugal_radius_au <= Fixed::ZERO
+        || metallicity_xd <= Fixed::ZERO
+        || dust_enrichment_ratio <= Fixed::ZERO
+    {
+        return None;
+    }
+    let ln10 = Fixed::from_int(10).ln();
+    let log10_g = log10_decimal(civsim_units::fundamentals::GRAVITATIONAL_CONSTANT.value)?;
+    let log10_m_sun = log10_decimal(crate::astro::SOLAR_MASS_KG)?;
+    let log10_au = log10_decimal(crate::astro::ASTRONOMICAL_UNIT_M)?;
+    // R_c^2 * r = R_c^2 * (x R_c) = R_c^3 * x, in metres, so log10(denominator geometry) = 3 log10(R_c_m) + log10(x).
+    let log10_rc_m = log10_pos(centrifugal_radius_au)?.checked_add(log10_au)?;
+    let log10_4pi = log10_pos(Fixed::from_int(4).checked_mul(Fixed::PI)?)?;
+    // The Gaussian cutoff exp(-x^2) in base ten: log10(exp(-x^2)) = -x^2 / ln 10.
+    let exp_log10 = Fixed::ZERO.checked_sub(x.checked_mul(x)?.checked_div(ln10)?)?;
+    log10_pos(metallicity_xd)?
+        .checked_add(log10_pos(dust_enrichment_ratio)?)?
+        .checked_add(log10_g)?
+        .checked_add(log10_m_sun)?
+        .checked_add(log10_pos(planet_mass_solar)?)?
+        .checked_add(log10_mdot_kg_s)?
+        .checked_sub(log10_4pi)?
+        .checked_sub(Fixed::from_int(3).checked_mul(log10_rc_m)?)?
+        .checked_sub(log10_pos(x)?)?
+        .checked_add(exp_log10)
+}
+
+/// The PLANET-IRRADIATION FLUX `F_p = L_p sin(zeta + eta) / (8 pi (r^2 + z_s^2))` (Schneeberger and Mousis 2025
+/// Equation 21), the third heat flux, the giant's own radiative heating of its disc, returned as
+/// `log10(F_p / (W m^-2))`. In the surface-temperature sum (Eq. 18) it enters weighted by the absorbed-light
+/// fraction `k_s`, which the caller applies.
+///
+/// `log10_lp_watts` is the planet luminosity `log10(L_p / W)` (the giant's formation luminosity, from
+/// [`crate::giants::formation_accretion_luminosity_log10_watts`]); `grazing_angle_sin` is `sin(zeta + eta)`, the
+/// disc's grazing incidence to the planet's light (dimensionless, in `(0, 1]`); `r_au` and `z_s_au` are the
+/// cylindrical radius and the photosurface altitude in AU. The grazing angle and `z_s` come from the disc's
+/// vertical structure, which is coupled to the temperature solve, so they enter as caller inputs (a named
+/// coupling, not a value authored here). `None` on a non-positive or out-of-range input, or an overflow.
+pub fn planet_irradiation_flux_log10(
+    log10_lp_watts: Fixed,
+    grazing_angle_sin: Fixed,
+    r_au: Fixed,
+    z_s_au: Fixed,
+) -> Option<Fixed> {
+    if grazing_angle_sin <= Fixed::ZERO
+        || grazing_angle_sin > Fixed::from_int(1)
+        || r_au <= Fixed::ZERO
+        || z_s_au < Fixed::ZERO
+    {
+        return None;
+    }
+    let log10_au = log10_decimal(crate::astro::ASTRONOMICAL_UNIT_M)?;
+    // (r^2 + z_s^2) in m^2 = (r_au^2 + z_s_au^2) * AU^2, so log10 = log10(r_au^2 + z_s_au^2) + 2 log10(AU).
+    let sum_au2 = r_au
+        .checked_mul(r_au)?
+        .checked_add(z_s_au.checked_mul(z_s_au)?)?;
+    let log10_denom_m2 =
+        log10_pos(sum_au2)?.checked_add(Fixed::from_int(2).checked_mul(log10_au)?)?;
+    let log10_8pi = log10_pos(Fixed::from_int(8).checked_mul(Fixed::PI)?)?;
+    log10_lp_watts
+        .checked_add(log10_pos(grazing_angle_sin)?)?
+        .checked_sub(log10_8pi)?
+        .checked_sub(log10_denom_m2)
 }
 
 #[cfg(test)]
@@ -297,5 +400,115 @@ mod tests {
             viscous_heating_flux_from_transport(&transport, &orbit, x),
             viscous_heating_flux_from_transport(&transport, &orbit, x)
         );
+    }
+
+    // The accretion flux matches an independent f64 reference from Eq. 20 at a mid-disc radius, and the Gaussian
+    // cuts it off beyond the centrifugal radius (a far-out x gives a far smaller flux).
+    #[test]
+    fn the_accretion_flux_matches_a_reference_and_cuts_off_beyond_rc() {
+        let (x, mdot, m_solar, rc_au, xd, chi) = (
+            0.5_f64,
+            1.2e13_f64,
+            9.54e-4_f64,
+            0.02_f64,
+            0.02_f64,
+            5.0_f64,
+        );
+        let g = 6.674e-11_f64;
+        let m_sun = 1.989e30_f64;
+        let au = 1.495_978_707e11_f64;
+        let rc_m = rc_au * au;
+        let r_m = x * rc_m;
+        let f_ref = (xd * chi * g * (m_solar * m_sun) * mdot)
+            / (4.0 * std::f64::consts::PI * rc_m * rc_m * r_m)
+            * (-(x * x)).exp();
+        let got = accretion_heating_flux_log10(
+            r(1, 2),
+            r((mdot.log10() * 1e6) as i64, 1_000_000),
+            r((m_solar * 1e7) as i64, 10_000_000),
+            r(2, 100),
+            r(2, 100),
+            r(5, 1),
+        )
+        .expect("the accretion flux resolves");
+        assert!(
+            (got.to_f64_lossy() - f_ref.log10()).abs() < 1e-2,
+            "F_acc log10 {} vs Eq.20 reference {}",
+            got.to_f64_lossy(),
+            f_ref.log10()
+        );
+        // Beyond R_c (x = 3) the Gaussian cutoff makes the flux far smaller than at mid-disc.
+        let inner = accretion_heating_flux_log10(
+            r(1, 2),
+            r(13, 1),
+            r(954, 1_000_000),
+            r(2, 100),
+            r(2, 100),
+            r(5, 1),
+        )
+        .unwrap();
+        let outer = accretion_heating_flux_log10(
+            r(3, 1),
+            r(13, 1),
+            r(954, 1_000_000),
+            r(2, 100),
+            r(2, 100),
+            r(5, 1),
+        )
+        .unwrap();
+        assert!(
+            outer < inner,
+            "the Gaussian cuts off the accretion flux beyond R_c"
+        );
+    }
+
+    // The planet-irradiation flux matches an independent f64 reference from Eq. 21, and falls with distance.
+    #[test]
+    fn the_planet_irradiation_flux_matches_a_reference() {
+        let (log_lp, sin_g, r_au, zs_au) = (28.0_f64, 0.05_f64, 0.02_f64, 0.002_f64);
+        let au = 1.495_978_707e11_f64;
+        let denom = 8.0 * std::f64::consts::PI * ((r_au * au).powi(2) + (zs_au * au).powi(2));
+        let f_ref = 10f64.powf(log_lp) * sin_g / denom;
+        let got = planet_irradiation_flux_log10(r(28, 1), r(5, 100), r(2, 100), r(2, 1000))
+            .expect("the planet-irradiation flux resolves");
+        assert!(
+            (got.to_f64_lossy() - f_ref.log10()).abs() < 1e-2,
+            "F_p log10 {} vs Eq.21 reference {}",
+            got.to_f64_lossy(),
+            f_ref.log10()
+        );
+        // Farther out, the flux is weaker (the inverse-square falloff).
+        let near =
+            planet_irradiation_flux_log10(r(28, 1), r(5, 100), r(2, 100), r(2, 1000)).unwrap();
+        let far =
+            planet_irradiation_flux_log10(r(28, 1), r(5, 100), r(10, 100), r(2, 1000)).unwrap();
+        assert!(far < near);
+    }
+
+    #[test]
+    fn the_new_fluxes_fail_soft() {
+        assert!(accretion_heating_flux_log10(
+            Fixed::ZERO,
+            r(13, 1),
+            r(1, 1),
+            r(2, 100),
+            r(2, 100),
+            r(5, 1)
+        )
+        .is_none());
+        assert!(accretion_heating_flux_log10(
+            r(1, 2),
+            r(13, 1),
+            r(1, 1),
+            r(2, 100),
+            Fixed::ZERO,
+            r(5, 1)
+        )
+        .is_none());
+        assert!(
+            planet_irradiation_flux_log10(r(28, 1), Fixed::ZERO, r(2, 100), r(2, 1000)).is_none()
+        );
+        // A grazing angle above one (an unphysical sine) is rejected.
+        assert!(planet_irradiation_flux_log10(r(28, 1), r(2, 1), r(2, 100), r(2, 1000)).is_none());
     }
 }
