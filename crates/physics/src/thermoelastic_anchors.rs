@@ -178,6 +178,287 @@ impl GammaPairing {
     }
 }
 
+/// WHERE A ROW'S FIT APPLIES, as the row itself states it.
+///
+/// Every `[[anchor]]` block carries a `scope` sentence and the loader discarded it, so a source's own
+/// statement of where its model holds never reached the consumer. Carrying it is the first half of the fix;
+/// the second half is making the testable part testable, and that split is deliberate:
+///
+/// - The `stated` sentence is carried VERBATIM, so nothing the source said is lost even where no machine
+///   can act on it.
+/// - `reference_temperature_k` and `reference_pressure_bar` are transcribed numerically on every row and
+///   are checkable today. The MGD solver takes its thermal pressure as a DIFFERENCE from a reference
+///   temperature it holds as its own constant, so a row declaring a different reference is a mismatch the
+///   consumer must refuse rather than silently re-anchor.
+/// - The fitted P,T SPAN is NOT numerically transcribed on any shipped row. The scope sentences say
+///   "upper-mantle to lower-mantle P,T as fit by the inversion", which is a regime rather than an interval,
+///   and inventing endpoints for it would be fabricating the very thing this type exists to carry. The
+///   fields are here, the loader reads them when a row supplies them, and where a row does not the absence
+///   rides every answer as [`ScopeCaveat::FittedSpanNotTranscribed`] instead of passing for validity.
+/// - `riders` carry assumptions the fit inherits from outside the quasi-harmonic model. Fayalite's is live:
+///   its scope discloses that the 2005 entropy assumes `R ln 5` magnetic entropy per Fe, a magnetic
+///   contribution the Debye model does not contain and cannot reproduce.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelScope {
+    /// The row's own scope sentence, verbatim and unparsed.
+    pub stated: String,
+    /// The reference temperature the row's anchors are stated at (K).
+    pub reference_temperature_k: Option<Fixed>,
+    /// The reference pressure the row's anchors are stated at (bar).
+    pub reference_pressure_bar: Option<Fixed>,
+    /// The temperature span the fit was made over (K), where the row transcribes one.
+    pub fitted_temperature_span_k: Option<(Fixed, Fixed)>,
+    /// The pressure span the fit was made over (GPa), where the row transcribes one.
+    pub fitted_pressure_span_gpa: Option<(Fixed, Fixed)>,
+    /// Assumptions the fit carries from outside the model the consumer evaluates.
+    pub riders: Vec<String>,
+}
+
+/// A test that CONVICTED a row at the evaluated state. A failure blocks; the row may not be evaluated there.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ScopeFailure {
+    /// The row declares a reference state the consumer does not anchor at. Refused rather than re-anchored:
+    /// the anchors are meaningful at the reference they were fit against and nowhere else, and quietly
+    /// evaluating them against a different one would move every thermal pressure by an unstated amount.
+    ReferenceStateMismatch {
+        /// The reference temperature the row declares (K).
+        declared_k: Fixed,
+        /// The reference temperature the consumer anchors at (K).
+        assumed_k: Fixed,
+    },
+    /// The evaluated temperature lies outside the span the row transcribes for its fit.
+    TemperatureOutsideFittedSpan {
+        /// The temperature asked about (K).
+        t_k: Fixed,
+        /// The low edge of the transcribed span (K).
+        span_lo_k: Fixed,
+        /// The high edge of the transcribed span (K).
+        span_hi_k: Fixed,
+    },
+    /// The evaluated pressure lies outside the span the row transcribes for its fit.
+    PressureOutsideFittedSpan {
+        /// The pressure asked about (GPa).
+        p_gpa: Fixed,
+        /// The low edge of the transcribed span (GPa).
+        span_lo_gpa: Fixed,
+        /// The high edge of the transcribed span (GPa).
+        span_hi_gpa: Fixed,
+    },
+}
+
+impl fmt::Display for ScopeFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ScopeFailure::ReferenceStateMismatch {
+                declared_k,
+                assumed_k,
+            } => write!(
+                f,
+                "the row's anchors are stated at {} K and the consumer anchors at {} K",
+                declared_k.to_f64_lossy(),
+                assumed_k.to_f64_lossy()
+            ),
+            ScopeFailure::TemperatureOutsideFittedSpan {
+                t_k,
+                span_lo_k,
+                span_hi_k,
+            } => write!(
+                f,
+                "{} K lies outside the transcribed fit span [{}, {}] K",
+                t_k.to_f64_lossy(),
+                span_lo_k.to_f64_lossy(),
+                span_hi_k.to_f64_lossy()
+            ),
+            ScopeFailure::PressureOutsideFittedSpan {
+                p_gpa,
+                span_lo_gpa,
+                span_hi_gpa,
+            } => write!(
+                f,
+                "{} GPa lies outside the transcribed fit span [{}, {}] GPa",
+                p_gpa.to_f64_lossy(),
+                span_lo_gpa.to_f64_lossy(),
+                span_hi_gpa.to_f64_lossy()
+            ),
+        }
+    }
+}
+
+/// Something the scope check could not test, or tested and wants seen. A caveat NEVER blocks: it rides the
+/// answer so a reader sees what the number is standing on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ScopeCaveat {
+    /// The row states its fitted regime in prose and transcribes no interval for this axis, so the span
+    /// test could not run. Reported rather than passed over: "nothing convicted it" is not "it was
+    /// checked", the same distinction [`ChannelAgreement::SingleChannel`] keeps one type over.
+    FittedSpanNotTranscribed {
+        /// The axis whose span is missing.
+        axis: &'static str,
+    },
+    /// The fit carries an assumption from outside the model the consumer evaluates. Fayalite's `R ln 5`
+    /// magnetic entropy per Fe is the live one: a magnetic contribution a Debye model does not contain, so
+    /// the anchors reproduce their source's entropy while the consumer's quasi-harmonic form cannot.
+    AssumptionOutsideTheModel {
+        /// The assumption, in the row's own words.
+        text: String,
+    },
+}
+
+impl fmt::Display for ScopeCaveat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ScopeCaveat::FittedSpanNotTranscribed { axis } => write!(
+                f,
+                "the row transcribes no fitted {axis} interval, so that scope test could not run"
+            ),
+            ScopeCaveat::AssumptionOutsideTheModel { text } => {
+                write!(f, "the fit assumes {text}")
+            }
+        }
+    }
+}
+
+/// Whether a row may be evaluated at a state, with everything the check found either way.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ScopeVerdict {
+    /// No test convicted the row. The caveats ride the answer.
+    InScope {
+        /// What could not be tested, or was tested and wants seen.
+        caveats: Vec<ScopeCaveat>,
+    },
+    /// At least one test convicted the row. EVERY failing test is reported, never the first one only: a row
+    /// can be out of scope on several axes at once, and naming one would understate what it would take to
+    /// bring it in.
+    OutOfScope {
+        /// Every test that convicted the row.
+        failures: Vec<ScopeFailure>,
+        /// What could not be tested, carried so a refusal still shows what it did not reach.
+        caveats: Vec<ScopeCaveat>,
+    },
+}
+
+impl ScopeVerdict {
+    /// Whether the row may be evaluated at the state this verdict was taken for.
+    pub fn in_scope(&self) -> bool {
+        matches!(self, ScopeVerdict::InScope { .. })
+    }
+
+    /// The caveats, either way. A refusal carries them too.
+    pub fn caveats(&self) -> &[ScopeCaveat] {
+        match self {
+            ScopeVerdict::InScope { caveats } | ScopeVerdict::OutOfScope { caveats, .. } => caveats,
+        }
+    }
+}
+
+impl ModelScope {
+    /// Test this scope at a state, returning every conviction and every rider.
+    ///
+    /// `assumed_reference_k` is the reference temperature the CONSUMER anchors at, passed in rather than
+    /// assumed here, so the mismatch check compares two stated things instead of one stated and one
+    /// remembered.
+    // @derives: whether a phase's fit applies at a state <- the row's own transcribed scope and reference state
+    pub fn verdict_at(&self, t_k: Fixed, p_gpa: Fixed, assumed_reference_k: Fixed) -> ScopeVerdict {
+        let mut failures = Vec::new();
+        let mut caveats = Vec::new();
+
+        if let Some(declared_k) = self.reference_temperature_k {
+            if declared_k != assumed_reference_k {
+                failures.push(ScopeFailure::ReferenceStateMismatch {
+                    declared_k,
+                    assumed_k: assumed_reference_k,
+                });
+            }
+        }
+        match self.fitted_temperature_span_k {
+            Some((lo, hi)) if t_k < lo || t_k > hi => {
+                failures.push(ScopeFailure::TemperatureOutsideFittedSpan {
+                    t_k,
+                    span_lo_k: lo,
+                    span_hi_k: hi,
+                })
+            }
+            Some(_) => {}
+            None => caveats.push(ScopeCaveat::FittedSpanNotTranscribed {
+                axis: "temperature",
+            }),
+        }
+        match self.fitted_pressure_span_gpa {
+            Some((lo, hi)) if p_gpa < lo || p_gpa > hi => {
+                failures.push(ScopeFailure::PressureOutsideFittedSpan {
+                    p_gpa,
+                    span_lo_gpa: lo,
+                    span_hi_gpa: hi,
+                })
+            }
+            Some(_) => {}
+            None => caveats.push(ScopeCaveat::FittedSpanNotTranscribed { axis: "pressure" }),
+        }
+        for rider in &self.riders {
+            caveats.push(ScopeCaveat::AssumptionOutsideTheModel {
+                text: rider.clone(),
+            });
+        }
+
+        if failures.is_empty() {
+            ScopeVerdict::InScope { caveats }
+        } else {
+            ScopeVerdict::OutOfScope { failures, caveats }
+        }
+    }
+}
+
+/// ONE SOURCE INVERSION'S CELLS FOR A PHASE.
+///
+/// The column transcribes two global inversions per mantle row and the loader read only one of them,
+/// keeping the successor's `q` solely as a fallback for the single-channel case and never reading its
+/// `theta_0` at all. What survived was [`ChannelAgreement`], a three-valued flag recording THAT the
+/// channels disagree while dropping BY HOW MUCH and TOWARD WHAT. For enstatite that discarded a factor of
+/// 2.3 in `q` (7.8 against 3.4) with its own citation calling it the largest disagreement in the column,
+/// and `q` enters two exponentials.
+///
+/// # One fit at a time, both fits kept
+///
+/// A channel is a COHERENT SET: its `V_0`, `K_0`, `K_0'`, `theta_0`, `gamma_0` and `q` were fit together
+/// against one corpus and are meaningful together. Mixing cells across channels is what
+/// [`ThermoelasticAnchorRow::pairs_with_banked_gamma`] exists to prevent and that rule is untouched. "One
+/// joint fit or nothing" bars a MIXED set; it does not bar carrying the competing coherent set beside it,
+/// and erasing the competitor was never what the rule asked for.
+///
+/// `gamma_0` is `None` on the primary channel by design: the bank (`gruneisen.toml`'s `gamma_eos_debye`)
+/// holds the 2005 value, carried by pointer so there is no second copy to drift. A successor channel
+/// carries its own, because the bank has no 2011 value to point at.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AnchorChannel {
+    /// The source inversion this set came from, as the row names it.
+    pub family: String,
+    /// The volume exponent `q`.
+    pub q: Option<Fixed>,
+    /// `q`'s uncertainty as this channel's source states it.
+    pub q_band: Option<Fixed>,
+    /// Whether this channel's `q` was fit or estimated from systematics.
+    pub q_grade: Option<CellGrade>,
+    /// The EFFECTIVE Debye temperature from this channel.
+    pub theta_0: Option<EffectiveDebyeTemperature>,
+    /// `theta_0`'s uncertainty as this channel's source states it (K).
+    pub theta_0_band_k: Option<Fixed>,
+    /// Whether this channel's `theta_0` was fit or estimated from systematics.
+    pub theta_0_grade: Option<CellGrade>,
+    /// This channel's own `gamma_0`. `None` on the primary, which points at the bank instead.
+    pub gamma_0: Option<Fixed>,
+    /// `gamma_0`'s uncertainty as this channel's source states it.
+    pub gamma_0_band: Option<Fixed>,
+    /// Reference molar volume from this fit (cm^3/mol).
+    pub v0_cm3: Option<Fixed>,
+    /// Reference isothermal bulk modulus from this fit (GPa).
+    pub k0_gpa: Option<Fixed>,
+    /// Pressure derivative of the bulk modulus from this fit.
+    pub k0_prime: Option<Fixed>,
+    /// Atoms per formula unit matching THIS CHANNEL'S `v0_cm3`. The channels differ: enstatite is
+    /// `Mg4Si4O12` (20 atoms) in 2005 and `MgMgSi2O6` (10) in 2011, a factor of two in both.
+    pub atoms_per_formula_unit: Option<u32>,
+}
+
 /// One phase's MGD anchors, with the grade and channel agreement each value carries.
 #[derive(Clone, Debug)]
 pub struct ThermoelasticAnchorRow {
@@ -216,6 +497,13 @@ pub struct ThermoelasticAnchorRow {
     /// 2011, a factor of two in both `V_0` and the atom count. Taking `V_0` from here and the atom count
     /// from elsewhere would halve the molar basis silently, and the thermal energy is per formula unit.
     pub atoms_per_formula_unit: Option<u32>,
+    /// Where this row's fit applies, as the row itself states it. See [`ModelScope`].
+    pub scope: ModelScope,
+    /// Every source inversion this row transcribes, PRIMARY FIRST, in the order the row declares them.
+    ///
+    /// The flat fields above are the primary channel's cells, kept as a view onto `channels[0]` rather than
+    /// a second parse, so there is nothing to drift.
+    pub channels: Vec<AnchorChannel>,
 }
 
 impl ThermoelasticAnchorRow {
@@ -347,17 +635,8 @@ impl ThermoelasticAnchors {
                         }),
                     }
                 };
-            let grade = |key: &str| -> Result<Option<CellGrade>, AnchorError> {
-                match field(key) {
-                    None => Ok(None),
-                    Some(t) => CellGrade::parse(&t)
-                        .map(Some)
-                        .ok_or(AnchorError::UnknownGrade {
-                            phase: name.clone(),
-                            text: t.clone(),
-                        }),
-                }
-            };
+            // Grades are parsed PER CHANNEL below, through `cgrade`, because a row can carry a fit cell in
+            // one inversion and an assumed one in the other and a single row-level read would lose that.
             // THE VOCABULARY FIELDS ARE FATAL ON AN UNRECOGNISED MEMBER, exactly as the grades are. A
             // helper that mapped "anything but true" to false read `channels_agree = "within-band"` as a
             // disagreement and inverted the meaning on every row that used it.
@@ -380,35 +659,149 @@ impl ThermoelasticAnchors {
                 })?,
             };
 
-            // A SINGLE-CHANNEL ROW carries its value under the channel's own key rather than a bare one.
-            // Quartz exists only in the 2011 table, so its `q` is `q_slb2011`, and a loader reading only
-            // the bare key would report the phase as having no exponent at all rather than having an
-            // assumed one, which is a different and more forgiving error than the truth.
-            let q = match num("q")? {
-                Some(v) => Some(v),
-                None => num("q_slb2011")?,
+            // EVERY CHANNEL THE ROW DECLARES, primary first. The row names them in `channels`; a row that
+            // declares none is a single primary channel named by its `q_source`, which is what every row
+            // meant before the key existed.
+            //
+            // KEY RESOLUTION, and why it takes two spellings. A channel's cell lives under
+            // `<base>_<family>`. The primary additionally reads the BARE key, and falls through to its own
+            // suffixed form: that fall-through is the single-channel case generalized, and it is what lets
+            // quartz (2011-only, so its `q` is `q_slb2011`) report an ASSUMED exponent rather than no
+            // exponent at all, which is a different and more forgiving error than the truth. The second
+            // spelling `<stem>_<family>_<tail>` is what this column grew before the convention settled;
+            // two of those keys are pinned by the offline provenance script, so both are read rather than
+            // renaming a receipt checker's anchors for tidiness.
+            let families: Vec<String> = match field("channels") {
+                Some(list) => list
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect(),
+                None => vec![field("q_source").unwrap_or_else(|| "primary".to_string())],
             };
-            let q_grade = match grade("q_grade")? {
-                Some(g) => Some(g),
-                None => grade("q_slb2011_grade")?,
+            let mut channels: Vec<AnchorChannel> = Vec::new();
+            for (index, family) in families.iter().enumerate() {
+                let primary = index == 0;
+                let key = |base: &str| -> Option<String> {
+                    let bare = if primary { field(base) } else { None };
+                    bare.or_else(|| field(&format!("{base}_{family}")))
+                        .or_else(|| {
+                            base.rsplit_once('_')
+                                .and_then(|(stem, tail)| field(&format!("{stem}_{family}_{tail}")))
+                        })
+                };
+                let cnum = |base: &str| -> Result<Option<Fixed>, AnchorError> {
+                    match key(base) {
+                        None => Ok(None),
+                        Some(t) => Fixed::from_decimal_str(&t).map(Some).map_err(|_| {
+                            AnchorError::BadValue {
+                                phase: name.clone(),
+                                field: base.to_string(),
+                                text: t.clone(),
+                            }
+                        }),
+                    }
+                };
+                let cgrade = |base: &str| -> Result<Option<CellGrade>, AnchorError> {
+                    match key(base) {
+                        None => Ok(None),
+                        Some(t) => {
+                            CellGrade::parse(&t)
+                                .map(Some)
+                                .ok_or(AnchorError::UnknownGrade {
+                                    phase: name.clone(),
+                                    text: t.clone(),
+                                })
+                        }
+                    }
+                };
+                channels.push(AnchorChannel {
+                    family: family.clone(),
+                    q: cnum("q")?,
+                    q_band: cnum("q_band")?,
+                    q_grade: cgrade("q_grade")?,
+                    theta_0: cnum("theta_0_k")?.map(EffectiveDebyeTemperature),
+                    theta_0_band_k: cnum("theta_0_band_k")?,
+                    theta_0_grade: cgrade("theta_0_grade")?,
+                    gamma_0: cnum("gamma_0")?,
+                    gamma_0_band: cnum("gamma_0_band")?,
+                    v0_cm3: cnum("v0_cm3_per_mol")?,
+                    k0_gpa: cnum("k0_gpa")?,
+                    k0_prime: cnum("k0_prime")?,
+                    atoms_per_formula_unit: key("atoms_per_formula_unit")
+                        .and_then(|v| v.parse::<u32>().ok()),
+                });
+            }
+            // The flat fields are a VIEW onto the primary channel, never a second parse.
+            let primary = channels.first().cloned().unwrap_or(AnchorChannel {
+                family: "primary".to_string(),
+                q: None,
+                q_band: None,
+                q_grade: None,
+                theta_0: None,
+                theta_0_band_k: None,
+                theta_0_grade: None,
+                gamma_0: None,
+                gamma_0_band: None,
+                v0_cm3: None,
+                k0_gpa: None,
+                k0_prime: None,
+                atoms_per_formula_unit: None,
+            });
+
+            // THE SCOPE, WHICH THE LOADER USED TO DROP ON THE FLOOR. Every block carries a `scope`
+            // sentence and none of it reached a consumer. The sentence is kept verbatim; the two numeric
+            // clauses the file transcribes (the reference state) are parsed; the fitted P,T span is read
+            // where a row supplies it and reported as untested where none does. No endpoint is invented
+            // for a row whose source states its regime in prose.
+            let span =
+                |lo_key: &str, hi_key: &str| -> Result<Option<(Fixed, Fixed)>, AnchorError> {
+                    Ok(match (num(lo_key)?, num(hi_key)?) {
+                        (Some(lo), Some(hi)) => Some((lo, hi)),
+                        _ => None,
+                    })
+                };
+            let scope = ModelScope {
+                stated: field("scope").unwrap_or_default(),
+                reference_temperature_k: num("temperature_k")?,
+                reference_pressure_bar: num("pressure_bar")?,
+                fitted_temperature_span_k: span(
+                    "scope_fitted_temperature_k_lo",
+                    "scope_fitted_temperature_k_hi",
+                )?,
+                fitted_pressure_span_gpa: span(
+                    "scope_fitted_pressure_gpa_lo",
+                    "scope_fitted_pressure_gpa_hi",
+                )?,
+                // One key, several riders, split on " | " so a row that inherits two assumptions does not
+                // need a second key spelling.
+                riders: field("scope_rider")
+                    .map(|t| {
+                        t.split(" | ")
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
             };
 
             let row = ThermoelasticAnchorRow {
-                q,
-                q_band: num("q_band")?.or(num("q_slb2011_band")?),
-                q_grade,
-                theta_0: num("theta_0_k")?.map(EffectiveDebyeTemperature),
-                theta_0_band_k: num("theta_0_band_k")?,
-                theta_0_grade: grade("theta_0_grade")?,
+                scope,
+                q: primary.q,
+                q_band: primary.q_band,
+                q_grade: primary.q_grade,
+                theta_0: primary.theta_0,
+                theta_0_band_k: primary.theta_0_band_k,
+                theta_0_grade: primary.theta_0_grade,
                 theta_0_channels: vocab("theta_0_channels_agree", ChannelAgreement::parse)?,
                 q_channels: vocab("channels_agree", ChannelAgreement::parse)?,
                 gamma_pairing: pairing,
                 usable_as_anchor: field("usable_as_anchor").map(|v| v == "true"),
-                v0_cm3: num("v0_cm3_per_mol")?,
-                k0_gpa: num("k0_gpa")?,
-                k0_prime: num("k0_prime")?,
-                atoms_per_formula_unit: field("atoms_per_formula_unit")
-                    .and_then(|v| v.parse::<u32>().ok()),
+                v0_cm3: primary.v0_cm3,
+                k0_gpa: primary.k0_gpa,
+                k0_prime: primary.k0_prime,
+                atoms_per_formula_unit: primary.atoms_per_formula_unit,
+                channels,
                 name: name.clone(),
             };
             rows.insert(name, row);
@@ -531,6 +924,115 @@ mod tests {
             "hematite is absent from both mantle-species compilations and is omitted, not estimated"
         );
         assert!(t.row("unobtainium").is_none());
+    }
+
+    /// A ROW'S OWN SCOPE REFUSES BY NAME, and it names EVERY test that convicted rather than the first.
+    ///
+    /// The shipped column transcribes no numeric fit span: its scopes state a REGIME in prose
+    /// ("upper-mantle to lower-mantle P,T as fit by the inversion"), and inventing endpoints for that would
+    /// fabricate the very thing the field exists to carry. So the span test is exercised on a row that does
+    /// transcribe one. The mechanism is what is under test: a source that states where its fit reaches must
+    /// be able to stop a consumer past that edge, and until now the loader discarded the sentence outright.
+    #[test]
+    fn a_phase_asked_outside_its_transcribed_fit_span_refuses_by_name() {
+        let src = "[[anchor]]\nname = \"bounded\"\nq = \"2.0\"\nq_grade = \"fit\"\n\
+                   temperature_k = \"300\"\npressure_bar = \"1\"\n\
+                   scope = \"fit over a stated interval\"\n\
+                   scope_fitted_temperature_k_lo = \"300\"\nscope_fitted_temperature_k_hi = \"1200\"\n\
+                   scope_fitted_pressure_gpa_lo = \"0\"\nscope_fitted_pressure_gpa_hi = \"15\"\n";
+        let t = ThermoelasticAnchors::from_toml_str(src).expect("the row loads");
+        let row = t.row("bounded").expect("bounded has a row");
+        let reference = Fixed::from_int(300);
+
+        // Inside the transcribed span: no conviction, and no span caveat either, because the test RAN.
+        let inside = row
+            .scope
+            .verdict_at(Fixed::from_int(1000), Fixed::from_int(10), reference);
+        assert!(
+            inside.in_scope(),
+            "1000 K and 10 GPa lie inside [300, 1200] K and [0, 15] GPa: {inside:?}"
+        );
+        assert!(
+            inside.caveats().is_empty(),
+            "a row transcribing both spans has nothing untested to report: {inside:?}"
+        );
+
+        // Outside on BOTH axes: both convictions are reported, never the first only.
+        let outside = row
+            .scope
+            .verdict_at(Fixed::from_int(1900), Fixed::from_int(40), reference);
+        let ScopeVerdict::OutOfScope { failures, .. } = &outside else {
+            panic!("1900 K and 40 GPa lie outside the transcribed spans: {outside:?}")
+        };
+        assert!(
+            failures.contains(&ScopeFailure::TemperatureOutsideFittedSpan {
+                t_k: Fixed::from_int(1900),
+                span_lo_k: Fixed::from_int(300),
+                span_hi_k: Fixed::from_int(1200),
+            }),
+            "the refusal must NAME the span it fell outside, with the edges: {failures:?}"
+        );
+        assert_eq!(
+            failures.len(),
+            2,
+            "a row out of scope on two axes reports two convictions: naming one would understate what it \
+             takes to bring it back in, which is the discipline RowExclusion already applies one column \
+             over: {failures:?}"
+        );
+
+        // THE REFERENCE STATE IS A SCOPE TEST TOO, and this one bites on the shipped data. The anchors are
+        // stated at the reference their fit was made against, and a consumer that anchors its thermal
+        // pressure somewhere else is re-anchoring them silently.
+        let rebased = row.scope.verdict_at(
+            Fixed::from_int(1000),
+            Fixed::from_int(10),
+            Fixed::from_int(298),
+        );
+        assert!(
+            matches!(&rebased, ScopeVerdict::OutOfScope { failures, .. }
+                     if failures.iter().any(|f| matches!(f, ScopeFailure::ReferenceStateMismatch { .. }))),
+            "the row declares 300 K; a consumer anchoring at 298 K must be refused: {rebased:?}"
+        );
+    }
+
+    /// THE SHIPPED ROWS DO NOT TRANSCRIBE A SPAN, and every answer now says so rather than passing for
+    /// checked. "Nothing convicted it" is not "it was checked", the same distinction
+    /// [`ChannelAgreement::SingleChannel`] keeps for the channel comparison.
+    #[test]
+    fn the_shipped_rows_report_their_untranscribed_span_rather_than_claiming_validity() {
+        let t = ThermoelasticAnchors::standard().expect("anchors load");
+        let mut checked = 0;
+        for phase in t.phases().map(str::to_string).collect::<Vec<_>>() {
+            let row = t.row(&phase).expect("row");
+            assert!(
+                !row.scope.stated.is_empty(),
+                "{phase}: the scope sentence must survive the loader, which used to drop it"
+            );
+            assert_eq!(
+                row.scope.reference_temperature_k,
+                Some(Fixed::from_int(300)),
+                "{phase}: every row transcribes its reference state numerically, and that is the clause \
+                 the scope check CAN test today"
+            );
+            let v = row.scope.verdict_at(
+                Fixed::from_int(1600),
+                Fixed::from_int(10),
+                Fixed::from_int(300),
+            );
+            assert!(
+                v.caveats().iter().any(|c| matches!(
+                    c,
+                    ScopeCaveat::FittedSpanNotTranscribed { axis } if *axis == "temperature"
+                )),
+                "{phase}: its scope states a regime in prose, so the span test could not run and the \
+                 answer must carry that: {v:?}"
+            );
+            checked += 1;
+        }
+        assert_eq!(
+            checked, 7,
+            "all seven rows, not a subset that happened to load"
+        );
     }
 
     /// An unrecognised grade is FATAL, not a silent fall-through to fit.

@@ -7,7 +7,7 @@
 //! # Why this exists
 //!
 //! An interior column needs density, expansivity, bulk modulus and heat capacity AT the pressure and
-//! temperature it actually sits at. What the repository holds is AMBIENT data: Grueneisen rows near 300 K
+//! temperature it sits at. What the repository holds is AMBIENT data: Grueneisen rows near 300 K
 //! and 1 bar, adiabatic bulk moduli at about 298 K, standard-state molar volumes. Reading those at 1600 K
 //! and 100 kbar produced a number that agreed with measurement at one temperature by CANCELLATION, a
 //! high-temperature Dulong-Petit capacity against a 300 K gamma, modulus and volume, rather than by
@@ -36,9 +36,15 @@
 //!
 //! ALL SIX RUNG-3 ANCHORS ARE NOW BANKED: molar volume (phase registry), bulk modulus (mineral moduli),
 //! `K'` and `gamma_0` (Grueneisen table), and the effective Debye temperature `theta_0` and volume
-//! exponent `q` (`thermoelastic_anchors.toml`), and RUNG 3 ITSELF IS BUILT in
-//! [`crate::mie_gruneisen_debye`]. What remains is wiring it into this ladder's dispatch, so a query
-//! above the ambient frame reaches the solver instead of the refusal it still returns today.
+//! exponent `q` (`thermoelastic_anchors.toml`), RUNG 3 ITSELF IS BUILT in
+//! [`crate::mie_gruneisen_debye`], and it IS WIRED into the dispatch below: a query above the ambient
+//! frame reaches the solver rather than the refusal an earlier version of this sentence still described.
+//!
+//! Two things ride that answer which used to be dropped on the way out. The Debye `C_V` the solver computes
+//! is carried on [`ThermoResponse`] instead of dying at the boundary, and the answering row's own scope
+//! statement is tested and reported instead of being discarded at load. And where the column banks more
+//! than one published inversion for a phase, [`evaluate_at`] returns them as separate branches with the gap
+//! between them visible, rather than picking one and returning it as a point.
 //!
 //! Two of those anchors arrived by routes worth distinguishing, because counting them all as fetches
 //! overprices the work by a large factor:
@@ -73,11 +79,12 @@
 //! about 14 GPa and 1900 K, which is one phase rather than a mechanism), and rung 2 wants a quasi-harmonic
 //! calculation and its cache.
 
-use civsim_core::Fixed;
+use crate::verdict::{Band, ProvenanceKey};
+use civsim_core::{content_id, Fixed};
 use civsim_physics::gruneisen::GruneisenTable;
 use civsim_physics::mineral_moduli::MineralModuli;
 use civsim_physics::petrology_data::PhaseRegistry;
-use civsim_physics::thermoelastic_anchors::ThermoelasticAnchors;
+use civsim_physics::thermoelastic_anchors::{ScopeVerdict, ThermoelasticAnchors};
 
 /// The zero this module compares against, matching the sibling modules' idiom.
 const ZERO: Fixed = Fixed::ZERO;
@@ -107,7 +114,7 @@ pub enum ThermoRung {
 }
 
 /// One phase's thermoelastic response at a state, with the rung that produced it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ThermoResponse {
     /// Volumetric thermal expansivity (per kelvin).
     pub alpha_per_k: Fixed,
@@ -115,10 +122,151 @@ pub struct ThermoResponse {
     pub bulk_modulus_gpa: Fixed,
     /// Molar volume (cm^3/mol) at the requested state.
     pub molar_volume_cm3: Fixed,
+    /// Isochoric heat capacity (J/mol/K) on the answering rung's own molar basis, where that rung computes
+    /// one. `None` on a rung that does not.
+    ///
+    /// CARRIED RATHER THAN DROPPED, which is the whole point of the field. Rung 3 computed a Debye `C_V` on
+    /// the way to its expansivity and threw it away at the function boundary, so the interior column that
+    /// needed a heat capacity reached for Dulong-Petit `3R/M` instead. Against this value at forsterite's
+    /// `theta_0` of 809 K, Dulong-Petit runs +39.4 percent at 300 K and -2.8 percent at 1600 K: at mantle
+    /// temperature the errors offset to about 3 percent, which is agreement by cancellation, the same shape
+    /// of defect this module's header records as the reason the ladder exists.
+    pub c_v_j_per_mol_k: Option<Fixed>,
     /// Which rung answered.
     pub rung: ThermoRung,
     /// The frame this answer is valid in, carried so a consumer cannot silently reuse it elsewhere.
     pub valid_at: ThermoState,
+    /// What the answering row's own scope sentence says about this state: the tests it passed, and the
+    /// tests that could not be run. `None` on a rung whose inputs carry no transcribed scope.
+    ///
+    /// A caveat here NEVER blocks. It rides the answer so a reader can see what the number is standing on,
+    /// which for fayalite includes a magnetic-entropy assumption the evaluating model does not contain.
+    pub scope: Option<ScopeVerdict>,
+}
+
+/// The marginal bands one source inversion states for its own anchors.
+///
+/// Kept PER ANCHOR and never collapsed into one band on the response. The parameters of a global inversion
+/// are correlated and the sources publish marginals without the covariance matrix, so combining them as if
+/// independent would move the answer by an unknown amount in an unknown direction. This is the same rule
+/// `covariance_key` enforces one field over: family-correlated values share one key precisely so that
+/// independent leaves cannot falsely shrink a combined band.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct AnchorBands {
+    /// `q`'s marginal band.
+    pub q: Option<Band>,
+    /// `theta_0`'s marginal band (K).
+    pub theta_0_k: Option<Band>,
+    /// `gamma_0`'s marginal band.
+    pub gamma_0: Option<Band>,
+}
+
+/// The NUMERICAL bands on a branch's response: how well the solver's central differences resolved, and
+/// nothing about how well the anchors describe the phase. That second question is [`AnchorBands`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct NumericalBands {
+    /// The band on the isothermal bulk modulus (GPa).
+    pub bulk_modulus_gpa: Option<Band>,
+    /// The band on the volumetric expansivity (per K).
+    pub alpha_per_k: Option<Band>,
+    /// The band on the isochoric heat capacity (J/mol/K).
+    pub c_v_j_per_mol_k: Option<Band>,
+}
+
+/// ONE SOURCE INVERSION'S ANSWER at a state, kept discrete.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ThermoelasticBranch {
+    /// The source inversion whose jointly-fit anchors produced this answer.
+    pub source_family: String,
+    /// Other families whose anchors are byte-identical to this branch's, so they are this same
+    /// determination rather than agreeing witnesses. Two compilations by the same authors over an
+    /// overlapping corpus are one witness heard twice, which the held manifest states in its own words.
+    pub concurring_families: Vec<String>,
+    /// The response this family's anchors give at the requested state.
+    pub response: ThermoResponse,
+    /// The marginal bands the family's source states for its anchors.
+    pub input_band: AnchorBands,
+    /// How well the solver resolved its own derivatives at this state.
+    pub numerical_band: NumericalBands,
+    /// What this family's row says about whether its fit reaches this state.
+    pub validity: ScopeVerdict,
+    /// The provenance key every anchor of this family shares. ONE key per joint inversion, because its
+    /// parameters are correlated: registering them under independent keys would let an uncertainty
+    /// combination treat correlated values as independent and shrink a band by a factor that does not
+    /// exist.
+    pub covariance_key: ProvenanceKey,
+}
+
+/// A source family that could not be evaluated, with every reason.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BranchExclusion {
+    /// The family that was excluded.
+    pub family: String,
+    /// Every reason, never the first only.
+    pub reasons: Vec<String>,
+}
+
+/// The envelope of the branches, per quantity. A REPORTING ENVELOPE, never a distribution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResponseHull {
+    /// Low and high volumetric expansivity across the branches (per K).
+    pub alpha_per_k: (Fixed, Fixed),
+    /// Low and high isothermal bulk modulus across the branches (GPa).
+    pub bulk_modulus_gpa: (Fixed, Fixed),
+    /// Low and high molar volume across the branches (cm^3/mol).
+    pub molar_volume_cm3: (Fixed, Fixed),
+}
+
+/// THE IN-SCOPE DETERMINATIONS at one state, kept DISCRETE.
+///
+/// THE MEMBERS ARE RETAINED RATHER THAN COLLAPSED, for the reason the stagnant-lid ensemble one crate over
+/// gives for the same shape: each branch is one published inversion's answer, and the space between two of
+/// them holds no model at all. Nobody fitted the interior of the spread. [`Self::response_hull`] reports
+/// the envelope for a sensitivity statement and is named to say what it is; the members are what a consumer
+/// should read.
+///
+/// A single-branch evaluation is the ordinary case and carries no ceremony: where the successor inversion
+/// reproduces the primary cell for cell, the two collapse to one branch naming both families.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ThermoelasticEvaluation {
+    /// The discrete in-scope branches, one per source family, in the column's own declared order.
+    pub branches: Vec<ThermoelasticBranch>,
+    /// Every family that could not be evaluated, carried so an answer still shows what it left out.
+    pub excluded: Vec<BranchExclusion>,
+}
+
+impl ThermoelasticEvaluation {
+    /// The envelope of the branches, per quantity.
+    ///
+    /// A REPORTING ENVELOPE, never a distribution: the interior of the hull is not supported by anything,
+    /// because the branches inside it are discrete answers from separate global inversions rather than
+    /// samples of one. It is emphatically not a two-sample statistic either, and the sources make that
+    /// point themselves: the successor compilation shares both authors and much of its corpus with the
+    /// primary, so the two are a revision rather than two independent determinations.
+    ///
+    /// `None` when there are no branches.
+    pub fn response_hull(&self) -> Option<ResponseHull> {
+        let mut it = self.branches.iter();
+        let first = it.next()?;
+        let mut hull = ResponseHull {
+            alpha_per_k: (first.response.alpha_per_k, first.response.alpha_per_k),
+            bulk_modulus_gpa: (
+                first.response.bulk_modulus_gpa,
+                first.response.bulk_modulus_gpa,
+            ),
+            molar_volume_cm3: (
+                first.response.molar_volume_cm3,
+                first.response.molar_volume_cm3,
+            ),
+        };
+        for b in it {
+            let widen = |(lo, hi): (Fixed, Fixed), v: Fixed| (lo.min(v), hi.max(v));
+            hull.alpha_per_k = widen(hull.alpha_per_k, b.response.alpha_per_k);
+            hull.bulk_modulus_gpa = widen(hull.bulk_modulus_gpa, b.response.bulk_modulus_gpa);
+            hull.molar_volume_cm3 = widen(hull.molar_volume_cm3, b.response.molar_volume_cm3);
+        }
+        Some(hull)
+    }
 }
 
 /// Why no rung could answer. Each variant names the rung it is about and what would close it, so the
@@ -138,6 +286,20 @@ pub enum ThermoRefusal {
         rung: ThermoRung,
         /// The inputs that rung needs and the repository does not hold.
         missing: Vec<String>,
+    },
+    /// The rung's inputs are all banked and the row's OWN scope statement excludes this state. Distinct
+    /// from [`ThermoRefusal::RungUnavailable`], which is an absence of inputs, and from
+    /// [`ThermoRefusal::OutsideEveryFrame`], which is a query outside an ambient row's measured frame: this
+    /// is the source itself saying its fit does not reach here, and the loader used to discard that
+    /// sentence entirely.
+    OutsideDeclaredScope {
+        /// The phase asked for.
+        phase: String,
+        /// The rung whose input row declared the scope.
+        rung: ThermoRung,
+        /// EVERY failing scope test, never the first one only: a row can be out of scope on several axes at
+        /// once, and naming one would understate what it would take to bring it in.
+        failures: Vec<String>,
     },
     /// Every rung declined, and the requested state is outside the only frame that could answer.
     OutsideEveryFrame {
@@ -166,6 +328,16 @@ impl core::fmt::Display for ThermoRefusal {
                  repository does not bank {}. Refused rather than defaulted, because a default here would \
                  be an authored planetary interior.",
                 missing.join(", ")
+            ),
+            ThermoRefusal::OutsideDeclaredScope {
+                phase,
+                rung,
+                failures,
+            } => write!(
+                f,
+                "phase {phase} has every {rung:?} anchor banked and its own row declares the fit does not \
+                 reach this state: {}. The row said so all along; the loader used to drop the sentence.",
+                failures.join("; ")
             ),
             ThermoRefusal::OutsideEveryFrame {
                 phase,
@@ -393,7 +565,7 @@ pub fn response_at(
         .collect();
 
     // RUNG 4: the ambient measured row, valid ONLY inside its own measured frame. The Grueneisen row
-    // carries that frame explicitly, which is what lets this refuse honestly instead of extrapolating.
+    // carries that frame explicitly, which is what lets this refuse rather than extrapolate.
     let gr = gruneisen.row(phase);
     if let Some(gr) = gr {
         let frame = ThermoState {
@@ -411,8 +583,15 @@ pub fn response_at(
                     alpha_per_k: alpha,
                     bulk_modulus_gpa: mrow.bulk_gpa,
                     molar_volume_cm3: row.molar_volume,
+                    // RUNG 4 HAS NO HEAT CAPACITY TO CARRY, and says so rather than passing the
+                    // Dulong-Petit value it used internally off as a measurement. `ambient_alpha` forms a
+                    // classical `3nR` on the way to the expansivity, which is the classical LIMIT of the
+                    // capacity and not the capacity at this state; reporting it here would ship the exact
+                    // substitution the rung-3 field exists to end.
+                    c_v_j_per_mol_k: None,
                     rung: ThermoRung::AmbientMeasured,
                     valid_at: frame,
+                    scope: None,
                 });
             }
         } else if missing.is_empty() {
@@ -431,23 +610,49 @@ pub fn response_at(
                     .ok_or_else(|| ThermoRefusal::UnknownPhase {
                         phase: phase.to_string(),
                     })?;
+                // THE ROW'S OWN SCOPE IS TESTED BEFORE THE SOLVER RUNS, not after. The anchors are stated
+                // at a reference the solver anchors its thermal pressure against, and a row declaring a
+                // different one may not be evaluated here at all. What the row states in prose rather than
+                // in numbers cannot be tested, and rides the answer as a caveat instead.
+                let scope = anchors
+                    .row(phase)
+                    .map(|r| {
+                        r.scope.verdict_at(
+                            state.temperature_k,
+                            p_gpa,
+                            Fixed::from_int(crate::mie_gruneisen_debye::REFERENCE_TEMPERATURE_K),
+                        )
+                    })
+                    .unwrap_or(ScopeVerdict::InScope {
+                        caveats: Vec::new(),
+                    });
+                if let ScopeVerdict::OutOfScope { failures, .. } = &scope {
+                    return Err(ThermoRefusal::OutsideDeclaredScope {
+                        phase: phase.to_string(),
+                        rung: ThermoRung::MieGruneisenDebye,
+                        failures: failures.iter().map(|f| f.to_string()).collect(),
+                    });
+                }
                 match crate::mie_gruneisen_debye::response_at(&a, p_gpa, state.temperature_k) {
                     Ok(r) => {
                         return Ok(ThermoResponse {
                             alpha_per_k: r.alpha_per_k,
                             bulk_modulus_gpa: r.bulk_modulus_gpa,
                             molar_volume_cm3: r.molar_volume_cm3,
+                            c_v_j_per_mol_k: Some(r.c_v_j_per_mol_k),
                             rung: ThermoRung::MieGruneisenDebye,
                             // Valid AT THE REQUESTED STATE, which is the whole point of the rung: unlike
                             // the ambient row below, it does not carry someone else's frame.
                             valid_at: state,
+                            scope: Some(scope),
                         });
                     }
                     Err(why) => {
-                        // The solver refused for a stated physical reason (past the spinodal, or an
-                        // unrepresentable intermediate). It is carried through rather than flattened into
-                        // "no rung answered", so a caller can tell a phase with no stable state at these
-                        // conditions from one the repository cannot describe.
+                        // The solver refused for a stated reason, and the two reasons are now distinct
+                        // types rather than one variant carrying both: `PastSpinodal` names a phase with no
+                        // mechanically stable state at these conditions, `Unrepresentable` names a state
+                        // this arithmetic could not carry. Carried through rather than flattened into "no
+                        // rung answered".
                         return Err(ThermoRefusal::RungUnavailable {
                             phase: phase.to_string(),
                             rung: ThermoRung::MieGruneisenDebye,
@@ -484,6 +689,127 @@ pub fn response_at(
         rung: ThermoRung::AmbientMeasured,
         missing: vec!["a Grueneisen row for this phase".to_string()],
     })
+}
+
+/// EVERY source inversion's answer at a state, rather than one of them.
+///
+/// [`response_at`] returns the strongest rung's single response and is what the interior column consumes;
+/// this returns the rung-3 ENSEMBLE, one branch per jointly-fit source family, with the delta between them
+/// visible instead of collapsed. Where the column banks one determination the ensemble holds one branch.
+///
+/// Refuses exactly where `response_at` refuses on rung 3, and for the same reasons.
+// @derives: a phase's per-inversion thermoelastic branches at a state <- each banked source family's own jointly-fit anchors
+pub fn evaluate_at(
+    phase: &str,
+    state: ThermoState,
+    registry: &PhaseRegistry,
+    moduli: &MineralModuli,
+    gruneisen: &GruneisenTable,
+    anchors: &ThermoelasticAnchors,
+) -> Result<ThermoelasticEvaluation, ThermoRefusal> {
+    if registry.phase(phase).is_none() {
+        return Err(ThermoRefusal::UnknownPhase {
+            phase: phase.to_string(),
+        });
+    }
+    let readiness = mie_gruneisen_debye_readiness(phase, registry, moduli, gruneisen, anchors);
+    let missing: Vec<String> = readiness
+        .iter()
+        .filter(|(_, have)| !have)
+        .map(|(name, _)| (*name).to_string())
+        .collect();
+    if !missing.is_empty() {
+        return Err(ThermoRefusal::RungUnavailable {
+            phase: phase.to_string(),
+            rung: ThermoRung::MieGruneisenDebye,
+            missing,
+        });
+    }
+
+    let p_gpa = state
+        .pressure_bar
+        .checked_div(Fixed::from_int(10_000))
+        .ok_or_else(|| ThermoRefusal::UnknownPhase {
+            phase: phase.to_string(),
+        })?;
+    let validity = anchors
+        .row(phase)
+        .map(|r| {
+            r.scope.verdict_at(
+                state.temperature_k,
+                p_gpa,
+                Fixed::from_int(crate::mie_gruneisen_debye::REFERENCE_TEMPERATURE_K),
+            )
+        })
+        .unwrap_or(ScopeVerdict::InScope {
+            caveats: Vec::new(),
+        });
+    if let ScopeVerdict::OutOfScope { failures, .. } = &validity {
+        return Err(ThermoRefusal::OutsideDeclaredScope {
+            phase: phase.to_string(),
+            rung: ThermoRung::MieGruneisenDebye,
+            failures: failures.iter().map(|f| f.to_string()).collect(),
+        });
+    }
+
+    let (families, family_exclusions) =
+        crate::mie_gruneisen_debye::MgdAnchors::families(phase, gruneisen, anchors);
+    let mut branches = Vec::new();
+    let mut excluded: Vec<BranchExclusion> = family_exclusions
+        .into_iter()
+        .map(|e| BranchExclusion {
+            family: e.family,
+            reasons: e.reasons,
+        })
+        .collect();
+
+    for f in families {
+        match crate::mie_gruneisen_debye::response_at(&f.anchors, p_gpa, state.temperature_k) {
+            Ok(r) => branches.push(ThermoelasticBranch {
+                // ONE KEY PER JOINT INVERSION, keyed on the family name so every anchor of one fit shares
+                // it. This is the covariance rule made structural rather than remembered.
+                covariance_key: ProvenanceKey(content_id(|h| h.write_bytes(f.family.as_bytes()))),
+                source_family: f.family,
+                concurring_families: f.concurring,
+                input_band: AnchorBands {
+                    q: f.q_band.map(Band::symmetric),
+                    theta_0_k: f.theta_0_band_k.map(Band::symmetric),
+                    gamma_0: f.gamma_0_band.map(Band::symmetric),
+                },
+                numerical_band: NumericalBands {
+                    bulk_modulus_gpa: Some(Band::symmetric(r.bulk_modulus_band_gpa)),
+                    alpha_per_k: Some(Band::symmetric(r.alpha_band_per_k)),
+                    c_v_j_per_mol_k: Some(Band::symmetric(r.c_v_band_j_per_mol_k)),
+                },
+                response: ThermoResponse {
+                    alpha_per_k: r.alpha_per_k,
+                    bulk_modulus_gpa: r.bulk_modulus_gpa,
+                    molar_volume_cm3: r.molar_volume_cm3,
+                    c_v_j_per_mol_k: Some(r.c_v_j_per_mol_k),
+                    rung: ThermoRung::MieGruneisenDebye,
+                    valid_at: state,
+                    scope: Some(validity.clone()),
+                },
+                validity: validity.clone(),
+            }),
+            Err(why) => excluded.push(BranchExclusion {
+                family: f.family,
+                reasons: vec![format!("{why:?}")],
+            }),
+        }
+    }
+
+    if branches.is_empty() {
+        return Err(ThermoRefusal::RungUnavailable {
+            phase: phase.to_string(),
+            rung: ThermoRung::MieGruneisenDebye,
+            missing: excluded
+                .iter()
+                .map(|e| format!("{}: {}", e.family, e.reasons.join("; ")))
+                .collect(),
+        });
+    }
+    Ok(ThermoelasticEvaluation { branches, excluded })
 }
 
 fn key_of(phase: &str) -> &str {
@@ -805,6 +1131,155 @@ mod tests {
             missing.contains(&"debye_temperature_theta_0") && missing.contains(&"volume_exponent_q"),
             "hematite is a ferric phase outside both mantle-species compilations, so it has neither \
              anchor and gets no neighbour's: {missing:?}"
+        );
+    }
+
+    /// FAYALITE'S MAGNETIC-ENTROPY ASSUMPTION RIDES ITS ANSWER, which is what a caveat is for.
+    ///
+    /// Its scope sentence discloses that the 2005 fit's entropy assumes `R ln 5` magnetic entropy per Fe. A
+    /// quasi-harmonic Debye model contains no magnetic term, so the anchors reproduce their source's
+    /// entropy while the form evaluating them cannot account for that part. That does not invalidate the
+    /// answer, and it must not be invisible: it rides rather than blocks.
+    ///
+    /// Forsterite is the control. Without it this would pass on a mechanism that stapled the caveat to
+    /// every row, which is the failure mode a single-phase check cannot see, and this module already
+    /// carries one instance of that lesson.
+    #[test]
+    fn fayalites_magnetic_entropy_assumption_rides_its_answer() {
+        use civsim_physics::thermoelastic_anchors::ScopeCaveat;
+        let (reg, mod_, gr, anc) = tables();
+        let interior = ThermoState {
+            temperature_k: Fixed::from_int(1600),
+            pressure_bar: Fixed::from_int(100_000),
+        };
+
+        let r = response_at("fayalite", interior, &reg, &mod_, &gr, &anc)
+            .expect("fayalite has every rung-3 anchor and answers at interior conditions");
+        assert_eq!(r.rung, ThermoRung::MieGruneisenDebye);
+        let scope = r
+            .scope
+            .as_ref()
+            .expect("a rung-3 answer carries its row's scope verdict");
+        assert!(scope.in_scope(), "the rider does not block: {scope:?}");
+        let rider = scope
+            .caveats()
+            .iter()
+            .find_map(|c| match c {
+                ScopeCaveat::AssumptionOutsideTheModel { text } => Some(text.clone()),
+                _ => None,
+            })
+            .expect("fayalite's magnetic-entropy assumption must ride its answer");
+        assert!(
+            rider.contains("R ln 5") && rider.contains("magnetic"),
+            "and it must name WHAT the assumption is, not merely that one exists: {rider}"
+        );
+
+        let fo = response_at("forsterite", interior, &reg, &mod_, &gr, &anc)
+            .expect("forsterite answers at the same state");
+        let fo_scope = fo.scope.as_ref().expect("carries a scope verdict");
+        assert!(
+            !fo_scope
+                .caveats()
+                .iter()
+                .any(|c| matches!(c, ScopeCaveat::AssumptionOutsideTheModel { .. })),
+            "forsterite's fit inherits no assumption from outside the model, so it must carry no rider: \
+             {fo_scope:?}"
+        );
+
+        // AND THE CAPACITY COMES OUT WITH IT. Rung 3 computes a Debye C_V and used to drop it here.
+        assert!(
+            r.c_v_j_per_mol_k.is_some(),
+            "the rung-3 response must carry its heat capacity across this boundary"
+        );
+        assert!(
+            fo.c_v_j_per_mol_k.expect("forsterite carries one") > Fixed::ZERO,
+            "and it must be a positive capacity"
+        );
+    }
+
+    /// THE ENSEMBLE REACHES THE LADDER, with the hull named for what it is.
+    ///
+    /// `response_at` returns one answer because the interior column needs one; `evaluate_at` returns the
+    /// branches so a consumer that wants the spread can see it rather than being handed a point. Enstatite
+    /// is the row where that matters, and the hull over its two branches is a REPORTING ENVELOPE: its
+    /// interior holds no model, because the two members are separate published inversions rather than
+    /// samples of one, and the sources are a revision pair rather than independent witnesses.
+    #[test]
+    fn the_ensemble_carries_both_inversions_with_their_covariance_keys_apart() {
+        let (reg, mod_, gr, anc) = tables();
+        let interior = ThermoState {
+            temperature_k: Fixed::from_int(1600),
+            pressure_bar: Fixed::from_int(100_000),
+        };
+
+        let e = evaluate_at("enstatite", interior, &reg, &mod_, &gr, &anc)
+            .expect("enstatite has every rung-3 anchor in both inversions");
+        assert_eq!(
+            e.branches.len(),
+            2,
+            "both inversions must reach the consumer: {:?}",
+            e.branches
+                .iter()
+                .map(|b| &b.source_family)
+                .collect::<Vec<_>>()
+        );
+        assert_ne!(
+            e.branches[0].covariance_key, e.branches[1].covariance_key,
+            "two separate joint fits carry two keys, so a combination cannot treat them as one fit"
+        );
+        // Each branch's own anchors share ONE key, which is what stops independent leaves from shrinking a
+        // combined band. The key is a function of the family, so it is the same for every anchor in it.
+        for b in &e.branches {
+            assert!(
+                b.input_band.q.is_some(),
+                "{}: the family's own marginal q band must ride its branch",
+                b.source_family
+            );
+            assert!(
+                b.numerical_band.bulk_modulus_gpa.is_some(),
+                "{}: and the solver's numerical band alongside it, which is a different question",
+                b.source_family
+            );
+            assert!(b.validity.in_scope());
+        }
+
+        let hull = e.response_hull().expect("two branches make a hull");
+        assert!(
+            hull.bulk_modulus_gpa.0 < hull.bulk_modulus_gpa.1,
+            "the two inversions do not agree on the modulus at depth, so the envelope has width: {:?}",
+            hull.bulk_modulus_gpa
+        );
+        for b in &e.branches {
+            assert!(
+                b.response.bulk_modulus_gpa >= hull.bulk_modulus_gpa.0
+                    && b.response.bulk_modulus_gpa <= hull.bulk_modulus_gpa.1,
+                "and every member sits inside it"
+            );
+        }
+
+        // CORUNDUM IS THE CONTROL: one determination, so one branch and a hull of zero width. Without it
+        // this test would pass on a mechanism that manufactured a spread everywhere.
+        let c =
+            evaluate_at("corundum", interior, &reg, &mod_, &gr, &anc).expect("corundum answers");
+        assert_eq!(c.branches.len(), 1, "corundum's inversions are identical");
+        assert_eq!(
+            c.branches[0].concurring_families,
+            vec!["slb2011".to_string()],
+            "and the agreeing family is named rather than silently dropped"
+        );
+        let ch = c.response_hull().expect("one branch still makes a hull");
+        assert_eq!(
+            ch.bulk_modulus_gpa.0, ch.bulk_modulus_gpa.1,
+            "a single determination has an envelope of zero width, which is the honest report and not a \
+             claim that the value is exact"
+        );
+
+        // AND THE SINGLE-ANSWER PATH IS UNCHANGED: the interior column still gets the primary branch.
+        let single = response_at("enstatite", interior, &reg, &mod_, &gr, &anc)
+            .expect("the single-response path still answers");
+        assert_eq!(
+            single.bulk_modulus_gpa,
+            e.branches[0].response.bulk_modulus_gpa
         );
     }
 
