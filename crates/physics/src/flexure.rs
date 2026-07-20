@@ -255,10 +255,14 @@ pub(crate) fn uniform_strip_load_admissible(pressure: Fixed, half_width: Fixed) 
     if pressure == Fixed::MIN {
         return false;
     }
-    Fixed::from_int(2)
-        .checked_mul(half_width)
-        .and_then(|width| width.checked_mul(pressure.abs()))
-        .is_some_and(line_load_admissible)
+    // Compare `2 a |q| <= V_max` in the raw Q32.32 integers before either multiplication can truncate. If
+    // `a = A/2^32` and `q = Q/2^32`, the exact inequality is `2 A Q <= V_max 2^64`. An overflowing left side
+    // is necessarily beyond the much smaller right side and therefore refuses.
+    let twice_half_width_bits = i128::from(half_width.to_bits()).checked_mul(2);
+    let pressure_bits = i128::from(pressure.abs().to_bits());
+    let integrated_bits = twice_half_width_bits.and_then(|width| width.checked_mul(pressure_bits));
+    let envelope_bits = i128::from(MAX_LINE_LOAD_GPA_KM) << (2 * Fixed::FRAC_BITS);
+    integrated_bits.is_some_and(|load| load <= envelope_bits)
 }
 
 /// THE INTERNAL UNIT SYSTEM AND THE SCALED KERNELS, private to the crate.

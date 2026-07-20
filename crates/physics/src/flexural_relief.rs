@@ -606,7 +606,7 @@ mod tests {
             if let Some(prior) = previous_residual {
                 assert!(
                     residual < prior,
-                    "the Airy residual must shrink as D decreases: {} against {}",
+                    "this independently selected Airy sweep must shrink at each decreasing D: {} against {}",
                     residual.to_f64_lossy(),
                     prior.to_f64_lossy()
                 );
@@ -670,6 +670,28 @@ mod tests {
             plate.deflection_km(&[minimum_pressure], Fixed::ZERO, Fixed::ZERO),
             Err(ReliefRefusal::LoadOutsideEnvelope),
             "the magnitude guard refuses Fixed::MIN without taking its unrepresentable absolute value"
+        );
+
+        // This pair is one half of a fixed-point step beyond the line-load envelope in real arithmetic.
+        // Forming width times pressure in Q32.32 would truncate it back onto 500 and admit it, so the guard
+        // compares the unshifted raw product instead.
+        let half_step_past = uniform_strip_load(
+            Fixed::from_int(1_000)
+                .checked_add(Fixed::EPSILON)
+                .expect("the pressure probe is representable"),
+            Fixed::ZERO,
+            Fixed::from_ratio(1, 4),
+        );
+        assert_eq!(
+            plate.deflection_km(&[half_step_past], Fixed::ZERO, Fixed::ZERO),
+            Err(ReliefRefusal::LoadOutsideEnvelope)
+        );
+
+        let sub_internal_width = uniform_strip_load(Fixed::ONE, Fixed::ZERO, Fixed::EPSILON);
+        assert_eq!(
+            plate.deflection_km(&[sub_internal_width], Fixed::ZERO, Fixed::ZERO),
+            Err(ReliefRefusal::NotRepresentable),
+            "a positive external footprint below one internal length step receives a typed refusal"
         );
     }
 }
