@@ -1,5 +1,6 @@
 # Rust build output
 /target
+/parked/target
 **/*.rs.bk
 
 # Cargo.lock is committed on purpose: reproducible builds are part of the

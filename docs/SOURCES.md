@@ -12,7 +12,7 @@ Custody is one of three. `in_repo`: bytes held in-tree, checksum verifiable with
 witness. `external`: bytes in local custody outside the repo, checksum plus archive snapshot.
 The licence decides which is permitted; see `docs/working/FETCH_PIPELINE_PLAN.md` section 3.
 
-**45 sources** (14 registry, 31 mirrored).
+**47 sources** (16 registry, 31 mirrored).
 
 ## Registry (hand-maintained)
 
@@ -64,6 +64,16 @@ Crystallography Open Database (COD), https://www.crystallography.net/cod/, eleve
 - licence evidence: https://www.crystallography.net/cod/ and the per-file header in each held CIF
 - free route (repository): https://www.crystallography.net/cod/
 - holding: `crates/physics/data/phase_conductivity/cod/`
+
+### `codata_2018_adjustment`
+
+Tiesinga, E., Mohr, P. J., Newell, D. B. and Taylor, B. N., 2021, CODATA Recommended Values of the Fundamental Physical Constants: 2018, Journal of Physical and Chemical Reference Data 50, 033105, DOI 10.1063/5.0064853.
+
+- sha256: `6d712bdc99719540bec65c7d1ef11b00f5d321e6083e9e6ed7d3de6fb8062908`
+- archived: https://web.archive.org/web/20250525020415id_/https://physics.nist.gov/cuu/pdf/JPCRD2018CODATA.pdf
+- scope: The method, input-data cutoff, least-squares adjustment, uncertainty treatment, and tables underlying the 2018 CODATA recommended values. It supports the value table's provenance and uncertainty semantics; it is not treated as an independent second measurement source.
+- custody: witness
+- licence (redistribution unconfirmed): The paper states copyright 2021 by the U.S. Secretary of Commerce on behalf of the United States and All rights reserved. No redistribution permission was inferred. The repository therefore holds no paper bytes and uses citation-plus-witness custody.
 
 ### `flexure_tafi`
 
@@ -124,6 +134,16 @@ Five published structure determinations in American Mineralogist, read as the pr
 - licence (**NOT redistributable**): NOT REDISTRIBUTABLE, and the finding points at an explicit assertion rather than at an inference. The Mineralogical Society of America's copyright notice states: 'All rights are reserved by the Mineralogical Society of America (MSA) and content may not be reproduced, downloaded, disseminated, published, or transferred in any form or by any means, except with the prior written permission of MSA, or as indicated below. Members of MSA and nonmembers may download pages or other content for their own use ... on a single computer. However, no part of such content may be otherwise or subsequently reproduced, downloaded, disseminated, published, or transferred, in any form or by any means, except with the prior written permission of, and with the express attribution to MSA.' Reading is permitted and redistributing is not, so these are held as citation plus witness with no bytes, matching the existing MSA findings in this registry for fan_2019 and jackson_1999_enstatite.
 - licence evidence: http://www.minsocam.org/msa/Copyright.html
 - free route (publisher-open): http://www.minsocam.org/ammin/AM51/AM51_123.pdf
+
+### `nist_codata_2018_ascii`
+
+National Institute of Standards and Technology, Fundamental Physical Constants: Complete Listing, 2018 CODATA adjustment, NIST Standard Reference Database 121, Gaithersburg, Maryland.
+
+- sha256: `8c47c05db62c4d314a5244db51a47b4831616e55a8d357ced373a8620ff43be1`
+- archived: https://web.archive.org/web/20241219074053id_/https://physics.nist.gov/cuu/Constants/ArchiveASCII/allascii_2018.txt
+- scope: The seven exact SI representation rows and three measured physical-invariant rows used by crates/units/src/fundamentals.rs, including each printed value, uncertainty or exact marker, and SI unit. Only fine-structure constant, Newtonian constant of gravitation, and electron mass are physical-floor candidates; the SI-defining rows are noncausal representation metadata. The 2018 adjustment remains pinned for this transcript schema; this entry does not authorize silent replacement by a later adjustment.
+- custody: witness
+- licence (redistribution unconfirmed): NIST identifies the constants database as Standard Reference Database 121, and the Standard Reference Data Act permits copyright in SRD compilations. No redistribution grant for these table bytes was established. The repository therefore holds no copy and records only the citation, factual row values, checksum, and public archive witness.
 
 ### `nsrds_nbs8`
 

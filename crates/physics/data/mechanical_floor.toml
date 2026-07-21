@@ -2,10 +2,8 @@
 # over the QuantityAxis / InteractionLaw registry. The axis ranges below are SET to the
 # owner's confirmed values (2026-06-30, select-confirm), each the cited datasheet maximum
 # with headroom or a theory-fixed interval, every value a tunable lever revisable on the
-# owner's signoff. Two axes stay reserved because their per-quantity scale is unsettled
-# (R-UNITS-PIN): second_moment_of_area (a small section underflows m^4) and the consumer
-# reference_tolerance (its pg/kg-to-g/kg envelope exceeds one Q32.32 scale, so the scale
-# is per toxin class). Pressure-class axes are on the pinned megapascal. The decimal
+# owner's signoff. The second moment of area's small-section bound uses its derived
+# per-quantity scale under R-UNITS-PIN. Pressure-class axes are on the pinned megapascal. The decimal
 # substance values are cited real data. Mechanism: design Part 41 and the working proposal
 # docs/working/MECHANICAL_MATERIALS_SUBSTRATE_PROPOSAL.md.
 
@@ -546,7 +544,7 @@ tier = 0
 
 [[law]]
 id = "law.friction"
-kernel = "friction"
+kernel = "coulomb_friction_response"
 ports = [
   { role = "static_coefficient", axis = "mech.static_friction" },
   { role = "kinetic_coefficient", axis = "mech.kinetic_friction" },
@@ -572,7 +570,7 @@ tier = 0
 
 [[law]]
 id = "law.weight"
-kernel = "weight"
+kernel = "weight_force"
 ports = [
   { role = "mass", axis = "mech.mass" },
   { role = "gravity", axis = "mech.gravitational_acceleration" },
@@ -610,7 +608,7 @@ tier = 0
 
 [[law]]
 id = "law.shear"
-kernel = "shear"
+kernel = "shear_stress"
 ports = [
   { role = "shear_force", axis = "mech.force" },
   { role = "shear_area", axis = "mech.cross_section_area" },
@@ -715,7 +713,7 @@ dimension = "pressure"
 interval_bound = "[-STRESS_MAX, STRESS_MAX]"
 tier = 0
 
-# --- A few real substances as vectors over the axes (cited real data) ---
+# --- Retained abiotic reference substances as vectors over the axes ---
 
 [[substance]]
 id = "iron"
@@ -729,33 +727,3 @@ values = [
   { axis = "therm.conductivity", value = "80" },
   { axis = "therm.melting_temperature", value = "1811" },
 ]
-
-[[substance]]
-id = "oak"
-participates_in = ["law.cut_penetrate", "law.bend_stress", "law.shear", "law.combustion"]
-real = "Wood Handbook FPL-GTR-190; wood-energy literature; CRC Handbook specific-heat tables (oven-dry wood ~1700); Incropera and DeWitt / CRC thermal-conductivity tables (oven-dry wood across the grain ~0.15 to 0.17); Turns, An Introduction to Combustion, stoichiometry (wood oxidiser-to-fuel mass ratio ~1.2)"
-values = [
-  { axis = "mat.density", value = "700" },
-  { axis = "mat.ultimate_tensile_strength", value = "90" },
-  { axis = "mat.shear_strength", value = "12" },
-  { axis = "therm.fuel_value", value = "15000" },
-  { axis = "therm.ignition_temperature", value = "570" },
-  { axis = "therm.specific_heat", value = "1700" },
-  { axis = "therm.conductivity", value = "0.17" },
-  { axis = "therm.oxidiser_demand", value = "1.2" },
-]
-
-# The stroke-rate / limb-biomechanics substrate axis (declared here at the file end so its insertion shifts no
-# existing axis or substance line the registry doc references). Grown per-segment by the body-development
-# program (the staged step-1b increment); read per-body by the strike as the distance the actuating force acts
-# over in one blow.
-[[axis]]
-id = "mech.stroke_length"
-measures = "the distance an actuating force acts over in one stroke, the reach of a power stroke, grown independently of the segment length so the acting-distance-to-length ratio is per-body data rather than a fixed one"
-unit = "m"
-dimension = "length"
-scale = "m"
-tier = 0
-range_lo = "0.001"
-range_hi = "100"
-real = "the work-energy relation, work equals force times distance (Meriam and Kraige, Engineering Mechanics: Dynamics)"

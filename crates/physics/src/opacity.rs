@@ -31,7 +31,7 @@ use crate::periodic::PeriodicTable;
 use civsim_core::Fixed;
 use civsim_units::bignum::{BigRat, BigUint};
 use civsim_units::compute;
-use civsim_units::fundamentals;
+use civsim_units::constants::{self, SiExecutionMagnitudes};
 
 /// The decimal digits of pi the opacity computation carries, far above the ~10 significant figures a Q32.32
 /// result holds, so the pi truncation never reaches the result's low bit. An engine-accuracy bound.
@@ -49,10 +49,21 @@ fn nonneg_fixed_to_bigrat(value: Fixed) -> BigRat {
     )
 }
 
-/// A fundamental constant's CODATA value as an exact rational, read from the single fundamentals register (never
-/// re-authored here). `None` if the symbol is not a registered fundamental.
-fn fundamental_bigrat(symbol: &str) -> Option<BigRat> {
-    BigRat::from_decimal_str(fundamentals::fundamental(symbol)?.value).ok()
+/// One sealed SI execution value as an exact rational. This resolves both
+/// representation definitions and derived values such as `eps_0`; no consumer
+/// reads a drift-oracle decimal or binds a replacement magnitude.
+fn execution_bigrat(execution: &SiExecutionMagnitudes, symbol: &str) -> Option<BigRat> {
+    Some(execution.get(symbol)?.exact_rational())
+}
+
+/// One noncausal SI representation value as an exact rational.
+fn representation_bigrat(symbol: &str) -> Option<BigRat> {
+    Some(
+        constants::si_representation_magnitudes()
+            .ok()?
+            .get(symbol)?
+            .exact_rational(),
+    )
 }
 
 /// The ELECTRON-SCATTERING (Thomson) opacity `kappa_es` (cm^2/g), DERIVED from the fundamentals and the periodic
@@ -76,14 +87,15 @@ fn fundamental_bigrat(symbol: &str) -> Option<BigRat> {
 /// exact factor 10. `None` if a fundamental or the hydrogen molar mass fails to resolve, or the result leaves the
 /// representable range.
 pub fn electron_scattering_opacity(
+    execution: &SiExecutionMagnitudes,
     hydrogen_mass_fraction: Fixed,
     table: &PeriodicTable,
 ) -> Option<Fixed> {
-    let e = fundamental_bigrat("e")?;
-    let eps_0 = fundamental_bigrat("eps_0")?;
-    let m_e = fundamental_bigrat("m_e")?;
-    let c = fundamental_bigrat("c")?;
-    let n_a = fundamental_bigrat("N_A")?;
+    let e = execution_bigrat(execution, "e")?;
+    let eps_0 = execution_bigrat(execution, "eps_0")?;
+    let m_e = execution_bigrat(execution, "m_e")?;
+    let c = execution_bigrat(execution, "c")?;
+    let n_a = execution_bigrat(execution, "N_A")?;
     let pi = compute::pi(OPACITY_PI_DIGITS);
 
     // The classical electron radius r_e = e^2 / (4*pi*eps_0*m_e*c^2), then the Thomson cross section
@@ -119,11 +131,11 @@ pub fn electron_scattering_opacity(
 /// `ln` of the Thomson cross section in cm^2, from the fundamentals in the log domain: `sigma_T ~6.65e-25 cm^2`
 /// underflows `Fixed`, so the `n_e`-linear electron-scattering opacity carries it as its log. `sigma_T = (8 pi/3)
 /// r_e^2`, `r_e = e^2/(4 pi eps_0 m_e c^2)`; `ln r_e` in cm folds the metre-to-cm scaling (`r_e * 100`) as `+2 ln 10`.
-fn ln_thomson_cross_section_cm2() -> Option<Fixed> {
-    let ln_e = crate::saha::ln_fundamental("e")?;
-    let ln_eps0 = crate::saha::ln_fundamental("eps_0")?;
-    let ln_me = crate::saha::ln_fundamental("m_e")?;
-    let ln_c = crate::saha::ln_fundamental("c")?;
+fn ln_thomson_cross_section_cm2(execution: &SiExecutionMagnitudes) -> Option<Fixed> {
+    let ln_e = crate::saha::ln_fundamental(execution, "e")?;
+    let ln_eps0 = crate::saha::ln_fundamental(execution, "eps_0")?;
+    let ln_me = crate::saha::ln_fundamental(execution, "m_e")?;
+    let ln_c = crate::saha::ln_fundamental(execution, "c")?;
     let ln_4pi = crate::saha::ln_of_decimal("12.56637061")?;
     let ln_8pi_3 = crate::saha::ln_of_decimal("8.37758041")?;
     let ln10 = Fixed::from_int(10).ln();
@@ -143,10 +155,12 @@ fn ln_thomson_cross_section_cm2() -> Option<Fixed> {
 /// scattering constant `0.348(1+X)` exactly, the general form provably containing its old limit (the reassembly
 /// identity). `None` if a constant fails to load.
 pub fn electron_scattering_opacity_from_electron_density(
+    execution: &SiExecutionMagnitudes,
     ln_electron_density_cm3: Fixed,
     ln_density_g_cm3: Fixed,
 ) -> Option<Fixed> {
-    let ln_kappa = ln_thomson_cross_section_cm2()? + ln_electron_density_cm3 - ln_density_g_cm3;
+    let ln_kappa =
+        ln_thomson_cross_section_cm2(execution)? + ln_electron_density_cm3 - ln_density_g_cm3;
     Some(ln_kappa.exp())
 }
 
@@ -285,19 +299,20 @@ fn free_free_shape(x: Fixed) -> Option<Fixed> {
 /// kernel returns no `Phi`, or the result leaves the representable range (an extreme density or temperature whose
 /// `kappa_ff^2` overflows `Fixed`).
 pub fn kramers_free_free_opacity(
+    execution: &SiExecutionMagnitudes,
     density_g_per_cm3: Fixed,
     temperature_k: Fixed,
     hydrogen_mass_fraction: Fixed,
     charge_weighted_abundance: Fixed,
     gaunt_factor: Fixed,
 ) -> Option<Fixed> {
-    let e = fundamental_bigrat("e")?;
-    let eps_0 = fundamental_bigrat("eps_0")?;
-    let m_e = fundamental_bigrat("m_e")?;
-    let h = fundamental_bigrat("h")?;
-    let c = fundamental_bigrat("c")?;
-    let k_b = fundamental_bigrat("k_B")?;
-    let n_a = fundamental_bigrat("N_A")?;
+    let e = execution_bigrat(execution, "e")?;
+    let eps_0 = execution_bigrat(execution, "eps_0")?;
+    let m_e = execution_bigrat(execution, "m_e")?;
+    let h = execution_bigrat(execution, "h")?;
+    let c = execution_bigrat(execution, "c")?;
+    let k_b = execution_bigrat(execution, "k_B")?;
+    let n_a = execution_bigrat(execution, "N_A")?;
     let pi = compute::pi(OPACITY_PI_DIGITS);
 
     // The Coulomb-squared charge alpha_c = e^2/(4*pi*eps_0) (the SI stand-in for the Gaussian e^2), and the atomic
@@ -362,6 +377,7 @@ pub fn kramers_free_free_opacity(
 /// representable: `kramers` forms the small `kappa_ff^2 = A_ff^2 * Phi^2` together and never `A_ff^2` alone.
 /// `None` if the free-free or the shape mean fails to resolve.
 fn free_free_prefactor(
+    execution: &SiExecutionMagnitudes,
     density_g_per_cm3: Fixed,
     temperature_k: Fixed,
     hydrogen_mass_fraction: Fixed,
@@ -370,6 +386,7 @@ fn free_free_prefactor(
 ) -> Option<Fixed> {
     let phi = rosseland_mean(free_free_shape)?;
     let kappa_ff = kramers_free_free_opacity(
+        execution,
         density_g_per_cm3,
         temperature_k,
         hydrogen_mass_fraction,
@@ -397,6 +414,7 @@ fn free_free_prefactor(
 /// identity). `None` if the full-ionization prefactor fails to resolve or a constant fails to load.
 #[allow(clippy::too_many_arguments)]
 fn free_free_prefactor_ionized(
+    execution: &SiExecutionMagnitudes,
     ln_electron_density_cm3: Fixed,
     ln_sum_z2_ni_cm3: Fixed,
     ln_density_g_cm3: Fixed,
@@ -407,13 +425,14 @@ fn free_free_prefactor_ionized(
     gaunt_factor: Fixed,
 ) -> Option<Fixed> {
     let a_ff_full = free_free_prefactor(
+        execution,
         density_g_per_cm3,
         temperature_k,
         hydrogen_mass_fraction,
         charge_weighted_abundance,
         gaunt_factor,
     )?;
-    let ln_na = crate::saha::ln_fundamental("N_A")?;
+    let ln_na = crate::saha::ln_fundamental(execution, "N_A")?;
     // ln of the fully-ionized number densities (cm^-3): n_e_full = (1+X)/2 * rho/m_u, sum Z^2 n_i_full =
     // <Z^2/A> * rho/m_u, m_u = 1/N_A g so the -ln m_u is a +ln N_A.
     let ln_half_1px = Fixed::ONE
@@ -455,6 +474,7 @@ fn free_free_prefactor_ionized(
 /// `None` if a term or the mean fails to resolve (including the cold molecular gap).
 #[allow(clippy::too_many_arguments)]
 pub fn total_gas_rosseland_opacity(
+    execution: &SiExecutionMagnitudes,
     temperature_k: Fixed,
     density_g_per_cm3: Fixed,
     ln_density_g_cm3: Fixed,
@@ -467,10 +487,12 @@ pub fn total_gas_rosseland_opacity(
     table: &PeriodicTable,
 ) -> Option<Fixed> {
     let kappa_es = electron_scattering_opacity_from_electron_density(
+        execution,
         ln_electron_density_cm3,
         ln_density_g_cm3,
     )?;
     let a_ff = free_free_prefactor_ionized(
+        execution,
         ln_electron_density_cm3,
         ln_sum_z2_ni_cm3,
         ln_density_g_cm3,
@@ -483,6 +505,7 @@ pub fn total_gas_rosseland_opacity(
     rosseland_mean(|x| {
         let ff = a_ff.checked_mul(free_free_shape(x)?)?;
         let hm = h_minus_opacity(
+            execution,
             x,
             temperature_k,
             hydrogen_mass_fraction,
@@ -510,6 +533,7 @@ pub fn total_gas_rosseland_opacity(
 /// gas arguments are exactly [`total_gas_rosseland_opacity`]'s; `None` if a term or the mean fails to resolve.
 #[allow(clippy::too_many_arguments)]
 pub fn total_gas_and_grain_rosseland_opacity(
+    execution: &SiExecutionMagnitudes,
     temperature_k: Fixed,
     density_g_per_cm3: Fixed,
     ln_density_g_cm3: Fixed,
@@ -523,10 +547,12 @@ pub fn total_gas_and_grain_rosseland_opacity(
     grain_kappa_at: impl Fn(Fixed) -> Option<Fixed>,
 ) -> Option<Fixed> {
     let kappa_es = electron_scattering_opacity_from_electron_density(
+        execution,
         ln_electron_density_cm3,
         ln_density_g_cm3,
     )?;
     let a_ff = free_free_prefactor_ionized(
+        execution,
         ln_electron_density_cm3,
         ln_sum_z2_ni_cm3,
         ln_density_g_cm3,
@@ -537,9 +563,9 @@ pub fn total_gas_and_grain_rosseland_opacity(
         gaunt_factor,
     )?;
     // lambda(x, T) = (h c / k_B) / (x T), in microns: the wavelength the grain closure is priced at.
-    let h = fundamental_bigrat("h")?;
-    let c = fundamental_bigrat("c")?;
-    let k_b = fundamental_bigrat("k_B")?;
+    let h = representation_bigrat("h")?;
+    let c = representation_bigrat("c")?;
+    let k_b = representation_bigrat("k_B")?;
     let alpha_um_k = h.mul(&c).div(&k_b).mul(&BigRat::from_i64(1_000_000));
     let t_br = nonneg_fixed_to_bigrat(temperature_k);
 
@@ -565,6 +591,7 @@ pub fn total_gas_and_grain_rosseland_opacity(
     rosseland_mean(|x| {
         let ff = a_ff.checked_mul(free_free_shape(x)?)?;
         let hm = h_minus_opacity(
+            execution,
             x,
             temperature_k,
             hydrogen_mass_fraction,
@@ -694,6 +721,7 @@ pub fn h_minus_bound_free_reduced_cross_section(lambda_um: Fixed) -> Option<Fixe
 /// anyway). `None` if a fundamental or the hydrogen data fails to resolve, or the result leaves the representable
 /// range.
 pub fn h_minus_bound_free_opacity(
+    execution: &SiExecutionMagnitudes,
     x: Fixed,
     temperature_k: Fixed,
     hydrogen_mass_fraction: Fixed,
@@ -703,12 +731,12 @@ pub fn h_minus_bound_free_opacity(
     if x <= Fixed::ZERO || temperature_k <= Fixed::ZERO {
         return None;
     }
-    let h = fundamental_bigrat("h")?;
-    let c = fundamental_bigrat("c")?;
-    let k_b = fundamental_bigrat("k_B")?;
-    let m_e = fundamental_bigrat("m_e")?;
-    let e = fundamental_bigrat("e")?;
-    let n_a = fundamental_bigrat("N_A")?;
+    let h = execution_bigrat(execution, "h")?;
+    let c = execution_bigrat(execution, "c")?;
+    let k_b = execution_bigrat(execution, "k_B")?;
+    let m_e = execution_bigrat(execution, "m_e")?;
+    let e = execution_bigrat(execution, "e")?;
+    let n_a = execution_bigrat(execution, "N_A")?;
     let pi = compute::pi(OPACITY_PI_DIGITS);
 
     // The wavelength fold lambda = (h c/k)/(x T) [micron]: h c/k in SI is m*K, *1e6 -> micron*K.
@@ -975,10 +1003,10 @@ pub fn h_minus_free_free_opacity(
     if x <= Fixed::ZERO || temperature_k <= Fixed::ZERO {
         return None;
     }
-    let h = fundamental_bigrat("h")?;
-    let c = fundamental_bigrat("c")?;
-    let k_b = fundamental_bigrat("k_B")?;
-    let n_a = fundamental_bigrat("N_A")?;
+    let h = representation_bigrat("h")?;
+    let c = representation_bigrat("c")?;
+    let k_b = representation_bigrat("k_B")?;
+    let n_a = representation_bigrat("N_A")?;
 
     // lambda = (h c/k)/(x T) [micron] (h c/k in SI is m*K, *1e6 -> micron*K), as Fixed for the region select and as
     // BigRat for the polynomial.
@@ -1036,6 +1064,7 @@ pub fn h_minus_free_free_opacity(
 /// (the bounded midplane fixed point); this term supplies its H- spectral piece. `None` on the same conditions as
 /// the two component terms.
 pub fn h_minus_opacity(
+    execution: &SiExecutionMagnitudes,
     x: Fixed,
     temperature_k: Fixed,
     hydrogen_mass_fraction: Fixed,
@@ -1043,6 +1072,7 @@ pub fn h_minus_opacity(
     table: &PeriodicTable,
 ) -> Option<Fixed> {
     let bf = h_minus_bound_free_opacity(
+        execution,
         x,
         temperature_k,
         hydrogen_mass_fraction,
@@ -1092,9 +1122,9 @@ pub fn rayleigh_grain_opacity(
     if x <= Fixed::ZERO || temperature_k <= Fixed::ZERO || bulk_density_g_cm3 <= Fixed::ZERO {
         return None;
     }
-    let h = fundamental_bigrat("h")?;
-    let c = fundamental_bigrat("c")?;
-    let k_b = fundamental_bigrat("k_B")?;
+    let h = representation_bigrat("h")?;
+    let c = representation_bigrat("c")?;
+    let k_b = representation_bigrat("k_B")?;
     let pi = compute::pi(OPACITY_PI_DIGITS);
 
     // lambda = (h c/k)/(x T) [micron], as Fixed for the table interpolation and BigRat for the opacity.
@@ -1723,9 +1753,9 @@ pub fn grain_rosseland_opacity_spectral(
         return None;
     }
     // lambda(x, T) = (h c / k_B) / (x T), in microns (the same constant the Rayleigh term forms).
-    let h = fundamental_bigrat("h")?;
-    let c = fundamental_bigrat("c")?;
-    let k_b = fundamental_bigrat("k_B")?;
+    let h = representation_bigrat("h")?;
+    let c = representation_bigrat("c")?;
+    let k_b = representation_bigrat("k_B")?;
     let alpha_um_k = h.mul(&c).div(&k_b).mul(&BigRat::from_i64(1_000_000));
     let t_br = nonneg_fixed_to_bigrat(temperature_k);
 
@@ -1775,6 +1805,178 @@ pub fn grain_rosseland_opacity_spectral(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn execution() -> SiExecutionMagnitudes {
+        constants::canonical_si_execution_magnitudes().expect("the sealed floor projects")
+    }
+
+    fn electron_scattering_opacity(
+        hydrogen_mass_fraction: Fixed,
+        table: &PeriodicTable,
+    ) -> Option<Fixed> {
+        super::electron_scattering_opacity(&execution(), hydrogen_mass_fraction, table)
+    }
+
+    fn electron_scattering_opacity_from_electron_density(
+        ln_electron_density_cm3: Fixed,
+        ln_density_g_cm3: Fixed,
+    ) -> Option<Fixed> {
+        super::electron_scattering_opacity_from_electron_density(
+            &execution(),
+            ln_electron_density_cm3,
+            ln_density_g_cm3,
+        )
+    }
+
+    fn kramers_free_free_opacity(
+        density_g_per_cm3: Fixed,
+        temperature_k: Fixed,
+        hydrogen_mass_fraction: Fixed,
+        charge_weighted_abundance: Fixed,
+        gaunt_factor: Fixed,
+    ) -> Option<Fixed> {
+        super::kramers_free_free_opacity(
+            &execution(),
+            density_g_per_cm3,
+            temperature_k,
+            hydrogen_mass_fraction,
+            charge_weighted_abundance,
+            gaunt_factor,
+        )
+    }
+
+    fn free_free_prefactor(
+        density_g_per_cm3: Fixed,
+        temperature_k: Fixed,
+        hydrogen_mass_fraction: Fixed,
+        charge_weighted_abundance: Fixed,
+        gaunt_factor: Fixed,
+    ) -> Option<Fixed> {
+        super::free_free_prefactor(
+            &execution(),
+            density_g_per_cm3,
+            temperature_k,
+            hydrogen_mass_fraction,
+            charge_weighted_abundance,
+            gaunt_factor,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn free_free_prefactor_ionized(
+        ln_electron_density_cm3: Fixed,
+        ln_sum_z2_ni_cm3: Fixed,
+        ln_density_g_cm3: Fixed,
+        density_g_per_cm3: Fixed,
+        temperature_k: Fixed,
+        hydrogen_mass_fraction: Fixed,
+        charge_weighted_abundance: Fixed,
+        gaunt_factor: Fixed,
+    ) -> Option<Fixed> {
+        super::free_free_prefactor_ionized(
+            &execution(),
+            ln_electron_density_cm3,
+            ln_sum_z2_ni_cm3,
+            ln_density_g_cm3,
+            density_g_per_cm3,
+            temperature_k,
+            hydrogen_mass_fraction,
+            charge_weighted_abundance,
+            gaunt_factor,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn total_gas_rosseland_opacity(
+        temperature_k: Fixed,
+        density_g_per_cm3: Fixed,
+        ln_density_g_cm3: Fixed,
+        hydrogen_mass_fraction: Fixed,
+        charge_weighted_abundance: Fixed,
+        gaunt_factor: Fixed,
+        ln_electron_density_cm3: Fixed,
+        ln_sum_z2_ni_cm3: Fixed,
+        electron_pressure_dyn_cm2: Fixed,
+        table: &PeriodicTable,
+    ) -> Option<Fixed> {
+        super::total_gas_rosseland_opacity(
+            &execution(),
+            temperature_k,
+            density_g_per_cm3,
+            ln_density_g_cm3,
+            hydrogen_mass_fraction,
+            charge_weighted_abundance,
+            gaunt_factor,
+            ln_electron_density_cm3,
+            ln_sum_z2_ni_cm3,
+            electron_pressure_dyn_cm2,
+            table,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn total_gas_and_grain_rosseland_opacity(
+        temperature_k: Fixed,
+        density_g_per_cm3: Fixed,
+        ln_density_g_cm3: Fixed,
+        hydrogen_mass_fraction: Fixed,
+        charge_weighted_abundance: Fixed,
+        gaunt_factor: Fixed,
+        ln_electron_density_cm3: Fixed,
+        ln_sum_z2_ni_cm3: Fixed,
+        electron_pressure_dyn_cm2: Fixed,
+        table: &PeriodicTable,
+        grain_kappa_at: impl Fn(Fixed) -> Option<Fixed>,
+    ) -> Option<Fixed> {
+        super::total_gas_and_grain_rosseland_opacity(
+            &execution(),
+            temperature_k,
+            density_g_per_cm3,
+            ln_density_g_cm3,
+            hydrogen_mass_fraction,
+            charge_weighted_abundance,
+            gaunt_factor,
+            ln_electron_density_cm3,
+            ln_sum_z2_ni_cm3,
+            electron_pressure_dyn_cm2,
+            table,
+            grain_kappa_at,
+        )
+    }
+
+    fn h_minus_bound_free_opacity(
+        x: Fixed,
+        temperature_k: Fixed,
+        hydrogen_mass_fraction: Fixed,
+        electron_pressure_dyn_cm2: Fixed,
+        table: &PeriodicTable,
+    ) -> Option<Fixed> {
+        super::h_minus_bound_free_opacity(
+            &execution(),
+            x,
+            temperature_k,
+            hydrogen_mass_fraction,
+            electron_pressure_dyn_cm2,
+            table,
+        )
+    }
+
+    fn h_minus_opacity(
+        x: Fixed,
+        temperature_k: Fixed,
+        hydrogen_mass_fraction: Fixed,
+        electron_pressure_dyn_cm2: Fixed,
+        table: &PeriodicTable,
+    ) -> Option<Fixed> {
+        super::h_minus_opacity(
+            &execution(),
+            x,
+            temperature_k,
+            hydrogen_mass_fraction,
+            electron_pressure_dyn_cm2,
+            table,
+        )
+    }
 
     fn table() -> PeriodicTable {
         PeriodicTable::standard().expect("the periodic table loads")
@@ -2002,7 +2204,7 @@ mod tests {
             ("Mg", crate::saha::ln_of_decimal("3e12").unwrap()),
             ("Ca", crate::saha::ln_of_decimal("2e11").unwrap()),
         ];
-        let state = crate::saha::electron_density_saha(temp, &species, &tbl).unwrap();
+        let state = crate::saha::electron_density_saha(&execution(), temp, &species, &tbl).unwrap();
         assert!(
             !state.no_free_electrons,
             "the 6000 K gas has free electrons"
@@ -2078,7 +2280,7 @@ mod tests {
             ("Mg", crate::saha::ln_of_decimal("3e12").unwrap()),
             ("Ca", crate::saha::ln_of_decimal("2e11").unwrap()),
         ];
-        let state = crate::saha::electron_density_saha(temp, &species, &tbl).unwrap();
+        let state = crate::saha::electron_density_saha(&execution(), temp, &species, &tbl).unwrap();
         let rho = Fixed::from_ratio(24, 100_000_000);
         let ln_rho = crate::saha::ln_of_decimal("2.4e-7").unwrap();
         let (x, z2a, g) = (
@@ -2153,7 +2355,7 @@ mod tests {
             ("H", crate::saha::ln_of_decimal("1e17").unwrap()),
             ("K", crate::saha::ln_of_decimal("1e10").unwrap()),
         ];
-        let state = crate::saha::electron_density_saha(temp, &species, &tbl).unwrap();
+        let state = crate::saha::electron_density_saha(&execution(), temp, &species, &tbl).unwrap();
         let rho = Fixed::from_ratio(24, 100_000_000);
         let ln_rho = crate::saha::ln_of_decimal("2.4e-7").unwrap();
         let ln_ne = state.ln_electron_density_cm3;
@@ -2232,7 +2434,7 @@ mod tests {
         let cwa = Fixed::ONE; // <Z^2/A> = 1 for pure hydrogen
         let g = Fixed::ONE;
         let ln_rho = crate::saha::ln_of_decimal("1e-6").unwrap();
-        let ln_na = crate::saha::ln_fundamental("N_A").unwrap();
+        let ln_na = crate::saha::ln_si_representation("N_A").unwrap();
         // (1+X)/2 = 1 at X = 1, so ln n_e_full = ln rho + ln N_A; sum Z^2 n_i = n_e (single-stage = full for H).
         let ln_ne_full = ln_rho + ln_na;
         let a_ff_full = free_free_prefactor(rho, t, x, cwa, g).unwrap();
@@ -2259,7 +2461,7 @@ mod tests {
         let cwa = Fixed::ONE;
         let g = Fixed::ONE;
         let ln_rho = crate::saha::ln_of_decimal("1e-6").unwrap();
-        let ln_na = crate::saha::ln_fundamental("N_A").unwrap();
+        let ln_na = crate::saha::ln_si_representation("N_A").unwrap();
         let ln_ne_full = ln_rho + ln_na;
         let ln_tenth = crate::saha::ln_of_decimal("0.1").unwrap();
         let ln_ne_tenth = ln_ne_full + ln_tenth; // n_e = 0.1 n_e_full, single-stage so sum Z^2 n_i = n_e

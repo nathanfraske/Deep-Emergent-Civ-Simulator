@@ -1,0 +1,1041 @@
+# Copyright 2026 Nathan M. Fraske
+# Licensed under the Apache License, Version 2.0; see LICENSE.
+#
+# The physics-floor provenance grade register (provenance register Phase 2, the floor unification).
+# Sidecar to the floor manifests: each value entry's two-tag real/fantasy provenance refined into the
+# owner's seven-tag register (docs/PROVENANCE_LEDGER.md). A `real` entry refines to [M] measured, [D]
+# derived (with derived_from), or [E] estimator; a `fantasy` entry to [A] authored, [C] closure, [D]
+# derived, or [X] contingency. The tag is DERIVED from the entry's own recorded ground, source-verified
+# (the panel is a lead, source is the verdict), never re-authored. `derive_first_defect` marks a bulk
+# material property stored on the substance rather than derived from its components: a generality defect
+# (Principle 11, admit-the-alien) ORTHOGONAL to the refutability provenance, so the value stays [M] and
+# the defect is separately countable for the materials buildout that resolves it (the gate's seam-2
+# correction, verified at source). scripts/floor_provenance_gate.py enforces completeness and the
+# real/fantasy-to-grade consistency; the honesty number is the closure-plus-authored query over this
+# register unified with reserved.toml.
+
+[[grade]]
+id = "bio.consumer.assimilation"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "bio.consumer.fermentation"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "bio.consumer.hill_exponent"
+grade = "closure"
+unsettled = true
+
+[[grade]]
+id = "bio.consumer.reference_tolerance"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "bio.consumer.requirement"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "bio.convective_surface"
+grade = "unverified_measurement_candidate"
+unsettled = true
+
+[[grade]]
+id = "bio.decomposition_barrier"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "bio.decomposition_rate"
+grade = "closure"
+
+[[grade]]
+id = "bio.energy_density"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "bio.lipid_fraction"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "bio.mineral_ash_fraction"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "bio.net_harm"
+grade = "closure"
+unsettled = true
+
+[[grade]]
+id = "bio.net_nutrition"
+grade = "derived"
+derived_from = ["law.net_nutrition"]
+unsettled = true
+
+[[grade]]
+id = "bio.nonstructural_carbohydrate_fraction"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "bio.protein_fraction"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "bio.respiratory_surface"
+grade = "unverified_measurement_candidate"
+unsettled = true
+
+[[grade]]
+id = "bio.structural_carbohydrate_fraction"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "bio.toxin.alkaloid"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "bio.toxin.cardiac_glycoside"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "bio.toxin.cyanogenic"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "bio.toxin_load_coarse"
+grade = "derived"
+derived_from = ["bio.toxin.alkaloid", "bio.toxin.cyanogenic", "bio.toxin.cardiac_glycoside", "registered per-class toxin maxima"]
+
+[[grade]]
+id = "bio.water_fraction"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "chem.acidity"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "chem.activation_energy"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "chem.corrosion_susceptibility"
+grade = "closure"
+unsettled = true
+
+[[grade]]
+id = "chem.formation_enthalpy"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "chem.solute_affinity"
+grade = "closure"
+unsettled = true
+
+[[grade]]
+id = "chem.standard_potential"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "opt.absorption_coefficient"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "opt.emissivity"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "opt.emissivity.band_0"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "opt.emissivity.band_1"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "opt.emissivity.band_2"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "opt.reflectance"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "opt.refractive_index"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "opt.scattering_coefficient"
+grade = "unverified_measurement_candidate"
+unsettled = true
+
+[[grade]]
+id = "opt.source_power"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "opt.spectral_band"
+grade = "closure"
+unsettled = true
+
+[[grade]]
+id = "opt.transmittance"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "copper"
+grade = "unverified_measurement_candidate"
+derive_first_defect = true
+
+[[grade]]
+id = "elec.capacitance"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "elec.charge"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "elec.current"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "elec.electric_field"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "elec.emf"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "elec.potential"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "elec.resistance"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "elec.resistivity"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "lodestone"
+grade = "estimator"
+derive_first_defect = true
+unsettled = true
+
+[[grade]]
+id = "mag.coupling_coefficient"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mag.flux"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mag.flux_density"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mag.inductance"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mag.magnetic_moment"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mag.permeability"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "acoustic.absorption_coefficient"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "acoustic.absorption_reference"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "acoustic.formant_frequency"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "acoustic.frequency"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "acoustic.resonator_length"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "acoustic.source_power"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "air"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "chem.acentric_factor"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "chem.boiling_point"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "chem.critical_pressure"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "chem.critical_temperature"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "chem.fusion_enthalpy"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "chem.triple_point_temperature"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "chem.vaporization_enthalpy"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "fluid.bulk_modulus"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "fluid.channel_radius"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "fluid.column_height"
+grade = "contingency"
+unsettled = true
+
+[[grade]]
+id = "fluid.convective_coefficient"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "fluid.drag_coefficient"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "fluid.driving_pressure"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "fluid.dynamic_viscosity"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "fluid.gas_transfer_coefficient"
+grade = "estimator"
+unsettled = true
+
+[[grade]]
+id = "fluid.immersed_volume"
+grade = "contingency"
+unsettled = true
+
+[[grade]]
+id = "fluid.lift_coefficient"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "fluid.moisture_content"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "fluid.respirable_content"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "fluid.surface_tension"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "fluid.vapor_pressure"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "therm.temperature"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "water"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "geo.decay_constant"
+grade = "derived"
+derived_from = ["half-life (U-238 4.468 Gyr, U-235 0.7038 Gyr, Th-232 14.05 Gyr, K-40 1.251 Gyr; Audi et al. 2003)", "law lambda = ln2 / half-life"]
+unsettled = true
+
+[[grade]]
+id = "geo.internal_heat_production"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "geo.isotope_concentration"
+grade = "unverified_measurement_candidate"
+unsettled = true
+
+[[grade]]
+id = "geo.specific_heat_production"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "k40"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "th232"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "u235"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "u238"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "carrion"
+grade = "unverified_measurement_candidate"
+derive_first_defect = true
+
+[[grade]]
+id = "clay"
+grade = "unverified_measurement_candidate"
+derive_first_defect = true
+
+[[grade]]
+id = "granite"
+grade = "unverified_measurement_candidate"
+derive_first_defect = true
+
+[[grade]]
+id = "halite"
+grade = "unverified_measurement_candidate"
+derive_first_defect = true
+
+[[grade]]
+id = "hematite"
+grade = "unverified_measurement_candidate"
+derive_first_defect = true
+
+[[grade]]
+id = "loam"
+grade = "unverified_measurement_candidate"
+derive_first_defect = true
+
+[[grade]]
+id = "oilseed"
+grade = "unverified_measurement_candidate"
+derive_first_defect = true
+
+[[grade]]
+id = "spent_hull"
+grade = "unverified_measurement_candidate"
+derive_first_defect = true
+
+[[grade]]
+id = "tuber"
+grade = "unverified_measurement_candidate"
+derive_first_defect = true
+
+[[grade]]
+id = "iron"
+grade = "unverified_measurement_candidate"
+derive_first_defect = true
+
+[[grade]]
+id = "mat.compressive_strength"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mat.density"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mat.ductility"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mat.elastic_modulus"
+grade = "unverified_measurement_candidate"
+derive_first_defect = true
+
+[[grade]]
+id = "mat.fracture_energy"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mat.fracture_strength"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mat.indentation_hardness"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mat.poisson_ratio"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mat.shear_strength"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mat.specific_cut_energy"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mat.ultimate_tensile_strength"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mat.wear_coefficient"
+grade = "unverified_measurement_candidate"
+unsettled = true
+
+[[grade]]
+id = "mat.yield_strength"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mech.arm_length"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mech.constraint_factor"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mech.contact_area"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mech.cross_section_area"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mech.edge_radius"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mech.effective_length_factor"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mech.force"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mech.gravitational_acceleration"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mech.kinetic_friction"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mech.mass"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mech.restitution"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mech.second_moment_of_area"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mech.section_modulus"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mech.slide_distance"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mech.static_friction"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mech.stroke_length"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "mech.velocity"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "oak"
+grade = "unverified_measurement_candidate"
+derive_first_defect = true
+
+[[grade]]
+id = "therm.boiling_temperature"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "therm.conductivity"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "therm.expansion"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "therm.fuel_value"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "therm.ignition_temperature"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "therm.latent_heat"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "therm.melting_temperature"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "therm.oxidiser_demand"
+grade = "unverified_measurement_candidate"
+unsettled = true
+
+[[grade]]
+id = "therm.specific_heat"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Ac"
+grade = "unverified_measurement_candidate"
+unsettled = true
+
+[[grade]]
+id = "Ag"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Al"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Ar"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "As"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "At"
+grade = "unverified_measurement_candidate"
+unsettled = true
+
+[[grade]]
+id = "Au"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "B"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Ba"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Be"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Bi"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Br"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "C"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Ca"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Cd"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Ce"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Cl"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Co"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Cr"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Cs"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Cu"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Dy"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Er"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Eu"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "F"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Fe"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Fr"
+grade = "unverified_measurement_candidate"
+unsettled = true
+
+[[grade]]
+id = "Ga"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Gd"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Ge"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "H"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "He"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Hf"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Hg"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Ho"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "I"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "In"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Ir"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "K"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Kr"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "La"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Li"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Lu"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Mg"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Mn"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Mo"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "N"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Na"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Nb"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Nd"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Ne"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Ni"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "O"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Os"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "P"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Pa"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Pb"
+grade = "unverified_measurement_candidate"
+unsettled = true
+
+[[grade]]
+id = "Pd"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Pm"
+grade = "unverified_measurement_candidate"
+unsettled = true
+
+[[grade]]
+id = "Po"
+grade = "unverified_measurement_candidate"
+unsettled = true
+
+[[grade]]
+id = "Pr"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Pt"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Ra"
+grade = "unverified_measurement_candidate"
+unsettled = true
+
+[[grade]]
+id = "Rb"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Re"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Rh"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Rn"
+grade = "unverified_measurement_candidate"
+unsettled = true
+
+[[grade]]
+id = "Ru"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "S"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Sb"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Sc"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Se"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Si"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Sm"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Sn"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Sr"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Ta"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Tb"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Tc"
+grade = "unverified_measurement_candidate"
+unsettled = true
+
+[[grade]]
+id = "Te"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Th"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Ti"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Tl"
+grade = "unverified_measurement_candidate"
+unsettled = true
+
+[[grade]]
+id = "Tm"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "U"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "V"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "W"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Xe"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Y"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Yb"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Zn"
+grade = "unverified_measurement_candidate"
+
+[[grade]]
+id = "Zr"
+grade = "unverified_measurement_candidate"
+
+# --- candidate phases (phase_registry.toml): cited thermodynamic data, measured plus a generality defect (seam-1 reconciled by the two-axis distinction) ---
+
+[[grade]]
+id = "phase.quartz"
+grade = "unverified_measurement_candidate"
+derive_first_defect = true
+
+[[grade]]
+id = "phase.corundum"
+grade = "unverified_measurement_candidate"
+derive_first_defect = true
+
+[[grade]]
+id = "phase.periclase"
+grade = "unverified_measurement_candidate"
+derive_first_defect = true
+
+[[grade]]
+id = "phase.hematite"
+grade = "unverified_measurement_candidate"
+derive_first_defect = true
+
+[[grade]]
+id = "phase.forsterite"
+grade = "unverified_measurement_candidate"
+derive_first_defect = true
+
+[[grade]]
+id = "phase.fayalite"
+grade = "unverified_measurement_candidate"
+derive_first_defect = true
+
+[[grade]]
+id = "phase.spinel"
+grade = "unverified_measurement_candidate"
+derive_first_defect = true
+
+[[grade]]
+id = "phase.enstatite"
+grade = "unverified_measurement_candidate"
+derive_first_defect = true

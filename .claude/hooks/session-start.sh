@@ -20,15 +20,49 @@ set -u
 ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT" || exit 0
 
-# Gather each block RAW (no byte truncation here; Python does the codepoint-safe clip).
-verify_out="$(bash scripts/verify.sh 2>&1 | head -c 6000)"
+# Gather each block raw (no byte truncation here; Python does the codepoint-safe
+# clip). Preserve the verifier's status before reading its bounded output. The
+# former pipeline through `head` discarded a failing verifier status.
+verify_tmp="$(mktemp "${TMPDIR:-/tmp}/civsim-session-verify.XXXXXX" 2>/dev/null || true)"
+if [ -z "$verify_tmp" ]; then
+  verify_out="STATUS: FAILED TO ALLOCATE VERIFICATION OUTPUT"
+elif bash scripts/verify.sh >"$verify_tmp" 2>&1; then
+  verify_out="STATUS: CLEAN
+$(head -c 6000 "$verify_tmp")"
+else
+  verify_status=$?
+  verify_out="STATUS: DIRTY (exit $verify_status)
+$(head -c 6000 "$verify_tmp")"
+fi
+[ -n "$verify_tmp" ] && rm -f "$verify_tmp"
 handoff="$(sed -n '1,120p' HANDOFFS.md 2>/dev/null | head -c 16000)"
-todos="$(grep '^- \*\*R-' TODOS.md 2>/dev/null | head -40)"
+if ! todos="$(python3 - "$ROOT/TODOS.md" <<'PY'
+import re, sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+match = re.search(
+    r"^## Canonical abiotic queue\s*$\n(.*?)(?=^## |\Z)",
+    text,
+    re.M | re.S,
+)
+if not match:
+    raise SystemExit("missing bounded canonical abiotic queue")
+pattern = re.compile(r"^- \*\*(P-[A-Z0-9-]+)\.\*\*\s*(.*)$")
+items = [(m.group(1), line) for line in match.group(1).splitlines() if (m := pattern.match(line))]
+ids = [item for item, _line in items]
+duplicates = sorted({item for item in ids if ids.count(item) > 1})
+print("CANONICAL QUEUE: items=%d, duplicates=%s" % (len(items), duplicates or "none"))
+for _item, line in items:
+    print(line)
+PY
+)"; then
+  todos="CANONICAL QUEUE: FAILED TO PARSE TODOS.md; read the file before working"
+fi
 
 roadmap_file="docs/working/CONSENSUS_ROADMAP.md"
 if [ -f "$roadmap_file" ]; then
   # The roadmap is now the lean FEATURE STATUS BOARD and nothing else (the deeper reconciliation
-  # and history live in ROADMAP_REFERENCE.md). Surface the whole board on every session start so
+  # and history live in parked/docs/working/ROADMAP_REFERENCE.md). Surface the whole board on every session start so
   # it is READ first; the Stop gate enforces editing it IN PLACE when a segment makes progress, so
   # it never goes stale. The Python step below clips it to the roadmap budget on a codepoint
   # boundary with a truncation marker, so the agent knows to read the file for the rest.
@@ -42,11 +76,11 @@ else
   roadmap="(not present; create it when the ground-truth order is next reviewed)"
 fi
 
-method="Method available: the fully-blind audit (AGENTIC_ADDENDUM.md section 7). When a correctness or reserved-value verdict must not be contaminated by the repo's own tests, comments, or prior reviews, assemble a scratchpad packet (substrate contract + code + declared spec, no tests or docs) and run repo-walled independent auditors; pilot one agent for sufficiency first, then verify every finding against the source. Panelists on the cheapest model that fits (Sonnet; Haiku for mass; Opus for the hardest cases)."
+method="Method available: the fully-blind audit (AGENTIC_ADDENDUM.md section 7). When a correctness or floor-admission verdict must not be contaminated by the repo's own tests, comments, or prior reviews, assemble a scratchpad packet (substrate contract + code + declared spec, no tests or docs) and run repo-walled independent auditors; pilot one agent for sufficiency first, then verify every finding against the source. Panelists on the cheapest model that fits (Sonnet; Haiku for mass; Opus for the hardest cases)."
 
 # The raw sections are passed by environment (never re-expanded, so quotes/backticks in the
 # content are inert) and clipped once in Python on codepoint boundaries.
-fetch="Fetch discipline, a STANDING RULE read at session start (AGENTIC_ADDENDUM.md section 12): if you produce a load-bearing number you MUST vendor its source at fetch time. Download the document or data file, SHA256 it, hold it behind the manifest (docs/working/VENDORING_CHECKLIST.md); a URL citation is NOT provenance (a link rots, and the number is then a claim with no held witness). Read the primary's figures and tables, not the abstract, and carry each value's anchor, a dual-channel agreement where the standard needs it, and its SCOPE (the regime it applies to). A fetch that has not vendored, anchored, and scoped its value is not finished."
+fetch="Fetch discipline, a STANDING RULE read at session start (AGENTIC_ADDENDUM.md section 12): if you produce a load-bearing number you MUST vendor its source at fetch time. Download the document or data file, SHA256 it, hold it behind the manifest (docs/working/VENDORING_CHECKLIST.md); a URL citation is NOT provenance. Read primary figures and tables, and carry each value's anchor, dual-channel agreement where required, and scope. Evidence custody is not canonical admission: the candidate must still derive or pass the complete absolute-floor admission process."
 
 export SS_METHOD="$method" SS_FETCH="$fetch" SS_ROADMAP="$roadmap" SS_HANDOFF="$handoff" SS_TODOS="$todos" SS_VERIFY="$verify_out"
 
@@ -71,8 +105,8 @@ ctx = (
     + "=== docs/working/CONSENSUS_ROADMAP.md (the ground-truth order of work; keep it current) ===\n"
     + sec["roadmap"] + "\n\n"
     + "=== HANDOFFS.md (read the top entry first to recover state) ===\n" + sec["handoff"] + "\n\n"
-    + "=== TODOS.md (open research items) ===\n" + sec["todos"] + "\n\n"
-    + "=== verification baseline (scripts/verify.sh) ===\n" + sec["verify"]
+    + "=== TODOS.md (canonical abiotic queue) ===\n" + sec["todos"] + "\n\n"
+    + "=== parked legacy archive verification baseline (scripts/verify.sh) ===\n" + sec["verify"]
 )
 if len(ctx) > LIMIT:
     ctx = ctx[:LIMIT].rstrip() + "\n...[truncated to the context cap]"

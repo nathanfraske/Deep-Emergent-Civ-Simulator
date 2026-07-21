@@ -1,100 +1,87 @@
-# The Provenance Ledger (canonical, hardcoded, mandated constant across the project)
+# Canonical provenance ledger
 
-Owner-authored (2026-07-12), the conclusive research finding. This is the enforced register: every value in the project carries one of the seven provenance tags below, machine-checked. A designed-but-optional ledger stayed empty (0/228 tagged) and that failure is why this is now hardcoded and mandatory, never a suggestion or a memory.
+The canonical ledger is an accounting graph for the abiotic planet and
+stellar-system runpath. It is not a value store and does not grant admission by
+tag, tier, citation, or owner choice. The runner accepts only an
+`AbsolutePhysicsFloor` whose complete ordered graph matches the repository-owned
+audited catalog.
 
-The enforcement is two layers, both hardcoded (see `crates/sim/src/calibration.rs` and the born-provenance gate). The `provenance` field is required: `Provenance::Unclassified` is a fail-loud sentinel, and a value not one of the seven tags fails the build (the same machine-check the `category` field already gets). A ledger-validation gate (a `#[test]` that runs on every `cargo test`, plus a CI check in the family of `constructor_gate`/`determinism_gate`) loads the manifest and asserts: every entry carries one of the seven tags; every `derived` value declares real, non-empty `derived_from` edges; the DAG is acyclic; and category and provenance are consistent (derivable to derived/estimator/written-state, defect to closure/authored, per_world to measured/contingency, fundamental to measured). An untagged or inconsistent value fails the build. The register is one register with one honesty number, not two checked side by side: the physics floor's two-tag provenance maps into the seven-tag register (the Phase-2 unification).
+The implementation lives in `crates/ledger`. The catalog lives in
+`crates/planet/src/canonical/catalog.rs`. The checked-in central report lives at
+`docs/working/CANONICAL_LEDGER_INVENTORY.txt`.
 
-## Provenance tags (the seven-tag taxonomy, refutability test)
+## Seven provenance marks
 
-- **[D] derived**: computable from the fundamentals and the situation.
-- **[M] measured**: refutable without the sim (an empirical datum).
-- **[E] estimator**: factor-to-tens-of-percent on banked columns.
-- **[C] closure**: the real free knobs.
-- **[A] authored**: an authored value.
-- **[W] written state**: computed history, neither authored nor derived-once.
-- **[X] contingency**: a per-world sampled initial condition.
+- `[D]` Derived: computed by a named law from named ledger ancestry.
+- `[M]` Measured: refutable by observation without running the simulator.
+- `[E]` Estimator: a bounded approximation over admitted evidence.
+- `[C]` Closure: a model closure accounting class, barred from the initial floor.
+- `[A]` Authored: a hand-authored magnitude, barred from the initial floor.
+- `[W]` Written state: computed history generated within the causal run.
+- `[X]` Contingency: a realization draw generated from an admitted measure by
+  a versioned sampler and approved realization-coordinate law. A caller seed,
+  fixed hidden seed, operating-system entropy, viewer state, world identity,
+  transcript ordinal, or enumeration order cannot select the coordinate. If
+  the coordinate law is absent, the stage refuses.
 
-## Layer 1, constants and mechanisms
+These seven marks are the complete canonical taxonomy. Audit sentinels such as
+`unverified_measurement_candidate` and `unclassified` are fail-closed states,
+not additional marks.
 
-c, h, k_B, e (exact by 2019 SI definition), epsilon_0/mu_0, G, m_e [M]; electron spin hbar/2 with g = 2 plus alpha/2pi [D, the tool-audit addition]; N_A as bookkeeping. Boundary notes: the nuclear cache (masses, half-lives, cross-sections) is computed by QCD, which the engine does not own, so layer-1 nuclear variation is designer sovereignty with an incoherence flag; EM-constant variation is a coherent similarity transform (a_0, Ry scaling); eta_baryon sits here as the one authored cosmological number [A].
+## Four tiers
 
-## Layer 2, the table-as-cache
+1. Universal: measured irreducible fundamentals and values derived from named
+   ancestry.
+2. Reference: admitted reference evidence or compute-once results.
+3. Residue: estimators and irreducible residual accounting.
+4. Contingency: generated realization contingency, never a caller input.
 
-Periodicity itself: numerical theorem, banked, non-analytic (Lowdin flag). Per element/isotope columns: Z [D]; isotope masses [M]; half-lives and branching [M, relocated from layer 3; plasma-regime flag]; neutron cross-section spectra, positions and widths [M], Breit-Wigner shape, 1/v law, Wigner statistics, Doppler feedback [D]; IE [M; H exact]; EA [M; Slater-grade E]; chi_M and chi_AR [D, from IE, EA, Z_eff, r]; Pyykko covalent radii [M]; Shannon ionic radii [M; Z_eff E]; polarizability alpha [H exact at 4.5a_0^3; Lorentz-oscillator E; M override]; formation-energy rows dG_f(T,P), including the melt-redox dG(P) curve [M / compute-once]; Racah B, C and Jorgensen f, g [M class constants]; bond force constants k [M; Badger E for invented bonds]; aufbau override, ~20 rows [A, with derived clustering rationale]; magnetic moments per substance [insulators D via Hund, CF, Goodenough-Kanamori; metals M with Slater-Pauling class structure]; anisotropy K per magnetic species [M]; per-volatile primitives (T_b, L) [M/A, two numbers is the proven floor]; E_b cohesive anchors [M/A; D for ionics via Born-Lande]; rho_0 per phase [A/M]; B_0 [E from E_coh/V; M override], B_0' ~ 4 default; Henry constants [M]; band strengths and photo cross-sections [M]; semiconductor gaps [M]; superconducting and Curie points [M].
+The tiers and marks form a complete 4 by 7 accounting matrix. Empty cells are
+reported as zero. A tier or mark never turns a magnitude into a legal input.
 
-### Layer 2.5, the prototype library
+## Admission contract
 
-30 to 50 aristotypes carrying exact Madelung constants and packing geometry [D], radius-ratio windows [D-in-form, two-thirds honesty grade]. Anchor rows: H (exact), H_2 (compute-once, spectroscopic), He (ab initio, metrology grade, better than experiment).
+Universal leaves must be `[M]`. Derived entries must be `[D]` and name their
+complete ancestry. Every non-derived leaf at every tier may enter only after
+derive-first exhaustion is recorded with all of the following:
 
-## Layer 3a, the estimator tier (all running on banked columns)
+- nonempty derivation attempts;
+- a per-phenomenon Buckingham-Pi residual budget;
+- Gap Law evidence;
+- Residual Law evidence;
+- a unique residual slot.
 
-Trouton with chi_M polarity bins; Hildebrand; the E_HB ladder F/O/N ~ 29/21/13 kJ/mol [M class constants]; Kirchhoff dcp from Dulong-Petit plus stat mech; Dulong-Petit 3R per atom; Lindemann (fitted constant flag); Slater gamma = B_0'/2 - 2/3; Richard's rule dS_fus ~ R; T_b/T_c ~ 0.6; Born-Lande (ionic, ~5% demonstrated); Miedema (two measured parameters per metal); London alpha^2 IE/r^6 (~20% on C_6); Hume-Rothery; broken-bond vacancy ~ E_b with the factor 2 to 3 relaxation class correction; surface energy E_b/a^2 (same relaxation flag); hydrogenic dopant levels (factor ~2); Debye theta_D from EOS sound speed; PBR as first-order oxide screen; Dones-Tremaine spin prior (CLT-forced shape, SFD-tied scale).
+The admission layer rejects `[A]`, `[C]`, caller-supplied `[W]`, caller-supplied
+`[X]`, incomplete receipts, duplicate residual slots, and candidates outside the
+repository-owned catalog. Evidence custody supports a receipt but never admits
+the value by itself. When a required measure cannot derive and lacks complete
+admission, the physical stage refuses.
 
-## Layer 3b, measured class constants with derived structure
+There is no generic value-binding API. `AbsolutePhysicsFloor` exposes identities,
+ancestry, and receipts only. Typed physical magnitude access must be
+repository-owned and specific to the admitted identity.
 
-creep g = E*/RT_m per bonding-class-and-mechanism, half a dozen for the universe (17 to 18 close-packed metals, 26 to 30 covalent/directional, grain-boundary fraction ~0.4 to 0.6); Andrade alpha ~ 0.2 to 0.3 (solid tidal Q now derived through it); Byerlee 0.6 to 0.85; phyllosilicate class friction (layered-bond rationale [D]); Taylor-Quinney ceiling f <= ~0.1 [D bound, value C].
+## Central inventory
 
-## Layer 3c, the closure ledger, the real knobs, each banded
+Regenerate the complete tier-by-mark report with:
 
-Turbulence family: turbulent Nu correlations; convection beta (0.1 to 1/3, contested, feeds tau(beta) memory); C_E ~ 1.3e-3; cloud macro-organization (declared worst entry, matching the field); K_zz(z) as a field; diapycnal kappa (tidally co-powered); hurricane drag ratio; tau_i per contact class (a time series via film state, atmosphere-selected); Archard k per wear regime; cavitation-erosion k; the universal abrasion coefficient. Energy deposition: eps_heat ~ 0.3 to 0.5 (ledger-bounded) and eps_escape ~ 0.1, distinct slots. Interior: k_core 20 to 150 W/m.K (unsettled); ocean Q (state-dependent closure on continental configuration); mobile-lid friction and lambda caps; Weibull moduli per formation class; Holsapple pi-coefficients; Paris m ~ 2 to 4 and the stress-corrosion index; the deep-time INTERIOR THERMOSTAT set point (`interior.thermostat_set_point_solidus_fraction`), the mean province's radiogenic budget back-solved from a target steady state instead of derived from an abundance times a per-isotope heat production, reserved as a dimensionless fraction of the world's own derived surface solidus so it stays per-world. Two disclosures ride with it. Its coefficient is composed against the CONDUCTIVE-LIMIT balance while the kernel's loss carries the boundary-layer Nusselt factor, so the true steady state is `T_ref + (target - T_ref)/Nu` and only a non-convecting column (Nu = 1) lands on the target; every convecting province settles below it. And it is UNBANDED with no hindcast exclusion, unlike its neighbours in this group, so its width is unstated. Retirement is a wiring rather than a fetch: `law.radiogenic_heat`, the cited per-isotope `geo.specific_heat_production` and `geo.decay_constant` rows (u238, u235, th232, k40), and the `secular_step`/`secular_history` decay-into-heat path are all built and unread, leaving the per-world `geo.isotope_concentration` as the one missing input (the disk abundance table stops at Z = 42, so U and Th carry no abundance). Atmosphere: MT_CKD continuum; WHAK barrier set (40 to 80 kJ/mol bracket); precipitation-efficiency scheme; CCN inventory; charge-separation rate; haze optics. Stellar and system: Mdot_star(t) wind history; flare slope ~E^(-1.8); Holman-Wiegert stability criterion; SEMF's five MeV coefficients. Materials: Margules class constants; partition coefficients per element class; per-solvent weakening entries; redox-chain overrides (equilibration efficiency with its Weber-scale derived form, late veneer).
+```sh
+just ledger-inventory
+```
 
-## Layer 3d, chemistry-border authored
+Check that the checked-in report matches the catalog with:
 
-photochemical rate tables (expanding but bounded); Zel'dovich lightning fixation; flame rate constants; wet corrosion rates; solubility products; serpentinization and dehydration Clapeyron entries; hydrous speciation coefficient (calibrated, factor-2 mechanism derived); clathrate cage parameters (pair-potential tier). Plus authored booleans: many-body accidents (ice floats class), VSEPR exact-angle decimals where consumed, class-assignment enum for invented substances.
+```sh
+just ledger-inventory-check
+```
 
-## Layer 4, the contingency vector, final form
+The current physical-floor catalog contains three Tier 1 `[M]` invariants:
+`fundamental.alpha`, `fundamental.G`, and `fundamental.m_e`. Every other matrix
+cell is zero. Exact SI representation definitions are versioned separately and
+carry no provenance tag; runtime-derived execution values do not masquerade as
+floor inputs. The inventory generator emits each tag, count, tier total, and
+stable member identity, so no hand-maintained summary can drift silently.
 
-System: M_star, composition/metallicity, birth epoch, Omega_star_0 (young systems only, gyrochronology erases it), architecture draws through genesis (masses from occurrence statistics, Rayleigh e and i, peas-in-a-pod spacing, metallicity-correlated giants, AMD-filtered, Laplace-Lagrange spectrum then exact), binarity draw. Per body: M, {x_i} (absorbing volatiles and radiogenics), a, e, i, phases, eps_0, P_0, T_p,0, initial thermal and damage slots, satellite elements. Formalized contingency in named slots: chaos-band draws (seeded, measure-based), attractor-basin bits (Venus class), sub-kT polymorph draws, unequilibrated-impactor events. Demoted or deleted from this layer: R (EOS), the Fe3+ redox anchor (computed with bounded override), present-day spin and tilt wherever age exceeds tau_forget, old-star spin.
-
-## Written-state registry (computed history, neither authored nor derived-once) [W]
-
-lithology; crack density and damage; dislocation density; grain size, texture, fabric; oxide film thickness; remanent magnetization and coercivity structure; reservoir inventories; isotope ratios (D/H, Ar-40, U-235/U-238); the mineral species census (Hazen staircase); fossil figure (B-A)/C; continental configuration; T_p with its tau(beta) kernel; ore anomaly fields; crater record; the archive class generally (rhythmites, BIFs, detrital grains, thermochronometers).
-
-## Engine spec
-
-four-tag provenance with the refutability test; headline counts as ledger queries; error-band DAG with regime-marginal surfacing; the solver law (all memory in named state, memoryless solver); timescale-ladder quasi-statics with stiffness self-check; pseudo-arclength continuation with deterministic fold jumps; lattice quantization below error bands; fixed module order and deterministic reductions; the chaos protocol (detector, seeded stationary draw, three-way switch); attractor shortcut with basin measures; response surfaces on slow schedules; ConservedBudget double-entry (L and E, energy posting to the heat ledger, |L| invariant under precession); memoized kernel on (composition, E-bucket, path class); lazy anomaly instantiation; status fields built/stubbed/spec with spec-to-repo diff; compute-once cache; cosmetic gazetteer; Buckingham pre-counting; the four legal procgen moves with the incoherence flag.
-
-## Open walls, flagged as field-unsolved
-
-turbulence closure; coronal heating; the plate-weakening mechanism and Earth's own onset date; the core paradox and k_core; beta and thermal history; the 100-kyr problem; the giant-planet spin regulator; the CNT prefactor; cloud organization; Lowdin's challenge; deep-focus earthquake mechanism; charge separation.
-
-## Validation battery (banked in-conversation, compressed)
-
-helium metrology; Denver and Everest boiling; global 1 m/yr precipitation; Pr = 2/3; the 900 K thermosphere; the three-planet hot-O gate; Ar-40 at 49%; NaCl at 5%; CO bond length 113 versus 112.8; magnetite 4 versus 4.1 mu_B; iron M_s 1.73 versus 1.71; TNT 6.6 versus 6.9 km/s; Io's 1e14 W and its eclipse collapse; the Earth-Moon angular-momentum double entry at ~10%; 6 to 7 km MORB crust; Olympus versus Everest; the 3.4 ppm cold trap; the 8 to 10 R_E standoff; the Mercury-to-Earth fO2 staircase; enstatite-chondrite assemblages; Oklo at 3.8%; 21.9 h rhythmites; the 1.8 R_earth radius valley; Venus D/H; the Hazen staircase and its reduced-world null; CAI-first condensation.
-
----
-
-## This session's derivation work to reconcile
-
-The ledger above is comprehensive on the physics substrate but predates this session's derive-first work on the actual repo. These reconcile in, each tagged by what the code on current `origin/main` does (built = the real tag; specified-not-built = the intended provenance with status `spec`). Where a session derivation and the ledger disagree, the REPO is the truth.
-
-- **Surface gravity is DERIVED [D]** (built on #175): `g = (4/3)*pi*G*R*rhobar` (the floor `GRAVITATIONAL_CONSTANT`; the per-world radius `R`; the per-world planet MEAN density `rhobar`). The mean density must be the whole-planet mean (~5514 for Earth), never the silicate composition mean (~3300, which gives a wrong g~5.9); `rhobar` tags [M] measured pending its own derivation from bulk composition plus core (a flagged interior-lane follow-on, then it becomes [D]). This is the concrete form behind the ledger's demoted "R (EOS)": gravity derives from G plus geometry plus a measured mean density, authored nowhere.
-- **The saturation index tangent is DERIVED [D]** (merged #180): from the measured latent heat [M] and the derived gas constant `R = N_A*k_B` [D], retiring the two double-authored `hydrology.saturation_slope`/`saturation_e_ref`. Those two entries move authored to derived.
-- **Crustal and mantle density are DERIVED [D] from composition** via the petrology assemblage kernel (`assemblage_density_at_conditions`, Gibbs minimization over the phase registry), armed on #175/#178. Composition {x_i} is the [X/M] input; density falls out. The material/substance registry (floor `*_floor.toml` substances: granite density=2700 authored, etc.) is an AUTHORING-DEFECT the owner flagged this session: those bulk properties BYPASS this derivation. Tag the authored bulk rows [A]/[C], flag them, and note the correct form (a material is a composition whose properties derive [D], the measured floor relocated DOWN to mineral/element components).
-- **Stream-power exponents [D] and the Shields threshold [D]** (A's 3a/3b): exponents from the incision process model plus hydraulic geometry (Whipple and Tucker), leaving the process-model choice plus near-universal b, c; Shields tau_c from composition densities, gravity, grain size, only the universal Shields number ~0.045 reserved [M].
-- **Spin/tilt audit resolutions** (this session's section-11-cleared findings, reconcile with the ledger's Layer 3/4): solid tidal Q derives [D] through Andrade rheology from the banked viscosity with one class constant (Andrade alpha ~0.2-0.3 [M]); the permanent quadrupole (B-A)/C is WRITTEN STATE [W] (fossil figure); the accretion prior shape is central-limit-theorem forced with only the SFD-tied scale reserved [M/C]; chaos must be SAMPLED not integrated (the chaos protocol: a regime detector, a seeded stationary-band draw in a named slot [X], a three-way switch, NEVER a fixed-point path integral of a chaotic trajectory, which is a byte-neutrality landmine); L_spin+L_orbit must conserve under `ConservedBudget` double-entry (energy posting to a heat ledger, |L| invariant under precession).
-- **The N-body / celestial work to pull in**: task #44 R-CELESTIAL-SECULAR, the multi-body system genesis (masses from occurrence statistics, Rayleigh e/i priors, mutual-Hill peas-in-a-pod spacing, an AMD stability filter, then the Laplace-Lagrange secular-spectrum eigenproblem, closed-form, no N-body integration), which the ledger's Layer-4 "architecture draws through genesis" names. Its secular spectrum feeds BOTH the obliquity verdict and the Milankovitch/ice-age module. Tag the genesis draws [X] contingency, the derived spectrum [D], all status `spec` until built. Note that `environ.rs` is currently single-world, so this is a needed new substrate the ledger presumes.
-
----
-
-## The mechanism this ledger enforces (implementation)
-
-The seven-tag `Provenance` enum, the worst-case rank ordering, and the enforcement gate live in `crates/sim/src/calibration.rs`. The register is populated per value in `calibration/reserved.toml` (the `provenance` field, plus two edge fields on each `derived` value). A derivation names its inputs by definition, so a `derived` value MUST declare a non-empty `derived_from`: its full named source list. Those sources split two ways. The ones that are themselves reserved values are the machine-verifiable DAG edges, mirrored in `inputs` (a subset of `derived_from`, every id resolving to a manifest entry), over which the worst-case join runs. The code-level substrate laws and floor quantities that are not reserved values (`semantics::concept_thresholds`, the perceptual JND, a `law::` constant) live in `derived_from` alone: named and disclosed, un-joinable, because the manifest DAG traces only manifest-value ancestry. The honest limit this makes explicit: a code-level source that is itself a free knob cannot be joined, so an auditor reads `derived_from` to check the un-joinable edges by hand. A `derived` value with an empty source list is rejected by the gate (a value that computes from nothing is not derived, the laundering hole a bare `[D]` would open).
-
-The honesty number is the `authoring_surface` query: the count of entries whose EFFECTIVE provenance (the worst-case join up the DAG) is `closure` or `authored`, whether declared at the root or inherited through a derived chain that touches one. Phase 1 covers `calibration/reserved.toml`; Phase 2 extends the enforcement gate to the floor manifests (`crates/physics/data/*.toml`) and the material/substance registry, unifying the physics floor's two-tag `RealWithSource`/`FantasyReserved` provenance into this seven-tag register.
-
-**Phase-1 result (2026-07-13, the blind full-228 classification, smoke-gated against confirmation bias).** All 228 reserved values are tagged. Declared distribution: closure 187, derived 18, measured 14, authored 8, estimator 1. Wiring the 11 joinable derived chains carries closure taint up 10 of them, so the EFFECTIVE distribution is closure 197, derived 8, measured 14, authored 8, estimator 1. The honesty number (`authoring_surface`) is 205: the world-content values whose outcomes rest on set-points no laboratory could refute without running the sim. The range is 202 to 205: three of the 205 are fixed-point representability guards (overflow ceilings and saturation caps, `lang.dawn_round_cap`, `body.damage_caps`, `aging.wear_energy_ceiling`), arguable off the authoring surface as engine bounds rather than world content. Sixty-two entries carry a disclosed unsettled flag (no live read-site, superseded, or a residual classification uncertainty). This corrects a biased first pass that deflated the count to 174 by laundering closures into measured/contingency/estimator; the blind re-run flipped 47 tags, 31 of them onto the closure surface.
-
-## Phase 2, the floor unification and the consumer/form-side rules
-
-**Phase-2 result (the floor register).** The physics floor's two-tag `real`/`fantasy` provenance is refined into the seven-tag register as a sidecar keyed by id (`crates/physics/data/floor_provenance.toml`, read by `civsim_physics::floor_provenance`), byte-neutral by construction (the floor structs and their content hash are untouched). 243 entries: 124 axes, 19 substances, 92 elements, 6 candidate phases. The floor authoring surface is 6, the genuine owner-reserved biology and chemistry couplings (`bio.decomposition_rate`, `bio.consumer.hill_exponent`, `bio.net_harm`, `chem.corrosion_susceptibility`, `chem.solute_affinity`, `opt.spectral_band`); the physics quantity axes and the metrological atomic-weight conventions are measured, their owner-ratified windows being fixed-point representability bounds rather than world-content knobs. The TWO-AXIS DISTINCTION the arc established: a value carries a provenance/refutability grade (the honesty number counts closure-plus-authored; a cited measurement is `[M]`, off the authoring surface) AND, orthogonally, a `derive_first_defect` marker on the generality axis (a bulk material property or a phase stored on the substance rather than derived from its components is Earth-specific until the materials buildout adds the derivation). `derive_first_defects()` returns 22 (13 bulk substances, the authored elastic-modulus axis the materials modulus route targets, plus 8 phases: quartz, corundum, periclase, hematite, forsterite, fayalite, spinel and enstatite): the materials-buildout punch-list, each entry flipping `[M]`-plus-defect to `[D]` as its derivation lands and the honesty number improving. The combined honest picture is the calibration 205 plus the floor 6, resolved as one query over the joined register under the worst-case DAG join (slice 4, below).
-
-**Phase-2 result (the joined register, the unified honesty number).** The calibration manifest and the physics floor fold into ONE node set (`civsim_foundation::unified_provenance::JoinedRegister`, an accounting query with no run-path caller, byte-neutral by construction). 471 nodes (228 calibration entries plus 243 floor grades) under the identical min-rank worst-case DAG join Phase 1 built, with each node's joinable input edges recomputed against the UNIFIED namespace so a cross-register source (a calibration value naming a floor quantity, or the reverse) joins across the seam that was disclosed-but-un-joinable in either register alone. The unified honesty number is 211: the calibration 205 plus the floor 6, computed by the join rather than summed, so a cross-register flip would fail the born test. There is no flip today, verified at source: no value in either register derives from an authoring-surface value in the other. The one live cross-register edge is benign, `langmod.perceptual_geometry` (a calibration `[D]`) deriving from two `[M]` acoustic floor axes, and a measured input never taints toward the surface; a synthetic-closure-edge test exercises the taint path so a future closure edge across the seam surfaces rather than hides. The `[M]`-plus-`derive_first_defect` phase pin survives the fold (no phase on the unified surface, `derive_first_defects()` unchanged by the join, 20 after the materials port added the elastic-modulus axis). The single provenance axis and single honesty number the Phase-2 opener set out to build now exist: the physics floor is essentially all measured, and the authored surface concentrates in the calibration knobs (205) plus 6 biology and chemistry couplings.
-
-**The three consumer and form-side rules (the register's forward-guard contract).** These are gate extensions that key off the provenance grade of a value against what a consumer does with it. Each has zero current violations, so each is DEFERRED, never built empty (a gate that enforces nothing is a defect until it earns its place). Each rule states its trigger and the substrate whose arrival wires it, and each trigger is an OBLIGATION on the materials buildout: the slice that builds a rule's triggering substrate MUST wire that rule's guard IN THE SAME SLICE, so the guard and its first client land together. Never machinery-first-empty (what this defers), and never a client-without-its-guard (an `[E]` reaching an exponent with no gate). Deferring then costs nothing: the guard arrives the moment there is something to guard.
-
-1. **Exponential-consumer escalation: an `[E]` estimator is forbidden in an exponent.** An estimator's error band, exponentiated, is unbounded (5 percent of a base, raised to a power, is not 5 percent of the result), so a consumer that raises a value to a power requires that value to be `[M]` or `[D]`, and a tie within the band escalates up the provenance ladder. Trigger: a consumer declares a power-law read of a register value. Activating substrate: a consumer annotation (each consumer declaring what it does with a value), which does not yet exist; the two floor estimators (`lodestone`, `fluid.gas_transfer_coefficient`) and the one calibration estimator are read in no exponent today. Obligation: the slice that adds the first power-law consumer of a register value wires this guard in the same slice.
-
-2. **Disposer resolution-ladder: a disposer may only discriminate at its energy model's resolution.** A disposer (a comparison that selects among candidates by energy) whose error band exceeds the decision gap must escalate up the provenance ladder or resolve as a seeded sub-kT contingency draw: an `[E]` lattice energy carrying tens of percent of hundreds of kJ/mol can rank a compound-formation question but must never arbitrate a polymorph selection at units of kJ/mol. This rule IS the owner's Verdict typestate (`docs/working/VERDICT_KERNEL_CONTRACT.md`): a `Verdict` carries `delta` alongside the deciding model's `resolution_s`, and when `delta < s` the type has no `winner` field, only `Escalate` or `SeededDraw`, so the resolution-ladder becomes a state that cannot be constructed rather than a rule anyone must remember. Home: the materials kernel, not a register gate. Obligation: the Verdict type is built with the disposer (materials buildout, Stage 4), the guard reified as the typestate in the same slice.
-
-3. **`[D]`-closed-form re-evaluation: a `[D]` with a closed form stores the FORM and recomputes it, never hand-copies the number.** A derived constant is a query (recompute from the closed form over its inputs), not a transcribed literal, so a transcription error fails the build the way an untagged value does (the g-factor catch: `2 + alpha/2pi` written where the correct Schwinger anomaly is `2 + alpha/pi`). Trigger: a `[D]` value whose closed form can be recomputed from its inputs. Activating substrate: the `[D]`'s inputs being manifest-resolvable; today the floor `[D]` inputs are code-level (half-lives, laws) and the calibration `[D]` constants reference the floor fundamentals, which are not manifest entries, so there is nothing to recompute in-gate. Obligation: the slice that makes a `[D]`'s inputs manifest-resolvable adds the `form` field and the recompute-and-assert in the same slice, so the form is load-bearing rather than decorative documentation.
+The retired calibration-era ledger specification is preserved at
+`parked/docs/PROVENANCE_LEDGER_LEGACY.md`. It is historical evidence only and
+does not define the canonical runpath.

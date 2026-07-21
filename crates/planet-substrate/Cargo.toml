@@ -1,0 +1,22 @@
+[package]
+name = "civsim-planet-substrate"
+description = "Private pre-migration mechanisms retained for typed canonical planet adapters."
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+civsim-core = { path = "../core" }
+civsim-materials = { path = "../materials" }
+civsim-physics = { path = "../physics" }
+civsim-units = { path = "../units" }
+civsim-world = { path = "../world" }
+
+[build-dependencies]
+civsim-stone0 = { path = "../stone0" }
+
+[lints.clippy]
+disallowed_types = "deny"

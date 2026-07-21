@@ -1,4 +1,19 @@
-# Physics surfaces and the honest-residue ledger (owner research, in progress)
+# Superseded physics-surfaces residue map: historical research inventory
+
+Status: superseded by the canonical absolute-floor ruling of 2026-07-20.
+
+The physical relations below remain derivation leads. Their earlier authored
+residue and authored-input language grants no canonical permission. Buckingham
+Pi bounds the number of dimensionless residual slots that still require proof;
+it does not authorize values for those slots. Each irreducible survivor must be
+an eligible `[M]` or `[E]` value with complete derivation-exhaustion, Gap Law,
+Residual Law, unique-slot, evidence, and admit-the-alien receipts. Otherwise
+the consumer refuses. No per-class, per-world, familiar-reference, or viewer
+value enters merely because this historical map names it.
+
+Use `docs/working/ABIOTIC_EVIDENCE_DEBT.md` and the executable ledger admission
+types for the active rule. Every reference to an authored residue or budget
+below is historical terminology only.
 
 Owner-supplied derive-first batch (2026-07-11) carrying the physics surface from ocean waves through material strength to the energy technologies and the electric age, each a derived skeleton with a short authored residue. Captured as a living map; spot-checked numbers noted. The meta-tool at the end, Buckingham Pi, bounds the authored surface of every phenomenon before it is built.
 

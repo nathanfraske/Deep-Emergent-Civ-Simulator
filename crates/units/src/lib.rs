@@ -17,10 +17,7 @@
 //! This crate is the foundation the runbook lists as buildable now and the
 //! structure the R-UNITS-PIN flag calls for. It carries the *mechanism* only:
 //!
-//! - A base-dimension registry. The set of base dimensions is data the owner and
-//!   the physics fan-out provide (R-DEEPTECH-PHYSICS), not authored here, because
-//!   the physics catalogue is the one authored layer and is the owner's to populate
-//!   (Principle 9). A [`Dimension`] is a vector of integer exponents over those base
+//! - A base-dimension registry. A [`Dimension`] is a vector of integer exponents over supplied base
 //!   dimensions, kept in a canonical sorted form, so a derived dimension (force,
 //!   energy) is a computed composition rather than an authored entry, and every
 //!   quantity mechanically reduces to base dimensions, which is the descriptor
@@ -33,21 +30,21 @@
 //!   perturb a canonical result, and overflow follows the quantity's declared
 //!   policy rather than an accident (the discipline Part 55 requires).
 //!
-//! What this crate deliberately does not contain: any base dimension, any quantity,
-//! or any scale. Those are the authored physics catalogue and the owner's reserved
-//! values; the tests use a small fixture catalogue, clearly marked as a fixture and
-//! not the authored set. The one exception is the [`fundamentals`] module: the closed
-//! table of CODATA fundamental constants, which ARE the one authored universal layer
-//! the value-authoring line permits (distinct from any owner or per-world value).
+//! What this crate deliberately does not contain: a caller-selected physical
+//! floor, per-world quantity, or causal scale. The [`fundamentals`] module keeps
+//! exact SI representation definitions separate from measured physical
+//! invariants, and `constants` derives the execution view. The canonical planet
+//! boundary alone admits physical invariants after derive-first exhaustion.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub mod bignum;
 pub mod compute;
-pub mod emic;
+pub mod constants;
 pub mod fundamentals;
 pub mod guard;
+pub mod physics_floor;
 pub mod plan;
 pub mod tier2;
 

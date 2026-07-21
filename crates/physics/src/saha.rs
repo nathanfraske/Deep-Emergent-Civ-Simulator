@@ -33,6 +33,7 @@
 use crate::periodic::PeriodicTable;
 use civsim_core::Fixed;
 use civsim_units::bignum::BigRat;
+use civsim_units::constants::{self, SiExecutionMagnitudes};
 use civsim_units::fundamentals;
 
 /// The natural log of a decimal-string magnitude, for constants that overflow or underflow `Fixed` and so cannot
@@ -102,29 +103,68 @@ fn normalize_wide_plain(s: &str) -> Option<(String, i32)> {
     Some((mantissa_str, exp))
 }
 
-/// The natural log of a registered fundamental constant's value (its underflow-safe log, via [`ln_of_decimal`]).
-/// `None` if the symbol is not a registered fundamental.
-pub fn ln_fundamental(symbol: &str) -> Option<Fixed> {
-    ln_of_decimal(fundamentals::fundamental(symbol)?.value)
+/// The natural log of a sealed SI execution value.
+///
+/// Root coordinates are logged from their exact source decimal. Projecting an
+/// underflowing root through a finite binary scaled integer before taking its
+/// log would add representation drift to every downstream equation. Derived
+/// `eps_0` is assembled in the log domain from its defining relation, so its
+/// off-path CODATA decimal remains only a drift oracle. Other derived execution
+/// values may use the sealed scaled projection when no log-domain relation is
+/// needed by a caller.
+pub fn ln_fundamental(execution: &SiExecutionMagnitudes, symbol: &str) -> Option<Fixed> {
+    execution.get(symbol)?;
+    if let Some(decimal) = execution.source_decimal(symbol) {
+        return ln_of_decimal(decimal);
+    }
+    if symbol == "eps_0" {
+        let twice_ln_e = ln_fundamental(execution, "e")?.checked_mul(Fixed::from_int(2))?;
+        return twice_ln_e
+            .checked_sub(Fixed::from_int(2).ln())?
+            .checked_sub(ln_fundamental(execution, "alpha")?)?
+            .checked_sub(ln_fundamental(execution, "h")?)?
+            .checked_sub(ln_fundamental(execution, "c")?);
+    }
+    let value = execution.get(symbol)?;
+    if value.bits() <= 0 {
+        return None;
+    }
+    let ln_bits = ln_of_decimal(&value.bits().to_string())?;
+    let scale = i32::try_from(value.scale_bits()).ok()?;
+    Some(ln_bits - Fixed::from_int(scale).mul(Fixed::from_int(2).ln()))
 }
 
-/// A deterministic, canonical `log(exp(a) + exp(b))` for the log-domain sums the Saha charge-neutrality root needs
-/// (each ionization term and their sum live in the log domain). Written `hi + ln(1 + exp(lo - hi))` with `hi` the
-/// larger operand, so `lo - hi <= 0` and the inner `exp` is in `(0, 1]` (never overflows, underflows harmlessly to
-/// zero when one term dominates, giving `hi`). The fixed hi-then-lo ordering makes it associative-stable and
-/// order-independent (the canonical-logsumexp determinism rule).
-/// @provides log_sum_exp
+/// Natural log of a noncausal SI representation value.
+///
+/// Physical-invariant roots and relations depending on them are unavailable
+/// here. This path is only for coordinate operations such as `R = N_A k_B`.
+pub fn ln_si_representation(symbol: &str) -> Option<Fixed> {
+    let representation = constants::si_representation_magnitudes().ok()?;
+    let value = representation.get(symbol)?;
+    if let Some(root) = fundamentals::fundamental(symbol) {
+        return ln_of_decimal(root.value);
+    }
+    if value.bits() <= 0 {
+        return None;
+    }
+    let ln_bits = ln_of_decimal(&value.bits().to_string())?;
+    let scale = i32::try_from(value.scale_bits()).ok()?;
+    Some(ln_bits - Fixed::from_int(scale).mul(Fixed::from_int(2).ln()))
+}
+
+// @derives: the binary log-domain sum <- the shared N-ary log-sum-exp primitive over the two operands
+/// Compatibility wrapper for `log(exp(a) + exp(b))`. The numerical implementation lives once in
+/// [`Fixed::log_sum_exp`]; this domain-facing binary shape remains for callers that combine exactly two terms.
 pub fn log_sum_exp(a: Fixed, b: Fixed) -> Fixed {
-    let (hi, lo) = if a >= b { (a, b) } else { (b, a) };
-    // lo - hi <= 0; a saturating subtract only matters at the representable rails, which the log domain avoids.
-    let d = lo - hi;
-    hi + (Fixed::ONE + d.exp()).ln()
+    Fixed::log_sum_exp(&[a, b]).expect("a two-element log-domain sum is non-empty")
 }
 
 /// The eV-to-kelvin factor `e / k_B` (K/eV, ~11605): both `e` and `k_B` underflow `Fixed`, but their ratio is
 /// representable, so the Boltzmann argument `chi/(k T) = chi_eV * (e/k_B) / T` is formed from this ratio rather
 /// than from the underflowing individual constants. Computed once in exact `BigRat`.
-fn ev_to_kelvin() -> Option<Fixed> {
+fn ev_to_kelvin(execution: &SiExecutionMagnitudes) -> Option<Fixed> {
+    execution.get("e")?;
+    execution.get("k_B")?;
     let e = BigRat::from_decimal_str(fundamentals::fundamental("e")?.value).ok()?;
     let k = BigRat::from_decimal_str(fundamentals::fundamental("k_B")?.value).ok()?;
     Fixed::from_bits_i128(e.div(&k).round_to_scale(Fixed::FRAC_BITS)?)
@@ -160,7 +200,12 @@ fn ground_state_degeneracies(symbol: &str) -> Option<(Fixed, Fixed)> {
 /// FIRST ionization energy read from the measured [`PeriodicTable`] (the periodic table carries the first IE per
 /// element; the successive-IE ladder is a separate transition-metal column). `None` if the species lacks a pinned
 /// degeneracy convention or a first ionization energy, or on a non-positive temperature.
-pub fn ln_saha_factor(symbol: &str, temperature_k: Fixed, table: &PeriodicTable) -> Option<Fixed> {
+pub fn ln_saha_factor(
+    execution: &SiExecutionMagnitudes,
+    symbol: &str,
+    temperature_k: Fixed,
+    table: &PeriodicTable,
+) -> Option<Fixed> {
     if temperature_k <= Fixed::ZERO {
         return None;
     }
@@ -169,13 +214,18 @@ pub fn ln_saha_factor(symbol: &str, temperature_k: Fixed, table: &PeriodicTable)
     let g_factor = Fixed::from_int(2).mul(gp).checked_div(g0)?.ln();
     // (3/2) ln(2 pi m_e k_B T / h^2), each log underflow-safe.
     let ln_2pi = ln_of_decimal("6.283185307")?;
-    let quantum = ln_2pi + ln_fundamental("m_e")? + ln_fundamental("k_B")? + temperature_k.ln()
-        - Fixed::from_int(2).mul(ln_fundamental("h")?);
+    let quantum = ln_2pi
+        + ln_fundamental(execution, "m_e")?
+        + ln_fundamental(execution, "k_B")?
+        + temperature_k.ln()
+        - Fixed::from_int(2).mul(ln_fundamental(execution, "h")?);
     // (3/2) ln(...) is per cubic metre; subtract 6 ln 10 to land per cubic centimetre (the cgs join system).
     let ln_quantum_concentration =
         Fixed::from_ratio(3, 2).mul(quantum) - Fixed::from_int(6).mul(Fixed::from_int(10).ln());
     // chi/(k T) = chi_eV * (e/k_B) / T, from the representable ratio.
-    let boltzmann = chi_ev.mul(ev_to_kelvin()?).checked_div(temperature_k)?;
+    let boltzmann = chi_ev
+        .mul(ev_to_kelvin(execution)?)
+        .checked_div(temperature_k)?;
     Some(g_factor + ln_quantum_concentration - boltzmann)
 }
 
@@ -210,8 +260,8 @@ pub struct SahaState {
 
 /// `ln(k_B)` in CGS (erg/K): the SI `k_B` (J/K) times `1e7`, in the log domain `ln k_B + 7 ln 10`. For `P_e` in
 /// dyn/cm^2 from `n_e` in cm^-3 and `T` in K.
-fn ln_k_boltzmann_cgs() -> Option<Fixed> {
-    Some(ln_fundamental("k_B")? + Fixed::from_int(7).mul(Fixed::from_int(10).ln()))
+fn ln_k_boltzmann_cgs(execution: &SiExecutionMagnitudes) -> Option<Fixed> {
+    Some(ln_fundamental(execution, "k_B")? + Fixed::from_int(7).mul(Fixed::from_int(10).ln()))
 }
 
 /// The multi-species SAHA free-electron density from single-stage ionization and charge neutrality. Each `species`
@@ -224,6 +274,7 @@ fn ln_k_boltzmann_cgs() -> Option<Fixed> {
 /// validity flag (rider 1), and the zero-electron verdict (rider 2). `None` if no species resolves or a constant
 /// fails to load.
 pub fn electron_density_saha(
+    execution: &SiExecutionMagnitudes,
     temperature_k: Fixed,
     species: &[(&str, Fixed)],
     table: &PeriodicTable,
@@ -234,29 +285,26 @@ pub fn electron_density_saha(
     // (ln N_i, ln S_i) for each species that carries both a pinned convention and a first ionization energy.
     let mut terms: Vec<(Fixed, Fixed)> = Vec::with_capacity(species.len());
     for (symbol, ln_n_i) in species {
-        if let Some(ln_s) = ln_saha_factor(symbol, temperature_k, table) {
+        if let Some(ln_s) = ln_saha_factor(execution, symbol, temperature_k, table) {
             terms.push((*ln_n_i, ln_s));
         }
     }
     if terms.is_empty() {
         return None;
     }
-    // The total nuclei ln(sum N_i) (the full-ionization ceiling on n_e), by a canonical log-domain fold.
-    let ln_n_total = terms
-        .iter()
-        .map(|(ln_n, _)| *ln_n)
-        .reduce(log_sum_exp)
-        .unwrap();
+    // The total nuclei ln(sum N_i), the full-ionization ceiling on n_e, through the shared canonical reduction.
+    let nuclei: Vec<Fixed> = terms.iter().map(|(ln_n, _)| *ln_n).collect();
+    let ln_n_total = Fixed::log_sum_exp(&nuclei)?;
     // ln RHS(ln n_e) = logsumexp_i [ln N_i + ln S_i - logsumexp(ln n_e, ln S_i)], the charge-neutrality right side.
     let ln_rhs = |ln_ne: Fixed| -> Fixed {
-        terms
+        let rhs_terms: Vec<Fixed> = terms
             .iter()
             .map(|(ln_n, ln_s)| *ln_n + *ln_s - log_sum_exp(ln_ne, *ln_s))
-            .reduce(log_sum_exp)
-            .unwrap()
+            .collect();
+        Fixed::log_sum_exp(&rhs_terms).expect("validated Saha terms are non-empty")
     };
 
-    let ln_k_cgs = ln_k_boltzmann_cgs()?;
+    let ln_k_cgs = ln_k_boltzmann_cgs(execution)?;
     let ln_t = temperature_k.ln();
     // ln P_e for a given ln n_e (P_e = n_e k_B T, cgs). The representable floor: P_e must exceed the smallest
     // positive Fixed, else the electrons are below resolution.
@@ -266,12 +314,9 @@ pub fn electron_density_saha(
     // The max achievable n_e "through each donor's own S": the weakly-ionized estimate n_e ~ sqrt(sum N_i S_i),
     // i.e. (1/2) logsumexp(ln N_i + ln S_i). Accurate in the cold regime (where the verdict matters), and merely
     // conservative (over-estimating) in the hot regime (where the bisection solves anyway).
-    let ln_ne_estimate = terms
-        .iter()
-        .map(|(ln_n, ln_s)| *ln_n + *ln_s)
-        .reduce(log_sum_exp)
-        .unwrap()
-        .div(Fixed::from_int(2));
+    let electron_estimate_terms: Vec<Fixed> =
+        terms.iter().map(|(ln_n, ln_s)| *ln_n + *ln_s).collect();
+    let ln_ne_estimate = Fixed::log_sum_exp(&electron_estimate_terms)?.div(Fixed::from_int(2));
     // The zero-electron verdict (rider 2): if even that estimate's electron pressure is below the representable
     // floor, there are no free electrons at resolution (the cold outer disk).
     if ln_p_e(ln_ne_estimate) < ln_p_floor {
@@ -314,6 +359,10 @@ pub fn electron_density_saha(
 mod tests {
     use super::*;
 
+    fn execution() -> SiExecutionMagnitudes {
+        constants::canonical_si_execution_magnitudes().expect("the sealed floor projects")
+    }
+
     fn close(a: Fixed, b: f64, tol: f64) -> bool {
         (a.to_f64_lossy() - b).abs() < tol
     }
@@ -343,14 +392,18 @@ mod tests {
 
     #[test]
     fn ln_of_decimal_handles_a_plain_integer_and_reads_the_register() {
+        let execution = execution();
         // A plain integer (no exponent) with a value that fits: ln(299792458) ~ 19.52. And the register read.
         assert!(
             close(ln_of_decimal("299792458").unwrap(), 19.518, 0.01),
             "ln(c) ~ 19.52, got {}",
             ln_of_decimal("299792458").unwrap().to_f64_lossy()
         );
-        assert_eq!(ln_fundamental("m_e"), ln_of_decimal("9.1093837015e-31"));
-        assert_eq!(ln_fundamental("not_a_constant"), None);
+        assert_eq!(
+            ln_fundamental(&execution, "m_e"),
+            ln_of_decimal("9.1093837015e-31")
+        );
+        assert_eq!(ln_fundamental(&execution, "not_a_constant"), None);
         // A WIDE plain integer that overflows Q32.32 as a plain value (the AU in metres, 1.496e11): the normalize
         // branch expresses it as mantissa times 10^exp so its log is defined. ln(149597870700) ~ 25.73.
         assert!(
@@ -406,7 +459,8 @@ mod tests {
         // Boltzmann term 13.6 * 11605 / 6000 ~26.30) minus 6 ln 10 = 13.816, so ~22.17. The g factor is 0
         // (2*1/2 = 1); a ground-state slip to g0 = 1 would shift this by ln 2 ~ 0.69, so the pin is load-bearing here.
         let t = table();
-        let ln_s = ln_saha_factor("H", Fixed::from_int(6000), &t).unwrap();
+        let execution = execution();
+        let ln_s = ln_saha_factor(&execution, "H", Fixed::from_int(6000), &t).unwrap();
         assert!(
             close(ln_s, 22.17, 0.3),
             "ln S(H, 6000K) ~ 22.17 cgs, got {}",
@@ -414,8 +468,8 @@ mod tests {
         );
         // The inner-disk character: potassium (IE 4.34 eV) ionizes far more readily than hydrogen (13.6 eV) at the
         // same cool temperature, so it feeds the electron budget below ~3000 K. ln S(K) >> ln S(H).
-        let ln_k = ln_saha_factor("K", Fixed::from_int(3000), &t).unwrap();
-        let ln_h = ln_saha_factor("H", Fixed::from_int(3000), &t).unwrap();
+        let ln_k = ln_saha_factor(&execution, "K", Fixed::from_int(3000), &t).unwrap();
+        let ln_h = ln_saha_factor(&execution, "H", Fixed::from_int(3000), &t).unwrap();
         assert!(
             ln_k > ln_h,
             "K ionizes more readily than H at 3000 K: ln S(K) {} > ln S(H) {}",
@@ -423,7 +477,10 @@ mod tests {
             ln_h.to_f64_lossy()
         );
         // A species with no pinned degeneracy convention is excluded, not guessed.
-        assert_eq!(ln_saha_factor("Xx", Fixed::from_int(6000), &t), None);
+        assert_eq!(
+            ln_saha_factor(&execution, "Xx", Fixed::from_int(6000), &t),
+            None
+        );
     }
 
     #[test]
@@ -433,6 +490,7 @@ mod tests {
         // against kT ~ 0.5 eV, because the low-IE metals (Na, K, Mg, Ca) and H's own tail set n_e ~1.4e13 cm^-3.
         // This exercises the huge-exponent regime the log-space design exists for.
         let t = table();
+        let execution = execution();
         let temp = Fixed::from_int(5800);
         let species = [
             ("H", ln_of_decimal("1e17").unwrap()),
@@ -441,7 +499,7 @@ mod tests {
             ("Mg", ln_of_decimal("3e12").unwrap()),
             ("Ca", ln_of_decimal("2e11").unwrap()),
         ];
-        let state = electron_density_saha(temp, &species, &t).unwrap();
+        let state = electron_density_saha(&execution, temp, &species, &t).unwrap();
         assert!(
             !state.no_free_electrons,
             "the photosphere has free electrons"
@@ -451,7 +509,7 @@ mod tests {
             "the photosphere is well below full ionization"
         );
         // x_H = S_H / (S_H + n_e), in the log domain.
-        let ln_s_h = ln_saha_factor("H", temp, &t).unwrap();
+        let ln_s_h = ln_saha_factor(&execution, "H", temp, &t).unwrap();
         let x_h = (ln_s_h - log_sum_exp(state.ln_electron_density_cm3, ln_s_h)).exp();
         assert!(
             x_h.to_f64_lossy() > 1e-5 && x_h.to_f64_lossy() < 1e-3,
@@ -460,7 +518,10 @@ mod tests {
         );
         // The export is representable and positive (dyn/cm^2), and the solve replays.
         assert!(state.electron_pressure_dyn_cm2 > Fixed::ZERO);
-        assert_eq!(state, electron_density_saha(temp, &species, &t).unwrap());
+        assert_eq!(
+            state,
+            electron_density_saha(&execution, temp, &species, &t).unwrap()
+        );
     }
 
     #[test]
@@ -469,12 +530,13 @@ mod tests {
         // short-circuits to the LEGAL no-free-electrons verdict (grains and molecules own the opacity there) rather
         // than chasing a -500-class root no bracket should follow.
         let t = table();
+        let execution = execution();
         let species = [
             ("H", ln_of_decimal("1e15").unwrap()),
             ("Na", ln_of_decimal("2e9").unwrap()),
             ("K", ln_of_decimal("1e8").unwrap()),
         ];
-        let state = electron_density_saha(Fixed::from_int(100), &species, &t).unwrap();
+        let state = electron_density_saha(&execution, Fixed::from_int(100), &species, &t).unwrap();
         assert!(state.no_free_electrons, "no free electrons at 100 K");
         assert_eq!(state.electron_pressure_dyn_cm2, Fixed::ZERO);
     }
@@ -485,8 +547,9 @@ mod tests {
         // declared domain (hydrogen's own ionization and helium's first stage start moving the budget), and the
         // flag trips LOUDLY rather than degrading silently.
         let t = table();
+        let execution = execution();
         let species = [("H", ln_of_decimal("1e14").unwrap())];
-        let hot = electron_density_saha(Fixed::from_int(15000), &species, &t).unwrap();
+        let hot = electron_density_saha(&execution, Fixed::from_int(15000), &species, &t).unwrap();
         assert!(
             !hot.single_ionization_valid,
             "a >50%-ionized gas trips the validity flag"

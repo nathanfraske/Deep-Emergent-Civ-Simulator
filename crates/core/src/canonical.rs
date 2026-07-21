@@ -20,11 +20,11 @@
 //! holds authoritative state bounds its element on `Canonical`, so a float in
 //! canonical state is a compile error rather than a latent nondeterminism bug.
 //!
-//! The only sanctioned way a non-authoritative float may enter canonical state is
-//! through a quantizer that snaps it to an integer canonical unit with
-//! round-half-to-even, identical across machines for the same input.
+//! Floating-point presentation data has no sanctioned crossing into canonical
+//! state. A caller must supply an integer or exact fixed-point representation
+//! whose custody and rounding contract were established before this boundary.
 
-use crate::fixed::{Fixed, FRAC_BITS};
+use crate::fixed::Fixed;
 
 /// A type permitted in canonical (authoritative, replayable) state.
 ///
@@ -48,7 +48,7 @@ impl Canonical for u128 {}
 
 /// A wrapper that marks its contents as non-authoritative. Whatever it holds can
 /// never satisfy [`Canonical`], so it cannot be placed where canonical state is
-/// required. Use it for render fields, language output, and view-time elaboration.
+/// required. Use it for render fields and view-time elaboration.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NonCanonical<T>(pub T);
 
@@ -75,46 +75,6 @@ impl<T: Canonical> CanonicalCell<T> {
     pub fn get(self) -> T {
         self.0
     }
-}
-
-/// Snap a non-authoritative `f64` into a fixed-point canonical value with
-/// round-half-to-even, given how many fractional units make one whole. The result
-/// is identical across machines for the same input, so the crossing is reproducible
-/// (design Part 3.4).
-#[inline]
-pub fn quantize_unit(value: f64, units_per_one: i64) -> Fixed {
-    debug_assert!(units_per_one > 0, "units_per_one must be positive");
-    // Snap to the 1/units_per_one grid, then place that grid point into the Q32.32
-    // fractional field. Both steps round half-to-even, so the crossing honours its
-    // documented rounding rather than truncating toward zero (audit C-03).
-    let units = (value * units_per_one as f64).round_ties_even() as i128;
-    let bits = idiv_round_half_even(units << FRAC_BITS, units_per_one as i128);
-    Fixed::from_bits(bits as i64)
-}
-
-/// Integer division rounded to nearest, ties to even, for a positive divisor.
-#[inline]
-fn idiv_round_half_even(num: i128, den: i128) -> i128 {
-    debug_assert!(den > 0);
-    let q = num.div_euclid(den); // floor toward negative infinity
-    let r = num.rem_euclid(den); // 0 <= r < den
-    let twice = r * 2;
-    if twice < den {
-        q
-    } else if twice > den {
-        q + 1
-    } else if q % 2 == 0 {
-        q
-    } else {
-        q + 1
-    }
-}
-
-/// The Part 3.4 example: a non-authoritative water depth in metres becomes
-/// canonical millimetres through a stable quantizer.
-#[inline]
-pub fn quantize_depth_mm(metres: f32) -> i32 {
-    (metres * 1000.0).round_ties_even() as i32
 }
 
 // --- Canonical iteration and reduction (design Part 3.5, Part 57; R-CANON-WALK, R-REDUCE-ORDER) ---
@@ -148,8 +108,8 @@ where
 
 /// Fold a non-associative canonical combine in a pinned order (R-REDUCE-ORDER, design Part 57):
 /// sort the items by their total key, then fold left. The result is a pure function of the item set
-/// rather than of arrival or thread order, which is what pins a combine like the gossip conflict
-/// apply, the weighted pick over an unordered candidate list, or the migration renormalisation. The
+/// rather than of arrival or thread order, which pins weighted selection over an unordered candidate
+/// list and any other non-associative reduction. The
 /// key must be a total order for the guarantee to hold. This is the general form of what
 /// [`Fixed::sum_bits`](crate::Fixed::sum_bits) does for the associative sum: order the inputs, then
 /// combine.
@@ -183,36 +143,6 @@ mod tests {
         assert_eq!(store_canonical(Fixed::ONE).get(), Fixed::ONE);
         assert_eq!(store_canonical(7i64).get(), 7);
         assert!(store_canonical(true).get());
-    }
-
-    #[test]
-    fn quantize_depth_is_exact_and_stable() {
-        // Values exactly representable in f32 quantize without rounding ambiguity.
-        assert_eq!(quantize_depth_mm(1.5), 1500);
-        assert_eq!(quantize_depth_mm(-2.5), -2500);
-        assert_eq!(quantize_depth_mm(0.0), 0);
-        // Determinism: same input, same output, every call.
-        for _ in 0..1000 {
-            assert_eq!(quantize_depth_mm(3.5), 3500);
-        }
-    }
-
-    #[test]
-    fn quantize_unit_rounds_half_to_even_not_toward_zero() {
-        // Regression for the determinism audit C-03: the final placement into the
-        // Q32.32 grid must round half-to-even, not truncate toward zero. The nearest
-        // Q32.32 bit to two thirds is 2_863_311_531; the truncating form gave
-        // 2_863_311_530.
-        assert_eq!(quantize_unit(2.0 / 3.0, 3).to_bits(), 2_863_311_531);
-    }
-
-    #[test]
-    fn quantize_unit_lands_on_expected_fixed() {
-        // 0.5 with 1000 units per one is one half in Q32.32.
-        let half = quantize_unit(0.5, 1000);
-        assert_eq!(half, Fixed::from_ratio(1, 2));
-        let one = quantize_unit(1.0, 1000);
-        assert_eq!(one, Fixed::ONE);
     }
 
     #[test]

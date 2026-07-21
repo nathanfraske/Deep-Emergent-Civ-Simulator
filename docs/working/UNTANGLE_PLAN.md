@@ -1,8 +1,57 @@
 # Untangle plan: ownership, canonical execution, and meaningful pins
 
-Status: planning document. This document proposes sequenced work; it does not declare any proposed mechanism implemented.
+Status: active migration plan. The implementation note below records the
+structural slices landed on 2026-07-20; later sections retain the original audit
+evidence and proposed decomposition order.
 
-Evidence date: 2026-07-20, against the inspected repository snapshot. Measurements involving `calibration/reserved.toml` are a point-in-time count and will change as owner calibration lands.
+Evidence date: 2026-07-20, against the inspected repository snapshot. Counts for
+the retired calibration system are historical measurements only. That system is
+not a canonical planet input.
+
+## Implementation update and owner rulings
+
+- The canonical runpath is the abiotic planet and solar-system arc. Biology,
+  civilization, dawn, compose, and the causal viewer are parked legacy work.
+- `civsim-planet` now owns the explicit runner boundary. Its seven stages are
+  star/disk/system; assembly/composition; orbit/secular/moons; young
+  thermal/materials; geodynamics/deep time; loads/flexure; immutable snapshot.
+- The canonical runner uses the seven provenance types and four ledger tiers.
+  It has no calibration profile, calibration manifest, or development fallback.
+- Those types and tiers are accounting, not equal input privileges. The runner
+  accepts only the validated absolute physics floor. Reference or residue joins
+  that floor only after a derivation-hunter receipt and Buckingham-Pi budget;
+  Gap and Residual Law obligations remain explicit. Written state and seeded
+  contingency are generated, never caller-supplied world values.
+- Admit-the-alien applies at every stage. Earth, Mirror, the Sun, a fixed orbit,
+  familiar composition, and solar hindcast targets are not implicit worlds.
+  Sourced reference rows may constrain a mechanism's validity domain, but
+  cannot select a realization. The physical realization derives from the
+  validated floor; any contingency is generated inside the pipeline only after
+  a physical measure exists. No caller seed enters the front door.
+- The centralized ledger inventory is generated from the audited catalog and
+  checked at `docs/working/CANONICAL_LEDGER_INVENTORY.txt`.
+- The no-argument executable constructs that repository-owned eleven-entry
+  floor and enters the library runner. `run-derived` is a compatibility recipe
+  for the same path. `--readiness` remains a separate zero-entry preflight
+  receipt, and caller world arguments are rejected.
+- All pre-migration modules inside `civsim-planet` are crate-private. The
+  boundary gate fails if canonical stages import one without a typed adapter or
+  if crate root re-exports one as an alternate runner. It also rejects direct
+  canonical imports from raw physics, materials, or world substrates.
+- The 217-row `floor_provenance.toml` population is now explicitly a candidate
+  evidence audit, not a second floor. It recognizes the exact seven marks plus
+  one fail-closed sentinel that never renders `[M]`.
+- The old viewer is being preserved under `parked/`. The root viewer can borrow
+  only a completed immutable `PlanetSnapshot`; it has no physical clock or
+  causal state mutation.
+- A dependency and source gate enforces both the planet boundary and the
+  observer-only viewer boundary.
+- The Earth-default `WorldStructure` selector moved to the parked world facade;
+  the active world crate no longer exposes scenario-authored terrain selection.
+
+Any later reference in this document to a calibrated canonical run is
+superseded by this absolute-floor contract. References to old calibration profiles
+remain only when describing the inspected legacy behavior.
 
 ## Decision
 
@@ -23,9 +72,15 @@ The answer to the pin question is layered:
 1. Keep the two current hashes as dawn-fixture identity checks, rename them, and make the comparison real.
 2. Add reachability receipts to say what a run exercised. A receipt explains a pin's scope; it does not validate code the run never reached.
 3. Add direct, library-owned golden-state harnesses for each physics subsystem being refactored. These are the smallest pins that can mean something for physics work now.
-4. Add a completed canonical-planet receipt and digest once a `Profile::Calibrated` physics run can finish from owner-approved inputs.
+4. Add a completed canonical-planet receipt and digest once every required
+   derivation, floor admission, and physical capability can finish.
 
-This is pins plus reachability plus per-subsystem goldens. More final hashes from `run_world` would repeat the present mistake. Replacing hashes with reachability receipts would detect wiring while losing output regression. A canonical end-to-end digest alone would be too coarse for locating a broken invariant and cannot exist as a completed-state pin while the selected world's required calibration closure refuses.
+This is pins plus reachability plus per-subsystem goldens. More final hashes from
+`run_world` would repeat the present mistake. Replacing hashes with reachability
+receipts would detect wiring while losing output regression. A canonical
+end-to-end digest alone would be too coarse for locating a broken invariant and
+cannot exist as a completed-state pin while a required derivation, admission
+receipt, or physical capability refuses.
 
 Principle 3 remains absolute throughout: the same model version, input, and seed must replay bit for bit. Seed ensembles add a population-level physical comparison for chaotic domains; they never replace exact replay for each member.
 
@@ -72,11 +127,16 @@ One owner premise needs correction. In the checked-in repository at the start of
 
 The dawn quarantine is farther along than the problem statement implies. `crates/sim/src/dawn_harness.rs` already carries a strong quarantine banner, and `crates/sim/tests/dawn_harness_quarantine.rs` build-enforces that canonical `sim/src` modules do not call it. Its direct executable consumers are the `aging_demo` and `run_world` examples; integration coverage lives in `mirror_calibrated_boot.rs` and `world_build.rs`. This work should be retained and extended, not recreated.
 
-### Calibration correction
+### Historical calibration correction
 
 The statement that any `Profile::Calibrated` run refuses while any reserved value remains is too broad. `CalibrationManifest::ensure_all_set` checks the enabled requirement set, not every entry in the global registry. On the current working tree, `reserved.toml` contains 232 entries, of which 118 remain `reserved` and 114 are `set`; despite that, `mirror_calibrated_boot` passes and boots the dawn fixture under `Profile::Calibrated` because its enabled closure is satisfied.
 
-The correct rule is: a canonical physics run must enumerate its required closure, enable it, and refuse if any member is unset or if a required substrate has no registered value path. The planned physics runner is expected to refuse until that closure is complete, but `Profile::Calibrated` by itself does not guarantee refusal. The dawn assembly also installs `dialogue::dev_substrate` unconditionally, so a successful calibrated dawn test does not make that path canonical.
+That finding describes only the retired dawn arc: its profile checked an enabled
+subset rather than the whole registry. It is not the canonical physics rule.
+The canonical runner accepts only a validated absolute floor and refuses when a
+required derivation, admission receipt, or capability is absent. The dawn
+assembly also installs `dialogue::dev_substrate` unconditionally, so its
+successful calibrated test remains legacy evidence only.
 
 ### Viewer and gate facts
 
@@ -200,7 +260,7 @@ The minimum runner surface is library first:
 crates/planet/
   src/
     canonical/
-      spec.rs          # typed world/run inputs, no fixture defaults
+      stage.rs         # fixed causal stage identifiers; no caller run specification
       preflight.rs     # enabled requirement closure and capability checks
       pipeline.rs      # fixed stage order
       receipt.rs       # completed/refused structured outcome
@@ -212,30 +272,50 @@ The binary name is provisional; the ownership and dependency rule are the decisi
 
 ### Inputs and stage contract
 
-The binary runs only `Profile::Calibrated`. It has no development fallback and no implicit world. Its `CanonicalPlanetRunSpec` reads an owner-designated per-world manifest containing world identity, seed, initial per-world data, termination target, and any numerical-policy data the owner rules to be per-world. Universal inputs come only from the fundamental-constant floor. Derived quantities are computed. Unresolved quantities are reserved with their basis and cause refusal.
+The binary has no profile selector, development fallback, implicit world,
+world-value manifest, realization name, or caller seed. Its only value-bearing
+input is a validated absolute floor. Identity `[W]`, contingency `[X]`, derived
+quantities, written state, and termination are produced by the staged
+mechanisms. An unresolved derivation, floor admission, Gap Law verdict,
+Residual Law edge, or capability causes a structured refusal.
 
-Mirror may become the first world only after the owner explicitly designates it and the current profile-override differences are resolved as canonical world data. The passing Mirror dawn test is not evidence for that designation.
+Mirror cannot be selected by supplying Mirror values. A Mirror-like result may
+be used as an external validation case only after the pipeline derives that
+realization from the absolute floor, admitted physical measures, and the approved
+realization-coordinate law. The passing
+Mirror dawn test is not evidence for canonical admission.
 
-The minimum declared physics arc is:
+The declared physics arc is:
 
-1. star, disk, and planetary-system inputs;
-2. planet assembly and composition;
-3. young thermal state and material property column, including thermoelastic and conductivity branches;
-4. geodynamic and deep-time evolution with thermal, crust, impact, and relief ledgers as enabled by the world;
-5. load moment equivalence and flexural response for the declared surface-load representation;
-6. a render-free `PlanetEvolutionSnapshot` and completed run receipt.
+1. star, disk, and planetary system;
+2. assembly and composition;
+3. orbital state, secular evolution, and moons;
+4. young thermal state and material properties, including thermoelastic and
+   conductivity branches;
+5. geodynamics and deep-time evolution, including crust and impact history;
+6. load moment equivalence and flexural response;
+7. a render-free immutable `PlanetSnapshot` and completed run receipt.
 
 Preflight must distinguish `enabled`, `reached`, `refused`, and `skipped-by-world-data`. A required stage cannot silently degrade to a display fallback. If the finite-load or field adapter needed for the declared planet is still absent, the arc refuses with that capability named. A periodic one-dimensional diagnostic must not be promoted as a planetary surface result.
 
-`DEEP_TIME_MYR_PER_TICK` does not move into this spec. The canonical physical step must derive from an integration stability/error substrate, or be read as owner-approved numerical/per-world data with a basis. Viewer frames sample or interpolate canonical state on a separate cadence. Until that ruling and substrate exist, preflight exposes the missing physical-step basis.
+`DEEP_TIME_MYR_PER_TICK` does not move into this spec. The canonical physical
+step must derive from an integration stability/error substrate. Viewer frames
+sample or interpolate canonical state on a separate cadence. Until that
+derivation exists, preflight exposes the missing physical-step basis.
 
 ### What is worth pinning
 
 A final-state digest alone is too weak for a dissipative system because distinct trajectories can converge. The completed pin is the digest of the full receipt, including normalized inputs, declared/reached stages, checkpoint trajectory, final state, conservation residuals, RNG namespaces, refusal-free outcome, and provenance. `World::state_hash` should retain its deliberately documented state boundary; runner input identity belongs beside it in the receipt rather than being smuggled into that hash.
 
-The model version changes when a physical mapping, branch measure, calibrated input, state interpretation, or RNG coordinate schema changes. A receipt-schema-only change does not change the model version if a twin proves the simulated state bytes and behavior unchanged. A path-only file move with compatibility re-exports is likewise a structural change, though Stone 0's source-input fingerprint may need its own expected update because source paths changed.
+The model version changes when a physical mapping, branch measure, evidenced
+input, state interpretation, or RNG coordinate schema changes. A
+receipt-schema-only change does not change the model version if a twin proves
+the simulated state bytes and behavior unchanged. A path-only file move with
+compatibility re-exports is likewise a structural change, though Stone 0's
+source-input fingerprint may need its own expected update because source paths
+changed.
 
-### Calibrated refusal and the proposed refusal digest
+### Ledger refusal and the proposed refusal digest
 
 A completed canonical state pin cannot exist for a world whose enabled requirement closure refuses. The plan should say that plainly rather than pin a development run under a canonical name.
 
@@ -243,13 +323,18 @@ A structured refusal receipt is coherent as a diagnostic and change-review artif
 
 It is a poor acceptance pin. A green test that requires the current real world to keep refusing would turn a known stop into expected behavior. The recommended policy is:
 
-- test the refusal machinery and canonical ordering with synthetic manifests;
+- test the refusal machinery and canonical ordering with synthetic validated
+  floors that obey the same admission contract;
 - make the real `run_planet` command exit with a documented nonzero status on refusal and print the readable receipt;
 - expose the current receipt in a clearly named readiness report or status check;
 - do not call its digest a canonical world pin and do not make exact persistence of the current refusal set a passing regression condition;
-- land the first canonical completion pin only when the selected world's required closure is set and every declared stage completes.
+- land the first canonical completion pin only when every required derivation
+  and declared stage completes.
 
-Whether the readiness status is merge-blocking while calibration remains open is an owner CI-policy ruling. The two acceptable choices are a required red readiness gate or a visible non-required status. Folding refusal into an ordinary green test is excluded. In either policy, a newly added refusal and a removed refusal must be readable without comparing opaque hashes.
+The readiness command is red while its required ledger closure or capability
+set remains open. Folding refusal into an ordinary green test is excluded. A
+newly added or removed refusal must be readable without comparing opaque
+hashes.
 
 ## Retiring the dawn-band and biology entanglement
 
@@ -277,7 +362,9 @@ The dawn stack is out of the physics path only when all of these are measurable:
 3. The canonical run and its receipt originate in planet library code. No `examples/` target is described as canonical in recipes, CI, or docs.
 4. The viewer consumes `PlanetEvolutionSnapshot` or another render-free planet result and does not assemble causal planetary state.
 5. Dawn hashes and integration tests remain in a separately named fixture lane. Their pass or failure says nothing about physics coverage unless a receipt names a shared reached mechanism.
-6. A future full-civilization runner composes an owner-approved planet state with the civilization runtime through a typed boundary. It does not call `build_dawn_runner` as a shortcut.
+6. A future full-civilization runner composes a completed canonical planet
+   snapshot with the civilization runtime through a typed boundary. It does not
+   call `build_dawn_runner` as a shortcut.
 
 ### Preserve the existing regression coverage
 
@@ -358,18 +445,25 @@ Measurements for every move:
 
 ### Slice 4: land the canonical front door in refusal-capable form
 
-Add `CanonicalPlanetRunSpec`, preflight, fixed pipeline ordering, structured receipts, and the thin `run_planet` binary. Select no implicit world. Wire `Profile::Calibrated` only. Enumerate the required calibration and capability closure for each declared stage.
+Add floor-only preflight, fixed pipeline ordering, structured receipts, and the
+thin `run_planet` binary. Select no implicit world, accept no authored seed, and
+expose no profile selector. Enumerate the required derivation, admission, and
+capability obligations for each declared stage.
 
-The pipeline may land while the real world refuses. That is a useful front door because it makes missing substrates and owner values concrete, but it is not yet a completed canonical pin. Use synthetic manifests to prove completed and refused receipt determinism without changing the visibility of the real refusal.
+The pipeline may land while it refuses. That is a useful front door because it
+makes missing substrates, derivations, and admission proofs concrete, but it is
+not yet a completed canonical pin. Use synthetic validated floors to prove
+completed and refused receipt determinism without changing the visibility of
+the real refusal.
 
 Classification: new orchestration over existing mechanisms. Treat any first live coupling between previously dormant stages as semantic even when individual kernels are unchanged, because it changes the simulated world. Such activation requires a model version, conservation checks, and review of every input path.
 
 Measurements:
 
 - Development data cannot be selected through the binary or library canonical entry point;
-- each reserved member of the enabled closure produces a readable refusal at its stage;
-- an unrelated reserved registry entry does not block the run;
-- permuting manifest file order does not change the receipt;
+- each missing derivation or admission proof produces a readable refusal at its stage;
+- an unrelated floor entry does not block the run;
+- permuting floor entry order does not change the receipt;
 - tracing on/off leaves simulated bytes unchanged;
 - a declared stage cannot disappear without changing or refusing the receipt;
 - the real command is nonzero and visibly refused until its selected world is ready.
@@ -394,7 +488,8 @@ Measurements:
 Create a machine-readable ledger for the causal scene-building region. For each of its physical constants, fallbacks, and CLI bridges, record one disposition:
 
 - fundamental constant already owned by the floor;
-- per-world data with an owner-approved source;
+- irreducible reference or residue admitted into the floor only after a
+  derivation-exhaustion receipt, Buckingham-Pi budget, and Gap/Residual review;
 - derived from an existing substrate;
 - missing substrate to build;
 - reserved with basis and therefore refusing;
@@ -417,9 +512,18 @@ This slice is blocked on owner rulings for values whose correct class cannot be 
 
 ### Slice 7: extract viewer physics through a semantic twin
 
-Define render-free planet input and output types. Move mechanisms, not viewer constants: parameterize the library mechanisms over typed inputs, and let a clearly named development adapter continue to supply the viewer's old fixture values while twins are established. The canonical adapter reads calibrated/per-world data and refuses missing inputs.
+Define render-free planet input and output types. Preserve the causal viewer as
+a parked legacy package. The canonical viewer receives only an immutable
+completed snapshot. Planet mechanisms accept only the validated absolute floor
+and internally generated state, and refuse missing derivations; no old viewer
+fixture value crosses the boundary.
 
-Move `build_deep_time_provinces`, `step_provinces`, and the physical part of `build_derived_scene_with_composition` behind the planet API. Keep color, camera, `SurfaceParam`, cache, interpolation, and playback decisions in the viewer. Compare the old and extracted development paths over the same input before deleting the old implementation.
+Rebuild required orchestration in the seven planet stages from existing
+library-owned mechanisms. Keep color, camera, cache, interpolation, and
+playback decisions in the viewer. Park
+`build_deep_time_provinces`, `step_provinces`, and
+`build_derived_scene_with_composition` with the old viewer until each useful
+physical dependency has an evidenced canonical input path.
 
 Only after the exact extraction passes should a separate semantic slice replace the retired isolation-mass derivation with its successor. That slice changes the model version and records downstream state, band, branch, conservation, provenance, and ensemble effects where the assembly protocol requires them.
 
@@ -434,9 +538,15 @@ Measurements:
 - the isolation-mass successor slice shows the intended delta under a new model version and passes the Chaos Protocol evidence if the affected assembly is sensitive;
 - constructor and determinism gates cover the new library location.
 
-### Slice 8: complete and pin the first calibrated planet
+### Slice 8: complete and pin the first ledger-complete planet
 
-Resolve the selected world's required closure through owner-set per-world data or built derivations. Close the open physical capabilities required by the declared stage list. Run the canonical pipeline to completion and check in the readable completed receipt plus its derived digest.
+Resolve the required closure through built derivations from the admitted
+absolute floor. A reference or residue may extend that floor only after the
+derivation hunter has failed, its Buckingham-Pi budget is recorded, and the Gap
+and Residual Law obligations are satisfied or visibly refused. Generate
+contingency from derived measures and the seed. Close the physical capabilities
+required by the declared stage list, run the pipeline to completion, and check
+in the readable completed receipt plus its derived digest.
 
 Classification: semantic activation. This is the first canonical physics pin and must carry a model version.
 
@@ -499,9 +609,9 @@ The following work is blocked behind an explicit ruling or substrate and must no
 
 | Blocker | Work it blocks | Required resolution |
 | --- | --- | --- |
-| Canonical world identity and termination data | First completed planet pin | Owner designates per-world data and its provenance; no fixture is promoted implicitly |
-| Physical integration interval | Canonical province/deep-time activation and viewer extraction | Build a stability/error derivation, or owner-classify a numerical/per-world value with basis; separate it from frame cadence |
-| Viewer causal-input ledger rows | Moving the causal scene builder into canonical library code | Derive, source as per-world, reserve with basis, or keep explicitly fixture-only |
+| Nonphysical run identity and physically derived termination | First completed planet pin | Keep the world id and seed outside physical inputs; derive termination from the declared physical question and error/stability substrate |
+| Physical integration interval | Canonical province/deep-time activation and viewer extraction | Build a stability/error derivation and separate it from frame cadence; otherwise refuse |
+| Viewer causal-input ledger rows | Moving the causal scene builder into canonical library code | Derive from the floor, admit an irreducible floor extension only with the full receipt, or keep explicitly fixture-only |
 | F3 finite-disc and typed-load questions | Declaring the surface flexure stage complete | Resolve load geometry/field adapter and `LoadKind` ownership; a one-dimensional diagnostic cannot stand in |
 | F7 melt-mass basis and conserved-ledger source/sink tags | Canonical crust/melt conservation receipt | Build the missing melt-fraction basis and preserve source/sink provenance in the ledger |
 | F6 stagnant-lid production ruling | Activating zero production in the visible province field | Owner decides whether the physically derived zero disables the current field or another substrate is required |
@@ -539,10 +649,14 @@ For a pure move, any simulation digest, branch/refusal, residual, RNG coordinate
 - It would not split brittle and ductile strength into separate ownership units. Together with their transition they form one yield-envelope contract.
 - It would not split geodynamic thermal and rheology dispatch so far that one column can be assembled from mutually inconsistent branches. `column_properties` owns their coherent result and refusal.
 - It would not create nine thermoelastic production files or six conductivity production files now. Their present production sizes and invariants support fewer modules.
-- It would not copy the viewer's 69 classified constants, 30 km fallback, or `DEEP_TIME_MYR_PER_TICK` into `sim` or `planet`. Each value must derive, be fundamental, be per-world data, remain fixture-only, or refuse with basis.
+- It would not copy the viewer's 69 classified constants, 30 km fallback, or
+  `DEEP_TIME_MYR_PER_TICK` into `sim` or `planet`. Each value must derive from
+  the absolute floor, qualify as an irreducible floor extension after the full
+  derivation-exhaustion protocol, remain fixture-only, or refuse with basis.
 - It would not replace the viewer's retired isolation formula in the same commit that moves it. Exact extraction and semantic retirement need separate evidence.
 - It would not scan the whole viewer with canonical constructor rules as a substitute for extraction. CLI and rendering fixtures would add noise while causal code remained in the wrong crate. Move causal ownership, then prohibit it from returning.
-- It would not require every global reserved entry to be set before any calibrated run. The required enabled closure is the correct fail-loud boundary.
+- It would not require unrelated ledger entries before a run. The declared
+  stage closure is the fail-loud boundary.
 - It would not make the current real refusal set a green golden. A refusal digest is a diagnostic checksum, not a completed-world pin.
 - It would not delete the dawn harness, biology mechanisms, or their slow tests merely because the physics runner should not depend on them.
 - It would not place the canonical planet binary in the current sim package. That would preserve the ambiguous ownership boundary.
@@ -553,10 +667,15 @@ For a pure move, any simulation digest, branch/refusal, residual, RNG coordinate
 
 The plan is complete when the repository can answer five questions mechanically:
 
-1. Which world, profile, model version, and inputs ran?
+1. Which realization identity, model version, absolute floor, and derivation
+   receipts ran?
 2. Which physical stages, state paths, and RNG namespaces were reached?
 3. Did the same input replay exactly?
 4. Which local invariant broke if the end-to-end receipt changed?
 5. Is a stop a visible refusal, rather than a default, fallback, skipped stage, or expected green limitation?
 
-At that point the dawn hashes still protect dawn behavior, physics goldens protect local mechanisms, the canonical planet receipt protects a real calibrated arc, the viewer observes rather than authors physics, and the large files are split along contracts that can each be tested. The three original problems then disappear together because the ownership boundary and the evidence boundary finally describe the same world.
+At that point the dawn hashes still protect parked behavior, physics goldens
+protect local mechanisms, the canonical planet receipt protects a
+ledger-complete arc, the viewer observes rather than authors physics, and the
+large files are split along contracts that can each be tested. The ownership
+boundary and the evidence boundary then describe the same world.

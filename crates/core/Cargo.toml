@@ -1,12 +1,18 @@
 [package]
 name = "civsim-core"
-description = "Determinism bedrock for the Emergent Civilization Simulator: fixed-point math, counter-based RNG, stable ids, arenas, the event log, and the typed canonical-state boundary."
+description = "Domain-neutral deterministic mechanics: fixed-point math, counter-based RNG, stable ids, arenas, event logs, and typed canonical-state boundaries."
 authors.workspace = true
 license.workspace = true
 edition.workspace = true
 version.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+
+[features]
+default = []
+# Compatibility-only biology and civilization identifiers. The active abiotic
+# workspace leaves this disabled; the separately parked workspace enables it.
+legacy-domains = []
 
 # The bedrock has no external dependencies on purpose. The determinism contract
 # is strongest when the foundation depends on nothing that could change a numeric

@@ -35,6 +35,7 @@
 //! against this same `r_d` source.
 
 use civsim_core::Fixed;
+use civsim_units::constants::SiExecutionMagnitudes;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -42,10 +43,10 @@ use std::fmt;
 /// The Slater effective principal quantum number for the 3d shell (`n* = 3` for `n = 3`).
 const N_STAR_3D: i32 = 3;
 
-/// The Bohr radius `a_0 = 0.52917721 Angstrom` (CODATA), a fundamental length constant (the physics floor),
-/// built by exact ratio. The hydrogenic mean-radius scale in `r = (n*)^2 a_0 / Zeff`.
-fn bohr_radius_angstrom() -> Fixed {
-    Fixed::from_ratio(52_917_721, 100_000_000)
+/// The Bohr radius in Angstroms, derived from `eps_0`, `h`, `m_e`, and `e` through the verified SI execution
+/// capability. The cited decimal is a diagnostic expectation, never the runtime source.
+fn bohr_radius_angstrom(execution: &SiExecutionMagnitudes) -> Option<Fixed> {
+    execution.bohr_radius_angstrom()
 }
 
 /// The d-state scale window (Angstrom): the derived radius must be the compact 3d-state scale, not the outermost
@@ -128,17 +129,20 @@ pub struct DStateRadii {
 }
 
 /// Derive the 3d-state radius from the effective nuclear charge: `r = (n*)^2 a_0 / Zeff`.
-fn derive_radius(z_eff: Fixed) -> Option<Fixed> {
+fn derive_radius(execution: &SiExecutionMagnitudes, z_eff: Fixed) -> Option<Fixed> {
     let n_star_sq = Fixed::from_int(N_STAR_3D * N_STAR_3D);
     n_star_sq
-        .checked_mul(bohr_radius_angstrom())?
+        .checked_mul(bohr_radius_angstrom(execution)?)?
         .checked_div(z_eff)
 }
 
 impl DStateRadii {
     /// Load the d-state radii from a TOML string. Every row must carry a citation and a positive `Zeff`, and its
     /// DERIVED radius must fall in the 3d-state scale window (the 4s-orbital guard).
-    pub fn from_toml_str(s: &str) -> Result<Self, DStateRadiusError> {
+    pub fn from_toml_str(
+        execution: &SiExecutionMagnitudes,
+        s: &str,
+    ) -> Result<Self, DStateRadiusError> {
         let file: DStateFile =
             toml::from_str(s).map_err(|e| DStateRadiusError::Parse(e.to_string()))?;
         let mut by_symbol = BTreeMap::new();
@@ -151,7 +155,7 @@ impl DStateRadii {
             if z_eff <= Fixed::ZERO {
                 return Err(DStateRadiusError::BadZeff(entry.symbol.clone()));
             }
-            let radius = derive_radius(z_eff).ok_or_else(|| {
+            let radius = derive_radius(execution, z_eff).ok_or_else(|| {
                 DStateRadiusError::BadValue(format!(
                     "{} radius derivation overflowed",
                     entry.symbol
@@ -178,8 +182,8 @@ impl DStateRadii {
     }
 
     /// The embedded standard d-state radii (`data/d_state_radii.toml`).
-    pub fn standard() -> Result<Self, DStateRadiusError> {
-        Self::from_toml_str(include_str!("../data/d_state_radii.toml"))
+    pub fn standard(execution: &SiExecutionMagnitudes) -> Result<Self, DStateRadiusError> {
+        Self::from_toml_str(execution, include_str!("../data/d_state_radii.toml"))
     }
 
     /// The derived 3d-state radius in Angstrom for an element, or `None` when absent.
@@ -207,8 +211,13 @@ impl DStateRadii {
 mod tests {
     use super::*;
 
+    fn execution() -> SiExecutionMagnitudes {
+        civsim_units::constants::canonical_si_execution_magnitudes()
+            .expect("the sealed physical floor projects")
+    }
+
     fn radii() -> DStateRadii {
-        DStateRadii::standard().expect("the d-state radii load")
+        DStateRadii::standard(&execution()).expect("the d-state radii load")
     }
 
     fn close(a: Fixed, b: f64, tol: f64) -> bool {
@@ -282,7 +291,7 @@ z_eff_3d = "3.0"
 source = "test (a 4s-scale Zeff)"
 "#;
         assert!(matches!(
-            DStateRadii::from_toml_str(trap),
+            DStateRadii::from_toml_str(&execution(), trap),
             Err(DStateRadiusError::OffScale(_))
         ));
     }
@@ -296,7 +305,7 @@ z_eff_3d = "0"
 source = "test"
 "#;
         assert!(matches!(
-            DStateRadii::from_toml_str(bad),
+            DStateRadii::from_toml_str(&execution(), bad),
             Err(DStateRadiusError::BadZeff(_))
         ));
     }
@@ -310,7 +319,7 @@ z_eff_3d = "10.0"
 source = ""
 "#;
         assert!(matches!(
-            DStateRadii::from_toml_str(bad),
+            DStateRadii::from_toml_str(&execution(), bad),
             Err(DStateRadiusError::MissingSource(_))
         ));
     }

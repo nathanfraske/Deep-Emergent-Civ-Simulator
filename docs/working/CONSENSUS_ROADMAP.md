@@ -1,141 +1,72 @@
-# Consensus Roadmap: the status board
+# Consensus roadmap: canonical abiotic status board
 
-The lean board: where the work is, one line per item. An entry is a date, a few words, and a pointer (a branch, a PR, a file, or a doc). The detail lives behind the pointer and never on the line.
+This is the lean pointer board for the canonical planet and stellar-system
+runpath. Each item is one short status line with a source pointer. Detailed
+history belongs in `HANDOFFS.md` or the parked archive. The Stop hook rejects a
+board above 16 KiB.
 
-Edit IN PLACE. When an item moves, move its line; when it lands, tombstone it under recent landings with its pointer; prune landings once they go stale. Do not inline the detail, do not append a dated narrative (that is `HANDOFFS.md`), and do not touch unrelated lines. Keep the file small: the stop-gate fails above 16 KB.
-
-The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, preserved verbatim; every item below carries its full history there. Dates are when the line last moved.
+Owner ruling, 2026-07-20: the only value-bearing input is the sealed absolute
+physics floor. The seven provenance marks and four ledger tiers are accounting,
+not admission. Written state and contingency are generated only after an
+admitted physical measure and approved realization-coordinate law. Every stage
+derives, passes complete floor admission, or refuses. Admit-the-alien and
+observer independence bind the full runpath.
 
 ## Active arcs
 
-- 2026-07-20  #215 review remediation: 18 pushed, pins bit-exact, CI green -> `HANDOFFS.md`
-- 2026-07-20  Slack band derived and reserved value retired; province now stops at the coherence gate -> `crates/materials/src/conductivity.rs`
-- 2026-07-20  FLAGGED: physics ungated both ways, pins reach zero of it and per-PR CI excludes the capstone tests -> `docs/working/UNTANGLE_PLAN.md`
-- 2026-07-20  Moon tidal-heating kernel -> `claude/moon-tidal-heating` (off main, carries #193's survival filter; doc-review round done). `moons::tidal_heating_power_log10`, dormant; witness `henning_2009_tidal_heating` in `sources/registry.toml`. Detail in `HANDOFFS.md`.
-- 2026-07-19  Mountains / mid-band (increment 3) -> #205 merged; wire waits on the thermoelastic ladder (`crates/physics/src/thermoelastic.rs`, rung 3 needs 3 anchors). Detail in `HANDOFFS.md`.
-- 2026-07-19  Seam D kernel built, flexural relief has a forebulge; producer-side wiring next -> `crates/physics/src/flexural_relief.rs`, `HANDOFFS.md`
-- 2026-07-19  Lane A flexure unit-system migration, Mars solves end to end -> `docs/working/FLEXURE_REPRESENTATION_DESIGN.md`
-- 2026-07-19  Lane B stagnant-lid: max(C1,C2) combinator + typed scope preflight built; production returns the typed refusal, run-path wiring unbuilt -> `crates/physics/src/convection_scaling.rs`
-- 2026-07-19  Lane C(i) global residual body count derived; per-target allocation is the open lever -> `crates/sim/src/smallbody.rs`
-- 2026-07-19  Lane D crust/mantle areal-mass ledger, growth is a transaction -> `crates/sim/src/deeptime.rs`
-- 2026-07-19  `Fixed::powf` audit done, 43 production sites, 2 railing defects fixed -> `docs/working/POWF_CALL_SITE_AUDIT.md`
-- 2026-07-19  Codex lane: distributed strip load, D cancels so the D->0 Airy limit is finite -> `crates/physics/src/flexural_relief.rs`
-- 2026-07-19  Lane integration order: kernels parallel, run-path serialized on deeptime.rs + main.rs -> `docs/working/GEODYNAMICS_LANE_MAP.md`
-- 2026-07-18  Remote agent #201 (disk-evolution wire) lands large and often -> rebase-onto-main integration, keep viewer/physics lanes disjoint.
-- 2026-07-18  Arc AFTER the crust (perpetual dynamics, atmosphere keystone, hydrosphere) -> plan in `PHYSICS_SUBSTRATE_ROADMAP.md`.
+- 2026-07-21  PR #215 is the draft integration base -> branch `claude/thermoelastic-rung3`, `HANDOFFS.md`
+- 2026-07-21  Replace the static stellar-birth obligation check with an executable leaf-closure evaluator, build the derive-first and Buckingham-Pi census, then close the joint measure and realization-coordinate law -> `docs/working/STELLAR_BIRTH_MEASURE_CONTRACT.md`
+- 2026-07-21  Stage 1 SI-native adapters are blocked until both stellar-birth measure leaves close -> `TODOS.md` P-STAGE1-ADAPTERS
+- 2026-07-21  Canonical GPU use remains blocked on typed adapters and exact CPU/GPU Q32.32 parity for every enabled backend -> `TODOS.md` P-GPU-BIT-PARITY
+- 2026-07-20  Stage 1 star, collapse, disk, and embryo-system realization -> `TODOS.md` P-STAR-DISK-SYSTEM
+- 2026-07-20  Stage 2 assembly and complete composition custody -> `TODOS.md` P-ASSEMBLY-COMPOSITION
+- 2026-07-20  Stage 3 orbit, secular dynamics, moons, and persistent body identity -> `TODOS.md` P-ORBITAL-SECULAR-MOONS
+- 2026-07-20  Stage 4 young thermal state and material realization -> `TODOS.md` P-YOUNG-THERMAL-MATERIALS
+- 2026-07-20  Stage 5 geodynamics, crust, mantle, and deep time -> `TODOS.md` P-GEODYNAMICS-DEEPTIME
+- 2026-07-20  Derive integration and physical termination from the floor -> `TODOS.md` P-INTEGRATION-TERMINATION
+- 2026-07-20  Stage 6 loads, flexure, relief, and surface evolution -> `TODOS.md` P-LOAD-FLEXURE
+- 2026-07-20  Close atmosphere, hydrology, and recycling on the physical path -> `TODOS.md` P-ATMOSPHERE-HYDROLOGY-RECYCLING
+- 2026-07-20  Stage 7 immutable snapshot transport and observer-only viewer -> `TODOS.md` P-SNAPSHOT-TRANSPORT
+- 2026-07-20  Replace indirect legacy pins with direct abiotic evidence -> `TODOS.md` P-DIRECT-EVIDENCE
+- 2026-07-20  Split canonical physics and planet grab bags by invariant -> `TODOS.md` P-GRAB-BAGS
+- 2026-07-20  Close source custody and claim-to-source debt without treating custody as admission -> `TODOS.md` P-SOURCE-DEBT
+- 2026-07-20  Resolve candidate-by-candidate crust, melt, geodynamics, and stellar evidence debt -> `docs/working/ABIOTIC_EVIDENCE_DEBT.md`
 
-- 2026-07-18 mantle effective-convective-viscosity slice -> claude/seam4-deeptime, crates/physics/src/convective_viscosity.rs
-- 2026-07-18 Hayashi-wall grid, the split with Agent C (#198) -> claude/seam4-deeptime, crates/physics/data/hayashi_wall.toml
-- 2026-07-17 consolidated surface pipeline, stages 0-5 -> claude/seam4-deeptime, docs/working/CONSOLIDATED_SURFACE_PIPELINE.md
-- 2026-07-17 disk-evolution expansion, the stellar-wind chain (#195) -> claude/disk-evolution-arc, docs/working/DISK_EVOLUTION_EXPANSION_SCOPE.md
-- 2026-07-16 deep-time run, seam 4 (#69) -> claude/seam4-deeptime, crates/sim/src/deeptime.rs
-- 2026-07-16 solar-system generator, the multi-body arc (#72) -> claude/seam4-deeptime, crates/sim/src/planetary_system.rs
-- 2026-07-16 gas and ice giant branch (#73) -> worktree-agent-a0d7873cd43809a0f, crates/sim/src/giants.rs
-- 2026-07-16 small-body buildout, asteroids and comets (#74) -> claude/seam4-deeptime, crates/sim/src/smallbody.rs
-- 2026-07-16 star-planet generative-and-visible capstone -> docs/working/CAPSTONE_PIPELINE_SCOPE.md
-- 2026-07-16 genesis-forward foundational arc (#160) -> claude/genesis-forward-scoping, docs/working/GENESIS_FORWARD_PLAN_OF_ATTACK.md
-- 2026-07-15 orbital-mechanics arc, the Kepler period (#78) -> claude/seam4-deeptime, crates/sim/src/astro.rs
-- 2026-07-15 Stone 0 local-firing provenance gate (#79) -> claude/seam4-deeptime, crates/stone0
-- 2026-07-14 kappa_R opacity assembly, the Saha closure (#191) -> claude/kappa-r-assembly, crates/physics/src/saha.rs
-- 2026-07-14 kappa_R molecular grid, the AESOPUS redirect (#191) -> claude/kappa-r-assembly
-- 2026-07-12 close the founder-zero survival window (#42) -> claude/survival-window-close, docs/working/PRODUCTIVITY_DERIVATION_KICKOFF.md
-- 2026-07-12 genesis internal-heat and memory primitives -> claude/genesis-internal-heat-memory, crates/physics/data/geology_floor.toml
-- 2026-07-12 provenance-DAG accounting -> claude/genesis-determinism-provenance, crates/sim/src/calibration.rs
-- 2026-07-12 derived-output-is-live gate (#43, bridge #158) -> crates/sim/src/derive_gate.rs, docs/working/DERIVED_OUTPUT_LIVE_GATE_SCOPE.md
-- 2026-07-11 surface-energy-balance arc (#139) -> laws::surface_balance_temperature
-- 2026-07-10 calibration reconciliation of reserved.toml (#122) -> docs/working/RECONCILIATION_BILLBOARD.md
-- 2026-07-09 Mirror and Tempest world loaders -> docs/working/MIRROR_CALIBRATION_RESEARCH.md
+## Refusals and owner gates
 
-## Not done / gated
+- 2026-07-20  Current canonical run enters Stage 1 and refuses on `stellar_birth.realization_measure`; no snapshot is emitted -> `crates/planet/src/canonical/`
+- 2026-07-20  The joint physical measure and realization-coordinate law are both unresolved; no scalar root is admitted -> `crates/planet/src/canonical/stellar_birth_measure.rs`
+- 2026-07-20  The three-node graph is an obligation contract today; executable leaf-closure evaluation is required before either leaf can close -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
 
-- 2026-07-19 Provenance hardening -> branch `claude/provenance-hardening`, 15 of 15 audit findings closed, each live-fired: gate bypasses shut, CI runs the checks that convict, Stone 0 runs 11 gates not 5, 244 unevidenced `[M]` labels downgraded to `unverified_measurement_candidate`. Pins hold. Unblocks R-ABIOGENESIS-2.
-- 2026-07-15 QUARANTINED 56 reserved values with dead provenance, frozen by the CI gate -> docs/working/quarantine_ledger.toml
-- 2026-07-12 PARTIAL the four universal constants to CODATA, G now in the floor -> crates/units/src/fundamentals.rs
-- 2026-07-11 GATED real biosphere thriving, gated on the biosphere-balance calibration -> worldbuild.rs T3 owner-gate
-- 2026-07-11 PARTIAL stroke-rate and limb-biomechanics substrate (#119, #123) -> claude/stroke-rate-substrate
-- 2026-07-10 NOT DONE integrated living-world scenario, sequenced behind the landing arcs -> `--scenario full`
-- 2026-07-10 NOT DONE geology and geography come alive, in scoping -> the genesis geology arc
-- 2026-07-10 NOT DONE R-COEVOLVE, Mirror as early-Earth initial conditions
-- 2026-07-10 CHECK LoD-invariant contention when coarse stepping is built (R-TEMPORAL-LOD) -> crates/sim/src/clock.rs
-- 2026-07-09 NOT DONE multi-cell and sub-cell extent, gated on the coordinate and field model
-- 2026-07-09 NOT DONE affordance-percept contents, Tier C must emerge through the learner (#111) -> crates/sim/src/discovery.rs
-- 2026-07-09 NOT DONE affordance-percept ceilings, floor-axis coverage and the closed combinator set (#111)
-- 2026-07-09 NOT DONE multi-channel perception, vision and hearing as data rows -> ChannelReachRegistry
-- 2026-07-09 NOT DONE genome-derived thermal setpoint, today a fixed per-race 310 K baseline
-- 2026-07-09 NOT DONE emergent pollution and climate, gated on industry and the Venus wiring
-- 2026-07-09 PARTIAL pick a plant for its PARTS, gated on multi-cell extent
-- 2026-07-09 PARTIAL perceiver-relative FracturePotential reference (#111) -> crates/sim/src/affordance_percept.rs
-- 2026-07-09 PARTIAL affordance composition, Tier B built and Tier C deferred (#111)
-- 2026-07-09 PARTIAL scenario name shaping structure, magic structure remains -> crates/world/src/structure.rs
-- 2026-07-08 NOT DONE chop down a tree, the biosphere-meets-made-world seam
-- 2026-07-08 NOT DONE war and raiding, `conflict_pressure` has zero run-loop consumers
-- 2026-07-08 NOT DONE Venus greenhouse and radiative balance, the floor kernels have no consumers
-- 2026-07-08 NOT DONE Europa volumetric z-stacked medium and a tidal-heating law
-- 2026-07-08 NOT DONE Arcanum magic system, Part 34 is unbuilt pseudocode and there is no mana field
-- 2026-07-08 NOT DONE temporal LoD, agent exec, GPU offload, save schema, view elaboration
-- 2026-07-08 NOT DONE the made world's deep tiers, Part 60 stages 6 to 13
-- 2026-07-08 Crucible RUNS as substrate, its design needs patchy-basin terrain and the war mechanism
+## Recent landings
 
-## Recent landings (tombstoned; prune when old)
-
-- 2026-07-20  DONE  #213 merged (`e27ac14`): moon tidal-heating kernel, dormant; the Kepler-fold documentation was the gate's one finding -> `crates/sim/src/moons.rs`.
-- 2026-07-19  DONE  #212 merged: truncation-residual disposition + windless Herbig grid; body corrected, two capabilities withdrawn -> `docs/working/PR212_INTEGRATION_SCOPE.md`.
-- 2026-07-19  DONE  #207 merged to main (`0de27ab`): derive-first abiogenesis research spec + closure-formalism addendum -> `docs/working/ABIOGENESIS_*.md`.
-- 2026-07-19  DONE  #201 merged to main (`402e00d`): disk slice 2 run-path wire, Mdot_0 derived, the L_bol hold dissolved -> `git log 402e00d`.
-- 2026-07-19  DONE  #203 merged to main (`b1b9ed0`): two crates, five live-fired gates, 225 files, pins held -> `git log b1b9ed0`.
-- 2026-07-19  DONE  Local/CI command parity: the check list is PARSED from the workflow, not copied (six classes had never run locally) -> `scripts/ci_local.sh`.
-- 2026-07-19  DONE  Phase-conductivity column fetched (8 phases, cell counts as reconstructions + kappa_298 x7) -> `crates/physics/data/phase_conductivity.toml`.
-- 2026-07-19  DONE  Crate layering un-inverted: `calibration`+`decision` bio -> foundation; foundation drops its bio lib dep -> `crates/foundation`.
-- 2026-07-19  DONE  Language cycle cut: `PlaceId` lifted to a leaf, 7-module cluster -> 3 -> `crates/foundation/src/located.rs`.
-- 2026-07-19  DONE  World ejecta docs: 7 stale claims, one pointing at a route ruled out in PR #177 -> `crates/world`.
-- 2026-07-19  FLAG  Last cycle (`environ`/`genesis`/`runner`) is NOT a small lift: `Field::step` calls `derive_field_diffusion` inside `runner.rs`.
-- 2026-07-18  HELD  Fixture-cluster re-pin BLOCKED on one absent cited column (`atoms_per_primitive_cell`, no data file carries it); rho/c_p/alpha measured and deriving, k/kappa/eta gated; thermostat diamond collapsed byte-neutral, both pins unmoved -> `GEOTHERM_ARC_SCOPE.md`.
-- 2026-07-18  DONE  Rock conductivity aggregate: Bruggeman EMT (fetched numerical benchmark rejects the geometric mean), pins held -> `crates/materials/src/conductivity.rs`.
-- 2026-07-18  DONE  Build speedups: build-script opt-level 3 (Stone 0 gate 4.4s -> 1.4s) + dev line-tables-only (9.9G -> 4.5G); pins held -> `Cargo.toml`.
-- 2026-07-18  DONE  Pipeline-status guard hardcoded (a habit is not a defense) -> `.claude/hooks/pipeline-status-guard.sh`.
-- 2026-07-18  DONE  Stone 0 pre-push hook INSTALLED; derives gate widened past `pub` (818 -> 1099 fns).
-- 2026-07-18  DONE  Provenance ratchet now fires at TURN scope (package-scoped cargo skipped it) -> `.claude/hooks/stop-gate.sh`.
-- 2026-07-18  DONE  Two load-bearing stale claims retired (render.rs T_e, stone0 wiring) -> `render.rs`, `crates/stone0/src/lib.rs`.
-- 2026-07-18  DONE  Derives-coverage gate + 8 physics/materials markers (map 11 -> 19 substrates; CI + stop-gate wired) -> `scripts/derives_gate.py`.
-- 2026-07-18  DONE  Gruneisen loader + census aggregator (rock gamma DERIVED, uncited phase refused) -> `crates/physics/src/gruneisen.rs`.
-- 2026-07-18  DONE  CI doc gate unbroken: two links cited a nonexistent `derive_deep_time_cap` -> `crates/viewer/src/main.rs`.
-- 2026-07-18  DONE  Biology parked out of `civsim-sim` (10 modules, 9,388 lines, both pins bit-exact) -> `crates/bio`.
-- 2026-07-18  DONE  Leaf substrates split out of `civsim-sim` (20 out-degree-zero modules, 12,677 lines, both pins bit-exact) -> `crates/foundation`.
-- 2026-07-18  DONE  `learn`/`locomotion` cycle broken by lifting 2 shared types; 3 SCCs -> 2 -> `crates/foundation/src/sequence.rs`.
-- 2026-07-18  FLAG  `calibration` sits in `civsim-bio` but 23 sim modules read it; wants its own shared crate -> `crates/bio/src/lib.rs`.
-- 2026-07-18  DONE  TAFI verdict: source correct, our transcription wrong; primary vendored + archived -> `VENDORING_CHECKLIST.md` (`flexure_tafi`).
-- 2026-07-18  DONE  Retired boundary-layer formula purged from 9 restatement sites (the diamond) -> `laws.rs`, `moment_equivalence.rs`, `geodynamics.rs`.
-- 2026-07-18  DONE  Stale-claim sweep, 32 verified findings (flexure Green's-function doc corrected to the cited form) -> `flexure.rs`.
-- 2026-07-18  DONE  Physics realization digest (first determinism instrumentation on the physics path) -> `deeptime.rs::realization_digest`.
-- 2026-07-18  DONE  Dawn harness parked, quarantine build-enforced (`worldbuild.rs` -> `dawn_harness.rs`) -> `crates/sim/tests/dawn_harness_quarantine.rs`.
-- 2026-07-18  DONE  Lean board landed on main (archive byte-identical, 16KB cap) -> PR #202, `9ae14a4b`.
-- 2026-07-18  DONE  GPU globe shading on the 5090 (CubeCL f32 kernel, non-canon, feature `gpu`) -> `crates/gpu/src/globe.rs`.
-- 2026-07-18  DONE  Viewer cadence watchable (opens young, derived 1 tick/frame, held impact bloom, pole-smooth glow) -> `d8add16`.
-- 2026-07-18  DONE  Cargo artifact ring buffer (LRU under size+count caps, auto at SessionStart) -> `scripts/target_gc.sh`.
-- 2026-07-18  DONE  WSL copyback recovery (branch ref repaired to `b2ebbb4`, cargo PATH restored to `.bashrc`, 180G reclaimed).
-- 2026-07-18  DONE  Conditioned Ra_crit row (reads the registry, rigid-rigid DEFAULTS-TAKEN, dispatch stubbed) -> `crates/physics/src/rayleigh_critical.rs`.
-- 2026-07-18  DONE  Critical-Rayleigh eigenvalue registry (boundary_class x heating_mode) -> `30fdd86`.
-- 2026-07-18  DONE  Rigid-rigid eigenvalue diamond fixed (1708 -> 1707.762, one cited row + two sentinels) -> `9036c5e`.
-- 2026-07-18  DONE  Block-2 receipt: all-brittle-thin-lid unreachable, measured -> `e0941f9`.
-- 2026-07-18  DONE  T_e hindcast retired from the floor (duplicated the wired referee) -> `9bab42a`.
-- 2026-07-18  DONE  Sub-step B: physical boundary layer `d(Ra_crit/Ra)^(1/3)` -> `0e8e4f6`.
-- 2026-07-18  DONE  Grueneisen ladder -> `ee89ce1`; Earth/Mars/Venus T_e referee -> `1ea64e5`; watchable-impacts flash -> `5f93509`.
-- 2026-07-18  DONE  Physics-substrate audit (3-lane map, dormant inventory) -> `PHYSICS_SUBSTRATE_ROADMAP.md`.
-- 2026-07-18  DONE  Vendoring pipeline consolidated + gated (29-source registry, licence overlay, `@sources` hop) -> `FETCH_PIPELINE_PLAN.md`, `scripts/sources_gate.py`.
-- 2026-07-18  DONE  Owner licence ruling applied: 6 restricted PDFs -> citation-plus-witness (witnesses byte-identical); JANAF blocked by `include_str!` -> plan D6.
-- Secular cooling: `geodynamics::secular_step` built; `step_deep_time` calls the static `convection_step` instead, so the interior freezes and volcanism dies.
-- Star brightening: `deeptime::stellar_luminosity_ratio` built; the viewer ages the clock but never reads it.
-- Relief collapse: `relax_to_support_bound` built; the viewer uses a hardcoded yield-strength flag.
-- Multi-body system generator: `assemble_system_with_giants` fully dark; the viewer samples independent single worlds.
-- Atmosphere radiative-balance / greenhouse closure (`wien_peak`, `interface_split` have no consumer; nothing derives surface temperature from the air). Highest leverage; gates Venus, climate, hydrology.
-- Hydrosphere + weather + erosion (R-HYDROSPHERE-WEATHER; needs a Chaos-Protocol climate ruling).
-- Interior recycling (crust is monotonic; no subduction, no overturn).
-
-- 2026-07-18 LANDED disk-gas mean molecular weight derives per world -> crates/sim/src/astro.rs
-- 2026-07-15 FIXED massive-star T_eff on both inversion paths (#76) -> crates/sim/src/astro.rs
-- 2026-07-15 PROVENANCE FIX AGSS09 abundances re-declared a cross-checker -> crates/physics/src/solar_abundances.rs
-- 2026-07-15 DONE capstone seam 2, the iron dark-crust optics -> viewer and materials
-- 2026-07-15 LANDED accretion primitives, hill radius and isolation mass, toward #72 -> crates/sim/src/astro.rs
-- 2026-07-15 FINDING GPU i128 is a CubeCL limit rather than a CUDA one -> crates/gpu
-- 2026-07-13 DONE Stage-4 disposer first cut (#186) -> claude/materials-buildout
-- 2026-07-13 DONE materials-arc design specs committed at source -> docs/working/VERDICT_KERNEL_CONTRACT.md
+- 2026-07-21  Physical floor normalized to three measured invariants; exact SI definitions moved to an untagged representation receipt and all execution constants derive from sealed relations -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
+- 2026-07-21  Transcript schema major 3 and run receipt v5 separate representation from causal floor, serialize complete exhaustion evidence, and emit derived `eps_0` ancestry -> `crates/planet/src/canonical/transcript.rs`
+- 2026-07-20  Root workspace narrowed to the abiotic dependency graph; biology, civilization, compose, scenarios, and calibration moved under `parked/` -> `parked/README.md`
+- 2026-07-20  `civsim-planet-substrate` privately owns the retained star, system, planet, geodynamics, deep-time, moon, and flexure modules with 372 passing tests -> `crates/planet-substrate/src/lib.rs`
+- 2026-07-20  Root viewer reduced to an immutable snapshot consumer; causal viewer preserved under `parked/` -> `crates/viewer/src/lib.rs`
+- 2026-07-20  Boundary gate enforces canonical ownership, dependency direction, floor ingress, and snapshot-only viewing -> `scripts/planet_boundary_gate.py`
+- 2026-07-20  Nested canonical modules receive the same strict ingress scan; the self-test plants its canary below `canonical/stages/stellar_birth/` -> `scripts/planet_boundary_gate.py`
+- 2026-07-21  The Stage 1 refusal is backed by an exact acyclic joint-measure and coordinate-law contract -> `crates/planet/src/canonical/stellar_birth_measure.rs`
+- 2026-07-21  Direct CLI tests pin exit 2, six events, receipt v5, schema major 3, repeatability, readiness separation, and rejection of world, profile, and seed arguments -> `crates/planet/tests/canonical_cli.rs`
+- 2026-07-21  Canonical ledger exposes four-tier by seven-mark generated accounting; current physical-floor total is three Universal `[M]` invariants -> `docs/working/CANONICAL_LEDGER_INVENTORY.txt`
+- 2026-07-21  Typed sealed access separates the ten-identity noncausal SI representation view from the fourteen-identity execution capability, with private values and no caller binding or mutation surface -> `crates/units/src/constants.rs`
+- 2026-07-21  Physical folds across physics and materials require the verified execution capability; representation-only conversions use the noncausal representation view -> `crates/units/src/constants.rs`
+- 2026-07-21  One frozen-packet blind-generalizer pass found and closed physical API reachability, shared receipt authority, and order-insensitive declaration checks -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
+- 2026-07-21  Direct canonical stdout is pinned at 22,134 bytes and SHA-256 `7058a1d013f19482460cb034bdbea0f35c7b7b9aeae0916a4e07cfe54f5f9c67` -> `docs/working/STELLAR_BIRTH_MEASURE_CONTRACT.md`
+- 2026-07-21  Complete Linux `check-pr` parity passed in 1,233.4 seconds, including canonical GPU guards and all ten package targets -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
+- 2026-07-20  Active physics is abiotic-only; organism laws and data survive through parked compatibility facades -> `crates/physics/src/lib.rs`, `parked/crates/physics/`
+- 2026-07-20  Legacy emic, celestial, disk-composition, and organism GPU surfaces moved behind parked facades -> `parked/crates/`
+- 2026-07-20  One 25-gate declarative inventory drives CI, Stone 0, Stop, Just, Make, PowerShell, local CI, and fail-closed pre-push routes -> `scripts/gates.toml`, `scripts/githooks/pre-push`
+- 2026-07-20  Legacy design, audit, research, runbook, roadmap, queue, and harness authority surfaces parked -> `parked/`
+- 2026-07-20  `Fixed::log_sum_exp` is the sole N-ary provider; strict Diamond reports 110 providers for 110 quantities -> `crates/core/src/fixed.rs`
+- 2026-07-20  No-argument and `run-derived` entrypoints construct the sealed floor, while readiness remains a separate missing-floor receipt -> `crates/planet/src/bin/run_planet.rs`
+- 2026-07-20  Pre-migration planet modules are private, and canonical stages cannot import raw physics, materials, or world substrates until typed adapters exist -> `scripts/planet_boundary_gate.py`
+- 2026-07-20  Broad physics provenance is a candidate-only audit; the exact admitted inventory remains the sole authority -> `crates/physics/src/floor_provenance.rs`
+- 2026-07-20  Abiotic evidence debt extracted; session grab bags and Earth-default world-structure selection moved behind `parked/` -> `docs/working/ABIOTIC_EVIDENCE_DEBT.md`
+- 2026-07-20  Missing fusion volume is explicit absence; every nonzero-pressure melt path returns a structured refusal instead of treating absence as zero -> `crates/physics/src/melting.rs`
+- 2026-07-20  The complete held H&K table reaches only `1e-4 GPa`; its unresolved positive-pressure range remains a Gap Law refusal -> `docs/working/HK2003_VERIFICATION.md`
+- 2026-07-20  Active physics ground data is reduced to 89 axes, 70 laws, and 14 substances; retired rows remain available only through the parked registry -> `crates/physics/src/graph.rs`
+- 2026-07-20  Active world and GPU crates retain physical operators and generic kernels; authored worldgen, camera, LOD, globe, and presentation paths are parked -> `crates/world/src/lib.rs`, `crates/gpu/src/lib.rs`
+- 2026-07-20  Retired core domain identifiers require the default-off `legacy-domains` feature, which only parked packages enable -> `crates/core/Cargo.toml`
+- 2026-07-20  The complete parked workspace gate is green; old causal-viewer planet expectations that require absent fusion-volume evidence are explicitly ignored and replaced by a refusal assertion -> `parked/crates/viewer/src/main.rs`

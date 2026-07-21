@@ -53,7 +53,6 @@ pub mod correlation;
 pub mod creep;
 pub mod definition;
 pub mod differentiation;
-pub mod disk_composition;
 pub mod electronic;
 pub mod equilibrium_condensation;
 pub mod freezer;

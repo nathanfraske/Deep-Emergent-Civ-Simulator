@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! # civsim-core: the determinism bedrock
+//! # civsim-core: fixed arithmetic and deterministic mechanics
 //!
-//! This crate is the foundation described in design Part 60, Stage 1, and listed
-//! in the runbook as buildable and fully testable now because it carries no
-//! reserved numbers. It holds, with no external dependencies:
+//! This crate holds domain-neutral deterministic mechanics with no external dependencies:
 //!
 //! - [`Fixed`]: the Q32.32 fixed-point newtype that is the canonical numeric type
 //!   (design Part 3.1). It is a newtype rather than a bare `i64` so that the typed
@@ -24,10 +22,9 @@
 //!   never silently stand in for authoritative state.
 //! - [`Rng`]: the per-entity counter-based RNG (design Part 3.2). Every draw is a
 //!   pure function of its coordinate, so results never depend on thread schedule.
-//! - [`DrawKey`] and [`Phase`]: the canonical draw-keying schema (the R-RNG-COORD
-//!   resolution) that folds a uniform coordinate (region, locus, secondary locus,
-//!   tick, phase, slot) and registers phase ids once, so the tick is always present
-//!   and two draw sites cannot collide on counter zero.
+//! - [`DrawKey`] and [`Phase`]: a deterministic draw-keying schema over a caller's
+//!   coordinates. Retired biology and civilization phase constants are available only
+//!   to the parked workspace through the `legacy-domains` feature.
 //! - [`StableId`] and [`Registry`]: process-wide identity that survives promotion,
 //!   demotion, save, and load (design Part 2.1, Part 11).
 //! - [`Arena`] and [`Slab`]: contiguous arena allocation and a generationally
@@ -39,9 +36,9 @@
 //!   open per the unresolved R-EVENT backlog item: the kind is a data-defined
 //!   identifier, not a closed Rust enum.
 //! - [`StateHasher`]: the deterministic fixed-order state hash (design Part 3.5).
-//! - [`GaussApprox`] and [`gaussian_unit`]: the stamped integer-Gaussian approximation
-//!   (design 25.10), a mean-zero deviate over the counter-keyed RNG for the quantitative
-//!   breeding-value spine and the continuous mutation steps, with no float.
+//! - [`GaussApprox`] and [`gaussian_unit`]: a deterministic integer-Gaussian candidate
+//!   mechanism used by pre-migration planetary assembly. Choosing a shape is not floor
+//!   admission; a canonical adapter must derive or admit that choice before use.
 //! - The typed canonical-state boundary in [`canonical`].
 
 pub mod arena;
@@ -59,15 +56,15 @@ pub mod schedule;
 
 pub use arena::{Arena, Slab, SlabHandle};
 pub use cacheline::CacheLine;
-pub use canonical::{
-    canonical_reduce, canonical_sorted, quantize_depth_mm, quantize_unit, Canonical, NonCanonical,
-};
+pub use canonical::{canonical_reduce, canonical_sorted, Canonical, NonCanonical};
 pub use command::{content_id, CommandBuffer, CommandKey, EventQueue};
 pub use event::{Event, EventId, EventKindId, EventLog};
 pub use fixed::{Fixed, FRAC_BITS};
 pub use gauss::{gaussian, gaussian_unit, GaussApprox};
 pub use hash::StateHasher;
-pub use id::{EntityHandle, EntityLocation, InstId, PoolId, Registry, StableId, StableRef};
+#[cfg(feature = "legacy-domains")]
+pub use id::InstId;
+pub use id::{EntityHandle, EntityLocation, PoolId, Registry, StableId, StableRef};
 pub use keys::{DrawKey, Phase, ABSENT};
 pub use rng::{splitmix64, Rng};
 pub use schedule::{flatten, run_serial, schedule, Access, ResourceId, SystemId};

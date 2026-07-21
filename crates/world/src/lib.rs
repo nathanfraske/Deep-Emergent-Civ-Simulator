@@ -12,12 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! # civsim-world: the spatial and worldgen layer
-//!
-//! The generated world the civilizations inhabit (design Parts 6, 12, 14, 56), built on
-//! the determinism bedrock of `civsim-core` and kept separate from the cognition layer
-//! (`civsim-sim`) so the spatial substrate stands on its own. It is being built in the
-//! order of roadmap M1:
+//! # civsim-world: abiotic spatial operators
 //!
 //! - [`topology`]: the coordinate and topology model (design Part 56). A [`topology::Coord3`]
 //!   over the 2.5D stacked model and a [`topology::TopologySpace`] trait every spatial
@@ -26,48 +21,28 @@
 //!   canonical state. [`topology::Coord3::key`] folds a cell into a draw-key locus, so the
 //!   spatial layer plugs straight into the canonical RNG keying of `civsim-core`.
 //!
-//! - [`noise`]: deterministic fixed-point fractal value noise, the field generator
-//!   worldgen samples (design Part 12).
-//! - [`terrain`]: the terrain and biome substrate (design Part 12), biomes recognised
-//!   over data-defined field ranges rather than a closed enum.
-//! - [`worldgen`]: worldgen pass one and the tile map (design Parts 12, 6, 14), a seed
-//!   turned into a bit-identical tile grid with a headless glyph render to view it.
-//! - [`lod`]: the chunk grid and the canonical level-of-detail quadtree (design Part 6),
-//!   one tree over the tile map summarising each region by its dominant biome.
-//! - [`view`]: the camera and the multi-zoom glyph view (design Parts 14, 11, 54), a pure
-//!   read of the quadtree that draws the world at any zoom without writing canon.
-//! - [`celestial`]: a world's orbital elements (design Parts 14.6, 32), the year and day
-//!   lengths in fixed-point world-seconds that the canonical time cadences derive from, so a
-//!   world's calendar is a property of its orbit rather than a hardcoded Earth year.
-//!
-//! The multi-scale GPU view (Part 14) is a later swap of the same [`view`] reads.
+//! - [`geology`]: sparse, deterministic resident fields at the interior-to-surface
+//!   boundary, including effective elevation deltas and per-column geodynamic state.
+//! - [`terrain`]: generic relief classification over references derived by the physical
+//!   pipeline. It carries no biome catalog or authored terrain selector.
 
 pub mod ballistic;
-pub mod celestial;
 pub mod crater;
 pub mod drag_flight;
 pub mod eruption;
 pub mod flood;
+pub mod geology;
 pub mod impact_event;
 pub mod impact_flux;
 pub mod label;
-pub mod lod;
 pub mod momentum;
-pub mod noise;
 pub mod redistribute;
 pub mod runout;
 pub mod solve;
-pub mod structure;
 pub mod surface_coupling;
 pub mod terrain;
 pub mod topology;
-pub mod view;
-pub mod worldgen;
 
-pub use celestial::OrbitalElements;
-pub use lod::{ChunkCoord, NodeSummary, QuadTree, CHUNK};
-pub use structure::{WorldStructure, EARTH_STRUCTURE};
-pub use terrain::{BiomeDef, BiomeId, BiomeSet, Rgb};
+pub use geology::{EarthworkField, GeodynamicColumn, GeodynamicField};
+pub use terrain::{classify_relief, relief_datum, TerrainRelief};
 pub use topology::{Coord3, FlatBounded, Topology, TopologySpace};
-pub use view::Camera;
-pub use worldgen::{Tile, TileMap, WorldgenParams};

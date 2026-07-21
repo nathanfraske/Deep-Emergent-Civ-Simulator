@@ -12,6 +12,12 @@
 # The gate crate: the library, the binary, and its tests.
 /crates/stone0/**            @nathanfraske
 
+# The canonical build consumer. Removing either the build script or its
+# build-dependency disables local firing for the main runpath.
+/crates/planet/build.rs      @nathanfraske
+/crates/planet/Cargo.toml    @nathanfraske
+/Cargo.toml                  @nathanfraske
+
 # The gate's shell scripts (the pre-push hook and the CI tombstone scan).
 /scripts/stone0*             @nathanfraske
 
@@ -22,7 +28,7 @@
 /.github/CODEOWNERS          @nathanfraske
 
 # The tombstone list (a widened or gutted list would silently disarm the retroactive catch).
-/calibration/stone0_tombstones.txt   @nathanfraske
+/scripts/stone0_tombstones.txt       @nathanfraske
 
 # The design of record.
 /docs/working/Q1_STONE0_PROVENANCE_GATE_DESIGN.md   @nathanfraske

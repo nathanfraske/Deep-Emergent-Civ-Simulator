@@ -182,7 +182,7 @@ pub fn axis_scale(axis: &QuantityAxis, sig_target: u32, guard: u32) -> Option<De
 
 /// The scale one class of a per-class-scale axis derives from its declared decimal envelope, keyed
 /// off the same decimal-envelope log2 the single-scale axes use so a sub-epsilon per-class bound (a
-/// nanogram-per-kilogram toxin tolerance) keeps its magnitude. `None` when the class's bounds are not
+/// nanogram-per-kilogram trace concentration) keeps its magnitude. `None` when the class's bounds are not
 /// both set: an unset per-class entry is reserved and omitted from the catalogue, the same as a
 /// reserved single axis, rather than silently taking the canonical scale (the `""` and `"0"` decimals
 /// both read as no-magnitude, so a blank bound must be caught by its emptiness, not its log2).
@@ -480,10 +480,10 @@ real = "test envelope"
     }
 
     #[test]
-    fn the_two_ratified_windows_derive_scales_that_fit_their_envelopes() {
-        // The 2026-07-03 windows derive correctly through the catalogue, not just as raw ranges: the
+    fn the_ratified_second_moment_window_derives_a_scale_that_fits_its_envelope() {
+        // The 2026-07-03 window derives correctly through the catalogue, not just as a raw range: the
         // second moment of area's 1e-12 low end (which underflows the stored Fixed to zero) forces a
-        // fine per-quantity scale that resolves it, and the respiratory surface fits the canonical.
+        // fine per-quantity scale that resolves it.
         let reg = floors(); // mechanical carries second_moment_of_area
         let smoa = reg.axis("mech.second_moment_of_area").unwrap();
         let d = axis_scale(smoa, 16, 1).unwrap();
@@ -494,32 +494,24 @@ real = "test envelope"
             d.scale_bits,
             lo_log2
         );
-        // respiratory_surface lives in the biology floor, which the shared fixture does not load.
-        let bio = PhysicsRegistry::load(data_path("biology_floor.toml")).unwrap();
-        let resp = bio.axis("bio.respiratory_surface").unwrap();
-        assert_eq!(
-            axis_scale(resp, 16, 1).unwrap().scale_bits,
-            CANONICAL_SCALE,
-            "the [0, 200] m^2 respiratory surface fits the canonical scale"
-        );
     }
 
     #[test]
     fn a_per_class_axis_registers_one_quantity_per_class_each_on_its_own_scale() {
-        // The bio.consumer.reference_tolerance case: a scale reserved per toxin class, whose
-        // pg/kg-to-g/kg envelope no single scale spans. The class is the quantity granularity, so the
+        // A per-class quantity can have an envelope no single scale spans. The class is the
+        // quantity granularity, so the
         // catalogue registers one quantity per class, each deriving its own scale from that class's
         // envelope through the same decimal-envelope path, so a nanogram-per-kilogram class keeps its
         // magnitude while a milligram class fits the canonical scale.
         let toml = r#"
 [[axis]]
 id = "test.tolerance"
-measures = "per-toxin-class reference tolerance"
+measures = "per-class test reference"
 unit = "mg/kg-body"
 dimension = "dimensionless"
 scale = "per-class"
 tier = 0
-range_reserved = "per toxin class (R-UNITS-PIN)"
+range_reserved = "per test class (R-UNITS-PIN)"
 real = "test"
 per_class = [
   { class = "alkaloid", range_lo = "0.001", range_hi = "5000" },

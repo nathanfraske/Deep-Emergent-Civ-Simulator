@@ -364,8 +364,8 @@ impl std::error::Error for ThermoRefusal {}
 /// ONE home for this conversion, because two consumers need it and two copies of a unit bridge is how a
 /// factor of `1e24` quietly diverges. The elastic Debye temperature reads it for the `(3n/4 pi V)^(1/3)`
 /// wavevector, and the Slack lattice-conductivity estimator reads it for the interatomic spacing
-/// `delta = cbrt(V_atom)`. `1 cm^3/mol` over Avogadro is `1e24 / 6.02214076e23 = 1.66053906717` cubic
-/// angstroms per particle.
+/// `delta = cbrt(V_atom)`. The unit conversion derives as `10^24 / N_A`
+/// through the universal floor.
 ///
 /// The atom count is the FORMULA UNIT's, matching the registry molar volume's own basis. Mixing it with an
 /// atoms-per-primitive-cell count would be a basis error wearing a derivation's clothes, and that column
@@ -383,7 +383,7 @@ pub fn atomic_volume_angstrom3(phase: &str, registry: &PhaseRegistry) -> Option<
     let per_atom_cm3_mol = row
         .molar_volume
         .checked_div(Fixed::from_int(atoms as i32))?;
-    let angstrom3_per_cm3_mol = Fixed::from_decimal_str("1.66053906717").ok()?;
+    let angstrom3_per_cm3_mol = civsim_units::constants::derived_atomic_volume_conversion();
     per_atom_cm3_mol.checked_mul(angstrom3_per_cm3_mol)
 }
 

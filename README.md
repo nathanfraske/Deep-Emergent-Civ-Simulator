@@ -1,51 +1,100 @@
-# Emergent Civilization Simulator
+# Deep Emergent Civilization Simulator
 
-A custom Rust engine for a deterministic, emergent fantasy civilization simulator, a hybrid in the spirit of Dwarf Fortress and Songs of Syx. Simulation comes first; the visible game is a thin glyph view onto a deep world. The world is generated, every individual is modelled, and everything of consequence emerges from rules rather than being authored: language, technology, money, governance, religion, cities, artifacts, and beliefs.
+The canonical product in this repository is now the deterministic abiotic
+planet and stellar-system pipeline. Its contract derives a complete system
+through seven causal stages and hands an immutable snapshot to observer-only
+viewers; the present implementation truthfully refuses in Stage 1.
+Biology, civilization, dawn, compose, scenarios, calibration, and the old
+causal viewer were built under a retired methodology and are preserved under
+`parked/`.
 
-This repository holds the design, the audit that keeps it honest, the research behind its resolved questions, the operating material for continuing the work, and the engine code as it is stood up in staged order.
+Copyright 2026 Nathan M. Fraske. Licensed under the Apache License, Version
+2.0; see `LICENSE` and `NOTICE`.
 
-Copyright 2026 Nathan M. Fraske. Licensed under the Apache License, Version 2.0; see `LICENSE` and `NOTICE`.
+## Canonical architecture
 
-## Where the documents are
+```text
+sealed floor + ledger + units
+              |
+      canonical planet stages
+              |
+       immutable snapshot
+              |
+            viewer
 
-- `docs/design.md`: the specification, 64 gapless parts (Part 0 through Part 63). Part 62 holds the research records, Part 63 the bibliography. This is the source of truth.
-- `docs/audit.md`: the companion ledger. The consolidation history, the parts carrying open research flags, the research backlog, the inconsistencies, and the running resolved-and-open counts.
-- `docs/research/`: the standalone research papers behind the resolved items, archived verbatim. They predate the prose customs and keep their original form (em dashes and all); they are never rewritten.
-- `CLAUDE.md`, `AGENTIC_ADDENDUM.md`, `RUNBOOK.md`: the operating manual, the agentic infrastructure, and the standup runbook.
-- `HANDOFFS.md`, `TODOS.md`: the rolling session log and the live backlog mirror.
+active candidate substrate: core, physics, materials, world, and private
+planet modules; reachable by canonical stages only through typed adapters
 
-## What is built now
-
-The standup follows the runbook: the determinism core is the foundation and carries no reserved numbers, so it is built and tested in full. The simulation crate carries the calibration-manifest plumbing and the substrate-loader scaffold; behaviour that depends on a reserved value is gated until the owner sets the number.
-
-- `crates/core`: the determinism bedrock. The `Fixed` (Q32.32) newtype with its arithmetic, the SplitMix64 counter-based RNG keyed on `(seed, entity, phase, counter)`, the state hasher, and the append-only event log. It depends on nothing, deliberately.
-- `crates/units`: the dimensional and representation layer (the scale planner, the wide-intermediate tier, the range census).
-- `crates/physics`: the authored physics FLOOR (its axes, substances and law kernels) plus the substrates that derive from it: the Rayleigh and convection scalings, flexure, the geotherm, moment equivalence, the Gruneisen ladder, mineral moduli, and the floor provenance register.
-- `crates/materials`: composition to properties. Density, specific heat, the two-rung thermal-conductivity ladder, moduli estimators, phase and condensation machinery.
-- `crates/compose`: the composition and capability layer.
-- `crates/foundation`: the leaf modules shared across the simulation, extracted so an edit elsewhere does not rebuild them (material, value, scenario, clock, breeding, sensorium, unified provenance and the rest).
-- `crates/bio`: the biology arc, parked out of the simulation's build path (genome, anatomy, belief, evidence, agent, theory of mind, lineage, mate choice).
-- `crates/world`: worldgen and surface transport. Craters, ejecta and runout, the ballistic and momentum integrators, impact events, celestial geometry.
-- `crates/sim`: the simulation systems and the calibration manifest loader (every reserved value loads as a fail-loud sentinel), the deep-time geodynamics, the runner, and the development and calibrated build profiles.
-- `crates/viewer`: the observer. A windowed glyph and globe view that reads canon and never writes it (Principle 10).
-- `crates/gpu`: canonical GPU compute in CubeCL, integer-only and bit-identical to the CPU oracle.
-- `crates/stone0`: the local-firing provenance gate that makes the no-fabricated-values discipline un-bypassable.
-
-What is held for the owner's calls: every reserved calibration value (surfaced with its basis in `calibration/reserved.toml`, never invented), and the open research items in the backlog (`docs/audit.md` carries the running count).
-
-## Building and testing
-
-```
-cargo test --workspace
+parked compatibility: biology, civilization, authored worldgen, causal
+presentation, scenarios, and the retired runner
 ```
 
-This runs the unit and property tests of the core, the determinism reproducibility harness (the same seed at one, four, and the machine's worker count must yield a bit-identical state hash), and the conservation and referential-integrity harness (promotion, demotion, merge, and split must conserve every declared projection and leave no dangling reference). Continuous integration runs the same tests plus `scripts/verify.sh`, which checks the prose customs and the document invariants.
+`civsim-planet` owns the seven stages:
 
+1. star, disk, and system;
+2. assembly and composition;
+3. orbital, secular, and moon evolution;
+4. young thermal and material state;
+5. geodynamics and deep time;
+6. loads and flexure;
+7. immutable snapshot.
+
+The sealed absolute physics floor is the only value-bearing input. The four
+ledger tiers and seven provenance marks, `[D]`, `[M]`, `[E]`, `[C]`,
+`[A]`, `[W]`, and `[X]`, are accounting only. A citation or tag cannot
+admit a value. Derive first. Every irreducible non-derived floor leaf, at any
+tier, needs the complete derivation-exhaustion, Buckingham-Pi, Gap Law, and
+Residual Law receipt. Otherwise the stage refuses. Written state and
+contingency are generated inside the run.
+
+The current audited physical floor contains three Universal `[M]` invariants:
+`alpha`, `G`, and `m_e`. Seven exact SI definitions live in a separate,
+versioned representation receipt and carry no provenance mark. `eps_0` is a
+runtime `[D]` value derived from `alpha`, `e`, `h`, and `c`; `sigma`, `R`, and
+the atomic-volume conversion are representation-derived execution values. The
+runner enters Stage 1 and refuses on the missing stellar-birth realization
+measure. It never promotes that refusal to a snapshot.
+
+## Developer entry points
+
+Linux and WSL use Just:
+
+```sh
+just
+just doctor
+just run-derived
+just readiness
+just ledger-inventory-check
+just test
+just check-pr
 ```
-scripts/verify.sh          # human-readable pass or fail summary
-scripts/verify.sh --json   # structured output for the projectops server and the panels
+
+Windows uses the WSL bridge:
+
+```powershell
+pwsh -NoProfile -File scripts/dev.ps1 doctor
+pwsh -NoProfile -File scripts/dev.ps1 run-derived
+pwsh -NoProfile -File scripts/dev.ps1 readiness
+pwsh -NoProfile -File scripts/dev.ps1 test
 ```
 
-## The reserved-value discipline
+`run-derived` is a compatibility name for the former derived globe workflow.
+It enters the same sealed-floor library runner as `run` and never enters a
+viewer. Legacy commands carry an explicit `legacy` or `parked` suffix and use
+`parked/Cargo.toml`. Their results do not supply planetary readiness.
 
-The engine is fully data-driven and openly incomplete by design. A mechanism is fixed Rust; the numbers it needs are the owner's, surfaced with their basis in `calibration/reserved.toml` and set deliberately, never guessed. A reserved value loads as a sentinel that fails loudly if read unset, so no system runs on a fabricated default. See `RUNBOOK.md` section 4.
+## Current records
+
+- `HANDOFFS.md`: current state first, followed by preserved session history.
+- `TODOS.md`: the lean canonical planetary queue.
+- `docs/working/CONSENSUS_ROADMAP.md`: the live status board.
+- `docs/working/REPOSITORY_CLEANUP_PLAN.md`: dependency-ordered cleanup plan.
+- `docs/working/CANONICAL_LEDGER_INVENTORY.txt`: generated four-by-seven accounting view.
+- `docs/working/ABIOTIC_EVIDENCE_DEBT.md`: unadmitted evidence and derivation obligations.
+- `docs/working/PHYSICS_FLOOR_REGISTRY.md`: discovery map for floor and derivation audits.
+- `docs/working/VENDORING_CHECKLIST.md`: research custody protocol.
+- `parked/docs/`, `parked/audits/`, and `parked/TODOS_LEGACY.md`: preserved civilization-era records.
+
+The strict Diamond gate is green: `Fixed::log_sum_exp` is the sole provider,
+and compatibility functions delegate to it. The current physical blocker is
+the named Stage 1 realization-measure refusal.

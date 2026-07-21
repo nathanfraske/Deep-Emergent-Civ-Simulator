@@ -27,7 +27,9 @@
 //! per-tick canonical path.
 
 use crate::bignum::{BigRat, BigUint};
-use crate::fundamentals::{fundamental, Composite, Fundamental};
+use crate::fundamentals::SiDimension;
+#[cfg(test)]
+use crate::fundamentals::{execution_root, Composite, Fundamental};
 
 /// Evaluate a composite's declared formula over its named inputs, EXACTLY as a rational. `resolve` maps a
 /// symbol (`pi`, `k_B`, ...) to its exact rational value. The returned rational is the composite's true
@@ -47,6 +49,32 @@ pub fn evaluate_formula(
     if parser.pos != parser.tokens.len() {
         return Err(format!(
             "trailing tokens in formula at position {}",
+            parser.pos
+        ));
+    }
+    Ok(value)
+}
+
+/// Evaluate the same formula grammar over typed SI dimensions.
+///
+/// Numeric literals and `pi` are dimensionless. Addition and subtraction require
+/// equal dimensions; multiplication, division, and integer powers transform the
+/// exponent vector exactly. Canonical composite projection calls this before any
+/// magnitude is emitted, so a unit label cannot drift away from its formula.
+pub fn evaluate_formula_dimension(
+    formula: &str,
+    resolve: &dyn Fn(&str) -> Result<SiDimension, String>,
+) -> Result<SiDimension, String> {
+    let tokens = tokenize(formula)?;
+    let mut parser = DimensionParser {
+        tokens: &tokens,
+        pos: 0,
+        resolve,
+    };
+    let value = parser.parse_expr()?;
+    if parser.pos != parser.tokens.len() {
+        return Err(format!(
+            "trailing tokens in dimension formula at position {}",
             parser.pos
         ));
     }
@@ -79,6 +107,7 @@ pub fn pi(digits: u32) -> BigRat {
 /// FAILS LOUD rather than emitting an unverified number. `pi` is computed to `working_digits` by a
 /// deterministic series; every fundamental is read from the table as an exact rational. Run once at load,
 /// off the canonical path.
+#[cfg(test)]
 pub fn compute_composite_at_scale(
     composite: &Composite,
     working_digits: u32,
@@ -88,7 +117,7 @@ pub fn compute_composite_at_scale(
         if name == "pi" {
             Ok(pi(working_digits))
         } else {
-            match fundamental(name) {
+            match execution_root(name) {
                 Some(f) => BigRat::from_decimal_str(f.value),
                 None => Err(format!(
                     "composite '{}' names unknown symbol '{}'",
@@ -125,6 +154,7 @@ pub fn compute_composite_at_scale(
 /// the crate's [`crate::derive_scale_bits`]. The magnitude bracket is read from the composite's known value
 /// (its order of magnitude), so the scale is a function of the quantity's own data plus the two reserved
 /// knobs, never an independent per-composite dial.
+#[cfg(test)]
 pub fn composite_scale_bits(
     composite: &Composite,
     sig_target: u32,
@@ -144,6 +174,7 @@ pub fn composite_scale_bits(
 /// scale that holds it, so it is representable rather than truncating to zero. The scale is a function
 /// of the quantity's own magnitude plus the two reserved knobs, never an independent per-fundamental
 /// dial.
+#[cfg(test)]
 pub fn fundamental_scale_bits(
     fund: &Fundamental,
     sig_target: u32,
@@ -172,6 +203,7 @@ pub fn working_digits_for_scale(scale_bits: u32, magnitude_log2: i64) -> u32 {
 /// derived working precision, rounding ONCE, and running the fail-loud cross-check against the stored
 /// reference. The caller projects this to whatever narrower scale it consumes at. `sig_target` and `guard`
 /// are the global reserved knobs; `canonical_scale` is the substrate's default fixed-point scale.
+#[cfg(test)]
 pub fn derived_composite_bits(
     composite: &Composite,
     sig_target: u32,
@@ -396,6 +428,93 @@ impl Parser<'_> {
     }
 }
 
+struct DimensionParser<'a> {
+    tokens: &'a [Token],
+    pos: usize,
+    resolve: &'a dyn Fn(&str) -> Result<SiDimension, String>,
+}
+
+impl DimensionParser<'_> {
+    fn peek(&self) -> Option<&Token> {
+        self.tokens.get(self.pos)
+    }
+
+    fn bump(&mut self) -> Option<&Token> {
+        let token = self.tokens.get(self.pos);
+        if token.is_some() {
+            self.pos += 1;
+        }
+        token
+    }
+
+    fn parse_expr(&mut self) -> Result<SiDimension, String> {
+        let acc = self.parse_term()?;
+        while let Some(token) = self.peek() {
+            match token {
+                Token::Plus | Token::Minus => {
+                    self.bump();
+                    let right = self.parse_term()?;
+                    if acc != right {
+                        return Err("addition or subtraction joins unequal dimensions".to_owned());
+                    }
+                }
+                _ => break,
+            }
+        }
+        Ok(acc)
+    }
+
+    fn parse_term(&mut self) -> Result<SiDimension, String> {
+        let mut acc = self.parse_factor()?;
+        while let Some(token) = self.peek() {
+            match token {
+                Token::Star => {
+                    self.bump();
+                    acc = acc.multiply(self.parse_factor()?)?;
+                }
+                Token::Slash => {
+                    self.bump();
+                    acc = acc.divide(self.parse_factor()?)?;
+                }
+                _ => break,
+            }
+        }
+        Ok(acc)
+    }
+
+    fn parse_factor(&mut self) -> Result<SiDimension, String> {
+        let base = self.parse_base()?;
+        if let Some(Token::Caret) = self.peek() {
+            self.bump();
+            let exponent = match self.bump() {
+                Some(Token::Number(value)) => value
+                    .parse::<u32>()
+                    .map_err(|_| format!("exponent '{value}' is not an unsigned integer"))?,
+                other => return Err(format!("expected an integer exponent, found {other:?}")),
+            };
+            base.pow(exponent)
+        } else {
+            Ok(base)
+        }
+    }
+
+    fn parse_base(&mut self) -> Result<SiDimension, String> {
+        let token = self.bump().cloned();
+        match token {
+            Some(Token::Number(_)) => Ok(SiDimension::DIMENSIONLESS),
+            Some(Token::Ident(name)) => (self.resolve)(&name),
+            Some(Token::LParen) => {
+                let inner = self.parse_expr()?;
+                match self.bump() {
+                    Some(Token::RParen) => Ok(inner),
+                    other => Err(format!("expected ')', found {other:?}")),
+                }
+            }
+            other => Err(format!("expected a dimension value, found {other:?}")),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -511,6 +630,7 @@ mod tests {
             fundamentals: &["k_B", "h", "c"],
             value: "5.670374419e-8",
             unit: "W/(m^2*K^4)",
+            dimension: crate::fundamentals::STEFAN_BOLTZMANN.dimension,
             provenance: "test",
         };
         let err = compute_composite_at_scale(&bogus, 50, 55).unwrap_err();

@@ -1,4 +1,22 @@
-# Layer-4 root census: the world-seed schema as a causal graph (cross-lane)
+# Superseded Layer-4 root census: historical dependency discovery
+
+Status: superseded by the canonical absolute-floor ruling of 2026-07-20.
+
+This file preserves earlier planetary dependency research only. It does not
+define a world-seed schema, canonical roots, draw inputs, or permission to bind
+an epoch, environment, composition, angular momentum, temperature, identity,
+or other per-world magnitude. On the active runpath, the sole value-bearing
+input is the sealed absolute physics floor. Every physical quantity discussed
+below must derive from that floor, complete the full Buckingham-Pi, Gap Law,
+Residual Law, unique-slot, evidence, and admit-the-alien admission contract, or
+remain a named refusal. A physical measure and its realization-coordinate law
+are both still absent. Labels such as field, cluster, familiar metallicity, or
+Solar neighbourhood may condition evidence, but cannot select a world.
+
+The active migration authority is `docs/working/ABIOTIC_EVIDENCE_DEBT.md` and
+the executable refusal is `stellar_birth.realization_measure`. Every use of
+ROOT, draw, interim, or world seed below is historical terminology and carries
+no forward authority.
 
 This is the layer-4 draw arc's FIRST DELIVERABLE, ruled ahead of any wire (research agent, owner-signed 2026-07-18). It is a CROSS-LANE document, not disk-lane private: the root set IS the world-seed schema, shared infrastructure, and the midband lane's radiogenic inventories drink from the same epoch-and-environment aquifer, so it goes to the coordinator.
 

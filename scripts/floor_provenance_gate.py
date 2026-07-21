@@ -13,24 +13,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The floor-provenance gate (provenance register Phase 2, docs/working/PROVENANCE_PHASE2_FLOOR_UNIFICATION.md).
+"""Audit provenance claims on the broad physics-data candidate population.
 
-The sibling of scripts/provenance_gate.py, one register level down: it fails CI the moment a physics-floor
-value entry ships without a provenance, so the floor's mandatory real-versus-fantasy split (Part 58,
+This gate does not define or admit the canonical absolute floor. That authority belongs to civsim-ledger and
+the generated four-tier by seven-mark inventory. This script fails CI when a broad physics-data candidate
+ships without an auditable claim, so the older real-versus-fantasy split
 `civsim_physics::Provenance::RealWithSource`/`FantasyReserved`, read fail-loud by `provenance_from`) can
 never silently drift back to an untagged value. The Rust loader already fails loud on a missing provenance;
-this is the fast structural sibling that catches it at CI-lint time across every floor manifest uniformly,
-before the build, exactly as provenance_gate.py does for calibration/reserved.toml.
+this is the fast structural sibling that catches it at CI-lint time across every candidate manifest.
 
 What carries provenance, from the actual substrate (crates/physics/src/lib.rs, periodic.rs): a VALUE entry
 does, a DERIVATION does not. An `[[axis]]` (QuantityAxis), a `[[substance]]` (Substance), and an
 `[[element]]` (periodic Element) each carry a `provenance` field, so each manifest block of those kinds must
 declare a non-empty `real = "..."` or `fantasy = "..."`. A `[[law]]` (InteractionLaw) is a derivation that
 computes an output from inputs and carries no provenance value (it is implicitly derived), so it is exempt.
-`phase_registry.toml` is exempt entirely: a phase's provenance DERIVES from its constituent substances (the
-DAG join one level up, the gate's seam-1 ruling), so a phase authors no real/fantasy field any more than it
-authors its density; slice 2 wires that derivation. Phase 2 refines these two tags into the seven-tag
-register; this slice-1 gate establishes the enforcement surface, byte-neutral.
+`phase_registry.toml` is exempt from the inline tag because each phase is audited through its constituent and
+per-property evidence. The sidecar records one of the exact seven provenance marks, or the fail-closed
+measurement-candidate sentinel. Neither the record nor a citation grants canonical admission.
 """
 
 import pathlib
@@ -88,21 +87,15 @@ def parse_blocks(text):
     return blocks
 
 
-# The seven register tags and the two-tag -> seven-tag consistency, the floor's analog of the calibration
-# category<->provenance gate. The two are RELATED but not strictly nested: the inline real/fantasy flags
-# whether a CITATION is present, and the grade is the refined provenance of the VALUE. A citation can be for
-# the value ITSELF (measured, a cited derivation, a cited band) OR for the SHAPE/METHOD/DEFINITION while the
-# value is chosen or sampled (the Hill-equation citation whose n is "the owner's per-class call"; the
-# definitional Archimedes citation whose immersed volume is a per-object slot). So a `real` entry can carry
-# any grade except a written-state (a floor value is never the sim's evolved history). A `fantasy` entry has
-# NO observation behind it, so it can never be measured or a banded estimator: fantasy -> authored, closure,
-# derived, or contingency. The load-bearing catch is therefore a fantasy value laundered as measured.
-# EIGHT now. `unverified_measurement_candidate` is the honest tier for a value LABELLED measured that
-# carries no machine-checkable evidence. It renders `[?M]`, never `[M]`. See the variant's own doc in
-# crates/foundation/src/calibration.rs for why these were downgraded rather than baselined.
-SEVEN_GRADES = {
+# The exact seven provenance spellings and one fail-closed audit sentinel. The inline real/fantasy flag
+# records whether an evidence ground is present, while the historical `grade` field classifies the candidate
+# claim. A citation can support the value itself or only a shape, method, or definition, so `real` does not
+# imply `[M]`. A `fantasy` entry has no observational ground and therefore cannot claim measured or estimator
+# status. The load-bearing catch is a fantasy candidate laundered as measured.
+# `unverified_measurement_candidate` is not an eighth provenance type. It is a refusal sentinel for a row
+# labelled measured without machine-checkable evidence and never renders `[M]`.
+CANONICAL_PROVENANCE = {
     "measured",
-    "unverified_measurement_candidate",
     "derived",
     "estimator",
     "closure",
@@ -110,6 +103,8 @@ SEVEN_GRADES = {
     "contingency",
     "written_state",
 }
+AUDIT_SENTINELS = {"unverified_measurement_candidate"}
+KNOWN_CANDIDATE_STATUSES = CANONICAL_PROVENANCE | AUDIT_SENTINELS
 CONSISTENT = {
     "real": {
         "measured",
@@ -158,8 +153,8 @@ def parse_grade_register(text):
 
 
 def _grade_problems_for(manifest_entries, reg):
-    """The pure cross-validation logic: every manifest value entry has a one-of-seven grade consistent with
-    its real/fantasy bucket, a derived grade carries derived_from, and no grade is an orphan. Returns
+    """The pure cross-validation logic: every candidate has a canonical provenance or recognized refusal
+    sentinel consistent with its real/fantasy bucket, a derived record carries derived_from, and no record is orphaned. Returns
     (id, problem) pairs. Takes the parsed register so it is testable without the file."""
     problems = []
     manifest_ids = {e["id"] for e in manifest_entries}
@@ -171,8 +166,10 @@ def _grade_problems_for(manifest_entries, reg):
             problems.append((idv, "no grade in floor_provenance.toml"))
             continue
         grade = g["grade"]
-        if grade not in SEVEN_GRADES:
-            problems.append((idv, f"grade '{grade}' is not one of the seven"))
+        if grade not in KNOWN_CANDIDATE_STATUSES:
+            problems.append(
+                (idv, f"candidate status '{grade}' is neither one of the seven provenance types nor an audit sentinel")
+            )
             continue
         bucket = bucket_by_id.get(idv)
         if bucket in CONSISTENT and grade not in CONSISTENT[bucket]:
@@ -181,12 +178,12 @@ def _grade_problems_for(manifest_entries, reg):
             problems.append((idv, "derived grade with no derived_from"))
     for idv in reg:
         if idv not in manifest_ids:
-            problems.append((idv, "grade-register id not present in any floor manifest"))
+            problems.append((idv, "candidate-register id not present in any broad physics manifest"))
     return problems
 
 
 def check_grades(manifest_entries):
-    """Cross-validate the real grade register against the manifest value entries. Returns (id, problem)."""
+    """Cross-validate the candidate register against broad manifest rows. Returns (id, problem)."""
     reg = parse_grade_register(GRADE_REGISTER.read_text())
     return _grade_problems_for(manifest_entries, reg)
 
@@ -226,11 +223,9 @@ def check():
                 manifest_entries.append({"id": b["id"], "bucket": b["bucket"]})
         if missing:
             failures[path.name] = missing
-    # The candidate phases (phase_registry.toml, seam-1 reconciled by the two-axis distinction): they carry
-    # no inline real/fantasy (their thermodynamic data is cited via per-property `source =`), so they are
-    # exempt from the real/fantasy completeness check, but each MUST carry a grade in the register keyed
-    # "phase.<name>" (measured plus a derive-first defect). Bucket None, so the real/fantasy-to-grade
-    # consistency is skipped; only completeness, one-of-seven, and derived-needs-derived_from apply.
+    # Candidate phases carry per-property prose citations but no inline real/fantasy field. Each must still
+    # have a candidate record keyed `phase.<name>`. With no old bucket, only completeness, known status, and
+    # derived-needs-derived_from apply. This audit record does not establish admission or `[M]` evidence.
     phase_path = FLOOR_DIR / "phase_registry.toml"
     if phase_path.exists():
         for m in re.finditer(r'^name = "([^"]+)"', phase_path.read_text(), re.M):
@@ -251,23 +246,29 @@ def main():
     grade_problems = check_grades(manifest_entries)
     if grade_problems:
         ok = False
-        print("floor-provenance gate: grade-register problems (floor_provenance.toml):")
+        print("floor-provenance gate: candidate-register problems (floor_provenance.toml):")
         for i, p in grade_problems:
             print(f"  - {i}: {p}")
     if ok:
-        surface = sum(
+        inadmissible = sum(
             1
             for g in parse_grade_register(GRADE_REGISTER.read_text()).values()
             if g["grade"] in ("closure", "authored")
         )
+        unverified = sum(
+            1
+            for g in parse_grade_register(GRADE_REGISTER.read_text()).values()
+            if g["grade"] in AUDIT_SENTINELS
+        )
         print(
-            f"floor-provenance gate: clean ({total} floor value entries, all born provenance-tagged and"
-            f" seven-tag graded; floor authoring surface {surface})"
+            f"floor-provenance gate: clean ({total} broad physics candidates audited against exactly seven"
+            f" provenance types; {unverified} fail-closed measurement candidates;"
+            f" {inadmissible} closure/authored candidates excluded from initial-floor admission)"
         )
         return 0
     print(
-        "floor-provenance gate: FAILED (every floor axis/substance/element must declare real or fantasy and"
-        " a consistent seven-tag grade; see docs/working/PROVENANCE_PHASE2_FLOOR_UNIFICATION.md)"
+        "floor-provenance gate: FAILED (every broad physics candidate must declare evidence grounding and"
+        " one of seven provenance types or a recognized refusal sentinel; canonical admission remains separate)"
     )
     return 1
 
@@ -289,13 +290,12 @@ def self_test():
     # An empty real string does not count as provenance.
     empty = '[[substance]]\nid = "s.c"\nreal = ""\n'
     assert parse_blocks(empty)[0]["has_provenance"] is False
-    # The grade register parses and the consistency check fires: a real-bucketed entry graded closure is
-    # inconsistent (real -> {measured, derived, estimator}); an untagged manifest entry is caught.
+    # The historical register spelling parses. A real-bucketed closure candidate is permitted because a
+    # citation may support only the method or shape, while the closure magnitude remains inadmissible.
     reg = parse_grade_register('[[grade]]\nid = "x.a"\ngrade = "closure"\n')
     assert reg == {"x.a": {"grade": "closure", "has_derived_from": False}}, reg
-    # Directly exercise the consistency logic without touching the real register file. A real-bucketed
-    # closure IS allowed (a cited shape with a chosen value), but a fantasy-bucketed measured is the
-    # load-bearing catch (a no-observation value laundered as measured).
+    # Directly exercise the consistency logic without touching the repository register. A fantasy-bucketed
+    # measured claim is the load-bearing laundering case.
     real_closure = _grade_problems_for(
         [{"id": "x.a", "bucket": "real"}], {"x.a": {"grade": "closure", "has_derived_from": False}}
     )

@@ -1,4 +1,5 @@
-// panels-reviewed (this template runs the five section-9 mandatory lenses; the reminder hook passes)
+// DISABLED: reference material only. This template lacks the mandatory section-11
+// fail-closed input-bias smoke stage and a diverse model/type roster.
 //
 // The section-9 MANDATORY LENS AUDIT (AGENTIC_ADDENDUM.md) plus correctness, over a change. Pass the change
 // context as `args`:

@@ -13,8 +13,8 @@
 // limitations under the License.
 
 //! `stone0-gate`: the Stone 0 provenance gate binary. CI runs it with `--ci`, its self-proof with
-//! `--self-test`, and a developer runs it with no flag for the full local check. It is not yet wired
-//! into any build script (increment 4 is reserved for the owner to gate).
+//! `--self-test`, and a developer runs it with no flag for the full local check. The canonical planet
+//! and parked compatibility runner also call the library from their build scripts.
 
 use civsim_stone0::{run, Mode};
 

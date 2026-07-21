@@ -27,12 +27,16 @@ set -uo pipefail
 payload="$(cat)"
 
 tool="$(printf '%s' "$payload" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("tool_name",""))' 2>/dev/null || echo "")"
-[ "$tool" = "Agent" ] || exit 0
+case "$tool" in
+  Agent|spawn_agent|collaboration.spawn_agent) ;;
+  *) exit 0 ;;
+esac
 
 prompt="$(printf '%s' "$payload" | python3 -c '
 import sys, json
 d = json.load(sys.stdin)
-print(d.get("tool_input", {}).get("prompt", ""))
+ti = d.get("tool_input", {}) or {}
+print(ti.get("prompt") or ti.get("message") or "")
 ' 2>/dev/null || echo "")"
 [ -n "$prompt" ] || exit 0
 
@@ -45,13 +49,14 @@ noun_re='(doi|arxiv|paper|primary source|literature|journal|nist|iapws|janaf|han
 printf '%s' "$lower" | grep -qE "$verb_re" || exit 0
 printf '%s' "$lower" | grep -qE "$noun_re" || exit 0
 
-# Does it already carry the protocol? Four markers, because a brief that mentions only one of them is a
-# brief that will produce three of the four failures.
+# Does it already carry the protocol? Five markers, because evidence custody and
+# canonical admission are separate obligations.
 missing=()
 printf '%s' "$lower" | grep -qE 'sha256|checksum'                   || missing+=("a SHA256/checksum requirement")
 printf '%s' "$lower" | grep -qE 'paywall|licen[cs]e|redistribut'     || missing+=("the paywall/licence check")
 printf '%s' "$lower" | grep -qE 'wayback|internet archive|archived_url|witness' || missing+=("the archive-witness fallback")
 printf '%s' "$lower" | grep -qE 'anchor|table|figure|page|locator'   || missing+=("the per-value anchor (table/figure/page)")
+printf '%s' "$lower" | grep -qE 'evidence.{0,30}not.{0,30}admission|custody.{0,30}not.{0,30}admission|derive.{0,40}admission.{0,40}refus' || missing+=("the rule that evidence custody does not grant canonical admission")
 
 [ "${#missing[@]}" -eq 0 ] && exit 0
 
@@ -73,6 +78,8 @@ printf '%s' "$lower" | grep -qE 'anchor|table|figure|page|locator'   || missing+
   echo "  - Read the primary's figures and tables, not the abstract."
   echo "  - A value you cannot source, you OMIT. An absent row is correct and expected; an invented row,"
   echo "    a periodic-table trend, or a related mineral's value is the worst outcome and will be caught."
+  echo "  - Evidence custody does NOT grant canonical admission. A candidate must still DERIVE from the"
+  echo "    admitted floor or carry the complete floor-admission receipt; otherwise the stage REFUSES."
   echo "  - Deliver the data column, its manifest, and an OFFLINE provenance test that re-checks every"
   echo "    receipt. Label the test with what it PROVES (custody / transcription / analytic) and what it"
   echo "    does not."

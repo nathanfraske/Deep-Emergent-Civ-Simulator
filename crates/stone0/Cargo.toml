@@ -2,7 +2,7 @@
 # Licensed under the Apache License, Version 2.0; see LICENSE.
 [package]
 name = "civsim-stone0"
-description = "Q1 Stone 0: the local-firing provenance gate. A dependency-free enforcement gate that runs the existing provenance discipline (the python gates) as a violation predicate, checks a human-password override against the local secrets directory, and scans the tracked tree for laundered credentials, retired tombstone phrases, and a baked-in override. Fails OPEN on any operational error and CLOSED only on a positive detection. Not yet wired into any build script (increment 4 is the owner's to gate)."
+description = "Q1 Stone 0: the local-firing provenance gate. A dependency-free enforcement gate that runs the canonical Python gates as a violation predicate, checks a human-password override against the local secrets directory, and scans the tracked tree for laundered credentials, retired tombstone phrases, and a baked-in override. Fails OPEN on an unavailable interpreter or repository service and CLOSED on a positive detection. Wired into the canonical planet build and the parked compatibility runner."
 authors.workspace = true
 license.workspace = true
 edition.workspace = true
@@ -10,9 +10,8 @@ version.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
-# The gate has no external dependencies on purpose: base64 is implemented inline, hashing is a small
-# native FNV, and every scan is std-only. Nothing here can pull a version that perturbs a build, and the
-# crate is deliberately depended on by nothing (increment 4, the build.rs wiring, is reserved).
+# The gate has no external dependencies on purpose: base64 and every native scan are std-only. Nothing
+# here can pull a version that perturbs a build. It is a build-dependency only, never a runtime input.
 [dependencies]
 
 # The library is the gate; the binary is a thin CLI over it, named stone0-gate for CI and local use.

@@ -10,10 +10,12 @@ rust-version.workspace = true
 
 [dependencies]
 civsim-core = { path = "../core" }
+civsim-ledger = { path = "../ledger" }
 # serde lets the catalogues load from data. No floating point is used anywhere in
 # this crate; magnitudes are integer fixed-point, so nothing here can perturb a
 # canonical result.
 serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
 
 [lints.clippy]
 # R-CANON-WALK is scoped to the canonical tick-state crates (core, sim, world);

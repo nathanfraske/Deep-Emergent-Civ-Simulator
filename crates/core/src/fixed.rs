@@ -133,7 +133,7 @@ impl Fixed {
     /// Parse a decimal string into `Fixed` using only integer arithmetic, so the
     /// conversion is exact to the fixed-point grid and identical on every machine;
     /// floating point is never touched. This is the canonical text-to-`Fixed` reader
-    /// the calibration manifest and the data-driven substrate loaders both use, so a
+    /// repository data loaders use, so a
     /// datasheet value or a reserved number reaches canonical state losslessly.
     pub fn from_decimal_str(s: &str) -> Result<Fixed, String> {
         let s = s.trim();
@@ -536,6 +536,40 @@ impl Fixed {
         Fixed::from_int(e).mul(LN2) + ln_m
     }
 
+    // @derives: a permutation-independent log-domain sum <- the input log magnitudes and the fixed-point exp and ln kernels
+    /// `ln(sum_i exp(x_i))` over a non-empty slice, evaluated in the max-shifted domain so no exponential can
+    /// overflow. The shifted terms are non-negative fixed-point values, so their saturating sum is independent of
+    /// caller order. A subtraction that falls below the representable window contributes zero, which is the
+    /// fixed-point image of its exponentially negligible term. Returns `None` only for an empty slice.
+    ///
+    /// This is the sole workspace provider. Domain crates may expose compatibility wrappers, but they delegate
+    /// here rather than implementing a second reduction.
+    /// @provides log_sum_exp
+    pub fn log_sum_exp(values: &[Fixed]) -> Option<Fixed> {
+        let (&first, rest) = values.split_first()?;
+        let mut max = first;
+        for &value in rest {
+            if value > max {
+                max = value;
+            }
+        }
+
+        let mut sum = Fixed::ZERO;
+        for &value in values {
+            let shifted_exp = match value.checked_sub(max) {
+                Some(shifted) => shifted.exp(),
+                None => Fixed::ZERO,
+            };
+            sum = sum.saturating_add(shifted_exp);
+        }
+
+        if sum <= Fixed::ZERO {
+            Some(max)
+        } else {
+            Some(max.saturating_add(sum.ln()))
+        }
+    }
+
     /// Sine and cosine together, integer-only and deterministic (CORDIC). Reduces the angle to
     /// `[-pi/4, pi/4]` by quadrant, rotates, and maps back. Returns `(sin, cos)`.
     #[inline]
@@ -738,7 +772,7 @@ impl Fixed {
     /// The largest argument whose exponential is representable, DERIVED from the representation rather than
     /// authored: `exp(x)` exceeds [`Fixed::MAX`] exactly when `x` exceeds `ln(Fixed::MAX)`.
     ///
-    /// Measured against what [`Fixed::exp`] actually does rather than trusted from the algebra: the last
+    /// Measured against [`Fixed::exp`] behavior rather than trusted from the algebra: the last
     /// argument whose exponential lands below the rail is `21.487560871` and the first that reaches it is
     /// `21.487563870`, so this derived edge falls inside the measured crossover. Within the `1.5e-6` sliver
     /// below it the series rails about `2e-6` early in relative terms, which is the accuracy the top of the
@@ -1083,6 +1117,43 @@ mod tests {
         assert_eq!(Fixed::from_int(1), Fixed::ONE);
         let x = Fixed::from_int(7);
         assert_eq!(x.mul(Fixed::ONE), x, "multiplying by ONE is identity");
+    }
+
+    #[test]
+    fn log_sum_exp_is_total_on_nonempty_slices_and_permutation_independent() {
+        assert_eq!(Fixed::log_sum_exp(&[]), None);
+        assert_eq!(
+            Fixed::log_sum_exp(&[Fixed::from_int(7)]),
+            Some(Fixed::from_int(7))
+        );
+
+        let values = [
+            Fixed::from_int(7),
+            Fixed::from_int(3),
+            Fixed::from_int(-2),
+            Fixed::from_int(5),
+        ];
+        let expected = Fixed::log_sum_exp(&values).unwrap();
+        for permutation in [
+            [values[0], values[1], values[2], values[3]],
+            [values[3], values[2], values[1], values[0]],
+            [values[1], values[3], values[0], values[2]],
+            [values[2], values[0], values[3], values[1]],
+        ] {
+            assert_eq!(Fixed::log_sum_exp(&permutation), Some(expected));
+        }
+
+        let wide = Fixed::log_sum_exp(&[Fixed::ONE, Fixed::MIN]).unwrap();
+        assert_eq!(
+            wide,
+            Fixed::ONE,
+            "an underflowed shifted term contributes zero"
+        );
+        assert_eq!(
+            Fixed::log_sum_exp(&[Fixed::MAX, Fixed::MAX]),
+            Some(Fixed::MAX),
+            "an unrepresentable result follows the Fixed saturation policy"
+        );
     }
 
     #[test]

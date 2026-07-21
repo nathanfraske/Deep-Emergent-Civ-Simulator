@@ -91,62 +91,14 @@ const fn dt(role: &'static str) -> PortContract {
         variadic: false,
     }
 }
-/// A class-set (variadic) port role: the kernel folds an open-arity set of same-dimension axes.
-const fn classset(role: &'static str, exponent: i8) -> PortContract {
-    PortContract {
-        role,
-        temporal: Temporal::Current,
-        exponent,
-        variadic: true,
-    }
-}
-
-/// The fixed contract for a kernel id, or `None` if the kernel has no contract yet (a legacy
-/// kernel whose laws are not checked). All five floors are fully migrated onto this table (biology,
-/// mechanics and materials, fluids, chemistry and optics, electricity and magnetism), including the
-/// former `law.impact` compound, now split into the monomial `law.kinetic_energy` and `law.impulse`.
-/// No law is legacy; every law binds a contract and is dimensionally checked at load.
+/// The fixed contract for an abiotic kernel id, or `None` if this package does not own the kernel.
+/// The mechanical and materials, fluids, chemistry and optics, electricity and magnetism, and geology
+/// floors are fully migrated onto this table, including the former `law.impact` compound, now split
+/// into the monomial `law.kinetic_energy` and `law.impulse`. Parked compatibility packages may supply
+/// contracts for their retired domains through the registry's explicit extension API.
 pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
     use OutputCheck::*;
     Some(match kernel {
-        // === Biology (wave 0) ===
-        // The two folds read a class set (the nutrient fractions, the toxin concentrations) as an
-        // open-arity variadic port and a handful of single consumer parameters; both report a
-        // dimensionless adequacy or harm ratio. edibility composes the two: it reads the produced
-        // net-nutrition and net-harm scores, so it derives one tier above them.
-        "net_nutrition" => KernelContract {
-            ports: const {
-                &[
-                    classset("supply", 0),
-                    cur("requirement", 0),
-                    cur("assimilation", 0),
-                    cur("fermentation", 0),
-                ]
-            },
-            output: Dimensionless,
-        },
-        "net_harm" => KernelContract {
-            ports: const {
-                &[
-                    classset("dose", 0),
-                    cur("tolerance", 0),
-                    cur("hill_exponent", 0),
-                ]
-            },
-            output: Dimensionless,
-        },
-        "edibility" => KernelContract {
-            ports: const {
-                &[
-                    cur("net_nutrition", 0),
-                    cur("net_harm", 0),
-                    cur("tolerance_aggregate", 0),
-                    cur("dose_aggregate", 0),
-                ]
-            },
-            output: Dimensionless,
-        },
-
         // === Mechanics and materials (wave 1) ===
         // Primary-output contracts: each verifies the law's primary measured consequence. A
         // secondary consequence (a margin, a mechanical advantage, an impulse) and a caller-
@@ -225,7 +177,7 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
             },
             output: Monomial,
         },
-        "friction" => KernelContract {
+        "coulomb_friction_response" => KernelContract {
             ports: const {
                 &[
                     cur("static_coefficient", 0),
@@ -241,7 +193,7 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
             ports: const { &[cur("segments", 0)] },
             output: Asserted("an open-arity sum over the segment-length axis; the variadic port kind is a reserved decision, so the fold is not a fixed-arity port monomial"),
         },
-        "weight" => KernelContract {
+        "weight_force" => KernelContract {
             ports: const { &[cur("mass", 1), cur("gravity", 1)] },
             output: Monomial,
         },
@@ -260,7 +212,7 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
             },
             output: Monomial,
         },
-        "shear" => KernelContract {
+        "shear_stress" => KernelContract {
             ports: const {
                 &[
                     cur("shear_force", 1),
@@ -399,7 +351,7 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
                     cur("internal", 0),
                 ]
             },
-            output: Asserted("J = k*A*(c_medium - c_internal); the output is declared a mass flux (mass/time) under the explicit-rate convention, but the two concentrations are a composed signed difference over fluid.respirable_content, so the port product is not a monomial over the ports"),
+            output: Asserted("J = k*A*(c_medium - c_internal); the output is declared a mass flux (mass/time) under the explicit-rate convention, but the two concentrations form a composed signed difference, so the port product is not a monomial over the ports"),
         },
         "poiseuille_flow" => KernelContract {
             // Q = pi*dP*r^4/(8*mu*L). Under the explicit-rate convention the law declares the
@@ -655,10 +607,21 @@ pub fn check_law(
     law: &InteractionLaw,
     axes: &BTreeMap<String, QuantityAxis>,
 ) -> Result<(), PhysicsError> {
+    check_law_with_contract(law, axes, kernel_contract(&law.kernel))
+}
+
+/// Check a law against a contract selected by its owning package. The root registry uses
+/// [`kernel_contract`]; a parked compatibility package can pass a retired-domain contract without
+/// restoring that contract to the canonical table.
+pub fn check_law_with_contract(
+    law: &InteractionLaw,
+    axes: &BTreeMap<String, QuantityAxis>,
+    contract: Option<KernelContract>,
+) -> Result<(), PhysicsError> {
     if law.kernel.is_empty() {
         return Ok(());
     }
-    let contract = kernel_contract(&law.kernel).ok_or_else(|| PhysicsError::UnknownKernel {
+    let contract = contract.ok_or_else(|| PhysicsError::UnknownKernel {
         law: law.id.clone(),
         kernel: law.kernel.clone(),
     })?;

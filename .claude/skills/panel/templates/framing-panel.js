@@ -1,4 +1,5 @@
-// panels-reviewed (this template IS the section-10 blind framing panel; the reminder hook passes)
+// DISABLED: reference material only. This template lacks the mandatory section-11
+// fail-closed input-bias smoke stage.
 //
 // The section-10 BLIND FRAMING PANEL (AGENTIC_ADDENDUM.md). Diverse isolated agents critique one
 // design-framing STATEMENT against the guiding principles alone. Pass the statement and the minimal neutral

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Tracked per-clone entrypoint for declarative gates and the Stone 0 tripwire.
+
+set -euo pipefail
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
+
+if python3 -c 'import tomllib' </dev/null >/dev/null 2>&1; then
+  PYTHON=python3
+elif python -c 'import tomllib' </dev/null >/dev/null 2>&1; then
+  PYTHON=python
+else
+  echo "pre-push: Python 3.11 or newer is required" \
+    "for the declarative gate authority." >&2
+  exit 2
+fi
+
+if [ "${1:-}" = "--list-gates" ]; then
+  tier="${2:-pr}"
+  if [ "$#" -gt 2 ]; then
+    echo "usage: scripts/githooks/pre-push [--list-gates [tier]]" >&2
+    exit 2
+  fi
+  cd "$ROOT"
+  exec "$PYTHON" scripts/gate_runner.py list --tier "$tier" --ids-only
+fi
+
+cd "$ROOT"
+# Git sends the pushed ref updates on stdin. Keep that stream untouched for the
+# Stone 0 history scan, including if the declarative runner later reads stdin.
+"$PYTHON" scripts/gate_runner.py run --tier pr </dev/null
+exec scripts/stone0-pre-push-hook.sh "$@"

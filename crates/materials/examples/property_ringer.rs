@@ -920,7 +920,10 @@ fn thermal_surface_ringer(table: &PeriodicTable, anchors: &MetalEosAnchors) -> (
 /// energy and the Drude conductivity, with the silver d-block failure as a named FLAG exhibit rather than a
 /// DEFECT. Returns `(checks, defects)`.
 fn electronic_ringer(table: &PeriodicTable, anchors: &MetalEosAnchors) -> (usize, usize) {
-    let route = ElectronicRoute::new(table, anchors);
+    let execution = civsim_units::constants::canonical_si_execution_magnitudes()
+        .expect("the sealed physical floor projects");
+    let representation = execution.representation();
+    let route = ElectronicRoute::new(table, anchors, &execution);
     let mut checks = 0usize;
     let mut defects = 0usize;
 
@@ -946,8 +949,14 @@ fn electronic_ringer(table: &PeriodicTable, anchors: &MetalEosAnchors) -> (usize
     // Silver (unanchored -> free functions): the NAMED d-block exhibit. The free-electron value ~9.0 eV overshoots
     // the observed screened plasmon ~3.8 by the d-screening factor (~2.4x); a FLAG (the model's stated reach), not
     // a defect. This one row motivates the deep band-structure piece.
-    let n_ag = carrier_density_per_nm3(Fixed::from_int(1), dec(1049, 100), dec(107868, 1000));
-    let ep_ag = plasma_energy_ev(n_ag);
+    let n_ag = carrier_density_per_nm3(
+        &representation,
+        Fixed::from_int(1),
+        dec(1049, 100),
+        dec(107868, 1000),
+    )
+    .expect("silver carrier density derives");
+    let ep_ag = plasma_energy_ev(&execution, n_ag).expect("silver plasma energy derives");
     let v = Verdict::Flag("d-block: free-electron overestimate (~2.4x d-screening)");
     report(
         "plasma[Ag] eV",
@@ -961,8 +970,15 @@ fn electronic_ringer(table: &PeriodicTable, anchors: &MetalEosAnchors) -> (usize
 
     println!("--- Drude conductivity sigma (S/m): one reserved lambda_tr per metal (sigma round-trip tested) ---");
     // Copper (unanchored -> free functions), lambda_tr ~0.16: the clean noble-metal case, few-percent.
-    let n_cu = carrier_density_per_nm3(Fixed::from_int(1), dec(896, 100), dec(63546, 1000));
-    let sigma_cu = drude_conductivity_s_per_m(n_cu, dec(16, 100), Fixed::from_int(300));
+    let n_cu = carrier_density_per_nm3(
+        &representation,
+        Fixed::from_int(1),
+        dec(896, 100),
+        dec(63546, 1000),
+    )
+    .expect("copper carrier density derives");
+    let sigma_cu = drude_conductivity_s_per_m(&execution, n_cu, dec(16, 100), Fixed::from_int(300))
+        .expect("copper conductivity derives");
     let v = grade(sigma_cu.to_f64_lossy(), 5.88e7, 0.10);
     report(
         "sigma[Cu] S/m",
@@ -1026,8 +1042,10 @@ fn electronic_ringer(table: &PeriodicTable, anchors: &MetalEosAnchors) -> (usize
             3.77e7,
         ),
     ] {
-        let n_e = carrier_density_per_nm3(Fixed::from_int(z), rho, m);
-        let sigma = drude_conductivity_s_per_m(n_e, lambda, Fixed::from_int(300));
+        let n_e = carrier_density_per_nm3(&representation, Fixed::from_int(z), rho, m)
+            .expect("carrier density derives");
+        let sigma = drude_conductivity_s_per_m(&execution, n_e, lambda, Fixed::from_int(300))
+            .expect("conductivity derives");
         let v = grade(sigma.to_f64_lossy(), sigma_obs, 0.32);
         report(
             &format!("sigma[{name}] lit-lambda"),

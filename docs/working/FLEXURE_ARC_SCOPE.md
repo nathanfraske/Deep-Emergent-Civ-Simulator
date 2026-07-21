@@ -4,7 +4,7 @@ Status: KERNEL BUILT and dormant (`crates/physics/src/flexure.rs`); the RENDER W
 
 ## The gap, grounded
 
-Stage 4 of `CONSOLIDATED_SURFACE_PIPELINE.md` places the surface as a superposition of representations, each at its own derived scale: the convective-wavelength province field, the crater rows, the texture floor. The middle band is empty. Real terrain in that band is the lithosphere's ELASTIC FLEXURE under loads: a load (a volcanic pile, a crater basin, a sediment wedge, a province thickness contrast) bends the elastic plate it sits on, and the plate's rigidity sets the wavelength of the bending. That bending is what makes mountain belts, moats around volcanoes, and peripheral bulges. It is a single analytic response, no per-world authoring.
+The retired surface plan at `parked/docs/working/CONSOLIDATED_SURFACE_PIPELINE.md` identified a useful physical gap: between the convective-wavelength province field and discrete crater rows, the flexural middle band is empty. The old plan is not a canonical execution specification. The retained mechanism is lithospheric elastic flexure under loads: a load (a volcanic pile, a crater basin, a sediment wedge, a province thickness contrast) bends the elastic plate it sits on, and the plate's rigidity sets the wavelength of the bending. That bending is what makes mountain belts, moats around volcanoes, and peripheral bulges. It is a single analytic response with no per-world authoring.
 
 ## The mechanism (derive-first, no free constants)
 

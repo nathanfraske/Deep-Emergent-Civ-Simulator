@@ -48,6 +48,17 @@ impl BigUint {
         b
     }
 
+    /// A value from a `u128`, split into the canonical little-endian limb form.
+    pub fn from_u128(v: u128) -> Self {
+        let mut b = BigUint {
+            limbs: (0..4)
+                .map(|index| ((v >> (index * 32)) & 0xFFFF_FFFF) as u32)
+                .collect(),
+        };
+        b.trim();
+        b
+    }
+
     /// True when the value is zero.
     pub fn is_zero(&self) -> bool {
         self.limbs.is_empty()
@@ -282,6 +293,20 @@ impl BigRat {
             num: BigUint::from_u64(v.unsigned_abs()),
             den: BigUint::from_u64(1),
         }
+    }
+
+    /// The exact rational represented by `bits * 2^-scale_bits`.
+    ///
+    /// This is the inverse of [`Self::round_to_scale`] for a published scaled
+    /// integer. Composite floor laws use it so their only numeric inputs are
+    /// the exact projected leaf bits carried by the canonical bitstream.
+    pub fn from_scaled_i128(bits: i128, scale_bits: u32) -> Self {
+        BigRat::new(
+            bits.is_negative(),
+            BigUint::from_u128(bits.unsigned_abs()),
+            BigUint::from_u64(1).shl_bits(scale_bits),
+        )
+        .reduce()
     }
 
     /// A rational `num / den` (both non-negative magnitudes), sign `neg`.
@@ -564,6 +589,24 @@ mod tests {
                     .unwrap(),
                 (hi - lo) as u128
             );
+        }
+    }
+
+    #[test]
+    fn u128_and_scaled_i128_construction_preserve_all_bits() {
+        for value in [
+            0_u128,
+            1,
+            u64::MAX as u128 + 1,
+            (1_u128 << 127) - 1,
+            u128::MAX,
+        ] {
+            assert_eq!(BigUint::from_u128(value).to_u128(), Some(value));
+        }
+
+        for (bits, scale) in [(7_i128, 3_u32), (-7, 3), (i128::MAX, 97)] {
+            let value = BigRat::from_scaled_i128(bits, scale);
+            assert_eq!(value.round_to_scale(scale), Some(bits));
         }
     }
 

@@ -57,6 +57,7 @@ use crate::materials_oracle::{PropertyEstimate, Provenance};
 use crate::periodic::PeriodicTable;
 use crate::petrology_data::Phase;
 use civsim_core::fixed::Fixed;
+use civsim_units::constants::{si_representation_magnitudes, SiExecutionMagnitudes};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -241,19 +242,19 @@ impl PrototypeLibrary {
 
 // ----- The Born-Lande bulk-modulus derivation -----
 
-/// The Coulomb energy `e^2 / (4 pi eps0)` at unit separation, in electron-volt-angstroms (CODATA 2018,
-/// `14.399645 eV.A`), as the exact rational `1439964 / 100000`. A fundamental physical law constant (the physics
-/// floor, Principle 11), the energy scale of the Madelung sum, built by exact ratio rather than a decimal parse.
-fn coulomb_energy_ev_angstrom() -> Fixed {
-    Fixed::from_ratio(1_439_964, 100_000)
+/// The Coulomb energy `e^2 / (4 pi eps0)` at unit separation in electron-volt-angstroms, derived from the
+/// verified SI execution capability. The cited `14.399645 eV.A` value is an off-path diagnostic expectation.
+fn coulomb_energy_ev_angstrom(execution: &SiExecutionMagnitudes) -> Option<Fixed> {
+    execution.coulomb_energy_ev_angstrom()
 }
 
-/// The conversion from `eV/A^3` to gigapascals (CODATA: `1 eV = 1.602177e-19 J`, `1 A^3 = 1e-30 m^3`, so
-/// `1 eV/A^3 = 160.2177 GPa`), as the exact rational `1602177 / 10000`. A fundamental unit-conversion law
-/// constant, built by exact ratio rather than a decimal parse. Public so the Rose EOS (`rose_eos`) reads the same
-/// constant rather than a second copy.
+/// The conversion from `eV/A^3` to gigapascals, derived from the exact SI representation view. Public so the
+/// Rose EOS (`rose_eos`) reads the same conversion rather than a second copy.
 pub fn gpa_per_ev_per_angstrom_cubed() -> Fixed {
-    Fixed::from_ratio(1_602_177, 10_000)
+    si_representation_magnitudes()
+        .expect("the sealed SI representation projects")
+        .gpa_per_ev_per_angstrom_cubed()
+        .expect("the exact eV/angstrom^3 conversion fits Fixed")
 }
 
 /// The identified ionic roles of a binary phase: which element is the cation and which the anion, their integer
@@ -346,6 +347,7 @@ fn identify_ionic_pair(composition: &[(String, u32)], table: &PeriodicTable) -> 
 /// stiff oxides, a fraction the owner sets; until set the band is emitted as zero and the systematic is
 /// documented here, never invented into the value.
 pub fn phase_bulk_modulus_ionic(
+    execution: &SiExecutionMagnitudes,
     phase: &Phase,
     table: &PeriodicTable,
     radii: &IonicRadii,
@@ -396,7 +398,7 @@ pub fn phase_bulk_modulus_ionic(
     let numerator = (n - Fixed::ONE)
         .checked_mul(madelung)?
         .checked_mul(charge_product)?
-        .checked_mul(coulomb_energy_ev_angstrom())?;
+        .checked_mul(coulomb_energy_ev_angstrom(execution)?)?;
     let b_ev_per_angstrom_cubed = numerator.checked_div(denominator)?;
     let value = b_ev_per_angstrom_cubed.checked_mul(gpa_per_ev_per_angstrom_cubed())?;
     if value <= Fixed::ZERO {
@@ -409,11 +411,14 @@ pub fn phase_bulk_modulus_ionic(
     })
 }
 
-/// The eV-to-kilojoule-per-mole conversion, `N_A e / 1000 = 96.485 kJ/(mol.eV)` (CODATA Faraday over a thousand),
-/// as the exact rational `96485 / 1000`. Converts a per-formula-unit energy in electron-volts to the molar
-/// energy the disposer ranks in. Public so the Rose EOS (`rose_eos`) reads the same constant rather than a copy.
+/// The eV-to-kilojoule-per-mole conversion `N_A e / 1000`, derived from the exact SI representation view.
+/// Converts a per-formula-unit energy to the molar energy the disposer ranks. Public so the Rose EOS reads the
+/// same conversion rather than a copy.
 pub fn ev_to_kj_per_mol() -> Fixed {
-    Fixed::from_ratio(96_485, 1_000)
+    si_representation_magnitudes()
+        .expect("the sealed SI representation projects")
+        .ev_to_kj_per_mol()
+        .expect("the exact eV-to-kJ/mol conversion fits Fixed")
 }
 
 /// The BORN-LANDE LATTICE ENERGY in kJ/mol of a prototype-mapped ionic phase, DERIVED as
@@ -433,6 +438,7 @@ pub fn ev_to_kj_per_mol() -> Fixed {
 /// form over measured inputs, the point-charge model an approximation. The emitted `band` is zero here (the raw
 /// energy); the disposer wraps it with the covalency-scaled resolution band.
 pub fn phase_lattice_energy_ionic(
+    execution: &SiExecutionMagnitudes,
     phase: &Phase,
     table: &PeriodicTable,
     radii: &IonicRadii,
@@ -440,6 +446,7 @@ pub fn phase_lattice_energy_ionic(
     prototypes: &PrototypeLibrary,
 ) -> Option<PropertyEstimate> {
     lattice_energy_ionic_raw(
+        execution,
         &phase.composition,
         phase.prototype.as_deref()?,
         table,
@@ -458,6 +465,7 @@ pub fn phase_lattice_energy_ionic(
 /// the radii or the Born cores). Provenance `[E]`: an exact form over measured inputs, the point-charge model an
 /// approximation; the emitted `band` is zero (the raw energy), the disposer wrapping it with the measured band.
 pub fn lattice_energy_ionic_raw(
+    execution: &SiExecutionMagnitudes,
     composition: &[(String, u32)],
     prototype_name: &str,
     table: &PeriodicTable,
@@ -505,7 +513,7 @@ pub fn lattice_energy_ionic_raw(
     let born_factor = Fixed::ONE - Fixed::ONE.checked_div(n)?;
     let magnitude_ev = madelung
         .checked_mul(charge_product)?
-        .checked_mul(coulomb_energy_ev_angstrom())?
+        .checked_mul(coulomb_energy_ev_angstrom(execution)?)?
         .checked_mul(born_factor)?
         .checked_div(r0)?;
     let u_kj_per_mol = (Fixed::ZERO - magnitude_ev).checked_mul(ev_to_kj_per_mol())?;
@@ -614,6 +622,7 @@ impl EnergyValidationSet {
 /// Returns `None` if any validation row's energy is not computable (the estimator cannot score its own
 /// reference, a coverage failure), or the set is empty, so the fraction is never fabricated from a partial set.
 pub fn ionic_energy_band_fraction(
+    execution: &SiExecutionMagnitudes,
     validation: &EnergyValidationSet,
     table: &PeriodicTable,
     radii: &IonicRadii,
@@ -626,6 +635,7 @@ pub fn ionic_energy_band_fraction(
     let mut sum_sq = Fixed::ZERO;
     for row in &validation.rows {
         let estimate = lattice_energy_ionic_raw(
+            execution,
             &row.composition,
             &row.prototype,
             table,
@@ -655,6 +665,11 @@ pub fn ionic_energy_band_fraction(
 mod tests {
     use super::*;
     use crate::petrology_data::PhaseRegistry;
+
+    fn execution() -> SiExecutionMagnitudes {
+        civsim_units::constants::canonical_si_execution_magnitudes()
+            .expect("the sealed physical floor projects")
+    }
 
     fn table() -> PeriodicTable {
         PeriodicTable::standard().expect("the periodic table loads")
@@ -700,8 +715,15 @@ mod tests {
     fn nacl_bulk_modulus_matches_the_measured_alkali_halide() {
         // The clean monovalent validation: A=1.74756, z+z-=1, n=avg(Ne 7, Ar 9)=8, r0=1.16+1.67=2.83 A (crystal).
         // B = 7 * 1.74756 * 1 * 14.39964 / (18 * 2.83^4) * 160.2177 ~ 24.4 GPa, against a measured 24 to 25.
-        let est = phase_bulk_modulus_ionic(&nacl(), &table(), &radii(), &born(), &protos())
-            .expect("NaCl derives its bulk modulus");
+        let est = phase_bulk_modulus_ionic(
+            &execution(),
+            &nacl(),
+            &table(),
+            &radii(),
+            &born(),
+            &protos(),
+        )
+        .expect("NaCl derives its bulk modulus");
         assert!(
             close(est.value, 24.4, 2.0),
             "NaCl bulk modulus should be ~24 GPa (measured 24-25), got {}",
@@ -718,8 +740,15 @@ mod tests {
         let periclase = reg
             .phase("periclase")
             .expect("periclase is in the registry");
-        let est = phase_bulk_modulus_ionic(periclase, &table(), &radii(), &born(), &protos())
-            .expect("periclase derives its bulk modulus (it is rock-salt, prototype-mapped)");
+        let est = phase_bulk_modulus_ionic(
+            &execution(),
+            periclase,
+            &table(),
+            &radii(),
+            &born(),
+            &protos(),
+        )
+        .expect("periclase derives its bulk modulus (it is rock-salt, prototype-mapped)");
         assert!(
             close(est.value, 266.0, 6.0),
             "periclase point-charge B should be ~266 GPa, got {}",
@@ -740,7 +769,15 @@ mod tests {
         for name in ["corundum", "hematite"] {
             let phase = reg.phase(name).expect("phase is in the registry");
             assert!(
-                phase_bulk_modulus_ionic(phase, &table(), &radii(), &born(), &protos()).is_none(),
+                phase_bulk_modulus_ionic(
+                    &execution(),
+                    phase,
+                    &table(),
+                    &radii(),
+                    &born(),
+                    &protos(),
+                )
+                .is_none(),
                 "{name} falls through: its prototype's Madelung constant is absent"
             );
         }
@@ -769,7 +806,15 @@ mod tests {
                 "{name} carries no ionic prototype key"
             );
             assert!(
-                phase_bulk_modulus_ionic(phase, &table(), &radii(), &born(), &protos()).is_none(),
+                phase_bulk_modulus_ionic(
+                    &execution(),
+                    phase,
+                    &table(),
+                    &radii(),
+                    &born(),
+                    &protos(),
+                )
+                .is_none(),
                 "{name} falls through to the screen tier (no ionic prototype)"
             );
         }
@@ -828,8 +873,15 @@ mod tests {
     fn nacl_lattice_energy_matches_the_born_haber_reference() {
         // Formal-charge Born-Lande: U = -A |z+z-| k (1-1/n) / r0, then to kJ/mol. For NaCl (A=1.74756, z+z-=1,
         // n=avg(Ne 7, Ar 9)=8, r0=1.16+1.67=2.83) this is about -751 kJ/mol, a few percent of the Born-Haber -787.
-        let est = phase_lattice_energy_ionic(&nacl(), &table(), &radii(), &born(), &protos())
-            .expect("NaCl derives its lattice energy");
+        let est = phase_lattice_energy_ionic(
+            &execution(),
+            &nacl(),
+            &table(),
+            &radii(),
+            &born(),
+            &protos(),
+        )
+        .expect("NaCl derives its lattice energy");
         assert!(
             close(est.value, -751.0, 20.0),
             "NaCl lattice energy should be about -751 kJ/mol, got {}",
@@ -847,8 +899,15 @@ mod tests {
         let periclase = reg
             .phase("periclase")
             .expect("periclase is in the registry");
-        let est = phase_lattice_energy_ionic(periclase, &table(), &radii(), &born(), &protos())
-            .expect("periclase derives its lattice energy");
+        let est = phase_lattice_energy_ionic(
+            &execution(),
+            periclase,
+            &table(),
+            &radii(),
+            &born(),
+            &protos(),
+        )
+        .expect("periclase derives its lattice energy");
         assert!(
             close(est.value, -3927.0, 120.0),
             "periclase lattice energy should be about -3927 kJ/mol, got {}",
@@ -870,7 +929,15 @@ mod tests {
         for name in ["quartz", "forsterite"] {
             let phase = reg.phase(name).expect("phase is in the registry");
             assert!(
-                phase_lattice_energy_ionic(phase, &table(), &radii(), &born(), &protos()).is_none(),
+                phase_lattice_energy_ionic(
+                    &execution(),
+                    phase,
+                    &table(),
+                    &radii(),
+                    &born(),
+                    &protos(),
+                )
+                .is_none(),
                 "{name} falls through the ionic lattice-energy route"
             );
         }
@@ -881,9 +948,17 @@ mod tests {
         // The phase wrapper is a thin delegate: it reads a phase's composition and prototype key and calls the
         // raw route. A composition-keyed caller (the Stage-4 disposer) gets the identical energy, so the refactor
         // is behaviour-preserving.
-        let phase_est = phase_lattice_energy_ionic(&nacl(), &table(), &radii(), &born(), &protos())
-            .expect("the phase route derives NaCl");
+        let phase_est = phase_lattice_energy_ionic(
+            &execution(),
+            &nacl(),
+            &table(),
+            &radii(),
+            &born(),
+            &protos(),
+        )
+        .expect("the phase route derives NaCl");
         let raw_est = lattice_energy_ionic_raw(
+            &execution(),
             &nacl().composition,
             "rock-salt",
             &table(),
@@ -918,8 +993,9 @@ mod tests {
         // Born-Haber references (NaCl about 4.6 percent, periclase about 3.5 percent), so the RMS is about 4
         // percent. It is DERIVED from the cited references, never a stored constant, so it is [M] not [C].
         let set = EnergyValidationSet::standard().expect("the validation set loads");
-        let fraction = ionic_energy_band_fraction(&set, &table(), &radii(), &born(), &protos())
-            .expect("the estimator scores both of its own references");
+        let fraction =
+            ionic_energy_band_fraction(&execution(), &set, &table(), &radii(), &born(), &protos())
+                .expect("the estimator scores both of its own references");
         assert!(
             close(fraction, 0.04, 0.015),
             "the measured band-fraction should be about 4 percent, got {}",

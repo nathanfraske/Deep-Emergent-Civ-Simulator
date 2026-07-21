@@ -19,13 +19,18 @@
 use civsim_core::Fixed;
 use civsim_units::bignum::BigRat;
 use civsim_units::compute;
-use civsim_units::fundamentals;
+use civsim_units::constants;
 
 const PHONON_PI_DIGITS: u32 = 40;
 
-/// One register fundamental as an exact `BigRat`.
+/// One sealed SI execution value as an exact `BigRat`.
 fn fundamental_bigrat(symbol: &str) -> Option<BigRat> {
-    BigRat::from_decimal_str(fundamentals::fundamental(symbol)?.value).ok()
+    Some(
+        constants::si_representation_magnitudes()
+            .ok()?
+            .get(symbol)?
+            .exact_rational(),
+    )
 }
 
 /// The squared frequency constant `C^2 = 10^5 N_A / (2 pi c_cgs)^2`, so `omega_TO[cm^-1] = sqrt((k[mdyn/A]/mu[amu])

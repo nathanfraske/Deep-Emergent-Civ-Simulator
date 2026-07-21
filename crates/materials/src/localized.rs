@@ -129,7 +129,11 @@ mod tests {
         // routes to Metallic never reach the localized route, and the localized route escalates on them anyway.
         let table = PeriodicTable::standard().expect("periodic table");
         let ladder = IonizationLadder::standard().expect("ionization ladder");
-        let d_state = DStateRadii::standard().expect("d-state radii");
+        let d_state = DStateRadii::standard(
+            &civsim_units::constants::canonical_si_execution_magnitudes()
+                .expect("the sealed physical floor projects"),
+        )
+        .expect("d-state radii");
         let radii = IonicRadii::standard().expect("ionic radii");
         let mit = MitReference::standard().expect("MIT reference set");
         let guard = CorrelationClassifier::calibrate(&table, &ladder, &d_state, &radii, &mit)

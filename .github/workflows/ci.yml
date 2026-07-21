@@ -1,261 +1,106 @@
 # Copyright 2026 Nathan M. Fraske
 # Licensed under the Apache License, Version 2.0; see LICENSE.
-#
-# Continuous integration: the verification suite on the documents and the full
-# Rust build, format, lint, and test on the engine. Both gate every push and pull
-# request (runbook section 1c).
+
 name: ci
 
 on:
   push:
     branches: ["**"]
   pull_request:
-  # Nightly full suite: the slow evolutionary-selection tests are excluded from the per-PR lane by a
-  # nextest filterset (NOT #[ignore], so the unimplemented Stage-N placeholders stay untouched) and
-  # run in full here. workflow_dispatch allows a manual run to validate the lane.
   schedule:
     - cron: "0 7 * * *"
   workflow_dispatch:
 
 jobs:
-  verify-docs:
-    name: documents and prose customs
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Verification suite
-        run: bash scripts/verify.sh
-      - name: Standing reserved-values review queue
-        run: |
-          python3 - <<'PY'
-          import tomllib
-          data = tomllib.load(open("calibration/reserved.toml", "rb"))
-          reserved = [
-              e for e in data.get("reserved", [])
-              if not (e.get("status") == "set" and str(e.get("value", "")).strip())
-          ]
-          print(f"{len(reserved)} reserved value(s) awaiting the owner's calibration:")
-          for e in reserved:
-              print(f"  - {e['id']}: {e['basis']}")
-          PY
-      - name: Determinism gate (no new nondeterminism vector in the determinism crates)
-        run: |
-          python3 scripts/determinism_gate.py
-          python3 scripts/determinism_gate.py --self-test
-      - name: Constructor gate (no new inline Fixed value outside the audited baseline)
-        run: |
-          python3 scripts/constructor_gate.py
-          python3 scripts/constructor_gate.py --self-test
-      - name: Provenance gate (every reserved value carries one of the seven register tags)
-        run: |
-          python3 scripts/provenance_gate.py
-          python3 scripts/provenance_gate.py --self-test
-      - name: Floor-provenance gate (every physics-floor value carries a real/fantasy provenance)
-        run: |
-          python3 scripts/floor_provenance_gate.py
-          python3 scripts/floor_provenance_gate.py --self-test
-      - name: Derives-coverage gate (a new physics substrate is marked deriving or classified)
-        run: |
-          python3 scripts/derives_gate.py --self-test
-          python3 scripts/derives_gate.py
-      - name: Quarantine gate (the parked living-world weak-provenance ledger stays in sync with source)
-        run: |
-          python3 scripts/quarantine_gate.py
-          python3 scripts/quarantine_gate.py --self-test
-      # The vendoring pipeline. The generator check runs FIRST: the gate reads the mirrored registry, so a
-      # stale mirror would have it checking a wrong picture of the tree and passing on it.
-      - name: Sources generator (the mirrored registry and the bibliography are not stale)
-        run: |
-          python3 scripts/gen_sources.py --self-test
-          python3 scripts/gen_sources.py --check
-      - name: Sources gate (a vendored source is checksummed, archived, scoped, slimmed and licence-cleared)
-        run: |
-          python3 scripts/sources_gate.py --self-test
-          python3 scripts/sources_gate.py
-      # The disk-arc literature ledger is a sibling receipt store to the sources pipeline above: every vendored
-      # primary carries a complete receipt (SHA256, Wayback witness, grade, verbatim extract, used_by), and a
-      # citation-plus-witness entry holds no bytes while still pinning the IA snapshot it was read against.
-      # EVERY per-source provenance test, discovered rather than listed. Naming them one by one is how
-      # seven of the eight came to be omitted: the list was written when there was one test and never grew
-      # with the directory. The omission was not visible from CI either, because a test that is not
-      # invoked reports nothing, and the Grueneisen test was FAILING the whole time it sat unrun. A glob
-      # cannot fall behind the tests it runs.
-      # THE ADVERTISED STOP GATE, which did not exist. The registry's own header says a stop gate
-      # regenerates it and blocks stale output; no CI job and no Stone 0 path ran the generator, so the
-      # only enforcement was a local editor hook, invisible to CI and to main. The registry is the
-      # enforced derive-versus-author reference, and a stale one is a WRONG reference.
-      # A profile may override a reserved value and must SAY SO. 71 ids collide between reserved.toml and
-      # mirror.toml with 40 different values and nothing comparing them, and six pairs disagree on UNIT,
-      # which is two quantities sharing a name rather than one quantity at two values.
-      - name: Profile overrides are declared (a calibration divergence is stated, not discovered)
-        run: |
-          python3 scripts/profile_override_gate.py --self-test
-          python3 scripts/profile_override_gate.py
-      - name: Floor registry is current (the derive-vs-author reference is not stale)
-        run: python3 scripts/gen_floor_registry.py --check
-      - name: Per-source provenance tests (every receipt, every source, discovered not listed)
-        run: |
-          set -e
-          shopt -s nullglob
-          found=0
-          for t in scripts/*_provenance_test.py; do
-            echo "--- $t"
-            python3 "$t"
-            found=$((found + 1))
-          done
-          if [ "$found" -lt 8 ]; then
-            echo "expected at least 8 per-source provenance tests, found $found" >&2
-            exit 1
-          fi
-          echo "ran $found per-source provenance test(s)"
-      - name: Disk-arc literature receipt ledger self-test
-        run: python3 scripts/disk_arc_literature_provenance_test.py --self-test
-
-  rust:
-    name: build, format, lint, test
-    # The per-PR lane skips the nightly schedule (nightly-full covers it more thoroughly there).
-    if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    env:
-      # The slow evolutionary-selection tests (nextest flagged them >60s, one >9min), plus the sampled-planet
-      # spawn's byte-identity gate (~109s: it derives the whole sampled set TWICE, serially and in parallel, and
-      # compares every derived bit including the full tile field, so its cost IS the thing it proves), plus the
-      # render/derive-scene proofs the derived-globe arc added (each derives one or more FULL scenes, some twice
-      # for a byte-identity or determinism comparison, so they run 100s to 346s; their cost IS the thing they
-      # prove, the same rule the sampled-planet gate set). Excluded from the per-PR lane by this filterset and
-      # run in full in nightly-full. Excluded by NAME, never #[ignore]d, so the #[ignore]d unimplemented Stage-N
-      # placeholder tests are never swept in.
-      SLOW_TESTS: "test(a_recurrent_controller_evolves_to_survive_the_food_vs_water_trap_better_than_a_linear_one) | test(the_dawn_bootstrap_pre_adapts_the_grazer_founders_own_physiology) | test(bidirectional_thermotaxis_emerges_and_rests_on_the_signed_thermoreceptor) | test(a_recurrent_controller_graduates_the_plumbing_and_evolves) | test(behaviour_evolves_under_homeostatic_selection) | test(the_evolved_best_follows_the_water_percept_in_every_direction) | test(the_sampled_planet_set_is_byte_identical_to_a_serial_derivation) | test(two_unpinned_seeds_derive_different_worlds) | test(the_pinned_mirror_is_byte_identical_to_the_solar_pin_draw) | test(two_unpinned_seeds_now_derive_different_densities_via_alpha) | test(the_crust_is_orbit_dependent_a_close_orbit_condenses_the_more_refractory_assemblage) | test(alpha_enhancement_lowers_the_derived_bulk_density_the_first_density_lever) | test(a_melted_world_drives_the_verdict_end_to_end_and_stands_in_km_relief) | test(the_pre_ms_flip_reproduces_the_probe_and_is_byte_neutral_at_one_au) | test(the_hadean_orbit_derives_a_silicate_crust_and_a_mars_class_planet) | test(the_disk_total_wire_joins_gas_and_grains) | test(the_ice_line_cliff_emerges_from_membership) | test(rule_3_shared_size_slope_is_live_data)"
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install the pinned toolchain
-        run: rustup show
-      # Cache the cargo registry and target dir across runs. The dominant CI cost was a
-      # cold full-workspace recompile on every push (clippy --all-targets, then the test
-      # build); warm cache skips most of it.
-      - name: Cache cargo build
-        uses: Swatinem/rust-cache@v2
-      - name: Format
-        run: cargo fmt --all --check
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      # THE DOC-LINK GATE: a doc may not cite an item into being. `rustdoc::broken_intra_doc_links` is ON BY
-      # DEFAULT and had been firing into a void, because nothing in CI ran `cargo doc`. The founding case
-      # (`creep_rows.rs` claiming a condition was REALIZED by `ductile_strength_mpa`, a function that existed
-      # nowhere but that sentence) WAS detected by the machine, and the detection was discarded. A check whose
-      # output nobody reads is a check that does not exist. RUSTDOCFLAGS promotes the lint to an error, so the
-      # verdict is consumed through the EXIT CODE. Never grep this lint's prose: it emits findings that do not
-      # carry the words "unresolved link" (`field_step_kernel`, `promote`, and every "is both a function and a
-      # module" ambiguity), so a grep for that phrase undercounts it.
-      #
-      # `--document-private-items` IS LOAD-BEARING here, not thoroughness: a gate blind to privacy modifiers
-      # audits the API surface rather than the codebase. The founding case fired ONLY by the accident of being
-      # public; had it been private, the machine would have been silent. Measured when this gate landed: the
-      # default scope saw 3 findings, the private scope 34, so 31 broken links were hiding inside private items.
-      #
-      # THIS GATE'S BLINDNESS SET, stated beside its discriminating power, because a gate that knows what it
-      # cannot see is a gate and one that does not is a comfort. It CATCHES bracketed links to items that do not
-      # exist, on public AND private items, in crates in the doc graph. It is BLIND to:
-      #   - Prose claims naming no item in link syntax (the "Rose's EOS route provides E_coh" class). Nothing
-      #     mechanical covers this; only the blind panel does.
-      #   - BACKTICKED names, which are not links, so backticking SILENCES the lint. The sweep's own notation
-      #     fixes deliberately blind it at ~8 sites and this commit adds 4 more (3 that name no item: the `[M]`
-      #     provenance tag twice and the `MIE_X_MIN` NUM/DEN concept; 1 that names a real item: the cross-crate
-      #     cite below). That is the honest cost of those fixes.
-      #   - Items that EXIST but whose body is a stub: the link resolves and the claim is still false.
-      #   - `#[cfg(test)]` items, which are unlinkable, so "the falsifier proves it" claims cannot be
-      #     link-checked at exactly the sites that cite proofs.
-      #   - CROSS-FIREWALL REFERENCES: UNREACHABLE BY CONSTRUCTION, PANEL TERRITORY. The live case is
-      #     `crates/compose` naming a `civsim_sim` item. Compose does not depend on sim BY DESIGN: the
-      #     authored-physics side must not learn of the emergent side, which is this project's single strongest
-      #     ANTI-STEERING structure, authored physics constitutionally unable to condition on emergent outcomes.
-      #     THE FIREWALL OUTRANKS THIS GATE, PERMANENTLY AND ON PURPOSE (owner ruling 2026-07-16). A rustdoc
-      #     link IS A DEPENDENCY IN MINIATURE, so NO RESOLUTION PATH IS EVER GRANTED, and "make the gate green"
-      #     is never a reason to open one. Cross-firewall references are BY-NAME PROSE WITH THE BOUNDARY STATED
-      #     IN THE SENTENCE. The rot risk closes without touching the architecture, through a TOOLING-LEVEL NAME
-      #     CHECK (a script matching mentioned item names against the other crate's actual items), which is
-      #     legal precisely because TOOLING MAY READ BOTH SIDES OF A FIREWALL THAT CODE MAY NOT CROSS. The
-      #     reference stays checkable; the crates stay strangers.
-      # CLOSED by this gate, and formerly the sharp one: "private items are not scanned at all".
-      #
-      # `rustdoc::private_intra_doc_links` is a DIFFERENT lint (a public doc linking a private item, ~91
-      # warnings) and is deliberately NOT denied: those items exist, so they are not phantom claims.
-      - name: Doc-link gate (a doc may not cite an item into being)
-        run: RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links" cargo doc --workspace --no-deps --document-private-items
-      # nextest parallelises tests across one global pool (faster than cargo's
-      # per-binary-sequential run) and emits a SLOW marker for any test over 60s, so the
-      # slow tests are visible in the log and can be trimmed. It does not run doctests, so
-      # those run separately below.
-      - name: Install nextest
-        uses: taiki-e/install-action@v2
-        with:
-          tool: nextest
-      - name: Test (per-PR lane; the slow evolutionary tests run in nightly-full)
-        run: cargo nextest run --workspace -E "not ($SLOW_TESTS)"
-      # THE DIAMOND GATE'S CANARY, the prove-ALWAYS half of the blindness rule. The sweep itself is a
-      # reporting tool and is NOT --strict (it would fail on output caches and cross-domain name
-      # collisions today). What CI enforces is that the gate CAN STILL SEE: the canary fixture is a set
-      # of known-bad cases the detector must always flag, and the gate exits 2 if any stops flagging.
-      # A refinement that quietly re-blinds the detector fails here instead of shipping, because a
-      # gate's noise is visible and annoying while a gate's blindness is invisible and comfortable.
-      - name: Diamond gate self-test (prove the detector still fires)
-        run: |
-          python3 scripts/diamond_gate.py --self-test
-          # THE REAL SCAN, which CI did not run. `--self-test` returns after checking two synthetic
-          # canaries and never touches the repository, so the gate has been passing without ever looking:
-          # five law-versus-field diamonds and one twin provider were live the whole time. `--strict`
-          # convicts anything NEW and carries the known-open ledger, so this can be on today.
-          python3 scripts/diamond_gate.py --strict
-      - name: Doctests
-        run: cargo test --workspace --doc
-
-  nightly-full:
-    name: nightly full test suite (incl. slow tests)
-    # Runs on the nightly schedule and on a manual dispatch, never on a push/PR, so the expensive
-    # evolutionary-selection proofs still gate daily without sitting on the per-PR critical path.
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install the pinned toolchain
-        run: rustup show
-      - name: Cache cargo build
-        uses: Swatinem/rust-cache@v2
-      - name: Install nextest
-        uses: taiki-e/install-action@v2
-        with:
-          tool: nextest
-      # The full suite: all non-ignored tests INCLUDING the slow evolutionary tests the PR lane
-      # filters out. The #[ignore]d Stage-N placeholders stay ignored (never run, not faked).
-      - name: Full test suite (incl. the slow evolutionary tests)
-        run: cargo nextest run --workspace
-      - name: Doctests
-        run: cargo test --workspace --doc
-
-  # Q1 Stone 0: the provenance gate, run in CI as a backstop to the local-firing gate (the build.rs
-  # wiring is a separate owner-gated step). CI has no secrets directory, so the gate's --ci mode runs the
-  # provenance, tombstone (tracked-tree), and override-env scans only and NEVER attempts the live-password
-  # scan. The extra step greps the pushed range for every retired tombstone phrase, and the full history
-  # whenever the tombstone list itself changed. fetch-depth: 0 is required for those range and history
-  # greps.
   stone0:
     name: Stone 0 gate
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Install the pinned toolchain
+      - name: Install the pinned Rust toolchain
         run: rustup show
-      - name: Cache cargo build
-        uses: Swatinem/rust-cache@v2
-      - name: Stone 0 self-test (prove every detector fires)
-        run: cargo run -p civsim-stone0 --bin stone0-gate -- --self-test
-      - name: Stone 0 gate (provenance + tombstone tree + override-env scans; no secrets on the runner)
+      - name: Prove the declarative gate authority
+        run: python3 scripts/gate_runner.py --self-test
+      - name: Print the ordered canonical gate ids
+        run: python3 scripts/gate_runner.py list --tier canonical --ids-only
+      - name: Prove the native Stone 0 detectors
+        run: cargo test -p civsim-stone0 --all-targets
+      - name: Run the authoritative canonical provenance suite
+        if: always()
         run: cargo run -p civsim-stone0 --bin stone0-gate -- --ci
-      - name: Stone 0 tombstone range and full-history grep
+      - name: Scan pushed history for retired credentials
+        if: always()
         env:
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
         run: bash scripts/stone0-ci-tombstone-scan.sh
+
+  canonical-planet:
+    name: canonical planet gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install the pinned Rust toolchain
+        run: rustup show
+      - name: Install Just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+      - name: Print the ordered pull-request gate ids
+        if: github.event_name != 'schedule'
+        run: just gates-list pr
+      - name: Canonical local and CI parity tier
+        if: github.event_name != 'schedule'
+        run: just ci
+      - name: Print the ordered nightly gate ids
+        if: github.event_name == 'schedule'
+        run: just gates-list nightly
+      - name: Canonical nightly tier
+        if: github.event_name == 'schedule'
+        run: just check-nightly
+
+  parked-legacy:
+    name: parked legacy diagnostics
+    if: github.event_name != 'schedule'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned Rust toolchain
+        run: rustup show
+      - name: Install Just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+      - name: Print the ordered legacy gate ids
+        run: just gates-list legacy
+      - name: Parked audit ratchets
+        run: just audit-parked
+      - name: Parked crate tests
+        run: cargo test --manifest-path parked/Cargo.toml --target-dir target/parked --all-targets
+      - name: Mixed legacy compatibility compile
+        run: cargo check --manifest-path parked/Cargo.toml --target-dir target/parked -p civsim-sim -p civsim-viewer-legacy
+
+  parked-nightly:
+    name: parked nightly test suite
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned Rust toolchain
+        run: rustup show
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+      - name: Parked crate tests
+        run: cargo test --manifest-path parked/Cargo.toml --target-dir target/parked --all-targets
+      - name: Parked ignored and slow tests
+        run: cargo test --manifest-path parked/Cargo.toml --target-dir target/parked --all-targets -- --include-ignored

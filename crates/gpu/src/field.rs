@@ -274,14 +274,17 @@ pub fn gpu_field_step(
 /// Cross-tick resident context for the field stencil: the split form of [`gpu_field_step`] with
 /// `iters = 1` per dispatch. The baseline is uploaded once and held resident; [`dispatch`](Self::dispatch)
 /// uploads one temperature snapshot, launches `field_step_kernel` once, and returns WITHOUT reading
-/// back; [`readback`](Self::readback) is the single CUDA-event-fenced sync point. This is what licenses
-/// the cross-tick software pipeline (design `docs/working/GPU_BLUEPRINT.md`): tick N dispatches the frozen
-/// post-combustion field, tick N's remaining CPU tail runs concurrently with the GPU stencil, and tick
-/// N+1 reads the result at a fixed point. Determinism is unaffected by completion timing: the fence only
-/// changes how long the CPU parks, never which bytes it reads (the kernel is a pointwise fixed-point map,
-/// gated bit-identical to the CPU `Field::step`). All calls must issue from ONE thread, because the
-/// thread-local `StreamId` fixes device order; the owning thread is captured in [`new`](Self::new) and
-/// debug-asserted at each call so a dispatch and its readback can never split across two streams.
+/// back; [`readback`](Self::readback) is the single CUDA-event-fenced sync point. The mechanism was built
+/// for the parked living-world pipeline (historical design
+/// `parked/docs/working/GPU_BLUEPRINT.md`) and is not connected to the canonical planet or viewer. A
+/// future canonical adapter may only consume an immutable planet snapshot. In the legacy schedule, tick
+/// N dispatches the frozen post-combustion field, tick N's remaining CPU tail runs concurrently with the
+/// GPU stencil, and tick N+1 reads the result at a fixed point. Determinism is unaffected by completion
+/// timing: the fence only changes how long the CPU parks, never which bytes it reads (the kernel is a
+/// pointwise fixed-point map, gated bit-identical to the CPU `Field::step`). All calls must issue from ONE
+/// thread, because the thread-local `StreamId` fixes device order; the owning thread is captured in
+/// [`new`](Self::new) and debug-asserted at each call so a dispatch and its readback can never split across
+/// two streams.
 pub struct FieldResident {
     client: CudaClient,
     /// The baseline forcing, uploaded once in `new` and held resident across every tick.

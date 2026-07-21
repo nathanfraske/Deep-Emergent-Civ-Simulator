@@ -204,50 +204,25 @@ pub enum CreepComposition {
     Sequential,
 }
 
-/// The canonical-order `logsumexp` `m + ln(sum_i exp(x_i - m))`, `m = max_i x_i`. Each `exp(x_i - m)` is in
-/// `(0, 1]` (in-window, no overflow). The shifted terms are summed in CANONICAL (sorted-ascending) order so the
-/// reduction is permutation-independent (rider 1c), the fixed-topology-reduction discipline in log-space. The
-/// slice must be non-empty (callers guard).
-/// @provides log_sum_exp
-fn logsumexp_canonical(values: &[Fixed]) -> Fixed {
-    let mut max = values[0];
-    for &v in &values[1..] {
-        if v > max {
-            max = v;
-        }
-    }
-    let mut terms: Vec<Fixed> = values
-        .iter()
-        .map(|&v| v.checked_sub(max).unwrap_or(ZERO).exp())
-        .collect();
-    terms.sort();
-    let mut sum = ZERO;
-    for t in terms {
-        sum = sum.saturating_add(t);
-    }
-    if sum <= ZERO {
-        return max;
-    }
-    max.saturating_add(sum.ln())
-}
-
 /// The natural log of the TOTAL creep strain rate over co-running regimes, dispatched on the boundary's
 /// [`CreepComposition`] (rider 1b). PARALLEL is the `logsumexp` (rates add), the physical total where mechanisms
 /// run in parallel. SEQUENTIAL is `-logsumexp(-ln_i)` (rates combine harmonically, the slowest step governing),
-/// the soft-min that goes to the minimum log-rate when the steps are well separated. Both reduce in canonical
-/// operand order (rider 1c). The dominant regime from [`creep_dominant_regime`] is the map readout, not the total.
+/// the soft-min that goes to the minimum log-rate when the steps are well separated. Both consume the sole shared
+/// [`Fixed::log_sum_exp`] provider. The dominant regime from [`creep_dominant_regime`] is the map readout, not the total.
 /// An empty slice yields [`Fixed::MIN`] (no creep).
 pub fn creep_total_log_rate(regime_log_rates: &[Fixed], composition: CreepComposition) -> Fixed {
     if regime_log_rates.is_empty() {
         return Fixed::MIN;
     }
     match composition {
-        CreepComposition::Parallel => logsumexp_canonical(regime_log_rates),
+        CreepComposition::Parallel => Fixed::log_sum_exp(regime_log_rates)
+            .expect("the empty creep-rate slice returned before reduction"),
         CreepComposition::Sequential => {
             // 1/eps_tot = sum 1/eps_i, so ln(eps_tot) = -logsumexp(-ln_i): the harmonic (series-rate) combination,
             // the slowest step governing.
             let negated: Vec<Fixed> = regime_log_rates.iter().map(|&r| -r).collect();
-            -logsumexp_canonical(&negated)
+            -Fixed::log_sum_exp(&negated)
+                .expect("the empty creep-rate slice returned before reduction")
         }
     }
 }

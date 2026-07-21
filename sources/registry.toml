@@ -15,7 +15,8 @@
 # a new source):
 #
 #   id            stable; referenced from manifest rows as `source_id`, from code as `// @sources:`,
-#                 and from floor_provenance.toml as `sources`
+#                 and from candidate audit rows in floor_provenance.toml as `sources`; that link closes
+#                 evidence custody only and does not admit the candidate
 #   citation      the full primary citation, verified at the primary
 #   sha256        the receipt. md5 alone does not pass: a collision-forgeable receipt is not tamper-evident
 #   archived_url  an Internet Archive snapshot, or `archive_pending` with a stated reason when a host
@@ -34,6 +35,43 @@
 # so the two cross-check and so an erratum has two independent witnesses. The claim record lives beside the
 # value it is about, in the per-directory manifest, as a `[[claim]]` block with `primary` and `secondary`
 # lists of ids from here.
+
+# ---------------------------------------------------------------------------------------------------
+# Canonical SI representation and physical-invariant coordinates. These are citation-plus-witness records:
+# no NIST bytes are redistributed by the repository. The ASCII table is the
+# evidence artifact; the peer-reviewed adjustment paper is its methods and
+# covariance companion, not an independent measurement campaign. Only the
+# three invariant rows can become value-bearing floor leaves after exhaustion.
+# ---------------------------------------------------------------------------------------------------
+
+[[source]]
+id = "nist_codata_2018_ascii"
+citation = "National Institute of Standards and Technology, Fundamental Physical Constants: Complete Listing, 2018 CODATA adjustment, NIST Standard Reference Database 121, Gaithersburg, Maryland."
+url = "https://physics.nist.gov/cuu/Constants/ArchiveASCII/allascii_2018.txt"
+archived_url = "https://web.archive.org/web/20241219074053id_/https://physics.nist.gov/cuu/Constants/ArchiveASCII/allascii_2018.txt"
+sha256 = "8c47c05db62c4d314a5244db51a47b4831616e55a8d357ced373a8620ff43be1"
+bytes = 40689
+custody = "witness"
+grade = "primary recommended-values table"
+scope = "The seven exact SI representation rows and three measured physical-invariant rows used by crates/units/src/fundamentals.rs, including each printed value, uncertainty or exact marker, and SI unit. Only fine-structure constant, Newtonian constant of gravitation, and electron mass are physical-floor candidates; the SI-defining rows are noncausal representation metadata. The 2018 adjustment remains pinned for this transcript schema; this entry does not authorize silent replacement by a later adjustment."
+extract = "Rows headed hyperfine transition frequency of Cs-133, speed of light in vacuum, Planck constant, elementary charge, Boltzmann constant, Avogadro constant, luminous efficacy, fine-structure constant, Newtonian constant of gravitation, and electron mass. Vacuum electric permittivity is retained only as a drift oracle for the derived SI relation."
+licence = "NIST identifies the constants database as Standard Reference Database 121, and the Standard Reference Data Act permits copyright in SRD compilations. No redistribution grant for these table bytes was established. The repository therefore holds no copy and records only the citation, factual row values, checksum, and public archive witness."
+note = "Live and archived bytes were fetched independently on 2026-07-20 and were byte-identical at 40,689 bytes with the recorded SHA-256. This is the canonical value receipt."
+
+[[source]]
+id = "codata_2018_adjustment"
+citation = "Tiesinga, E., Mohr, P. J., Newell, D. B. and Taylor, B. N., 2021, CODATA Recommended Values of the Fundamental Physical Constants: 2018, Journal of Physical and Chemical Reference Data 50, 033105, DOI 10.1063/5.0064853."
+url = "https://physics.nist.gov/cuu/pdf/JPCRD2018CODATA.pdf"
+archived_url = "https://web.archive.org/web/20250525020415id_/https://physics.nist.gov/cuu/pdf/JPCRD2018CODATA.pdf"
+sha256 = "6d712bdc99719540bec65c7d1ef11b00f5d321e6083e9e6ed7d3de6fb8062908"
+bytes = 2312070
+pages = 62
+custody = "witness"
+grade = "primary adjustment method and covariance account"
+scope = "The method, input-data cutoff, least-squares adjustment, uncertainty treatment, and tables underlying the 2018 CODATA recommended values. It supports the value table's provenance and uncertainty semantics; it is not treated as an independent second measurement source."
+extract = "The abstract reports the 2018 self-consistent recommended values; Tables XXX and XXXI print the abbreviated and complete constant lists."
+licence = "The paper states copyright 2021 by the U.S. Secretary of Commerce on behalf of the United States and All rights reserved. No redistribution permission was inferred. The repository therefore holds no paper bytes and uses citation-plus-witness custody."
+note = "Live and archived bytes were fetched independently on 2026-07-20 and were byte-identical at 2,312,070 bytes with the recorded SHA-256."
 
 # ---------------------------------------------------------------------------------------------------
 # Migrated from docs/working/VENDORING_CHECKLIST.md, which held this as its single prose entry and is the
@@ -322,7 +360,7 @@ free_route = "https://arxiv.org/abs/0912.1907"
 free_route_kind = "preprint-server"
 extract = "Equation (1), printed page 4, read dual-channel from the rendered equation image: 'E_dot_tidal = (21/2) (k2/Q) (G M_pri^2 R_sec^5 n e^2) / a^6', with the paper's own variable key printed beneath it verbatim: 'E_dot_tidal: Tidal heat production rate, watts; a: Semi-major axis; e: Eccentricity; G: The gravitational constant; M_pri: Mass of the primary; R_sec: Radius of the secondary; k2: Second-order Love number of the secondary; Q: Quality factor of the secondary.' Section 3 (page 4): 'For a homogeneous spin-synchronous body whose stiffness and viscous dissipation are both assumed to be constant and uniform, the global tidal heat rate can be expressed following the detailed derivation in Murray & Dermott (2005).' Footnote 2 fixes the convention: 'we adopt primary to refer to the central mass ... and consider tides generated inside an orbiting secondary.'"
 read_channels = "The arXiv v1 PDF read directly (pages 1 to 4); Equation (1) on page 4 read as the rendered equation image, not from a text layer."
-note = "Grounds crates/sim/src/moons.rs::tidal_heating_power_log10: the 21/2 coefficient and the which-body assignments (k2/Q/R the moon's, M the planet's, squared) are read from this witness. It is the heating counterpart of the section-8 tidal recession form in docs/working/PIPELINE_FETCHES.md; the two are siblings (recession dissipates in the planet, heating in the moon) and a caller must not cross their k2/Q. The primary derivation (Murray & Dermott chapter 4) is a book and is not held; this open arXiv paper is the byte-held witness that reprints the equation."
+note = "Grounds crates/planet-substrate/src/moons.rs::tidal_heating_power_log10: the 21/2 coefficient and the which-body assignments (k2/Q/R the moon's, M the planet's, squared) are read from this witness. It is the heating counterpart of the section-8 tidal recession form in docs/working/PIPELINE_FETCHES.md; the two are siblings (recession dissipates in the planet, heating in the moon) and a caller must not cross their k2/Q. The primary derivation (Murray & Dermott chapter 4) is a book and is not held; this open arXiv paper is the byte-held witness that reprints the equation."
 
 # ---------------------------------------------------------------------------------------------------
 # THE HEMATITE-AND-SPINEL FETCH (crates/physics/data/phase_conductivity.toml, 2026-07-20).

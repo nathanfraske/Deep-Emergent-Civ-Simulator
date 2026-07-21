@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! THE CANON SURFACE-COMPOSITION CHAIN: star-and-orbit in, the crust the physics produces out. The disk temperature
+//! PRE-MIGRATION SURFACE-COMPOSITION RESEARCH SUBSTRATE. This module is not a canonical planet entrypoint. Its
+//! caller-supplied abundance and melt-parameter bundles must be replaced by typed upstream stage receipts before
+//! any mechanism here can join the floor-only runner. The disk temperature
 //! at the orbit sets the CONDENSATION (which solids precipitate from the cooling gas at solar abundances), the VCS
 //! AMOUNT REDISTRIBUTION fixes how much of each, and DIFFERENTIATION floats the crust off the sinking metal and
 //! sulfide. This is the wire that retires the authored composition arrangement `slice0_demo_field` stood in for: the
@@ -42,7 +44,7 @@ use crate::equilibrium_condensation::{
 };
 use civsim_core::Fixed;
 use civsim_physics::janaf::JanafTables;
-use civsim_physics::melting::Endmember;
+use civsim_physics::melting::{Endmember, PressureMeltingRefusal};
 use civsim_physics::melting_data::MeltingRegistry;
 use civsim_physics::periodic::PeriodicTable;
 use civsim_physics::petrology::crustal_density;
@@ -50,12 +52,12 @@ use civsim_physics::petrology_data::PhaseRegistry;
 use civsim_physics::solar_abundances::SolarAbundances;
 use std::collections::{BTreeMap, BTreeSet};
 
-/// THE RESERVED McKenzie-Bickle (1988) INTERIOR INPUTS the caller supplies for the seam-6 crustal-thickness
-/// closure. These are the interior-thermostat and mantle-floor values the partial-melt column reads that the
-/// surface chain cannot itself derive (the SOLIDUS is derived from the endmember signatures inside the melt
-/// wiring, and the SOURCE DENSITY is derived from the floating source assemblage; only these four are supplied).
-/// Each is reserved-with-basis and cited, never authored inline (the reserved list is in
-/// `docs/working/MORNING_REVIEW.md`).
+/// Legacy McKenzie-Bickle interior parameter bundle retained for migration tests only.
+///
+/// It is not an admissible canonical input. Potential temperature must come from generated thermal history;
+/// gravity from generated mass and radius; the adiabat from assemblage properties; and productivity from fusion
+/// thermodynamics or a fully admitted Residue. The obligations and refusal rule are tracked in
+/// `docs/working/ABIOTIC_EVIDENCE_DEBT.md`.
 #[derive(Clone, Copy, Debug)]
 pub struct ReservedMeltParams {
     /// The mantle POTENTIAL TEMPERATURE (kelvin). Basis: the adiabat projected to the surface, the interior
@@ -176,15 +178,25 @@ fn ln_ten() -> Fixed {
 /// reads. `reserved` supplies the McKenzie-Bickle interior inputs the crustal-thickness closure needs (the
 /// solidus and the source density are derived here, not supplied). `None` if the JANAF read fails, no element is
 /// gas-balanceable, the equilibrium does not solve, or nothing floats (a world with no oxygen-bearing condensate
-/// has no derived crust, fail-loud).
+/// has no derived crust, fail-loud). A pressure-dependent melt evaluation with incomplete evidence returns its
+/// structured [`PressureMeltingRefusal`] rather than selecting the buoyancy fallback.
 pub fn derive_surface_composition(
     janaf: &JanafTables,
     abundances: &SolarAbundances,
     disk_temperature_k: Fixed,
     reserved: &ReservedMeltParams,
-) -> Option<SurfaceComposition> {
+) -> Result<Option<SurfaceComposition>, PressureMeltingRefusal> {
+    macro_rules! or_unavailable {
+        ($value:expr) => {
+            match $value {
+                Some(value) => value,
+                None => return Ok(None),
+            }
+        };
+    }
+
     if disk_temperature_k <= Fixed::ZERO {
-        return None;
+        return Ok(None);
     }
     // The gas-balanceable element budget: every element that appears in a JANAF GAS species (so the gas equilibrium
     // can balance it) and has a cited solar abundance. Emergent from the data, deterministic (sorted) order.
@@ -213,9 +225,9 @@ pub fn derive_surface_composition(
             continue;
         }
         if let Some(log_eps) = abundances.preferred(el) {
-            let exponent = log_eps
-                .checked_sub(Fixed::from_int(12))?
-                .checked_mul(ln_ten())?;
+            let exponent = or_unavailable!(log_eps
+                .checked_sub(Fixed::from_int(12))
+                .and_then(|value| value.checked_mul(ln_ten())));
             let amount = exponent.exp();
             if amount > Fixed::ZERO {
                 budget.insert(el.clone(), amount);
@@ -223,7 +235,7 @@ pub fn derive_surface_composition(
         }
     }
     if budget.is_empty() {
-        return None;
+        return Ok(None);
     }
     // The candidate species: every JANAF species whose atoms lie within the budget (gas and condensed alike). The
     // gas set balances the elements; the condensed set is what can precipitate.
@@ -271,11 +283,11 @@ pub fn derive_surface_composition(
         }
     }
     if gas.is_empty() {
-        return None;
+        return Ok(None);
     }
     // Condensation of the solar gas at the disk temperature, then the active precipitates.
-    let equilibrium = gas_equilibrium(&gas, &budget)?;
-    let active = condensed_active_set(&condensed, &equilibrium)?;
+    let equilibrium = or_unavailable!(gas_equilibrium(&gas, &budget));
+    let active = or_unavailable!(condensed_active_set(&condensed, &equilibrium));
     // The VCS amount redistribution over the active condensates (the phases, for their stoichiometry).
     let active_species: Vec<EquilibriumSpecies> = active
         .iter()
@@ -287,11 +299,11 @@ pub fn derive_surface_composition(
         _ => None, // degenerate vertex: the identity still differentiates, amounts route to the draw
     };
     // Differentiation: float the silicate fraction off the sinking metal and sulfide.
-    let differentiation = differentiate(&active, &budget)?;
+    let differentiation = or_unavailable!(differentiate(&active, &budget));
     // The petrology density read at the labelled surface conditions (~300 K, ~1 bar, where the isostasy is read),
     // the buoyancy fallback's density and the source-density derivation both consume it.
-    let registry = PhaseRegistry::standard().ok()?;
-    let table = PeriodicTable::standard().ok()?;
+    let registry = or_unavailable!(PhaseRegistry::standard().ok());
+    let table = or_unavailable!(PeriodicTable::standard().ok());
     let surface_t = Fixed::from_int(300);
     let surface_p = Fixed::ONE;
     let density_of = |name: &str| -> Option<Fixed> {
@@ -314,8 +326,8 @@ pub fn derive_surface_composition(
     // McKenzie-Bickle column divides by is DERIVED from the floating (fertile) source assemblage (g/cm3 to kg/m3),
     // not authored; the interior inputs (potential temperature, adiabat slope, productivity, gravity) are the
     // caller's reserved-with-basis values. The reference pressure for the first-melt composition is the surface,
-    // where the pooled melt sits. A floating set with no melting data or a sub-solidus mantle falls back to the
-    // buoyancy split (fail-soft), so the chain never aborts.
+    // where the pooled melt sits. A floating set with no surface melting signature or a sub-solidus mantle may
+    // fall back to the buoyancy split. A present surface signature with missing pressure evidence refuses instead.
     let melting = MeltingRegistry::standard().ok();
     let endmember_of =
         |name: &str| -> Option<Endmember> { melting.as_ref()?.endmember_for_species(name) };
@@ -325,7 +337,7 @@ pub fn derive_surface_composition(
             .and_then(|d_gcm3| d_gcm3.checked_mul(Fixed::from_int(1000)));
     let crustal_reference_pressure = Fixed::ZERO;
     let pm: PartialMeltCrust = match source_density_kg_m3 {
-        Some(source_density) => partial_melt_crust_and_mantle(
+        Some(source_density) => or_unavailable!(partial_melt_crust_and_mantle(
             &differentiation.floating,
             &amounts_map,
             endmember_of,
@@ -338,11 +350,12 @@ pub fn derive_surface_composition(
                 source_density_kg_per_m3: source_density,
                 gravity_m_per_s2: reserved.gravity_m_per_s2,
             },
-        )?,
+        )?),
         None => {
             // The source density did not derive (a floating phase the petrology cannot resolve), so the melt
             // column cannot run: the buoyancy split alone, no thickness.
-            let (crust, mantle) = crust_and_mantle(&differentiation.floating, density_of)?;
+            let (crust, mantle) =
+                or_unavailable!(crust_and_mantle(&differentiation.floating, density_of));
             PartialMeltCrust {
                 crust,
                 mantle,
@@ -376,7 +389,7 @@ pub fn derive_surface_composition(
             phase_set_composition(&pm.mantle, &amounts_map),
         )
     };
-    Some(SurfaceComposition {
+    Ok(Some(SurfaceComposition {
         surface,
         mantle_composition,
         crust: pm.crust,
@@ -389,7 +402,7 @@ pub fn derive_surface_composition(
         melt_status: pm.melt_status,
         differentiation,
         condensed_amounts: condensed_amount_readout,
-    })
+    }))
 }
 
 #[cfg(test)]
@@ -503,7 +516,7 @@ mod tests {
         // held out) is well-conditioned and converged before the damped-Newton repair; the repair MUST NOT move its
         // answer by a single bit. These are the raw-bit element potentials and condensed-active-set saturation indices
         // captured on the pre-repair solver at the disk 1000 K; the repair keeps the well-conditioned subset on the
-        // legacy fixed-point path, so they reproduce exactly. A drift here is a repair regression, not a recalibration.
+        // legacy fixed-point path, so they reproduce exactly. A drift here is a repair regression, not retuning.
         let janaf = JanafTables::standard().expect("JANAF loads");
         let abundances = SolarAbundances::standard().expect("abundances load");
         let (gas, condensed, budget) =
@@ -572,212 +585,20 @@ mod tests {
     }
 
     #[test]
-    fn the_mirror_primary_crust_is_hematite_free_the_terran_bias_lens_holding() {
-        // THE TERRAN-BIAS CATCHER as a standing test (owner ruling). Fe3+ oxide in a crust is a REDOX OUTCOME, not
-        // a given: a freshly differentiated crust from a reduced solar feedstock carries its iron as Fe2+ (the
-        // metal sinks to the core, the rest as FeS troilite and Fe2+ in silicates), NOT as Fe3+ oxide. Earth's
-        // abundant surface hematite is substantially an oxygenation-era biography item, so a newborn crust that
-        // came back with hematite would be surface-Terran bias wearing mineralogical clothes, not physics. The
-        // census decides per draw from the disposer's own oxygen fugacity; for the reduced solar Mirror it
-        // precipitates a single reduced Mg-silicate crust former (enstatite) and no ferric oxide.
-        let janaf = JanafTables::standard().unwrap();
-        let abundances = SolarAbundances::standard().unwrap();
-        let sc = derive_surface_composition(
-            &janaf,
-            &abundances,
-            Fixed::from_int(1000),
-            &normal_reserved(),
-        )
-        .unwrap();
-        for (phase, _) in &sc.crust {
-            assert!(
-                !phase.to_lowercase().contains("hematite") && !phase.contains("Fe2O3"),
-                "the Mirror primary crust must be hematite-free (the Terran-bias lens); got crust phase {phase}"
-            );
-        }
-        assert!(
-            sc.crust.iter().any(|(p, _)| p.contains("enstatite")),
-            "the Mirror crust former is the reduced Mg-silicate enstatite (MgSiO3), got {:?}",
-            sc.crust
-        );
-    }
-
-    #[test]
-    fn the_inner_disk_derives_a_silicate_crust_over_an_iron_core() {
-        // At a hot inner-disk temperature the solar gas condenses the Mg-silicates and iron metal; differentiation
-        // floats the oxygen-bearing silicates as the crust and sinks the iron. The derived surface carries Mg, Si,
-        // and O (the silicate elements), the crust the physics produces, with no authored composition anywhere.
+    fn the_full_surface_chain_preserves_missing_volume_refusal() {
+        // The condensation and differentiation portions can resolve, but the combined output also promises a
+        // pressure-derived melt column. Corundum and spinel have no fusion-volume evidence, so the chain must
+        // expose the refusal instead of emitting the former buoyancy-selected crust.
         let janaf = JanafTables::standard().expect("JANAF loads");
         let abundances = SolarAbundances::standard().expect("abundances load");
-        // A hot inner-disk temperature where the Mg-silicates and iron are condensed (well below their ~1350 K
-        // condensation fronts, above the volatile ices).
-        let sc = derive_surface_composition(
-            &janaf,
-            &abundances,
-            Fixed::from_int(1000),
-            &normal_reserved(),
-        )
-        .expect("the inner disk derives a surface");
-        let surface: Vec<&str> = sc.surface.iter().map(|(e, _)| e.as_str()).collect();
-        assert!(
-            surface.contains(&"Mg") && surface.contains(&"Si") && surface.contains(&"O"),
-            "the derived crust is a magnesium silicate, got {surface:?}"
-        );
-        // Iron and sulfur, if condensed as metal and sulfide, sank to the core, so they are not the surface.
-        assert!(
-            !surface.contains(&"Fe"),
-            "metallic iron sank to the core, off the surface, got {surface:?}"
-        );
-        // The sinking fraction is the metal (and sulfide) the differentiation pulled down.
-        assert!(
-            sc.differentiation
-                .sinking
-                .iter()
-                .any(|(n, _)| n.starts_with("Fe(")),
-            "iron metal is in the sinking fraction, got {:?}",
-            sc.differentiation.sinking
-        );
-    }
-
-    #[test]
-    fn the_surface_reads_the_crust_assemblage_not_the_solar_budget() {
-        // SEAM 5 end to end: the derived surface must be the crust's mineral assemblage (its silicate stoichiometry),
-        // not the oxygen-heavy solar element budget. The solar budget has O:Si ~ 340:90 ~ 3.8; a Mg-silicate crust
-        // (enstatite MgSiO3 at O:Si = 3, or forsterite Mg2SiO4 at O:Si = 4) reads its own ratio. Whichever silicate
-        // the buoyancy split floats, the surface O:Si must equal that phase's stoichiometry, distinct from the solar
-        // ratio, proving the assemblage replaced the budget.
-        let janaf = JanafTables::standard().expect("JANAF loads");
-        let abundances = SolarAbundances::standard().expect("abundances load");
-        let sc = derive_surface_composition(
-            &janaf,
-            &abundances,
-            Fixed::from_int(1000),
-            &normal_reserved(),
-        )
-        .expect("the inner disk derives a surface");
-        let get = |el: &str| -> Option<f64> {
-            sc.surface
-                .iter()
-                .find(|(e, _)| e == el)
-                .map(|(_, a)| a.to_bits() as f64)
-        };
-        let (o, si) = (
-            get("O").expect("O on surface"),
-            get("Si").expect("Si on surface"),
-        );
-        let o_over_si = o / si;
-        // The crust is a single Mg-silicate here, so O:Si is exactly 3 (enstatite) or 4 (forsterite), never the
-        // solar 3.8+. Assert it sits at an integer silicate ratio well away from solar.
-        assert!(
-            (o_over_si - 3.0).abs() < 0.05 || (o_over_si - 4.0).abs() < 0.05,
-            "the surface O:Si {o_over_si} is a silicate stoichiometry (3 or 4), not the solar budget"
-        );
-        // And the surface equals the assemblage of the crust phases (the substrate now provides what the viewer used
-        // to re-derive): the same rock the crust is.
-        assert!(
-            !sc.surface.is_empty() && !sc.mantle_composition.is_empty(),
-            "both the crust surface and the mantle composition are derived assemblages"
-        );
-    }
-
-    #[test]
-    fn the_refractory_solar_set_is_sub_solidus_and_falls_back_to_buoyancy() {
-        // SEAM 6 fail-soft: the solar-condensed floating set at 1000 K is the refractory Mg-Al assemblage (a
-        // ~1680 K ideal solidus), so a normal potential temperature (1588 K) does not melt it; the chain falls
-        // back to the pure-buoyancy split (used_partial_melt = false, no derived thickness), byte-preserving the
-        // pre-seam-6 crust. The partial-melt mechanism engages only for a fertile, warm-enough mantle (exercised
-        // in the differentiation-module tests on the lherzolite assemblage), the honest per-world outcome.
-        let janaf = JanafTables::standard().expect("JANAF loads");
-        let abundances = SolarAbundances::standard().expect("abundances load");
-        let sc = derive_surface_composition(
-            &janaf,
-            &abundances,
-            Fixed::from_int(1000),
-            &normal_reserved(),
-        )
-        .expect("the inner disk derives a surface");
-        assert!(
-            !sc.used_partial_melt,
-            "the refractory solar set is sub-solidus at a normal potential temperature, buoyancy fallback"
-        );
-        assert!(
-            sc.crust_thickness_km.is_none(),
-            "the buoyancy fallback carries no McKenzie-Bickle thickness"
-        );
-        // A hotter potential temperature (a Hadean/Archean mantle, a per-epoch reserved value) crosses the solidus
-        // and engages the partial-melt mechanism on the SAME set, the derived crust thickness appearing.
-        let hot = ReservedMeltParams {
-            potential_temperature_k: Fixed::from_int(1900),
-            ..normal_reserved()
-        };
-        let sc_hot = derive_surface_composition(&janaf, &abundances, Fixed::from_int(1000), &hot)
-            .expect("the hot-mantle scene derives");
-        if sc_hot.used_partial_melt {
-            assert!(
-                sc_hot.crust_thickness_km.is_some(),
-                "the engaged partial-melt column reports a derived crustal thickness"
-            );
-        }
-    }
-
-    #[test]
-    fn the_derived_solidus_survives_the_sub_solidus_fallback_for_the_deep_time_volcanism() {
-        // FIX 1: the deep-time volcanism must read the world's OWN derived solidus, never an authored 1373 K. The
-        // solidus is a property of the assemblage's endmembers, computed whether or not the potential temperature
-        // crosses it, so even on the sub-solidus BUOYANCY FALLBACK (the refractory solar-condensed scene) the
-        // derived solidus is EXPOSED on the SurfaceComposition for the downstream consumer.
-        let janaf = JanafTables::standard().expect("JANAF loads");
-        let abundances = SolarAbundances::standard().expect("abundances load");
-        let sc = derive_surface_composition(
-            &janaf,
-            &abundances,
-            Fixed::from_int(1000),
-            &normal_reserved(),
-        )
-        .expect("the inner disk derives a surface");
-        // Sub-solidus fallback, yet the derived solidus is present (surface value and slope), and no melt fraction.
-        assert!(
-            !sc.used_partial_melt,
-            "the refractory solar set is sub-solidus (buoyancy fallback)"
-        );
-        let solidus = sc
-            .solidus_surface_k
-            .expect("the derived solidus is exposed even on the sub-solidus fallback");
-        assert!(
-            sc.solidus_slope_k_per_gpa.expect("the derived slope is exposed") > Fixed::ZERO,
-            "the derived Clausius-Clapeyron solidus slope is positive (the solidus rises with pressure)"
-        );
-        assert!(
-            sc.max_melt_fraction.is_none(),
-            "no melt formed, so no formation melt fraction (the honest unprocessed case)"
-        );
-        // The physical reason it is sub-solidus: the world's own derived surface solidus sits ABOVE the normal
-        // potential temperature (1588 K). This is the world's OWN solidus, not the retired Earth 1373 K anchor.
-        assert!(
-            solidus > Fixed::from_int(1588),
-            "the derived solidus {} K is above the potential temperature, the honest reason for no melt",
-            solidus.to_f64_lossy()
-        );
-        // A hotter mantle on the SAME set melts: the derived solidus is unchanged (same endmembers), but now a melt
-        // fraction appears, the per-system input the downstream heterogeneity amplitude reads.
-        let hot = ReservedMeltParams {
-            potential_temperature_k: Fixed::from_int(1900),
-            ..normal_reserved()
-        };
-        let sc_hot = derive_surface_composition(&janaf, &abundances, Fixed::from_int(1000), &hot)
-            .expect("the hot-mantle scene derives");
-        assert_eq!(
-            sc_hot.solidus_surface_k, sc.solidus_surface_k,
-            "the derived solidus is the same for the same endmember set, hot or cold"
-        );
-        if sc_hot.used_partial_melt {
-            let f = sc_hot
-                .max_melt_fraction
-                .expect("the engaged melt column reports a melt fraction");
-            assert!(
-                f > Fixed::ZERO,
-                "the engaged partial-melt fraction is positive, the per-system heterogeneity input"
-            );
-        }
+        assert!(matches!(
+            derive_surface_composition(
+                &janaf,
+                &abundances,
+                Fixed::from_int(1000),
+                &normal_reserved(),
+            ),
+            Err(PressureMeltingRefusal::MissingFusionVolume { .. })
+        ));
     }
 }

@@ -125,14 +125,12 @@
 //! `kappa_r + nu kappa_theta = d2w/dr2 + (nu/r) dw/dr` (the `M` operator; see
 //! [`point_load_curvature_at_first_zero_crossing`]), and the rigidity is `D_eq = M_yield / kappa_eff`, which
 //! recovers `D` in the elastic limit exactly as the line load does. The scalar yield envelope, the neutral-surface
-//! solve, and the moment integral are all reused unchanged. Whether the uniaxial envelope is adequate at seamount
-//! curvatures is a MEASURED cost, not an assumed one: at the hindcast curvatures (4 to 8 by 1e-8 per metre) the
-//! competent plate is NEAR-ELASTIC on this engine's own envelope, the yielding ratio `T_e(YSE)/T_e(elastic)`
-//! sitting within about six per cent of one (`the_uniaxial_cost_is_measured_at_the_hindcast_curvatures`), so the
-//! plate yields only modestly and the two-dimensional yield surface stays the high-curvature refinement it always
-//! was rather than a hindcast one. The exact departure is reported by that measurement rather than assumed away,
-//! which is the shortcut-validity rule: the uniaxial law's cost is its measured departure from elastic, never a
-//! claim of zero. The comparison against the oceanic `T_e`-versus-age rows stays in RIGIDITY SPACE (the rows are
+//! solve, and the moment integral are all reused unchanged. An internal conditioned sensitivity at the hindcast
+//! curvatures (4 to 8 by 1e-8 per metre) places this engine's yielding ratio `T_e(YSE)/T_e(elastic)` within about
+//! six per cent of one (`the_uniaxial_model_reports_internal_hindcast_sensitivity`). That compares yielding with
+//! the elastic limit inside the same uniaxial model. It does not measure the error of omitting a biaxial yield
+//! surface, so external evidence for that approximation remains open. The comparison against the oceanic
+//! `T_e`-versus-age rows stays in RIGIDITY SPACE (the rows are
 //! `T_e(elastic)` fits, never moment-equivalence outputs), which is another slice's concern.
 //!
 //! THE ERRATUM THE AXISYMMETRIC FORM CARRIES. McNutt and Menard print the Laplacian curvature coefficient at the
@@ -2593,13 +2591,10 @@ impl LithosphereEnvelope<'_> {
     /// disagree the span has reached the answer and there is no single number to report, so this refuses, which
     /// is the same treatment the brittle branch's own gap already gets a few lines above.
     ///
-    /// THE SHALLOW COLUMN IS WHY THIS IS NOT A REFUSAL EVERYWHERE. The banked chords start at 0.3 GPa, so from
-    /// the surface down to about nine kilometres on an Earth-like world the bracket is the table's whole span
-    /// ([`crate::creep_rows::VolumeConstraint::UnconstrainedBySource`]). It costs nothing there: `P V*` tops out
-    /// near 8 kJ/mol against `E*`'s 530, the cold shallow rock is not creeping at a geological rate at either
-    /// end, and the brittle branch floors the envelope identically both ways. That is what lets a real envelope
-    /// be sampled FROM THE SURFACE, which is the full-column solve this unblocks, and it is asserted rather than
-    /// asserted-about (`the_shallow_envelope_is_invariant_across_the_v_star_bracket`).
+    /// EXACTLY ZERO PRESSURE IS WHY THE SURFACE CAN CLOSE WITHOUT A VOLUME CHOICE. The retained recovery chords
+    /// reach down to `1e-4 GPa`, not `0.3 GPa`; at the exact surface no chord includes zero, but `P V*` cancels
+    /// algebraically and both bracket ends produce the same value. A positive-pressure gap is different and must
+    /// remain a refusal at the canonical boundary unless a complete residual receipt closes it.
     ///
     /// # WHERE THE ENDS DISAGREE THIS REFUSES, AND THE BANDED VIEW IS ITS SIBLING
     ///
@@ -3777,14 +3772,11 @@ mod tests {
         }
     }
 
-    /// THE TABLE'S OWN EXTREMES as a FIXTURE: H&K's Table 2 offers nine determinations from -2 to 27 cm^3/mol,
-    /// and this is that span's two ends carrying the banked chord's own lower limit of 0.3 GPa.
+    /// A SYNTHETIC GAP FIXTURE using the eligible Table 2 spread under one common interval.
     ///
-    /// IT BANKS NOTHING AND ENDORSES NOTHING. The nine values fail to overlap because `V*` is a chord that
-    /// decreases with pressure, and picking one is a decision the primary declines to make. What this fixture is
-    /// for is the OPPOSITE of picking: it is the widest span the source supports, so a test can prove the width
-    /// cannot reach the shallow envelope's answer. Every assertion it appears in is a RELATION, and neither
-    /// endpoint can move one.
+    /// IT BANKS NOTHING AND ENDORSES NOTHING. Its shared `0.3 to 2 GPa` interval is test construction, not a
+    /// transcription of the source. It exists only to exercise the raw unconstrained-gap branch. Production
+    /// code reads the complete interval-bearing table, whose recovery rows reach `1e-4 GPa`.
     fn table2_span_fixture() -> [ActivationVolume; 2] {
         let chord = |v: i32| ActivationVolume {
             cm3_per_mol: Fixed::from_int(v),
@@ -3792,7 +3784,7 @@ mod tests {
             interval_max_gpa: Fixed::from_int(2),
             modality: Modality::Fitted,
         };
-        [chord(-2), chord(27)]
+        [chord(6), chord(27)]
     }
 
     fn test_chord() -> LoadChord {
@@ -4240,13 +4232,10 @@ mod tests {
     }
 
     #[test]
-    fn the_shallow_envelope_is_invariant_across_the_v_star_bracket() {
-        // THE ASSERTION THAT MAKES THE UNCONSTRAINED BRACKET SAFE, put on trial rather than assumed. The banked
-        // `V*` chords start at 0.3 GPa, about nine kilometres down, so a lid sampled FROM THE SURFACE is outside
-        // every chord through its whole brittle top and is served the TABLE'S OWN EXTREMES. That span is enormous
-        // (-2 to 27 cm^3/mol) and it costs nothing there, because `P V*` tops out near 8 kJ/mol at 0.3 GPa
-        // against `E*`'s 530: the cold shallow rock is not creeping at a geological rate at EITHER end, the
-        // brittle branch floors the envelope both ways, and the minimum is identical to the bit.
+    fn zero_pressure_cancels_the_unconstrained_v_star_bracket() {
+        // This synthetic fixture begins at 0.3 GPa, so exact zero is outside its chords. The full source table
+        // reaches `1e-4 GPa`, but also does not include zero. At zero the pressure-work term cancels by identity,
+        // so even a wide diagnostic span cannot move the envelope.
         let volumes = table2_span_fixture();
         let creep = [CreepCandidate {
             row: hk_dry_dislocation(),
@@ -4255,14 +4244,12 @@ mod tests {
         let geotherm = ramp_geotherm;
         let env = earth_like_lid(&creep, &geotherm, Fixed::from_int(100_000));
 
-        // THE PREMISE FIRST, or the invariance below would be a fact about a degenerate bracket. At 5 km the
-        // pressure is about 0.16 GPa, under every chord's 0.3 GPa floor, so the span is the table's own and it is
-        // 29 cm^3/mol wide.
-        let shallow = Fixed::from_int(5);
+        // THE PREMISE FIRST, or the invariance below would be a fact about a covered chord.
+        let shallow = Fixed::ZERO;
         let p_gpa = f64_of(env.vertical_stress_mpa(shallow).expect("lithostatic")) / 1000.0;
         assert!(
-            p_gpa < 0.3,
-            "5 km sits under the banked chords' 0.3 GPa floor: {p_gpa} GPa"
+            p_gpa == 0.0,
+            "the exact surface has zero pressure: {p_gpa} GPa"
         );
         let bracket =
             select_activation_volume(&volumes, Fixed::from_ratio((p_gpa * 1e6) as i64, 1_000_000))
@@ -4270,19 +4257,19 @@ mod tests {
         assert_eq!(
             bracket.constraint(),
             VolumeConstraint::UnconstrainedBySource,
-            "no chord reaches 5 km, so the source constrains nothing there"
+            "no chord includes exact zero, so the raw evidence helper reports the gap"
         );
         assert!(
             !bracket.is_degenerate()
-                && f64_of(bracket.at(VolumeEnd::High)) - f64_of(bracket.at(VolumeEnd::Low)) > 28.0,
-            "the span really is the table's whole width, or this test proves nothing: [{}, {}]",
+                && f64_of(bracket.at(VolumeEnd::High)) - f64_of(bracket.at(VolumeEnd::Low)) > 20.0,
+            "the diagnostic span is wide enough to make the cancellation meaningful: [{}, {}]",
             f64_of(bracket.at(VolumeEnd::Low)),
             f64_of(bracket.at(VolumeEnd::High))
         );
 
-        // THE CLAIM. Both ends agree, so the envelope reports a number, and the agreement is the PROOF that the
-        // span could not have moved it.
-        for z in [0, 1, 3, 5, 8] {
+        // THE CLAIM. At exact zero both ends agree by the pressure-work identity. This does not license a
+        // positive-pressure gap; the canonical boundary rejects one.
+        for z in [0] {
             let z = Fixed::from_int(z);
             for sense in [FaultingSense::Thrust, FaultingSense::Normal] {
                 assert_eq!(
@@ -4444,114 +4431,25 @@ mod tests {
     }
 
     #[test]
-    fn the_full_column_solves_from_the_surface_to_the_derived_lid_base() {
-        // THE TWO FINDINGS, CLOSED, IN ONE READING. This is the thing that could not be done before, and each
-        // half was blocked by a different one:
-        //
-        // - THE SURFACE END was blocked by the `V*` chords, which start at 0.3 GPa (about nine kilometres down).
-        //   The selection refused above that, so the composite had no admitted row, so the envelope refused, so
-        //   the profile could not be sampled AT ALL from the surface. The bracket retires that: outside every
-        //   chord the table's own extremes are reported, tagged unconstrained.
-        // - THE DEEP END was blocked by the integral having no domain but a declared one, since the integrand
-        //   does not die. It is now the derived conductive-lid base, below which the mantle overturns and a
-        //   static load's stresses are not sustained.
-        let volumes = [table2_volume_fixture()];
+    fn the_full_candidate_table_refuses_a_single_full_column() {
+        // The complete Hirth-Kohlstedt candidate set disagrees across overlapping pressure chords. That is Gap
+        // Law evidence, not a menu from which this solver may select an activation volume. Exact zero remains
+        // evaluable because `P V*` cancels, but a single positive-pressure column must refuse once the candidate
+        // spread can move the envelope. No fixture row or table-extremes fallback may hide that refusal.
+        let volumes = hk_dry_dislocation_activation_volumes();
         let creep = [CreepCandidate {
             row: hk_dry_dislocation(),
             volumes: &volumes,
         }];
         let geotherm = ramp_geotherm;
         let env = earth_like_lid(&creep, &geotherm, Fixed::from_int(100_000));
-        let delta = env.lid_base.depth_km();
-
-        // THE LID IS A SKIN ON THE LAYER RATHER THAN THE LAYER, which is what the Rayleigh number buys: a
-        // convecting mantle carries heat through its interior efficiently, so the temperature drop concentrates
-        // into a thin conductive top. Asserted here because without it this test sits through a "lid" that
-        // silently swallowed the whole 2890 km column, which is a mutation run's finding rather than a worry.
-        assert!(
-            delta < Fixed::from_int(2890),
-            "a convecting layer's conductive lid is thinner than the layer: {} km of 2890",
-            f64_of(delta)
-        );
-
-        // THE SURFACE IS OUTSIDE EVERY CHORD, which is the blocker made concrete rather than recalled.
-        assert!(
-            f64_of(env.vertical_stress_mpa(ZERO).expect("lithostatic")) / 1000.0 < 0.3,
-            "the surface sits under the banked chords' 0.3 GPa floor, which is what used to refuse it"
-        );
         assert!(
             env.compressive_yield_gpa(ZERO).is_some() && env.tensile_yield_gpa(ZERO).is_some(),
-            "the envelope answers AT THE SURFACE, which is the whole of what B7 unblocks"
+            "zero pressure is independent of activation volume"
         );
-
-        // AND THE WHOLE COLUMN SAMPLES, surface to derived lid base, with no declared depth anywhere in it.
-        let steps = 600;
-        let profile = EnvelopeProfile::sample(&env, steps).expect("the full column samples");
-        // THE GRID REALIZES THE DOMAIN RATHER THAN REPRODUCING IT, and the gap has a derived bound rather than a
-        // chosen one. `step = trunc(delta / steps)` truncates, losing under one ULP, and the deepest node is
-        // `step * steps`, so the node sits at or below `delta` by at most ONE ULP PER STEP: `steps *
-        // Fixed::EPSILON`, read off the representation. Asserting equality here would be asserting that
-        // fixed-point division is exact, and asserting a hand-picked epsilon would be a tolerance someone chose.
-        //
-        // THIS ASSERTION'S OWN BLINDNESS, stated because a mutation run measured it: widening the bound a
-        // thousandfold does not fail this test, since the realized gap (about 388 ULP against the bound's 600)
-        // sits well inside either. A test that a value lies within a bound cannot tell a derived bound from a
-        // looser authored one, BY CONSTRUCTION. What guards that is the derivation being written here where a
-        // reader checks it, which is how this project caught an authored `+2` hiding inside a "derived" bound:
-        // by reading it, never by a test going red.
-        let quantization = Fixed::EPSILON * Fixed::from_int(steps as i32);
-        let realized = profile.domain_max_depth_km();
         assert!(
-            realized <= delta && delta - realized <= quantization,
-            "the profile's deepest node is the derived lid base as its own grid realizes it: {} against {}",
-            f64_of(realized),
-            f64_of(delta)
-        );
-        // The envelope turns over inside the column, which is what makes this a real yield envelope rather than
-        // one branch: brittle rising with rho g z, then creep taking over as the geotherm climbs.
-        let at = |z: i32| {
-            f64_of(
-                env.compressive_yield_gpa(Fixed::from_int(z))
-                    .expect("envelope"),
-            )
-        };
-        assert!(
-            at(5) < at(30) && at(60) < at(30),
-            "the envelope rises on the brittle limb and falls on the ductile one: {}, {}, {}",
-            at(5),
-            at(30),
-            at(60)
-        );
-
-        // THE MOMENT INTEGRATES OVER IT.
-        let k = mm_illustration_curvature();
-        let z_n = neutral_surface_depth_km(&profile, k, lit_e(), lit_nu()).expect("z_n");
-        assert!(
-            z_n > ZERO && z_n < delta,
-            "the neutral surface is solved inside the derived lid: {} km of {}",
-            f64_of(z_n),
-            f64_of(delta)
-        );
-        let m = bending_moment(&profile, k, z_n, lit_e(), lit_nu()).expect("M");
-        let d = equivalent_rigidity(m.moment, k).expect("D");
-        assert!(
-            d > ZERO,
-            "a bent lid has a positive rigidity: {}",
-            f64_of(d)
-        );
-
-        // AND THE FLAG STAYS HONEST, which is the ruling's own condition. This envelope's integrand does NOT die
-        // (a power-law row keeps a strength floor and the lever arm grows), so the integral runs to the domain
-        // and says so. The domain is derived now rather than declared, and that is stated rather than absorbed:
-        // the moment's second parent is the lid base, and `self_truncated = false` is how a reader learns it.
-        assert!(
-            !m.self_truncated,
-            "the creep envelope's tail does not die, and the reading must not claim otherwise: {m:?}"
-        );
-        assert_eq!(m.truncation_depth_km, None);
-        assert!(
-            m.final_interval_contribution > Fixed::EPSILON,
-            "the last interval at the lid base still contributes, which is the tail measured rather than assumed"
+            EnvelopeProfile::sample(&env, 600).is_none(),
+            "the unresolved activation-volume spread must refuse a single full-column profile"
         );
     }
 
@@ -6079,14 +5977,12 @@ mod tests {
     }
 
     #[test]
-    fn the_uniaxial_cost_is_measured_at_the_hindcast_curvatures() {
-        // THE OWNER-RULED SHORTCUT-VALIDITY MEASUREMENT. The uniaxial yield law is what BOTH primaries use, so
-        // its cost is the DEPARTURE of the plate from elastic at the hindcast curvatures, measured on this
-        // engine's OWN envelope rather than assumed. If the competent plate is effectively elastic there, the
-        // biaxial (2-D yield surface) question is moot for the hindcast; if the ratio departs, it reopens with a
-        // number attached. The number is reported either way.
+    fn the_uniaxial_model_reports_internal_hindcast_sensitivity() {
+        // This is an INTERNAL CONDITIONED SENSITIVITY, not an external measurement of the biaxial omission. It
+        // compares yielding with the elastic limit inside the same uniaxial model at the hindcast curvatures.
+        // The result can reveal material nonlinearity in this model; it cannot close the external biaxial gap.
         //
-        // The measurement is Watts and Burov's ratio T_e(YSE)/T_e(elastic), read here as the moment the plate
+        // The diagnostic uses Watts and Burov's ratio T_e(YSE)/T_e(elastic), read here as the moment the plate
         // carries over the moment a FULLY ELASTIC plate of the same competent thickness would carry at the same
         // curvature: R = M_yield / (D(T_mech) kappa). R ~ 1 means the caps do not bind (effectively elastic).
         let volumes = hk_dry_dislocation_activation_volumes();

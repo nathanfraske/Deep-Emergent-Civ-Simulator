@@ -61,12 +61,12 @@
 use crate::ewald::{ewald_potential_matrix, Cell, N_REAL_SHELLS};
 use crate::periodic::Element;
 use civsim_core::fixed::Fixed;
+use civsim_units::constants::SiExecutionMagnitudes;
 
-/// The Coulomb energy `e^2 / (4 pi eps0)` at unit separation, `14.39964 eV.A` (CODATA), as an exact rational.
-/// The bridge from the reduced Ewald units (1/Angstrom) to electron-volts, and the constant that folds the
-/// atomic-unit `(16/5)` relation into this eV/Angstrom system.
-fn k_ev_angstrom() -> Fixed {
-    Fixed::from_ratio(1_439_964, 100_000)
+/// The Coulomb energy `e^2 / (4 pi eps0)` at unit separation in eV angstrom, derived from the verified SI
+/// execution capability. The cited `14.39964` value is a diagnostic expectation, not an independent input.
+fn k_ev_angstrom(execution: &SiExecutionMagnitudes) -> Option<Fixed> {
+    execution.coulomb_energy_ev_angstrom()
 }
 
 /// The Slater decay constant `tau` in inverse angstroms from the chemical hardness, `tau = (16/5) U` with
@@ -75,8 +75,10 @@ fn k_ev_angstrom() -> Fixed {
 /// atomic-unit `(16/5)` is expressed directly in the eV/Angstrom system: `gamma(0) = (5/16) tau` in `1/A`, and
 /// `k * gamma(0) = 2 eta = U`, so `tau[1/A] = 32 eta[eV] / (5 k)`. This is `[D-in-form]`: an exact relation on
 /// a model (1s) density, cruder than an SCF Slater exponent, the honest trade for zero new floor.
-fn tau_from_eta(eta: Fixed) -> Fixed {
-    Fixed::from_int(32) * eta / (Fixed::from_int(5) * k_ev_angstrom())
+fn tau_from_eta(execution: &SiExecutionMagnitudes, eta: Fixed) -> Option<Fixed> {
+    Fixed::from_int(32)
+        .checked_mul(eta)?
+        .checked_div(Fixed::from_int(5).checked_mul(k_ev_angstrom(execution)?)?)
 }
 
 /// One term of the unequal-exponent SCC-DFTB shielding, `Y(a, b, r)` (Elstner et al. 1998).
@@ -154,13 +156,21 @@ fn solve_linear(mut m: Vec<Vec<Fixed>>, mut b: Vec<Fixed>) -> Option<Vec<Fixed>>
 /// the diagonal `Gamma_ii = k (A_ii - sum_{L!=0} S) + 2 eta_i` (the periodic self plus the on-site hardness).
 /// `chi` and `eta` are the per-ion electronegativity and hardness in eV; the ion charges in `cell` are ignored
 /// (this solves for them). Returns `None` for a degenerate cell or a singular system.
-pub fn qeq_charges(cell: &Cell, chi: &[Fixed], eta: &[Fixed]) -> Option<Vec<Fixed>> {
+pub fn qeq_charges(
+    execution: &SiExecutionMagnitudes,
+    cell: &Cell,
+    chi: &[Fixed],
+    eta: &[Fixed],
+) -> Option<Vec<Fixed>> {
     let n = cell.ions.len();
     if chi.len() != n || eta.len() != n {
         return None;
     }
     let a = ewald_potential_matrix(cell)?;
-    let tau: Vec<Fixed> = eta.iter().map(|&e| tau_from_eta(e)).collect();
+    let tau: Vec<Fixed> = eta
+        .iter()
+        .map(|&e| tau_from_eta(execution, e))
+        .collect::<Option<Vec<_>>>()?;
 
     // The short-range shielding summed over lattice images, S_sum[i][j] = sum_L S(|r_ij + L|) (all L for
     // i != j; L != 0 for i == j). Cartesian ion positions and the lattice come from the cell.
@@ -216,7 +226,7 @@ pub fn qeq_charges(cell: &Cell, chi: &[Fixed], eta: &[Fixed]) -> Option<Vec<Fixe
     }
 
     // The shielded periodic Gamma matrix in eV, then the augmented (N+1) equalization system.
-    let k = k_ev_angstrom();
+    let k = k_ev_angstrom(execution)?;
     let two = Fixed::from_int(2);
     let mut m = vec![vec![Fixed::ZERO; n + 1]; n + 1];
     let mut rhs = vec![Fixed::ZERO; n + 1];
@@ -299,6 +309,11 @@ pub fn chemical_hardness(element: &Element) -> Option<Fixed> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn execution() -> SiExecutionMagnitudes {
+        civsim_units::constants::canonical_si_execution_magnitudes()
+            .expect("the sealed physical floor projects")
+    }
     use crate::periodic::PeriodicTable;
 
     fn table() -> PeriodicTable {
@@ -436,7 +451,8 @@ mod tests {
         let cell = mgo_cell();
         let chi = vec![mg.chi, mg.chi, mg.chi, mg.chi, o.chi, o.chi, o.chi, o.chi];
         let eta = vec![mg.eta, mg.eta, mg.eta, mg.eta, o.eta, o.eta, o.eta, o.eta];
-        let q = qeq_charges(&cell, &chi, &eta).expect("the shielded QEq solve converges");
+        let q =
+            qeq_charges(&execution(), &cell, &chi, &eta).expect("the shielded QEq solve converges");
         let q_mg = q[0];
         let q_o = q[4];
         assert!(

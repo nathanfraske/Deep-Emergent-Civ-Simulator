@@ -17,9 +17,10 @@
 //! Stone 0 is the meta-gate that makes the no-fabricated-values discipline un-bypassable at the local
 //! inner loop (design `docs/working/Q1_STONE0_PROVENANCE_GATE_DESIGN.md`). This crate is the gate's
 //! library and its `stone0-gate` binary. INCREMENT 4 IS DONE and the gate fires at BUILD time:
-//! `crates/sim/build.rs` calls `run(Mode::Local)` and panics on a positive detection, so the scan runs on
-//! every `cargo build`, `check`, `test`, and `clippy` of `civsim-sim`, and a blocked build stops there
-//! with the gate's report. The binary remains the direct entry point for `--ci` and `--self-test`.
+//! `crates/planet/build.rs` calls `run(Mode::Local)` and panics on a positive detection, so the scan runs
+//! on every unqualified canonical `cargo build`, `check`, `test`, and `clippy`, and on package-scoped
+//! commands that compile `civsim-planet`. The parked compatibility runner retains the same guard in
+//! `parked/crates/sim/build.rs`. The binary remains the direct entry point for `--ci` and `--self-test`.
 //!
 //! Said plainly because the previous wording claimed the opposite ("NOT yet wired into any build script"),
 //! which would send a developer whose build is blocked here to rule this gate out as the cause when it is
@@ -27,14 +28,14 @@
 //!
 //! ## The checks
 //!
-//! 1. Provenance scan (the violation predicate): shells out to the existing python gates
-//!    (`constructor_gate.py`, `provenance_gate.py`, `floor_provenance_gate.py`, `determinism_gate.py`,
-//!    `quarantine_gate.py`) and collects any failure. The verdict is cached by a content hash of the
-//!    scanned files plus the scripts, so a repeated run with unchanged inputs is cheap.
+//! 1. Provenance scan (the violation predicate): invokes the declarative gate runner's canonical tier,
+//!    including every per-source receipt test, and collects any failure.
+//!    Cargo decides when a guarded build script must rerun. Direct Stone 0 calls always rescan, so a
+//!    verdict can never outlive an input that a gate reads outside the repository.
 //! 2. Live-password laundering scan (local only): if the secrets file exists, reads the password and
-//!    scans every git-tracked file plus the git index for the literal password and its base64. A hit is
-//!    a hard fail. The password value is never printed, logged, written, or persisted; only the file
-//!    where a hit occurred is reported.
+//!    scans every tracked or nonignored untracked worktree file plus the git index for the literal
+//!    password and its base64. A hit is a hard fail. The password value is never printed, logged,
+//!    written, or persisted; only the file where a hit occurred is reported.
 //! 3. Tombstone scan: every retired (now-declassified) override phrase in `stone0_tombstones.txt` must
 //!    appear nowhere but the tombstone list itself. A hit is a laundered stale copy and fails.
 //! 4. Override-env-name scan: a committed file that assigns `STONE0_OVERRIDE` has baked the override in
@@ -58,39 +59,100 @@ use std::process::{Command, Stdio};
 /// The default out-of-repo secrets file the owner keeps the override password in.
 pub const DEFAULT_SECRETS_PATH: &str = "/mnt/e/Secrets/stone0-override.pass";
 /// The committed tombstone list, one retired (declassified) override phrase per line.
-pub const TOMBSTONE_REL: &str = "calibration/stone0_tombstones.txt";
+pub const TOMBSTONE_REL: &str = "scripts/stone0_tombstones.txt";
 /// The environment variable an owner-authorized single-command override is supplied through.
 pub const OVERRIDE_ENV: &str = "STONE0_OVERRIDE";
+
+/// Emit Cargo rebuild inputs for a build script that invokes Stone 0.
+///
+/// Existing tracked files are listed one by one, and the Git index is watched
+/// so adding a tracked file refreshes that list. A small directory fallback
+/// keeps the guard live when Git is unavailable. External vendored custody and
+/// the secrets path are watched separately because the Python receipt tests may
+/// read them even though they cannot appear in `git ls-files`.
+pub fn emit_cargo_rerun_inputs(repo_root: &Path) {
+    for relative in [
+        "crates",
+        "sources",
+        "scripts",
+        "docs/SOURCES.md",
+        "docs/working/PHYSICS_FLOOR_REGISTRY.md",
+        "docs/working/CANONICAL_LEDGER_INVENTORY.txt",
+        "Cargo.toml",
+        "Cargo.lock",
+    ] {
+        println!(
+            "cargo:rerun-if-changed={}",
+            repo_root.join(relative).display()
+        );
+    }
+
+    if let Ok(output) = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(["ls-files", "-z"])
+        .output()
+    {
+        if output.status.success() {
+            for raw in output.stdout.split(|byte| *byte == 0) {
+                if raw.is_empty() || raw.contains(&b'\n') || raw.contains(&b'\r') {
+                    continue;
+                }
+                let relative = String::from_utf8_lossy(raw);
+                println!(
+                    "cargo:rerun-if-changed={}",
+                    repo_root.join(relative.as_ref()).display()
+                );
+            }
+        }
+    }
+
+    if let Ok(output) = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(["rev-parse", "--path-format=absolute", "--git-path", "index"])
+        .output()
+    {
+        if output.status.success() {
+            let index = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !index.is_empty() {
+                println!("cargo:rerun-if-changed={index}");
+            }
+        }
+    }
+
+    if let Some(home) = std::env::var_os("HOME") {
+        let custody = PathBuf::from(home).join(".claude/vendored-sources");
+        if custody.exists() {
+            println!("cargo:rerun-if-changed={}", custody.display());
+        } else if let Some(parent) = custody.parent().filter(|path| path.exists()) {
+            println!("cargo:rerun-if-changed={}", parent.display());
+        }
+    }
+    let secrets = std::env::var_os("STONE0_SECRETS_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_SECRETS_PATH));
+    if secrets.exists() {
+        println!("cargo:rerun-if-changed={}", secrets.display());
+    } else if let Some(parent) = secrets.parent().filter(|path| path.exists()) {
+        println!("cargo:rerun-if-changed={}", parent.display());
+    }
+    println!("cargo:rerun-if-env-changed={OVERRIDE_ENV}");
+    println!("cargo:rerun-if-env-changed=STONE0_SECRETS_PATH");
+}
 
 /// The instruction block printed when the provenance scan fails with no valid override.
 pub const OVERRIDE_INSTRUCTIONS: &str = "This value has no provenance. To override you must obtain the current password from Nathan (out of band), set STONE0_OVERRIDE for a single command, and Nathan will rotate the password afterward. Do NOT write the password into the repo; CI will catch it via the tombstone list and halt.";
 
-/// The five existing python gates the provenance scan consolidates. A script that is absent is skipped
-/// silently (fail-open), so a not-yet-created gate never bricks a build.
-/// Every gate Stone 0 runs, with its arguments. An entry is `(script, args)`.
+/// The bootstrap pointer into the declarative gate authority.
 ///
-/// THE LIST WAS HALF THE GATES. It named five and omitted sources, source generation, derives, the
-/// diamond scan, the profile-override check, the floor-registry staleness check and all eight
-/// per-source provenance tests. The omission was invisible from Stone 0's own output, because a gate
-/// that is not in this list reports nothing at all: the failing Grueneisen witnesses were unseen here
-/// for exactly that reason.
-///
-/// A gate that takes an argument is listed WITH it, because `--strict` and `--check` are where several
-/// of these actually convict; running them bare is how the diamond scan passed for months without ever
-/// looking at the repository.
-const PROVENANCE_SCRIPTS: &[(&str, &[&str])] = &[
-    ("scripts/constructor_gate.py", &[]),
-    ("scripts/provenance_gate.py", &[]),
-    ("scripts/floor_provenance_gate.py", &[]),
-    ("scripts/determinism_gate.py", &[]),
-    ("scripts/quarantine_gate.py", &[]),
-    ("scripts/sources_gate.py", &[]),
-    ("scripts/gen_sources.py", &["--check"]),
-    ("scripts/derives_gate.py", &[]),
-    ("scripts/diamond_gate.py", &["--strict"]),
-    ("scripts/profile_override_gate.py", &[]),
-    ("scripts/gen_floor_registry.py", &["--check"]),
-];
+/// Gate membership, order, arguments, timeouts, inputs, path triggers, cache policy, and self-test
+/// metadata live in `scripts/gates.toml`. Stone 0 owns only this runner pointer, which prevents a
+/// second Rust command list from drifting away from Stop, Just, CI, and developer entrypoints.
+const PROVENANCE_RUNNER: (&str, &[&str]) = (
+    "scripts/gate_runner.py",
+    &["run", "--tier", "canonical", "--phase", "provenance"],
+);
 
 /// Which run this is. `Local` runs every check including the live-password and canary scans against the
 /// secrets file. `Ci` runs the provenance, tombstone, and override-env scans only (a hosted runner has
@@ -336,7 +398,7 @@ pub fn override_is_valid(override_value: Option<&str>, password: &str) -> bool {
 }
 
 // ----------------------------------------------------------------------------------------------------
-// The provenance scan: shell out to the python gates, with a content-hash verdict cache.
+// The provenance scan: shell out to every authoritative Python gate.
 // ----------------------------------------------------------------------------------------------------
 
 /// What one gate run produced.
@@ -363,22 +425,53 @@ fn run_python_gate(root: &Path, script_rel: &str, args: &[&str]) -> ScriptResult
         // missing entry means either the gate was deleted or the path drifted, and both should be loud.
         // Skipping made deleting a gate the quietest way to stop it convicting.
         return ScriptResult::Detected(format!(
-            "{script_rel} is listed in PROVENANCE_SCRIPTS but does not exist. A gate that is not there \
-             has not passed; restore it or remove its entry deliberately."
+            "{script_rel} is the declarative gate-authority runner but does not exist. A gate runner \
+             that is not there has not passed; restore it deliberately."
         ));
     }
-    let out = match Command::new("python3")
-        .arg(&path)
-        .args(args)
-        .current_dir(root)
-        .output()
-    {
-        Ok(o) => o,
-        Err(e) => {
-            return ScriptResult::Operational(format!(
-                "could not run python3 for {script_rel} ({e}); skipped"
-            ))
+    // Linux development uses `python3`, while a normal Windows installation commonly exposes the
+    // same interpreter as `python`. Windows may also install a `python3.exe` Store placeholder that
+    // spawns successfully but only prints "Python was not found". Treat that placeholder like an
+    // unavailable command and try the next platform candidate. Once a real interpreter runs the
+    // script, every non-zero result remains a positive detection below.
+    #[cfg(windows)]
+    let interpreters: &[(&str, &[&str])] = &[("python", &[]), ("py", &["-3"]), ("python3", &[])];
+    #[cfg(not(windows))]
+    let interpreters: &[(&str, &[&str])] = &[("python3", &[]), ("python", &[])];
+
+    let mut unavailable = Vec::new();
+    let mut selected = None;
+    for (program, prefix_args) in interpreters {
+        let result = Command::new(program)
+            .args(*prefix_args)
+            .arg(&path)
+            .args(args)
+            .current_dir(root)
+            .output();
+        match result {
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let launcher_placeholder = !out.status.success()
+                    && (stderr.contains("Python was not found")
+                        || stderr.contains("No suitable Python runtime found"));
+                if launcher_placeholder {
+                    unavailable.push(format!("{program} resolved to a launcher placeholder"));
+                    continue;
+                }
+                selected = Some(out);
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                unavailable.push(format!("{program} was not found"));
+            }
+            Err(e) => unavailable.push(format!("{program} could not spawn ({e})")),
         }
+    }
+    let Some(out) = selected else {
+        return ScriptResult::Operational(format!(
+            "could not run a Python interpreter for {script_rel} ({}); skipped",
+            unavailable.join("; ")
+        ));
     };
     if out.status.success() {
         return ScriptResult::Clean;
@@ -400,18 +493,23 @@ fn run_python_gate(root: &Path, script_rel: &str, args: &[&str]) -> ScriptResult
         ));
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
-    ScriptResult::Detected(format!("{script_rel}:\n{}", stdout.trim_end()))
+    let details = match (stdout.trim(), stderr.trim()) {
+        ("", "") => String::from("gate runner exited nonzero without output"),
+        (stdout, "") => stdout.to_string(),
+        ("", stderr) => stderr.to_string(),
+        (stdout, stderr) => format!("{stdout}\n{stderr}"),
+    };
+    ScriptResult::Detected(format!("{script_rel}:\n{details}"))
 }
 
 fn provenance_scan(root: &Path) -> ProvenanceOutcome {
     let mut detections = Vec::new();
     let mut operational = Vec::new();
-    for (s, args) in PROVENANCE_SCRIPTS {
-        match run_python_gate(root, s, args) {
-            ScriptResult::Clean => {}
-            ScriptResult::Detected(r) => detections.push(r),
-            ScriptResult::Operational(w) => operational.push(w),
-        }
+    let (script, args) = PROVENANCE_RUNNER;
+    match run_python_gate(root, script, args) {
+        ScriptResult::Clean => {}
+        ScriptResult::Detected(r) => detections.push(r),
+        ScriptResult::Operational(w) => operational.push(w),
     }
     ProvenanceOutcome {
         detections,
@@ -419,148 +517,42 @@ fn provenance_scan(root: &Path) -> ProvenanceOutcome {
     }
 }
 
-fn fnv1a64_update(mut h: u64, data: &[u8]) -> u64 {
-    for &b in data {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    h
-}
-
-fn collect_files_with_ext(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
-    if let Ok(rd) = std::fs::read_dir(dir) {
-        for entry in rd.flatten() {
-            let p = entry.path();
-            if p.is_dir() {
-                collect_files_with_ext(&p, ext, out);
-            } else if p.extension().and_then(|e| e.to_str()) == Some(ext) {
-                out.push(p);
-            }
-        }
-    }
-}
-
-/// A content hash of everything the python gates read, so a verdict can be cached and reused when the
-/// inputs are byte-identical. FNV-1a is adequate here: the cache is a local optimization, and CI always
-/// runs on a fresh checkout with no cache, so a cache miss is the backstop.
-fn provenance_input_hash(root: &Path) -> u64 {
-    let mut files: Vec<PathBuf> = Vec::new();
-    for (s, _args) in PROVENANCE_SCRIPTS {
-        files.push(root.join(s));
-    }
-    // EVERY INPUT A GATE READS, or a cached clean verdict outlives an edit that would have convicted.
-    // The ledger and the profiles were the live gap: editing `quarantine_ledger.toml` locally could reuse
-    // a cached pass because the ledger was not hashed and the build script did not declare it as a rerun
-    // input, and the calibration profiles are what the simulation actually loads.
-    for extra in [
-        "scripts/constructor_baseline.tsv",
-        "scripts/determinism_baseline.tsv",
-        "scripts/derives_baseline.tsv",
-        "scripts/profile_override_baseline.tsv",
-        "calibration/reserved.toml",
-        "calibration/profiles/dev-fixtures.toml",
-        "calibration/profiles/mirror.toml",
-        "docs/working/quarantine_ledger.toml",
-        "docs/working/PHYSICS_FLOOR_REGISTRY.md",
-        "sources/registry.toml",
-        "sources/mirrored.toml",
-    ] {
-        files.push(root.join(extra));
-    }
-    // Every directory the python gates scan must appear here, or an edit inside one of them would not
-    // invalidate the cached verdict and a stale verdict would be reused. `crates/bio/src` and
-    // `crates/foundation/src` are the scan roots the two crate extractions added (see the CRATES lists
-    // in constructor_gate.py and determinism_gate.py); they are covered here for that reason.
-    for dir in [
-        "crates/core/src",
-        "crates/physics/src",
-        "crates/bio/src",
-        "crates/foundation/src",
-        "crates/sim/src",
-        "crates/world/src",
-    ] {
-        collect_files_with_ext(&root.join(dir), "rs", &mut files);
-    }
-    collect_files_with_ext(&root.join("crates/physics/data"), "toml", &mut files);
-    files.sort();
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for f in files {
-        if let Ok(bytes) = std::fs::read(&f) {
-            h = fnv1a64_update(h, f.to_string_lossy().as_bytes());
-            h = fnv1a64_update(h, &[0]);
-            h = fnv1a64_update(h, &bytes);
-        }
-    }
-    h
-}
-
-fn read_cache(cache_path: &Path, want_hash: u64) -> Option<Vec<String>> {
-    let text = std::fs::read_to_string(cache_path).ok()?;
-    let (hash_line, rest) = text.split_once('\n')?;
-    if hash_line.trim() != format!("{want_hash:016x}") {
-        return None;
-    }
-    let dets: Vec<String> = rest
-        .split('\u{1e}')
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect();
-    Some(dets)
-}
-
-fn write_cache(cache_path: &Path, hash: u64, detections: &[String]) {
-    if let Some(parent) = cache_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let body = detections.join("\u{1e}");
-    let _ = std::fs::write(cache_path, format!("{hash:016x}\n{body}"));
-}
-
-fn provenance_scan_cached(root: &Path, notices: &mut Vec<String>) -> ProvenanceOutcome {
-    let hash = provenance_input_hash(root);
-    let cache_path = root.join("target/stone0/provenance.cache");
-    if let Some(dets) = read_cache(&cache_path, hash) {
-        notices.push("provenance verdict served from cache (inputs unchanged)".to_string());
-        return ProvenanceOutcome {
-            detections: dets,
-            operational: Vec::new(),
-        };
-    }
-    let outcome = provenance_scan(root);
-    // Only cache when python ran (no operational error), so a transient python outage never
-    // freezes a clean verdict into the cache.
-    if outcome.operational.is_empty() {
-        write_cache(&cache_path, hash, &outcome.detections);
-    }
-    outcome
-}
-
 // ----------------------------------------------------------------------------------------------------
-// Tracked-tree and index gathering (git). Every step fails open: any error returns Err and the caller
+// Worktree and index gathering (git). Every step fails open: any error returns Err and the caller
 // warns and skips, never blocks.
 // ----------------------------------------------------------------------------------------------------
 
-fn git_tracked_files(root: &Path) -> Result<Vec<RepoFile>, String> {
+fn git_worktree_files(root: &Path) -> Result<Vec<RepoFile>, String> {
     let out = Command::new("git")
         .arg("-C")
         .arg(root)
-        .args(["ls-files", "-z"])
+        .args([
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ])
         .output()
         .map_err(|e| format!("git ls-files did not spawn ({e})"))?;
     if !out.status.success() {
         return Err("git ls-files exited non-zero".to_string());
     }
     let mut files = Vec::new();
+    let mut seen = BTreeSet::new();
     for rec in out.stdout.split(|&b| b == 0) {
         if rec.is_empty() {
             continue;
         }
         let rel = String::from_utf8_lossy(rec).into_owned();
+        if !seen.insert(rel.clone()) {
+            continue;
+        }
         match std::fs::read(root.join(&rel)) {
             Ok(bytes) => files.push(RepoFile { path: rel, bytes }),
             Err(_) => {
-                // A tracked path with no readable working-tree file (a submodule gitlink, a deleted but
-                // still-tracked path). Skip it; the index scan still covers its staged blob.
+                // A listed path with no readable worktree file can be a submodule gitlink or a deleted
+                // tracked path. Skip it; the index scan still covers any staged blob.
             }
         }
     }
@@ -724,19 +716,20 @@ pub fn gate(cfg: &GateConfig) -> GateReport {
     let mut warnings: Vec<String> = Vec::new();
     let mut notices: Vec<String> = Vec::new();
 
-    // Gather the tracked tree once; the laundering, tombstone, override-env, and canary scans share it.
-    let files = match git_tracked_files(&cfg.repo_root) {
+    // Gather tracked and nonignored untracked worktree files once; the laundering, tombstone,
+    // override-env, and canary scans share them.
+    let files = match git_worktree_files(&cfg.repo_root) {
         Ok(f) => Some(f),
         Err(e) => {
             warnings.push(format!(
-                "git tracked-file scan unavailable ({e}); the laundering, tombstone, override-env, and canary scans are skipped"
+                "git worktree-file scan unavailable ({e}); the laundering, tombstone, override-env, and canary scans are skipped"
             ));
             None
         }
     };
 
     // Check 1: the provenance scan (both modes).
-    let prov = provenance_scan_cached(&cfg.repo_root, &mut notices);
+    let prov = provenance_scan(&cfg.repo_root);
     for w in prov.operational {
         warnings.push(w);
     }
@@ -979,7 +972,7 @@ fn self_test() -> i32 {
     let tombs = vec!["retired phrase alpha".to_string()];
     let tfiles = vec![
         RepoFile::new(
-            "calibration/stone0_tombstones.txt",
+            "scripts/stone0_tombstones.txt",
             b"retired phrase alpha\n".to_vec(),
         ),
         RepoFile::new(
@@ -996,7 +989,7 @@ fn self_test() -> i32 {
         "tombstone list itself not flagged",
         !thits
             .iter()
-            .any(|(p, _)| p == "calibration/stone0_tombstones.txt"),
+            .any(|(p, _)| p == "scripts/stone0_tombstones.txt"),
     );
 
     // override-env-name detection across shell, env, and yaml forms; prose is not flagged.

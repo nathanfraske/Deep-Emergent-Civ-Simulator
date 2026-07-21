@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! Integration tests for the Stone 0 gate. The positive-detection tests use in-memory fixtures so a real
-//! secret is never planted in the repo. One test runs the native scans against the real tracked tree and
+//! secret is never planted in the repo. One test runs the native scans against the real worktree and
 //! asserts no false positive.
 
 use std::path::PathBuf;
@@ -172,10 +172,70 @@ fn gate_catches_planted_violations_in_a_temp_repo() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// The native scans (tombstone, override-env, canary, and a password that cannot occur) must be CLEAN on
-/// the real tracked tree: no false positive. Skips gracefully if git is unavailable.
+/// A local laundering scan includes nonignored untracked worktree files. The synthetic secrets file is
+/// outside the repository so the test proves the note is detected without scanning the secret source.
 #[test]
-fn the_real_tracked_tree_is_clean_of_native_detections() {
+fn gate_catches_a_live_password_in_an_untracked_worktree_file() {
+    if Command::new("git").arg("--version").output().is_err() {
+        eprintln!("git unavailable; skipping temp-repo test");
+        return;
+    }
+
+    let base = std::env::temp_dir().join(format!("stone0-untracked-test-{}", std::process::id()));
+    let repo = base.join("repo");
+    let secrets = base.join("stone0-override.pass");
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(&repo).unwrap();
+
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(args)
+            .output()
+            .expect("git")
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.email", "t@t"]);
+    git(&["config", "user.name", "t"]);
+    std::fs::write(repo.join("README.md"), "clean base\n").unwrap();
+    git(&["add", "README.md"]);
+    git(&["commit", "-q", "-m", "clean base"]);
+
+    let password = "synthetic-live-password-48291";
+    std::fs::write(&secrets, format!("{password}\n")).unwrap();
+    std::fs::write(
+        repo.join("scratch-note.txt"),
+        format!("temporary note: {password}\n"),
+    )
+    .unwrap();
+
+    let cfg = GateConfig {
+        repo_root: repo,
+        secrets_path: secrets,
+        tombstones_path: base.join("missing-tombstones"),
+        mode: Mode::Local,
+        override_value: None,
+    };
+    let report = gate(&cfg);
+    assert!(
+        report
+            .failures
+            .iter()
+            .any(|failure| failure.contains("laundered credential")
+                && failure.contains("scratch-note.txt")),
+        "untracked live-password hit not reported: {:?}",
+        report.failures
+    );
+
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// The native scans (tombstone, override-env, canary, and a password that cannot occur) must be CLEAN on
+/// the real tracked and nonignored untracked worktree: no false positive. Skips gracefully if git is
+/// unavailable.
+#[test]
+fn the_real_worktree_is_clean_of_native_detections() {
     let root = match repo_root() {
         Some(r) => r,
         None => {
@@ -198,7 +258,12 @@ fn the_real_tracked_tree_is_clean_of_native_detections() {
     let native: Vec<&String> = report
         .failures
         .iter()
-        .filter(|f| f.contains("tombstone") || f.contains("override-env") || f.contains("canary"))
+        .filter(|failure| {
+            failure.starts_with("laundered retired override phrase")
+                || failure.starts_with("override-env baked into a committed file")
+                || failure.starts_with("laundered credential")
+                || failure.starts_with("canary tripped")
+        })
         .collect();
     assert!(
         native.is_empty(),

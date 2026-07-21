@@ -1,20 +1,16 @@
 # CLAUDE.md: Operating Manual for Continuing This Project
 
-This file is the entry point for any agent picking up the emergent fantasy civilization simulator design project. Read it in full before touching either working document. It encodes the customs, the prose style, the workflows, and the verification suite that the project has been maintained under, so that work continues in the same voice and to the same standard without drift.
+This file is the entry point for any agent working on the canonical abiotic planet and stellar-system pipeline. Read it in full before changing code, research custody, or an authority document. It encodes the project customs, value boundary, workflows, and verification suite so work continues without methodological drift.
 
-The owner is Nathan M. Fraske. The project is his. Every reserved number, every contested design call, and every resolution of a research item belongs to him, not to the agent.
+The owner is Nathan M. Fraske. The project is his. Every contested design call and every resolution of a research item belongs to him, not to the agent. No owner decision can admit an arbitrary magnitude to the canonical runpath.
 
 ---
 
 ## 1. What this project is
 
-A single large Markdown design document for a custom Rust engine: a deterministic, emergent fantasy civilization simulator, a hybrid in the spirit of Dwarf Fortress and Songs of Syx. Simulation comes first; the visible game is a thin glyph view onto a deep world. The world is generated, every individual is modelled, and everything of consequence emerges rather than being authored: language, technology, money, governance, religion, cities, artifacts, beliefs. The deliverable is the full vision captured in prose and Rust-shaped pseudocode, with no minimum-viable-product gating.
+The canonical product is the deterministic abiotic planet and stellar-system pipeline in `civsim-planet`. It begins at the sealed absolute physics floor, advances through the seven causal stages, and hands an immutable completed snapshot to observer-only viewers. Biology, civilization, dawn, compose, the causal viewer, their scenarios, and their calibration methodology are parked legacy work.
 
-The canonical knowledge lives in two maintained documents, plus a research record:
-
-- **The design document** (`docs/design.md`): the specification, 64 gapless parts (Part 0 through Part 63). Part 62 holds the research records (62.1 onward), Part 63 holds the bibliography. This is the source of truth.
-- **The audit and remediation log** (`docs/audit.md`): the companion ledger. Section 1 is the consolidation history (1a onward), Section 2 lists every part that carries an open research flag, Section 3 is the research backlog grouped thematically, Section 4 is the inconsistency list, and the tail holds the queue and the limitation note with the running resolved/open counts.
-- **The research papers**: standalone research reports behind the resolved items, archived for reference. Their reasoning is consolidated into the design document; the papers are the long-form source.
+`parked/docs/design.md`, `parked/docs/audit.md`, and `parked/docs/research/` preserve the earlier civilization design history. The verification hooks still protect their historical structure and prose, but they do not define the canonical runpath, authorize a value, or supply planetary readiness evidence. Current canonical state and order live in `HANDOFFS.md`, `TODOS.md`, `docs/working/CONSENSUS_ROADMAP.md`, and `docs/working/REPOSITORY_CLEANUP_PLAN.md`.
 
 The eleven design principles govern everything. The three that come up most: Principle 3 (determinism), Principle 8 (order emerges, never templated), Principle 9 (physics may be an authored cultural input, cultural outcomes may not, enforced by the Steering Audit), Principle 10 (observer independence), and Principle 11 (data-driven by default; a hardcoded constant in the path of world content is a defect until it earns its place). When in doubt, read the actual part before relying on memory of it.
 
@@ -26,11 +22,11 @@ These are absolute. They override convenience, and they override the agent's own
 
 1. **Prove it before you trust it, and most of all when "it" is your own conclusion.** Never sign off on a claim, a compatibility check, or a generalization until it has been verified against the real specified system. Read the actual parts. Do not reason against a hypothetical version of the design.
 2. **Audit the input, not the output alone.** When handed a research report, a request, or a prior decision, check the premises, not the result alone. The most valuable catches in this project have come from auditing the input.
-3. **Never fabricate a value.** When a mechanism needs a specific number (a threshold, a rate, a weight), it is surfaced to the owner as reserved, with the basis for the decision stated, never invented. This is non-negotiable and is the subject of Section 7.
+3. **Never fabricate or reserve a canonical value.** A required magnitude must derive from the admitted absolute floor. If every derive-first route fails, the candidate may enter only through the structured floor-admission process in Section 7. Otherwise the run refuses.
 4. **Emergence over templates.** Any design pattern that imposes order from outside the simulation rather than letting it arise from rules is a red flag. A closed enum or a lookup table sitting where world content should emerge is a defect. The sharp, testable form, a gate on every proposed substrate: if a substrate reads a high-level social or emergent fact (genetic relatedness, family or group membership, a named emotion, a skill or status level) to produce a behaviour, it is authoring, period. Replace it with the general causal primitive plus a proxy that correlates, and let the outcome emerge from selection. The template case is kin-biased cooperation: it is not wired by reading relatedness, which authors Hamilton's rule as a mechanism, but emerges because a being helps the familiar and nearby, which correlate with relatedness through local reproduction, so the rule becomes a description of the outcome, never a coded shortcut.
 5. **Do not assume the owner is right either.** Present real data, verified sources, and honest tradeoffs. Disagree when the evidence supports it. The owner rewards a found seam over a smooth yes.
-6. **The value-authoring line is absolute.** A value may be authored ONLY when it is part of the physics FLOOR (the material axes and law constants); NOWHERE else, no exceptions. Anything else in the path of world content must be DERIVED from the floor and the situation, or read as world data. If the mechanism needs a value the floor cannot yet supply, do not author it: flag the gap and develop the physics substrate (a new floor axis or law) so it can be read or derived. This is the sharpest form of Principle 11 and it binds every mechanism.
-7. **Every mechanism must admit the alien.** A photosynthetic mind, a being that draws energy from a redox gradient or a mana field, a silicon metabolism, a body with no analogue of a modelled organ: each must be feasible as DATA, not a rewrite. If a pathway assumes one kingdom, one chemistry, one body plan, or one energy route where a world's creature could differ, it is a defect. Key on the being's own data so the alien is a data row.
+6. **The value-bearing input line is absolute.** The sealed absolute physics floor is the only canonical value-bearing input. Provenance marks and ledger tiers account for a value but never admit it. Calibration manifests, profiles, caller-authored world rows, arbitrary cited inputs, written state, and contingency do not enter the canonical path. Written state and contingency are generated within the run.
+7. **Every mechanism must admit the alien.** No Earth, Mirror, Sun, familiar composition, fixed orbit, handpicked body count, or hindcast target may be an implicit world. The same causal stages must accept a physically different stellar system or planet without a special code path. Unsupported closure refuses rather than falling back to a familiar case.
 
 **Mandatory audits.** Every end-of-arc or before-merge audit MUST run the standing panel lenses in `AGENTIC_ADDENDUM.md` section 9 (the fully-blind confirmation-bias catcher, the derive-versus-author catcher, the alien-feasibility catcher, the Terran-bias catcher, and the steering and Principles catcher) alongside the correctness lenses, each an independent panelist, every finding verified against source before it is trusted. These are the owner's standing requirement, not a per-arc choice.
 
@@ -49,24 +45,26 @@ These govern the design document, the audit log, every research record, and the 
 
 ---
 
-## 4. Document anatomy and conventions
+## 4. Historical document anatomy and conventions
+
+This section applies only when preserving the legacy civilization design record. It has no value-admission authority over the canonical planet path.
 
 **The design document.**
 - Parts are top-level `## Part N: Title`, numbered 0 through 63, gapless. Subsections are `### N.M` (for example `### 33.1`, `### 62.9`).
 - A part that uses bold lead-in paragraphs (Part 41 is the model) keeps that style; a part that is prose-only (Part 54) keeps that; a part that specifies structures in `rust` code fences (Parts 9, 20, 25, 33, 36, 37) keeps that. Match the part you are editing.
-- A resolved research item carries, at the site of its mechanism, a `> Decided and reserved.` blockquote (Section 6), a record in Part 62, and a bibliography group in Part 63.
+- A resolved historical research item carries, at the site of its mechanism, a decision blockquote (Section 6), a record in Part 62, and a bibliography group in Part 63.
 - An open research item carries, at its site, a `> Needs research, item R-XXX in the research backlog. ... Flagged, not changed.` blockquote.
 
 **The audit log.**
-- Section 1 consolidation blocks are `### 1a`, `### 1b`, and so on, each a single dense paragraph ending with a pointer to where the mechanism, record, and sources live, and the note "Calibrations are reserved, not invented (below)." Subsections are separated by `---`.
+- Section 1 consolidation blocks are `### 1a`, `### 1b`, and so on, each a single dense paragraph ending with a pointer to where the mechanism, record, and sources live. Retain old calibration wording only as quoted historical record. Subsections are separated by `---`.
 - Section 3 backlog entries are bullets. An **open** item's bullet starts `- **R-XXX.` so it is counted. A **resolved** item's bullet is rewritten to start with a plain word, for example `- **Composition (R-DEEPTECH-COMPOSE): resolved.**`, so it drops out of the open count while staying findable.
-- The limitation note at the end carries the running counts (of the form "N research questions are resolved ... and M remain open ...") and must be updated on every resolve or flag. Read the current numbers from `docs/audit.md` itself rather than from any count quoted elsewhere: a restated count goes stale silently, and three documents in this repo have carried a stale one.
+- The limitation note at the end carries the running counts (of the form "N research questions are resolved ... and M remain open ...") and must be updated on every legacy resolve or flag. Read the current numbers from `parked/docs/audit.md` itself rather than from any count quoted elsewhere: a restated count goes stale silently, and three documents in this repo have carried a stale one.
 
 **Research item identifiers.** `R-` plus a domain tag, sometimes two parts: `R-EVIDENCE`, `R-VALUE-METRIC`, `R-DEEPTECH-COMPOSE`. New items follow the same shape.
 
 ---
 
-## 5. The two core workflows
+## 5. Historical research-document workflows
 
 ### 5a. Resolving a research item (after the owner signs off)
 
@@ -74,7 +72,7 @@ The owner signs off, almost always with the caveat that the result be **broadly 
 
 1. **Ground.** Read the actual parts the item touches. Do not work from memory.
 2. **Audit the report for generalization seams before integrating.** This step has caught a real seam in every resolution so far. Look specifically for a closed list authored one level down: a fixed enum of kinds, a fixed set of axes, a fixed set of combinators, a hardcoded list of conserved quantities. Harden each into a data-defined, extensible substrate or registry, sibling to the value substrate (Part 21), the semantic substrate (Part 33), and the institution-function substrate (Part 36): the mechanism is fixed Rust, the membership is data and grows with the world. Also confirm the result keys off per-entity or per-race data rather than a hardcoded notion (for example identity-permanence rather than "sentient").
-3. **Consolidate the hardened, general form.** Replace the flag blockquote with the mechanism, written in the style of the part (prose, bold lead-ins, or code, as the part uses). Add the `> Decided and reserved.` blockquote (Section 6). Add a four-paragraph record to Part 62 (the question; what was found; the decision taken, signed off and generalized; what remains to be proven). Add a bibliography group to Part 63 with precisely cited sources. Reconcile every cross-reference that deferred to the item.
+3. **Consolidate the hardened, general form.** Replace the flag blockquote with the mechanism, written in the style of the part (prose, bold lead-ins, or code, as the part uses). Add the decision blockquote from Section 6. Add a four-paragraph record to Part 62 (the question; what was found; the decision taken, signed off and generalized; what remains to be proven). Add a bibliography group to Part 63 with precisely cited sources. Reconcile every cross-reference that deferred to the item.
 4. **Update the audit log.** Add a Section 1 consolidation block. Rewrite the Section 3 backlog bullet to the resolved form (so it leaves the open count). Update Section 2, the queue, and the limitation counts.
 5. **Verify** (Section 8) and present.
 
@@ -90,25 +88,25 @@ When a sharp question exposes a real gap:
 
 ---
 
-## 6. The "Decided and reserved" blockquote
+## 6. The decision and admission blockquote
 
-Every resolution ends with a blockquote of this shape, in prose, no em dashes:
+Every new canonical resolution ends with a blockquote of this shape, in prose, with no em dashes:
 
-> Decided and reserved. The mechanism is settled and signed off, and on the owner's condition it is general and per-race differentiable. [One or two sentences stating the mechanism.] The mechanism is fixed Rust; [the data-defined parts] are data (Principle 11). What is reserved for your calibration, surfaced rather than fabricated, with its basis given: [each reserved value, each with the basis for deciding it]. The reserved list is in the audit log. The honest limits stand: [the real limits, plainly]. [Any couplings or remaining open siblings.]
+> Decided. [State the mechanism and causal scope.] Every value-bearing input comes from the admitted absolute physics floor. [Name the derivation ancestry.] If an irreducible candidate remains after derive-first exhaustion, [name the Buckingham-Pi budget, derivation attempts, Gap Law evidence, Residual Law evidence, and unique residual slot]. Unsupported closure refuses. Written state and contingency are generated. [State the alien-system falsifier and the remaining limits.]
 
-The reserved list inside it is the contract with the owner: every number the mechanism needs, each named, each with the basis on which the owner would set it, none invented.
+The blockquote records a derivation or a refusal. It never reserves an owner-set magnitude and never treats a citation, tier, or provenance mark as admission.
 
 ---
 
-## 7. Reserved values and tuneables (how the owner's numbers work)
+## 7. Absolute-floor admission and refusal
 
-This is the operational heart of "never fabricate a value". The mechanism is fixed and lives in code and prose; the numbers it needs are the owner's to set, and until he sets them they are **reserved**, not guessed.
+This is the operational heart of "never fabricate a value." The canonical run has two routes: a value derives from the sealed floor, or the run refuses. An irreducible reference or residue is still part of the floor and is admitted only after the derive-first process proves why no derivation closes it.
 
-- **Where reserved values are recorded.** Three places, kept consistent: the `> Decided and reserved.` blockquote at the mechanism's site, the per-item Section 1 consolidation block in the audit log, and the research record in Part 62. Each lists every reserved value with its basis.
-- **What "with its basis given" means.** Never just "this threshold is reserved". Always the ground on which the owner would decide it: "the failure boundary the material and physics data already define, such as pressure exceeding yield", or "the drift and loss rates the transmission subsystem already uses, set equal to them for consistency", or "the per-tick budget and the depth at which marginal gain falls below noise, a performance bound rather than a realism one". The basis tells the owner how to choose, so the choice is informed and not arbitrary.
-- **How they reach code.** When the engine is built, every reserved value is a named constant in a calibration manifest (see the runbook), defaulting to a sentinel that fails loudly if used unset, never a silent plausible default. Nothing is hardcoded inline.
-- **How they graduate.** The owner reviews the basis, sets the value, then playtests or calibrates against the stated target (for example "the population mean reconstructs the pool knowledge level within fixed-point tolerance"). Once set and validated, the value moves from reserved to set in the manifest, with who set it and when. The design document's reserved list and the manifest stay in step.
-- **The agent never sets one.** If a task seems to require a concrete number, the agent surfaces it as reserved with its basis and stops there. Surfacing a number for review is the correct output; inventing one is a defect.
+- **Accounting.** The seven marks are `[D]` Derived, `[M]` Measured, `[E]` Estimator, `[C]` Closure, `[A]` Authored, `[W]` Written state, and `[X]` Contingency. The four tiers are Universal, Reference, Residue, and Contingency. Counts and tags describe the ledger; they do not authorize a magnitude.
+- **Direct floor.** Universal irreducible leaves are measured fundamentals. Composite constants derive from named ancestry. A generic API may not bind a caller magnitude to an admitted identity.
+- **Exhaustion route.** Every non-derived floor leaf, at any tier, requires nonempty derivation attempts, a per-phenomenon Buckingham-Pi input budget, Gap Law evidence, Residual Law evidence, and a unique residual slot. Vendored evidence supports the receipt but does not grant admission.
+- **Generated categories.** Closure, written state, and contingency are not caller-supplied initial inputs. State and contingency arise inside the causal run and carry their generated provenance.
+- **Failure.** If the required derivation or admission receipt is absent, incomplete, over budget, or outside the repository-owned audited catalog, the stage returns a structured refusal. No profile, manifest, scenario row, fixture, citation, or owner-selected number fills the gap.
 
 ---
 
@@ -161,7 +159,7 @@ A consolidation is not done until em dashes are 0, banned adverbs are 0, parts a
 
 ## 11. What not to do
 
-- Do not invent a number. Surface it as reserved with its basis.
+- Do not invent, reserve, or accept a caller-authored canonical number. Derive it, admit an irreducible floor entry through the complete receipt, or refuse.
 - Do not sign off on your own conclusion without proving it against the real parts.
 - Do not author a closed enum or a lookup table where world content should emerge.
 - Do not add em dashes or the banned adverbs, and do not let a "not just X, it is Y" construction past.
