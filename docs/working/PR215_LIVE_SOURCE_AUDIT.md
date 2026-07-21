@@ -100,7 +100,7 @@ the causal bitstream.
 10. **Universal leaves bypassed derivation exhaustion.** Admission now requires
     a complete receipt for every non-derived leaf at every tier. The three
     current invariant receipts state derivation attempts, Buckingham-Pi budget,
-    Gap Law, Residual Law, and unique residual slot.
+    Gap Law with typed Chaos Protocol, Residual Law, and unique residual slot.
 11. **Receipt prose could vary after structural admission.** Canonical preflight
     now exact-matches the sealed receipt fingerprints as well as the ledger, so
     a caller cannot replace the evidence narrative while keeping the same IDs.
@@ -129,6 +129,19 @@ the causal bitstream.
     `f32` and `f64` core quantizers were removed. The canonical planet gate now
     rejects floating-point types, and the GPU no-float test scans Stage 0,
     shared primitives, fields, and transcendentals.
+17. **Gap Law did not carry its Chaos Protocol as typed evidence.** Admission now
+    requires either a not-applicable basis or a nonempty dynamical regime
+    partition with a transition law. Each regime proves that input bands remain
+    resolved for direct evolution or carries the stationary measure,
+    conservation projection, stability, validity, coordinate discipline, and
+    exact replay required by a sub-resolution disposition. Empty evidence or an
+    empty regime list refuses. Receipt fingerprints and transcripts cover the
+    complete ordered partition.
+18. **The Stage 1 contract could name leaves but could not evaluate them.** A
+    fixed-order evaluator now consumes only two opaque repository-owned proof
+    capabilities. It reports the exact unresolved leaf frontier, closes the
+    root only when both capabilities exist, and exposes no string, citation,
+    scalar, tag, or caller boolean as a closure path.
 
 The resulting projected composite values are replayable from the transcript:
 
@@ -161,16 +174,16 @@ Two direct no-argument runs produced:
 - zero stderr bytes;
 - six transcript events;
 - no `[W]`, no `[X]`, and no snapshot;
-- byte-identical stdout of `22,134` bytes, SHA-256
-  `7058a1d013f19482460cb034bdbea0f35c7b7b9aeae0916a4e07cfe54f5f9c67`;
-- receipt `civsim.planet.run.v5` and transcript schema major `3`;
+- byte-identical stdout of `27,941` bytes, SHA-256
+  `382bb176b8fbb85afeae07f4200925f63c1c00cb1daadf7924d2bfb692a373af`;
+- receipt `civsim.planet.run.v6` and transcript schema major `4`;
 - refusal `stellar_birth.realization_measure` at Stage 1.
 
 The umbrella refusal has two unresolved leaves:
 `stellar_birth.joint_physical_measure` and
-`stellar_birth.realization_coordinate_law`. The current graph is an obligation
-contract. It must become an executable leaf-closure evaluator before either
-leaf can close; until then the root refusal is the correct output.
+`stellar_birth.realization_coordinate_law`. The executable evaluator serializes
+those leaves in fixed canonical order. The repository resolver supplies neither
+opaque proof capability yet, so the root refusal is the correct output.
 
 ## Verified reachability
 
@@ -186,15 +199,15 @@ civilization, authored world generation, and the old causal viewer remain in
 
 The units, ledger, physics, materials, planet substrate, and canonical planet
 targets pass their focused test suites. The complete Linux `check-pr` recipe
-passed with exit `0` in `1,233.4` seconds. It covered all declarative PR gates,
-Stone 0, formatting, Clippy with warnings denied, the ten-package all-target
-suite, the expanded GPU no-float guard, available backend bit-parity tests,
-rustdoc, and doctests.
+passed with exit `0` in `867.6` seconds. It covered hook and gate canaries, all
+declarative PR gates, Stone 0, formatting, Clippy with warnings denied, the
+ten-package all-target suite, the expanded GPU no-float guard, available
+backend bit-parity tests, rustdoc, and doctests.
 
 Two post-gate direct Linux binary runs independently confirmed exit `2`, zero
-stderr bytes, `22,134` stdout bytes, byte equality, and SHA-256
-`7058a1d013f19482460cb034bdbea0f35c7b7b9aeae0916a4e07cfe54f5f9c67`.
-No earlier v4 receipt or eleven-entry census is evidence for the v5 result.
+stderr bytes, `27,941` stdout bytes, byte equality, and SHA-256
+`382bb176b8fbb85afeae07f4200925f63c1c00cb1daadf7924d2bfb692a373af`.
+No earlier receipt or inventory pin is evidence for the v6 result.
 
 One blind-generalizer pass was run against frozen candidate and specification
 packets, as requested instead of the historical six-pass overnight loop:
@@ -209,15 +222,50 @@ packets, as requested instead of the historical six-pass overnight loop:
 - all three findings repaired in this worktree without selecting a desired
   physical outcome.
 
+The executable-leaf and Chaos Protocol slice received one additional
+packet-only generalizer pass, not a six-pass loop. Its strongest-model
+input-bias smoke first returned `BLOCKED`: the packet treated the initial
+three-way chaos classification as exhaustive and tested false admission more
+than false refusal. The packet was neutralized with symmetric valid, absent,
+and invalid-proof cases plus mixed, stochastic, multi-attractor,
+nonstationary, and regime-changing falsifiers; the smoke then returned
+`CLEAR` before the auditor ran.
+
+The blind pass found that one exclusive not-applicable, dissipative, or
+Lyapunov-sensitive tag could not express mixed or changing dynamics. Source
+verification confirmed the enum had that shape. It is repaired as a nonempty
+validity-regime partition with a transition law. Each regime now records one
+of two resolution dispositions: direct evolution proves admitted input bands
+remain resolved, while sub-resolution evolution requires the stationary
+measure, conservation projection, stability, coordinate discipline, and
+replay gates. Multiple regimes can coexist; unsupported regimes refuse instead
+of being misclassified.
+
+The pass also correctly identified the future danger of treating runtime type
+and presence as semantic proof. Source verification found no current live
+bypass: production has no proof constructors and returns typed absence for
+both leaves, while the artifact seals are private. The exact open obligations
+now include absolute-floor binding, artifact-schema version,
+semantic-checker version, dependency digest, and coordinate-to-joint-measure
+binding. Those checkers remain required work before either production proof
+constructor may exist. This packet summarized structure rather than carrying
+the complete comment-stripped source, so it is evidence for the named
+generalization findings only, not a passed full code panel.
+
 ## Remaining audit debt
 
 - Admission structures still carry human-readable receipt strings. The current
   three receipts are independently sealed and exact-matched, but future leaves
   at any tier must replace prose-only proofs with typed, machine-resolvable
   artifacts before they can become live.
-- The Stage 1 requirement graph always returns its root today. Once a leaf has
-  a possible closure, evaluation must prove each dependency and report the
-  exact open frontier.
+- Opaque Stage 1 proof types have no production constructors. Future smart
+  constructors must validate every obligation, bind the absolute floor,
+  schema, checker, dependencies, validity domain, and joint measure, and return
+  structured invalid reasons. Runtime type and presence cannot stand in for
+  those checks.
+- Stage 1 leaf proofs remain absent. The next artifact must implement a
+  machine-readable dimensional rank and null-space census rather than
+  constructing either opaque proof from human-readable assertions.
 - Future contingency coordinates must not rely on a bounded integer domain
   without proving the physical support and mapping law.
 - Exact rational helpers need explicit resource and exponent domains before
@@ -241,8 +289,9 @@ as a passed six-pass standing panel.
    Buckingham-Pi groups, prove what remains underdetermined, and preserve
    correlations rather than authoring independent stellar knobs.
 2. For each irreducible survivor, complete source custody, uncertainty,
-   support, normalization, conditioning, Gap Law, Residual Law, and unique
-   residual-slot receipts. If any item is incomplete, keep the Stage 1 refusal.
+   support, normalization, conditioning, Gap Law including the typed Chaos
+   Protocol branch, Residual Law, and unique residual-slot receipts. If any
+   item is incomplete, keep the Stage 1 refusal.
 3. Define the realization-coordinate law independently of callers, hidden
    seeds, enumeration order, transcript ordinals, and observer state.
 4. Only after both leaves close, issue the first `[X]`, derive `[W]` identity,

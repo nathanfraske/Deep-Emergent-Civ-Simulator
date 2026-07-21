@@ -1,104 +1,174 @@
-//! Fail-closed contract for the first physical realization measure.
+//! Executable closure evaluator for the first physical realization measure.
 //!
-//! The requirement graph is deliberately smaller than a world-seed schema. A
-//! single joint physical measure preserves every correlation in its support;
-//! this contract does not split it into authored scalar roots, independent
-//! marginals, environment classes, or familiar-system labels. A separate
-//! coordinate law is required before generated contingency can sample that
-//! measure. Each node names a derive-first, admit-after-exhaustion, or refuse
-//! obligation. None of the names admits a value.
+//! The contract stays smaller than a world-seed schema. One joint physical
+//! measure preserves correlations across its support, and a separate
+//! coordinate law selects a deterministic contingency only after that measure
+//! closes. The evaluator accepts repository-owned typed proofs, never identity
+//! strings, provenance tags, citations, caller values, or closure booleans.
 
-use super::floor_magnitudes::AuditedFloorView;
+use super::{
+    floor_magnitudes::AuditedFloorView,
+    stellar_birth_artifacts::{
+        resolve_repository_artifacts, RepositoryStellarBirthArtifacts,
+        VerifiedJointPhysicalMeasure, VerifiedRealizationCoordinateLaw,
+    },
+};
 use std::fmt;
 
-/// The Stage 1 capability required by the canonical pipeline.
+/// The Stage 1 root required by the canonical pipeline.
 pub(crate) const STELLAR_BIRTH_REALIZATION_MEASURE: &str = "stellar_birth.realization_measure";
 
-const STELLAR_BIRTH_JOINT_PHYSICAL_MEASURE: &str = "stellar_birth.joint_physical_measure";
-const STELLAR_BIRTH_REALIZATION_COORDINATE_LAW: &str = "stellar_birth.realization_coordinate_law";
-
-const NO_REQUIREMENTS: &[&str] = &[];
-const REALIZATION_REQUIREMENTS: &[&str] = &[
-    STELLAR_BIRTH_JOINT_PHYSICAL_MEASURE,
-    STELLAR_BIRTH_REALIZATION_COORDINATE_LAW,
-];
-
-/// The physical role of one node in the fixed Stage 1 requirement graph.
+/// One typed leaf in the fixed Stage 1 proof contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RequirementKind {
+pub(crate) enum StellarBirthLeaf {
     JointPhysicalMeasure,
     RealizationCoordinateLaw,
-    RealizationMeasure,
 }
 
-/// Every node follows the canonical two-route rule and fails closed.
+impl StellarBirthLeaf {
+    const ORDERED: [Self; 2] = [Self::JointPhysicalMeasure, Self::RealizationCoordinateLaw];
+
+    pub(crate) const fn id(self) -> &'static str {
+        match self {
+            Self::JointPhysicalMeasure => "stellar_birth.joint_physical_measure",
+            Self::RealizationCoordinateLaw => "stellar_birth.realization_coordinate_law",
+        }
+    }
+
+    pub(crate) const fn obligations(self) -> &'static [StellarBirthClosureObligation] {
+        match self {
+            Self::JointPhysicalMeasure => JOINT_MEASURE_OBLIGATIONS,
+            Self::RealizationCoordinateLaw => COORDINATE_LAW_OBLIGATIONS,
+        }
+    }
+}
+
+/// Machine-readable proof clauses required before one leaf can close.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RequirementObligation {
-    DeriveFirstAdmitAfterExhaustionOrRefuse,
+pub(crate) enum StellarBirthClosureObligation {
+    DerivationCensus,
+    BuckinghamPiCensus,
+    EvidenceCustody,
+    TypedSupport,
+    Normalization,
+    Conditioning,
+    CorrelationPreservation,
+    UncertaintyPropagation,
+    GapLaw,
+    ChaosProtocol,
+    ResidualLaw,
+    UniqueResidualSlotIfIrreducible,
+    VersionedCoordinateSemantics,
+    CanonicalContentCoordinate,
+    ObserverIndependence,
+    OrderingIndependence,
+    ExactReplay,
+    AbsoluteFloorBinding,
+    ArtifactSchemaVersion,
+    SemanticCheckerVersion,
+    DependencyDigest,
+    JointMeasureBinding,
 }
 
-/// One obligation in the static stellar-birth requirement graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct MeasureRequirement {
-    id: &'static str,
-    kind: RequirementKind,
-    requires: &'static [&'static str],
-    obligation: RequirementObligation,
+impl StellarBirthClosureObligation {
+    pub(crate) const fn id(self) -> &'static str {
+        match self {
+            Self::DerivationCensus => "derivation_census",
+            Self::BuckinghamPiCensus => "buckingham_pi_census",
+            Self::EvidenceCustody => "evidence_custody",
+            Self::TypedSupport => "typed_support",
+            Self::Normalization => "normalization",
+            Self::Conditioning => "conditioning",
+            Self::CorrelationPreservation => "correlation_preservation",
+            Self::UncertaintyPropagation => "uncertainty_propagation",
+            Self::GapLaw => "gap_law",
+            Self::ChaosProtocol => "gap_law.chaos_protocol",
+            Self::ResidualLaw => "residual_law",
+            Self::UniqueResidualSlotIfIrreducible => "unique_residual_slot_if_irreducible",
+            Self::VersionedCoordinateSemantics => "versioned_coordinate_semantics",
+            Self::CanonicalContentCoordinate => "canonical_content_coordinate",
+            Self::ObserverIndependence => "observer_independence",
+            Self::OrderingIndependence => "ordering_independence",
+            Self::ExactReplay => "exact_replay",
+            Self::AbsoluteFloorBinding => "absolute_floor_binding",
+            Self::ArtifactSchemaVersion => "artifact_schema_version",
+            Self::SemanticCheckerVersion => "semantic_checker_version",
+            Self::DependencyDigest => "dependency_digest",
+            Self::JointMeasureBinding => "joint_measure_binding",
+        }
+    }
 }
 
-const DERIVE_ADMIT_OR_REFUSE: RequirementObligation =
-    RequirementObligation::DeriveFirstAdmitAfterExhaustionOrRefuse;
-
-const REQUIREMENT_GRAPH: [MeasureRequirement; 3] = [
-    MeasureRequirement {
-        id: STELLAR_BIRTH_JOINT_PHYSICAL_MEASURE,
-        kind: RequirementKind::JointPhysicalMeasure,
-        requires: NO_REQUIREMENTS,
-        obligation: DERIVE_ADMIT_OR_REFUSE,
-    },
-    MeasureRequirement {
-        id: STELLAR_BIRTH_REALIZATION_COORDINATE_LAW,
-        kind: RequirementKind::RealizationCoordinateLaw,
-        requires: NO_REQUIREMENTS,
-        obligation: DERIVE_ADMIT_OR_REFUSE,
-    },
-    MeasureRequirement {
-        id: STELLAR_BIRTH_REALIZATION_MEASURE,
-        kind: RequirementKind::RealizationMeasure,
-        requires: REALIZATION_REQUIREMENTS,
-        obligation: DERIVE_ADMIT_OR_REFUSE,
-    },
+const JOINT_MEASURE_OBLIGATIONS: &[StellarBirthClosureObligation] = &[
+    StellarBirthClosureObligation::DerivationCensus,
+    StellarBirthClosureObligation::BuckinghamPiCensus,
+    StellarBirthClosureObligation::EvidenceCustody,
+    StellarBirthClosureObligation::TypedSupport,
+    StellarBirthClosureObligation::Normalization,
+    StellarBirthClosureObligation::Conditioning,
+    StellarBirthClosureObligation::CorrelationPreservation,
+    StellarBirthClosureObligation::UncertaintyPropagation,
+    StellarBirthClosureObligation::GapLaw,
+    StellarBirthClosureObligation::ChaosProtocol,
+    StellarBirthClosureObligation::ResidualLaw,
+    StellarBirthClosureObligation::UniqueResidualSlotIfIrreducible,
+    StellarBirthClosureObligation::AbsoluteFloorBinding,
+    StellarBirthClosureObligation::ArtifactSchemaVersion,
+    StellarBirthClosureObligation::SemanticCheckerVersion,
+    StellarBirthClosureObligation::DependencyDigest,
 ];
 
-const ROOT_INDEX: usize = 2;
+const COORDINATE_LAW_OBLIGATIONS: &[StellarBirthClosureObligation] = &[
+    StellarBirthClosureObligation::VersionedCoordinateSemantics,
+    StellarBirthClosureObligation::CanonicalContentCoordinate,
+    StellarBirthClosureObligation::ObserverIndependence,
+    StellarBirthClosureObligation::OrderingIndependence,
+    StellarBirthClosureObligation::ExactReplay,
+    StellarBirthClosureObligation::GapLaw,
+    StellarBirthClosureObligation::ChaosProtocol,
+    StellarBirthClosureObligation::AbsoluteFloorBinding,
+    StellarBirthClosureObligation::ArtifactSchemaVersion,
+    StellarBirthClosureObligation::SemanticCheckerVersion,
+    StellarBirthClosureObligation::DependencyDigest,
+    StellarBirthClosureObligation::JointMeasureBinding,
+];
 
-fn root_requirement() -> &'static MeasureRequirement {
-    &REQUIREMENT_GRAPH[ROOT_INDEX]
+/// One unresolved typed leaf and the clauses its future proof must satisfy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct StellarBirthOpenRequirement {
+    leaf: StellarBirthLeaf,
 }
 
-/// Opaque proof that the complete stellar-birth measure contract has closed.
-///
-/// This type has no constructor. A future repository-owned constructor belongs
-/// here only after the joint measure and coordinate law have each derived or
-/// completed every required floor-admission receipt. Ledger identity, evidence
-/// custody, and a caller-provided coordinate cannot construct the capability.
+impl StellarBirthOpenRequirement {
+    pub(crate) const fn requirement_id(self) -> &'static str {
+        self.leaf.id()
+    }
+
+    pub(crate) const fn obligations(self) -> &'static [StellarBirthClosureObligation] {
+        self.leaf.obligations()
+    }
+}
+
+/// Opaque capability produced only by both verified leaf proofs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct StellarBirthMeasureCapability {
-    _sealed: CapabilitySeal,
+    _joint_measure: VerifiedJointPhysicalMeasure,
+    _coordinate_law: VerifiedRealizationCoordinateLaw,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct CapabilitySeal;
-
 /// Typed reason Stage 1 cannot construct its stellar-birth measure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StellarBirthMeasureRefusal {
-    requirement_id: &'static str,
+    frontier: Vec<StellarBirthOpenRequirement>,
 }
 
 impl StellarBirthMeasureRefusal {
-    pub(crate) const fn requirement_id(self) -> &'static str {
-        self.requirement_id
+    pub(crate) const fn requirement_id(&self) -> &'static str {
+        STELLAR_BIRTH_REALIZATION_MEASURE
+    }
+
+    pub(crate) fn open_frontier(&self) -> &[StellarBirthOpenRequirement] {
+        &self.frontier
     }
 }
 
@@ -106,27 +176,46 @@ impl fmt::Display for StellarBirthMeasureRefusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "derived or admitted absolute-floor measure '{}'",
-            self.requirement_id()
+            "derived or admitted absolute-floor measure '{}' with {} open leaf requirement(s)",
+            self.requirement_id(),
+            self.frontier.len()
         )
     }
 }
 
-/// Require the closed measure contract before Stage 1 can generate a draw.
-///
-/// The current three-invariant floor closes neither leaf. The audited floor view
-/// is accepted only to keep this check downstream of exact floor validation;
-/// it is not a generic lookup or a value-binding surface.
-pub(crate) fn require_birth_measure(
-    _floor: &AuditedFloorView<'_>,
+fn evaluate_artifacts(
+    artifacts: RepositoryStellarBirthArtifacts,
 ) -> Result<StellarBirthMeasureCapability, StellarBirthMeasureRefusal> {
-    let root = root_requirement();
-    debug_assert_eq!(root.id, STELLAR_BIRTH_REALIZATION_MEASURE);
-    debug_assert_eq!(root.kind, RequirementKind::RealizationMeasure);
-    debug_assert_eq!(root.obligation, DERIVE_ADMIT_OR_REFUSE);
-    Err(StellarBirthMeasureRefusal {
-        requirement_id: root.id,
+    let mut frontier = Vec::new();
+    for leaf in StellarBirthLeaf::ORDERED {
+        let closed = match leaf {
+            StellarBirthLeaf::JointPhysicalMeasure => artifacts.joint_measure.is_some(),
+            StellarBirthLeaf::RealizationCoordinateLaw => artifacts.coordinate_law.is_some(),
+        };
+        if !closed {
+            frontier.push(StellarBirthOpenRequirement { leaf });
+        }
+    }
+
+    if !frontier.is_empty() {
+        return Err(StellarBirthMeasureRefusal { frontier });
+    }
+
+    Ok(StellarBirthMeasureCapability {
+        _joint_measure: artifacts
+            .joint_measure
+            .expect("an empty frontier proves the joint measure is present"),
+        _coordinate_law: artifacts
+            .coordinate_law
+            .expect("an empty frontier proves the coordinate law is present"),
     })
+}
+
+/// Require the closed measure contract before Stage 1 can generate a draw.
+pub(crate) fn require_birth_measure(
+    floor: &AuditedFloorView<'_>,
+) -> Result<StellarBirthMeasureCapability, StellarBirthMeasureRefusal> {
+    evaluate_artifacts(resolve_repository_artifacts(floor))
 }
 
 #[cfg(test)]
@@ -134,104 +223,112 @@ mod tests {
     use super::*;
     use crate::canonical::sealed_absolute_physics_floor;
     use civsim_ledger::AbsolutePhysicsFloor;
-    use std::collections::BTreeSet;
 
     fn audited_floor() -> AbsolutePhysicsFloor {
         sealed_absolute_physics_floor().expect("the audited physical catalog is admissible")
     }
 
-    #[test]
-    fn the_requirement_graph_is_exact_and_rooted_at_the_present_refusal() {
-        assert_eq!(REQUIREMENT_GRAPH.len(), 3);
-        assert_eq!(
-            REQUIREMENT_GRAPH,
-            [
-                MeasureRequirement {
-                    id: "stellar_birth.joint_physical_measure",
-                    kind: RequirementKind::JointPhysicalMeasure,
-                    requires: &[],
-                    obligation: DERIVE_ADMIT_OR_REFUSE,
-                },
-                MeasureRequirement {
-                    id: "stellar_birth.realization_coordinate_law",
-                    kind: RequirementKind::RealizationCoordinateLaw,
-                    requires: &[],
-                    obligation: DERIVE_ADMIT_OR_REFUSE,
-                },
-                MeasureRequirement {
-                    id: "stellar_birth.realization_measure",
-                    kind: RequirementKind::RealizationMeasure,
-                    requires: &[
-                        "stellar_birth.joint_physical_measure",
-                        "stellar_birth.realization_coordinate_law",
-                    ],
-                    obligation: DERIVE_ADMIT_OR_REFUSE,
-                },
-            ]
-        );
-        assert_eq!(root_requirement().id, STELLAR_BIRTH_REALIZATION_MEASURE);
-    }
-
-    #[test]
-    fn every_dependency_resolves_and_the_requirement_graph_is_acyclic() {
-        let ids: BTreeSet<_> = REQUIREMENT_GRAPH.iter().map(|node| node.id).collect();
-        assert_eq!(ids.len(), REQUIREMENT_GRAPH.len());
-        assert!(REQUIREMENT_GRAPH
+    fn frontier_ids(refusal: &StellarBirthMeasureRefusal) -> Vec<&'static str> {
+        refusal
+            .open_frontier()
             .iter()
-            .flat_map(|node| node.requires.iter())
-            .all(|dependency| ids.contains(dependency)));
-
-        fn visit(
-            id: &'static str,
-            visiting: &mut BTreeSet<&'static str>,
-            visited: &mut BTreeSet<&'static str>,
-        ) {
-            assert!(visiting.insert(id), "cycle reaches {id}");
-            let node = REQUIREMENT_GRAPH
-                .iter()
-                .find(|node| node.id == id)
-                .expect("every dependency resolves to one graph node");
-            for dependency in node.requires {
-                if !visited.contains(dependency) {
-                    visit(dependency, visiting, visited);
-                }
-            }
-            assert!(visiting.remove(id));
-            visited.insert(id);
-        }
-
-        let mut visiting = BTreeSet::new();
-        let mut visited = BTreeSet::new();
-        visit(root_requirement().id, &mut visiting, &mut visited);
-        assert_eq!(visited, ids);
+            .map(|requirement| requirement.requirement_id())
+            .collect()
     }
 
     #[test]
-    fn the_joint_measure_remains_one_correlation_preserving_obligation() {
-        let joint = &REQUIREMENT_GRAPH[0];
-        assert_eq!(joint.kind, RequirementKind::JointPhysicalMeasure);
-        assert!(joint.requires.is_empty());
-        assert_eq!(joint.obligation, DERIVE_ADMIT_OR_REFUSE);
-        assert!(REQUIREMENT_GRAPH.iter().all(|node| {
-            !node.id.contains("epoch")
-                && !node.id.contains("environment")
-                && !node.id.contains("metallicity")
-                && !node.id.contains("scalar")
-        }));
-    }
-
-    #[test]
-    fn the_current_floor_refuses_at_the_graph_root() {
+    fn current_repository_artifacts_report_the_exact_open_frontier() {
         let floor = audited_floor();
         let floor_view =
             AuditedFloorView::from_floor(&floor).expect("the audited floor has typed magnitudes");
         let refusal = require_birth_measure(&floor_view)
-            .expect_err("the three-invariant floor cannot close the birth measure contract");
+            .expect_err("the present repository closes neither Stage 1 leaf");
 
-        assert_eq!(refusal.requirement_id(), STELLAR_BIRTH_REALIZATION_MEASURE);
         assert_eq!(
-            refusal.to_string(),
-            "derived or admitted absolute-floor measure 'stellar_birth.realization_measure'"
+            frontier_ids(&refusal),
+            vec![
+                "stellar_birth.joint_physical_measure",
+                "stellar_birth.realization_coordinate_law",
+            ]
         );
+        assert!(!frontier_ids(&refusal).contains(&STELLAR_BIRTH_REALIZATION_MEASURE));
+    }
+
+    #[test]
+    fn each_partial_proof_reports_only_the_other_leaf() {
+        let joint_only =
+            evaluate_artifacts(RepositoryStellarBirthArtifacts::test_fixture(true, false))
+                .unwrap_err();
+        assert_eq!(
+            frontier_ids(&joint_only),
+            vec!["stellar_birth.realization_coordinate_law"]
+        );
+
+        let coordinate_only =
+            evaluate_artifacts(RepositoryStellarBirthArtifacts::test_fixture(false, true))
+                .unwrap_err();
+        assert_eq!(
+            frontier_ids(&coordinate_only),
+            vec!["stellar_birth.joint_physical_measure"]
+        );
+    }
+
+    #[test]
+    fn the_root_closes_only_from_both_verified_typed_leaf_proofs() {
+        assert!(
+            evaluate_artifacts(RepositoryStellarBirthArtifacts::test_fixture(false, false))
+                .is_err()
+        );
+        assert!(
+            evaluate_artifacts(RepositoryStellarBirthArtifacts::test_fixture(true, false)).is_err()
+        );
+        assert!(
+            evaluate_artifacts(RepositoryStellarBirthArtifacts::test_fixture(false, true)).is_err()
+        );
+        assert!(
+            evaluate_artifacts(RepositoryStellarBirthArtifacts::test_fixture(true, true)).is_ok()
+        );
+    }
+
+    #[test]
+    fn frontier_order_is_canonical_and_repeatable() {
+        let first = evaluate_artifacts(RepositoryStellarBirthArtifacts::test_fixture(false, false))
+            .unwrap_err();
+        let second =
+            evaluate_artifacts(RepositoryStellarBirthArtifacts::test_fixture(false, false))
+                .unwrap_err();
+        assert_eq!(first, second);
+        assert_eq!(frontier_ids(&first), frontier_ids(&second));
+    }
+
+    #[test]
+    fn both_leaves_carry_the_chaos_protocol_as_a_gap_law_clause() {
+        for leaf in StellarBirthLeaf::ORDERED {
+            let ids: Vec<_> = leaf
+                .obligations()
+                .iter()
+                .map(|obligation| obligation.id())
+                .collect();
+            assert!(ids.contains(&"gap_law"));
+            assert!(ids.contains(&"gap_law.chaos_protocol"));
+        }
+    }
+
+    #[test]
+    fn the_joint_measure_remains_one_correlation_preserving_obligation() {
+        let ids: Vec<_> = StellarBirthLeaf::ORDERED
+            .into_iter()
+            .map(StellarBirthLeaf::id)
+            .collect();
+        assert!(ids.contains(&"stellar_birth.joint_physical_measure"));
+        assert!(StellarBirthLeaf::JointPhysicalMeasure
+            .obligations()
+            .contains(&StellarBirthClosureObligation::CorrelationPreservation));
+        assert!(ids.iter().all(|id| {
+            !id.contains("epoch")
+                && !id.contains("environment")
+                && !id.contains("metallicity")
+                && !id.contains("scalar")
+        }));
     }
 }

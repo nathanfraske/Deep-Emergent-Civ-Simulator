@@ -2,6 +2,135 @@ use crate::{Entry, Ledger, Provenance, Tier};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+/// The Chaos Protocol branch carried by the Gap Law.
+///
+/// A deterministic trajectory is valid only while admitted input bands remain
+/// resolved. Dynamical systems carry an explicit regime partition so mixed or
+/// changing behavior cannot be compressed into one global label. A regime
+/// whose divergence becomes sub-resolution must use a derived stationary
+/// measure plus a deterministic realization coordinate, never one fixed path
+/// presented as a uniquely derived physical history.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChaosProtocolReceipt {
+    /// The admitted item is not a dynamical evolution or branch selection.
+    NotApplicable { basis: String },
+    /// One or more physical regimes connected by a declared transition law.
+    Dynamical {
+        classification: String,
+        regime_partition: String,
+        transition_law: String,
+        regimes: Vec<ChaosRegimeReceipt>,
+    },
+}
+
+/// One domain in a dynamical Gap Law partition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChaosRegimeReceipt {
+    /// Input uncertainty remains resolved over the claimed evolution.
+    ResolvedTrajectory {
+        validity_domain: String,
+        resolution_bound: String,
+        evolution_postcondition: String,
+        exact_replay: String,
+    },
+    /// Sub-resolution divergence requires evolution by physical measure.
+    SubresolutionMeasure {
+        validity_domain: String,
+        stationary_measure: String,
+        conservation_projection: String,
+        stability_postcondition: String,
+        coordinate_discipline: String,
+        exact_replay: String,
+    },
+}
+
+impl ChaosRegimeReceipt {
+    pub const fn kind_id(&self) -> &'static str {
+        match self {
+            Self::ResolvedTrajectory { .. } => "resolved_trajectory",
+            Self::SubresolutionMeasure { .. } => "subresolution_measure",
+        }
+    }
+
+    pub fn evidence(&self) -> Vec<(&'static str, &str)> {
+        match self {
+            Self::ResolvedTrajectory {
+                validity_domain,
+                resolution_bound,
+                evolution_postcondition,
+                exact_replay,
+            } => vec![
+                ("chaos.regime.validity_domain", validity_domain),
+                ("chaos.regime.resolution_bound", resolution_bound),
+                (
+                    "chaos.regime.evolution_postcondition",
+                    evolution_postcondition,
+                ),
+                ("chaos.regime.exact_replay", exact_replay),
+            ],
+            Self::SubresolutionMeasure {
+                validity_domain,
+                stationary_measure,
+                conservation_projection,
+                stability_postcondition,
+                coordinate_discipline,
+                exact_replay,
+            } => vec![
+                ("chaos.regime.validity_domain", validity_domain),
+                ("chaos.regime.stationary_measure", stationary_measure),
+                (
+                    "chaos.regime.conservation_projection",
+                    conservation_projection,
+                ),
+                (
+                    "chaos.regime.stability_postcondition",
+                    stability_postcondition,
+                ),
+                ("chaos.regime.coordinate_discipline", coordinate_discipline),
+                ("chaos.regime.exact_replay", exact_replay),
+            ],
+        }
+    }
+}
+
+impl ChaosProtocolReceipt {
+    /// Stable serialization tag for the protocol branch.
+    pub const fn kind_id(&self) -> &'static str {
+        match self {
+            Self::NotApplicable { .. } => "not_applicable",
+            Self::Dynamical { .. } => "dynamical",
+        }
+    }
+
+    /// Ordered evidence fields for admission fingerprints and replay receipts.
+    pub fn evidence(&self) -> Vec<(&'static str, &str)> {
+        match self {
+            Self::NotApplicable { basis } => vec![("chaos.basis", basis)],
+            Self::Dynamical {
+                classification,
+                regime_partition,
+                transition_law,
+                regimes,
+            } => {
+                let mut evidence = vec![
+                    ("chaos.classification", classification.as_str()),
+                    ("chaos.regime_partition", regime_partition.as_str()),
+                    ("chaos.transition_law", transition_law.as_str()),
+                ];
+                if regimes.is_empty() {
+                    evidence.push(("chaos.regime", ""));
+                } else {
+                    for regime in regimes {
+                        evidence.push(("chaos.regime", regime.kind_id()));
+                        evidence.extend(regime.evidence());
+                    }
+                }
+                evidence
+            }
+        }
+    }
+}
+
 /// Evidence that the Gap Law obligations were considered for one irreducible
 /// initial-floor leaf at any tier.
 ///
@@ -13,16 +142,20 @@ pub struct GapLawReceipt {
     pub gap_dispatch: String,
     pub smooth_systematics: String,
     pub scale_free_limit: String,
+    pub chaos_protocol: ChaosProtocolReceipt,
 }
 
 impl GapLawReceipt {
-    fn evidence(&self) -> [(&'static str, &str); 4] {
-        [
-            ("gap.reference_validity", &self.reference_validity),
-            ("gap.gap_dispatch", &self.gap_dispatch),
-            ("gap.smooth_systematics", &self.smooth_systematics),
-            ("gap.scale_free_limit", &self.scale_free_limit),
-        ]
+    fn evidence(&self) -> Vec<(&'static str, &str)> {
+        let mut evidence: Vec<(&'static str, &str)> = vec![
+            ("gap.reference_validity", self.reference_validity.as_str()),
+            ("gap.gap_dispatch", self.gap_dispatch.as_str()),
+            ("gap.smooth_systematics", self.smooth_systematics.as_str()),
+            ("gap.scale_free_limit", self.scale_free_limit.as_str()),
+        ];
+        evidence.push(("gap.chaos_protocol", self.chaos_protocol.kind_id()));
+        evidence.extend(self.chaos_protocol.evidence());
+        evidence
     }
 }
 
@@ -433,6 +566,9 @@ mod tests {
                 gap_dispatch: "gap branches recorded".into(),
                 smooth_systematics: "smooth-systematics check recorded".into(),
                 scale_free_limit: "scale-free limit check recorded".into(),
+                chaos_protocol: ChaosProtocolReceipt::NotApplicable {
+                    basis: "fixture has no dynamical branch".into(),
+                },
             },
             residual_law: ResidualLawReceipt {
                 conservation: "conservation residual disposition recorded".into(),
@@ -592,6 +728,124 @@ mod tests {
                 entry_id: "residue.fixture".into(),
                 field: "residual.conservation",
             }
+        );
+    }
+
+    #[test]
+    fn empty_chaos_protocol_evidence_is_a_refusal() {
+        let ledger = Ledger::build([Entry {
+            id: "residue.fixture".into(),
+            tier: Tier::Residue,
+            provenance: Provenance::Estimator,
+            inputs: vec![],
+        }])
+        .unwrap();
+        let mut receipt = evidence_receipt("residue.fixture", "fixture.phenomenon", "slot.one", 1);
+        receipt.gap_law.chaos_protocol = ChaosProtocolReceipt::Dynamical {
+            classification: "the system carries a sub-resolution regime".into(),
+            regime_partition: "one declared validity domain".into(),
+            transition_law: "no transition exists in the one-regime partition".into(),
+            regimes: vec![ChaosRegimeReceipt::SubresolutionMeasure {
+                validity_domain: "the measure carries its domain".into(),
+                stationary_measure: String::new(),
+                conservation_projection: "conserved quantities are projected".into(),
+                stability_postcondition: "the sampled state satisfies stability checks".into(),
+                coordinate_discipline: "the coordinate is content-derived and versioned".into(),
+                exact_replay: "equal coordinates replay bit-for-bit".into(),
+            }],
+        };
+
+        assert_eq!(
+            AbsolutePhysicsFloor::admit(ledger, [receipt]).unwrap_err(),
+            FloorAdmissionError::MissingReceiptEvidence {
+                entry_id: "residue.fixture".into(),
+                field: "chaos.regime.stationary_measure",
+            }
+        );
+    }
+
+    #[test]
+    fn an_empty_dynamical_regime_partition_is_a_refusal() {
+        let ledger = Ledger::build([Entry {
+            id: "residue.fixture".into(),
+            tier: Tier::Residue,
+            provenance: Provenance::Estimator,
+            inputs: vec![],
+        }])
+        .unwrap();
+        let mut receipt = evidence_receipt("residue.fixture", "fixture.phenomenon", "slot.one", 1);
+        receipt.gap_law.chaos_protocol = ChaosProtocolReceipt::Dynamical {
+            classification: "dynamical".into(),
+            regime_partition: "claimed partition".into(),
+            transition_law: "claimed transition law".into(),
+            regimes: Vec::new(),
+        };
+
+        assert_eq!(
+            AbsolutePhysicsFloor::admit(ledger, [receipt]).unwrap_err(),
+            FloorAdmissionError::MissingReceiptEvidence {
+                entry_id: "residue.fixture".into(),
+                field: "chaos.regime",
+            }
+        );
+    }
+
+    #[test]
+    fn chaos_protocol_branches_have_stable_typed_evidence_order() {
+        let not_applicable = ChaosProtocolReceipt::NotApplicable {
+            basis: "no evolving trajectory".into(),
+        };
+        assert_eq!(not_applicable.kind_id(), "not_applicable");
+        assert_eq!(
+            not_applicable.evidence(),
+            vec![("chaos.basis", "no evolving trajectory")]
+        );
+
+        let dynamical = ChaosProtocolReceipt::Dynamical {
+            classification: "two physical regimes".into(),
+            regime_partition: "domains are disjoint and cover support".into(),
+            transition_law: "boundary crossing is derived".into(),
+            regimes: vec![
+                ChaosRegimeReceipt::ResolvedTrajectory {
+                    validity_domain: "resolved domain".into(),
+                    resolution_bound: "input bands remain resolved".into(),
+                    evolution_postcondition: "evolution stays in domain".into(),
+                    exact_replay: "bit-for-bit replay".into(),
+                },
+                ChaosRegimeReceipt::SubresolutionMeasure {
+                    validity_domain: "sensitive domain".into(),
+                    stationary_measure: "derived measure".into(),
+                    conservation_projection: "projected".into(),
+                    stability_postcondition: "checked".into(),
+                    coordinate_discipline: "content-derived".into(),
+                    exact_replay: "bit-for-bit replay".into(),
+                },
+            ],
+        };
+        assert_eq!(dynamical.kind_id(), "dynamical");
+        assert_eq!(
+            dynamical
+                .evidence()
+                .into_iter()
+                .map(|(field, _)| field)
+                .collect::<Vec<_>>(),
+            vec![
+                "chaos.classification",
+                "chaos.regime_partition",
+                "chaos.transition_law",
+                "chaos.regime",
+                "chaos.regime.validity_domain",
+                "chaos.regime.resolution_bound",
+                "chaos.regime.evolution_postcondition",
+                "chaos.regime.exact_replay",
+                "chaos.regime",
+                "chaos.regime.validity_domain",
+                "chaos.regime.stationary_measure",
+                "chaos.regime.conservation_projection",
+                "chaos.regime.stability_postcondition",
+                "chaos.regime.coordinate_discipline",
+                "chaos.regime.exact_replay",
+            ]
         );
     }
 

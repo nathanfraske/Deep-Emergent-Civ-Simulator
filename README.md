@@ -43,8 +43,8 @@ The sealed absolute physics floor is the only value-bearing input. The four
 ledger tiers and seven provenance marks, `[D]`, `[M]`, `[E]`, `[C]`,
 `[A]`, `[W]`, and `[X]`, are accounting only. A citation or tag cannot
 admit a value. Derive first. Every irreducible non-derived floor leaf, at any
-tier, needs the complete derivation-exhaustion, Buckingham-Pi, Gap Law, and
-Residual Law receipt. Otherwise the stage refuses. Written state and
+tier, needs the complete derivation-exhaustion, Buckingham-Pi, Gap Law with
+typed Chaos Protocol, and Residual Law receipt. Otherwise the stage refuses. Written state and
 contingency are generated inside the run.
 
 The current audited physical floor contains three Universal `[M]` invariants:

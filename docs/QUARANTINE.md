@@ -21,7 +21,8 @@ real binary. It follows these rules:
   ledger tiers. There is no calibration profile or calibration-manifest path.
 - The runner accepts only the validated absolute physics floor. A provenance
   tag or citation is accounting, not admission. A value first goes through the
-  derivation hunter, Buckingham-Pi input budget, Gap Law, and Residual Law. Only
+  derivation hunter, Buckingham-Pi input budget, Gap Law including its typed
+  Chaos Protocol branch, and Residual Law. Only
   an irreducible remainder with that receipt may extend the floor. Missing
   values or proofs produce structured refusals, never a development default.
 - Every stage satisfies admit-the-alien. Earth, Mirror, the Sun, a fixed orbit,

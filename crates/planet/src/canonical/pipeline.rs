@@ -1,6 +1,6 @@
 use super::{
-    floor_magnitudes::AuditedFloorView, preflight, star_disk_system, PlanetSnapshot, Refusal,
-    RunReceipt, RunTranscript, Stage,
+    floor_magnitudes::AuditedFloorView, preflight, star_disk_system, OpenRequirement,
+    PlanetSnapshot, Refusal, RunReceipt, RunTranscript, Stage,
 };
 use civsim_ledger::AbsolutePhysicsFloor;
 
@@ -70,8 +70,23 @@ pub fn run_planet(floor: &AbsolutePhysicsFloor) -> PlanetRunOutcome {
     }
 
     if let Err(reason) = star_disk_system::require_birth_measure(&floor_view) {
-        let refusal =
-            Refusal::missing_stage_requirement(Stage::StarDiskSystem, reason.requirement_id());
+        let open_requirements: Vec<_> = reason
+            .open_frontier()
+            .iter()
+            .map(|requirement| {
+                let obligations: Vec<_> = requirement
+                    .obligations()
+                    .iter()
+                    .map(|obligation| obligation.id())
+                    .collect();
+                OpenRequirement::new(requirement.requirement_id(), &obligations)
+            })
+            .collect();
+        let refusal = Refusal::missing_stage_requirement_frontier(
+            Stage::StarDiskSystem,
+            reason.requirement_id(),
+            open_requirements,
+        );
         return PlanetRunOutcome::Refused(close_refused_transcript(
             floor.len(),
             transcript,
@@ -122,8 +137,8 @@ mod tests {
     use super::*;
     use crate::canonical::{sealed_absolute_physics_floor, RefusalCode, RunEventKind, StageStatus};
     use civsim_ledger::{
-        DerivationExhaustionReceipt, Entry, GapLawReceipt, Ledger, Provenance, ResidualLawReceipt,
-        Tier,
+        ChaosProtocolReceipt, DerivationExhaustionReceipt, Entry, GapLawReceipt, Ledger,
+        Provenance, ResidualLawReceipt, Tier,
     };
 
     fn physical_floor() -> AbsolutePhysicsFloor {
@@ -155,13 +170,28 @@ mod tests {
             outcome.receipt().transcript().contingency_draws().count(),
             0
         );
+        let refusal = &outcome.receipt().refusals()[0];
         assert_eq!(
-            outcome.receipt().refusals(),
-            &[Refusal::missing_stage_requirement(
-                Stage::StarDiskSystem,
-                "stellar_birth.realization_measure",
-            )]
+            refusal.requirement_id(),
+            Some("stellar_birth.realization_measure")
         );
+        assert_eq!(
+            refusal
+                .open_requirements()
+                .iter()
+                .map(OpenRequirement::requirement_id)
+                .collect::<Vec<_>>(),
+            vec![
+                "stellar_birth.joint_physical_measure",
+                "stellar_birth.realization_coordinate_law",
+            ]
+        );
+        assert!(refusal.open_requirements().iter().all(|requirement| {
+            requirement
+                .obligations()
+                .iter()
+                .any(|obligation| obligation == "gap_law.chaos_protocol")
+        }));
         assert_eq!(outcome.receipt().stages()[0].status(), StageStatus::Refused);
         assert!(outcome.receipt().stages()[1..]
             .iter()
@@ -196,13 +226,12 @@ mod tests {
         let outcome = run_planet(&floor);
 
         assert_eq!(outcome.receipt().absolute_floor_entries(), floor.len());
+        let refusal = &outcome.receipt().refusals()[0];
         assert_eq!(
-            outcome.receipt().refusals(),
-            &[Refusal::missing_stage_requirement(
-                Stage::StarDiskSystem,
-                "stellar_birth.realization_measure",
-            )]
+            refusal.requirement_id(),
+            Some("stellar_birth.realization_measure")
         );
+        assert_eq!(refusal.open_requirements().len(), 2);
     }
 
     #[test]
@@ -248,6 +277,9 @@ mod tests {
                 gap_dispatch: "fixture evidence".into(),
                 smooth_systematics: "fixture evidence".into(),
                 scale_free_limit: "fixture evidence".into(),
+                chaos_protocol: ChaosProtocolReceipt::NotApplicable {
+                    basis: "fixture has no dynamical branch".into(),
+                },
             },
             residual_law: ResidualLawReceipt {
                 conservation: "fixture evidence".into(),

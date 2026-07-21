@@ -26,8 +26,8 @@ mod tests {
     use super::*;
     use crate::canonical::{sealed_absolute_physics_floor, RefusalCode};
     use civsim_ledger::{
-        DerivationExhaustionReceipt, Entry, GapLawReceipt, Ledger, Provenance, ResidualLawReceipt,
-        Tier,
+        ChaosProtocolReceipt, DerivationExhaustionReceipt, Entry, GapLawReceipt, Ledger,
+        Provenance, ResidualLawReceipt, Tier,
     };
 
     fn physical_floor() -> AbsolutePhysicsFloor {
@@ -59,6 +59,9 @@ mod tests {
                 gap_dispatch: "fixture evidence".into(),
                 smooth_systematics: "fixture evidence".into(),
                 scale_free_limit: "fixture evidence".into(),
+                chaos_protocol: ChaosProtocolReceipt::NotApplicable {
+                    basis: "fixture has no dynamical branch".into(),
+                },
             },
             residual_law: ResidualLawReceipt {
                 conservation: "fixture evidence".into(),

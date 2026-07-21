@@ -10,6 +10,7 @@ mod receipt;
 mod snapshot;
 mod stage;
 mod star_disk_system;
+mod stellar_birth_artifacts;
 mod stellar_birth_measure;
 mod transcript;
 
@@ -21,13 +22,13 @@ pub use catalog::{
     audited_substrate_ledger, sealed_absolute_physics_floor, AuditedCatalogError, SealedFloorError,
 };
 pub use civsim_ledger::{
-    AbsolutePhysicsFloor, DerivationExhaustionReceipt, FloorAdmissionError, GapLawReceipt,
-    ResidualLawReceipt,
+    AbsolutePhysicsFloor, ChaosProtocolReceipt, ChaosRegimeReceipt, DerivationExhaustionReceipt,
+    FloorAdmissionError, GapLawReceipt, ResidualLawReceipt,
 };
 pub use identity::{BodyId, ContingencyDrawId, EventId, RealizationId, ReservoirId};
 pub use pipeline::{readiness_receipt, run_planet, PlanetRunOutcome};
 pub use preflight::preflight;
-pub use receipt::{Refusal, RefusalCode, RunReceipt, StageReceipt, StageStatus};
+pub use receipt::{OpenRequirement, Refusal, RefusalCode, RunReceipt, StageReceipt, StageStatus};
 pub use snapshot::PlanetSnapshot;
 pub use stage::Stage;
 pub use transcript::{

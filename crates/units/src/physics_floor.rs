@@ -10,9 +10,11 @@ use crate::fundamentals::{
     FundamentalRole, SiDimension, COMPOSITES, PHYSICAL_INVARIANTS, REPRESENTATION_DEFINITIONS,
     SI_REPRESENTATION_SCHEMA_ID,
 };
+#[cfg(test)]
+use civsim_ledger::ChaosRegimeReceipt;
 use civsim_ledger::{
-    AbsolutePhysicsFloor, DerivationExhaustionReceipt, Entry, FloorAdmissionError, GapLawReceipt,
-    Ledger, LedgerError, Provenance, ResidualLawReceipt, Tier,
+    AbsolutePhysicsFloor, ChaosProtocolReceipt, DerivationExhaustionReceipt, Entry,
+    FloorAdmissionError, GapLawReceipt, Ledger, LedgerError, Provenance, ResidualLawReceipt, Tier,
 };
 use sha2::{Digest, Sha256};
 use std::fmt;
@@ -197,31 +199,32 @@ struct ReceiptFingerprint {
 }
 
 // These digests are an authority separate from the receipt constructor. They
-// cover every attempt, phenomenon, Pi budget, residual slot, and Gap/Residual
-// field using the length-prefixed v1 encoding below.
+// cover every attempt, phenomenon, Pi budget, residual slot, Gap/Residual
+// field, and typed Chaos Protocol branch using the length-prefixed v2 encoding
+// below.
 const RECEIPT_FINGERPRINTS: [ReceiptFingerprint; 3] = [
     ReceiptFingerprint {
         entry_id: "fundamental.alpha",
         sha256: [
-            0xff, 0xa5, 0x31, 0x0c, 0x7c, 0xff, 0x5d, 0x98, 0x3b, 0xde, 0x5a, 0x33, 0x24, 0xa5,
-            0x19, 0xc5, 0x60, 0xdd, 0x25, 0xdc, 0xf3, 0x02, 0xaf, 0x81, 0x16, 0x60, 0x38, 0xd3,
-            0x2b, 0x27, 0x8a, 0xe0,
+            0xad, 0x4a, 0x55, 0xa1, 0x57, 0xe4, 0x41, 0x6d, 0x58, 0xee, 0x06, 0x62, 0xd1, 0x94,
+            0xe2, 0x3c, 0x20, 0x20, 0x18, 0xee, 0x25, 0x69, 0xc5, 0x69, 0x0f, 0x85, 0x91, 0xe0,
+            0xfc, 0xb2, 0x83, 0x97,
         ],
     },
     ReceiptFingerprint {
         entry_id: "fundamental.G",
         sha256: [
-            0xd5, 0x6c, 0xee, 0xad, 0x01, 0x6b, 0x84, 0x43, 0xcd, 0x5b, 0xf7, 0xab, 0xa0, 0x4f,
-            0x91, 0xb9, 0x7c, 0x02, 0x72, 0x34, 0xb0, 0x58, 0xf7, 0x88, 0xbc, 0x9d, 0x17, 0x38,
-            0x2b, 0x9b, 0x4e, 0xa1,
+            0x84, 0x42, 0xf9, 0xb5, 0x8e, 0x7c, 0xbf, 0xf1, 0xab, 0xa3, 0x6a, 0x8c, 0x5f, 0xc7,
+            0x31, 0xd2, 0xa1, 0xbd, 0xc5, 0x98, 0xdf, 0x0f, 0xfb, 0x77, 0x2f, 0xe0, 0xc3, 0x73,
+            0xe2, 0x5c, 0x0c, 0xf5,
         ],
     },
     ReceiptFingerprint {
         entry_id: "fundamental.m_e",
         sha256: [
-            0x7e, 0xc7, 0x48, 0x2a, 0xb4, 0xc3, 0xba, 0x61, 0x71, 0x46, 0xfc, 0x6c, 0x74, 0x90,
-            0x7c, 0x64, 0x02, 0x90, 0x46, 0x37, 0x3b, 0x67, 0x15, 0x67, 0x18, 0xde, 0x1d, 0xdc,
-            0x2c, 0x62, 0x2d, 0x21,
+            0x2c, 0x40, 0xc6, 0xd1, 0x9d, 0xae, 0xf4, 0x20, 0xe1, 0xb2, 0xc9, 0xac, 0xa9, 0xb5,
+            0x3a, 0x2c, 0xe7, 0xc7, 0xdd, 0x4d, 0x83, 0x7c, 0xfd, 0x3e, 0xb9, 0xdf, 0x6b, 0x8f,
+            0xec, 0xe0, 0x77, 0xea,
         ],
     },
 ];
@@ -316,6 +319,10 @@ fn common_gap_law(reference_validity: &str, scale_free_limit: &str) -> GapLawRec
         gap_dispatch: "No authored gap branch is admitted; absence of the invariant causes a refusal rather than a substitute value".into(),
         smooth_systematics: "The invariant is not an interpolated table or smooth fit, so no trend residual can hide in this slot".into(),
         scale_free_limit: scale_free_limit.to_owned(),
+        chaos_protocol: ChaosProtocolReceipt::NotApplicable {
+            basis: "An invariant coordinate is time-independent and selects no trajectory, attractor, stochastic closure, or sub-resolution branch"
+                .into(),
+        },
     }
 }
 
@@ -390,7 +397,7 @@ fn physical_invariant_receipts() -> Vec<DerivationExhaustionReceipt> {
     ]
 }
 
-const RECEIPT_FINGERPRINT_SCHEMA_ID: &str = "civsim.floor.exhaustion-receipt-fingerprint.v1";
+const RECEIPT_FINGERPRINT_SCHEMA_ID: &str = "civsim.floor.exhaustion-receipt-fingerprint.v2";
 
 fn hash_field(hasher: &mut Sha256, value: &str) {
     hasher.update((value.len() as u64).to_le_bytes());
@@ -412,6 +419,11 @@ fn receipt_fingerprint(receipt: &DerivationExhaustionReceipt) -> [u8; 32] {
     hash_field(&mut hasher, &receipt.gap_law.gap_dispatch);
     hash_field(&mut hasher, &receipt.gap_law.smooth_systematics);
     hash_field(&mut hasher, &receipt.gap_law.scale_free_limit);
+    hash_field(&mut hasher, receipt.gap_law.chaos_protocol.kind_id());
+    for (field, evidence) in receipt.gap_law.chaos_protocol.evidence() {
+        hash_field(&mut hasher, field);
+        hash_field(&mut hasher, evidence);
+    }
     hash_field(&mut hasher, &receipt.residual_law.conservation);
     hash_field(&mut hasher, &receipt.residual_law.disequilibrium);
     hash_field(&mut hasher, &receipt.residual_law.fluctuation_dissipation);
@@ -609,6 +621,32 @@ mod tests {
             .expect("generic admission checks structure, not repository authority");
         let error = verify_absolute_physics_floor(&candidate)
             .expect_err("the independent receipt pin must reject changed prose");
+        assert!(error.to_string().contains("fundamental.alpha"));
+        assert!(error.to_string().contains("fingerprint"));
+    }
+
+    #[test]
+    fn changed_chaos_protocol_branch_cannot_self_seal() {
+        let sealed = sealed_absolute_physics_floor().unwrap();
+        let mut receipts: Vec<_> = sealed
+            .entries()
+            .map(|entry| sealed.receipt(&entry.id).unwrap().clone())
+            .collect();
+        receipts[0].gap_law.chaos_protocol = ChaosProtocolReceipt::Dynamical {
+            classification: "caller reclassified an invariant as dynamical".into(),
+            regime_partition: "unsupported partition claim".into(),
+            transition_law: "unsupported transition claim".into(),
+            regimes: vec![ChaosRegimeReceipt::ResolvedTrajectory {
+                validity_domain: "unsupported domain claim".into(),
+                resolution_bound: "unsupported resolution claim".into(),
+                evolution_postcondition: "unsupported postcondition".into(),
+                exact_replay: "unsupported replay claim".into(),
+            }],
+        };
+        let candidate = AbsolutePhysicsFloor::admit(audited_substrate_ledger().unwrap(), receipts)
+            .expect("generic admission checks structure, not repository authority");
+        let error = verify_absolute_physics_floor(&candidate)
+            .expect_err("the independent receipt pin must reject a changed chaos branch");
         assert!(error.to_string().contains("fundamental.alpha"));
         assert!(error.to_string().contains("fingerprint"));
     }

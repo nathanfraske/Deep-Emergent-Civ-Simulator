@@ -31,7 +31,8 @@ following:
 2. the held source, checksum, exact claim anchor, domain, uncertainty, and conditioning;
 3. every attempted first-principles and composition-level derivation, including why it failed;
 4. the Buckingham-Pi group budget for the phenomenon;
-5. Gap Law evidence showing why known mechanisms and measurements leave a gap;
+5. Gap Law evidence showing why known mechanisms and measurements leave a gap,
+   including the typed Chaos Protocol branch for dynamical sensitivity;
 6. Residual Law evidence for conservation, disequilibrium, fluctuation-dissipation, and dimensional
    analysis;
 7. one unique residual slot that is not already occupied by another candidate;

@@ -29,9 +29,21 @@ mod tests {
         let refusal = require_birth_measure(&floor_view)
             .expect_err("the universal-only floor cannot close a birth measure");
         assert_eq!(refusal.requirement_id(), STELLAR_BIRTH_REALIZATION_MEASURE);
+        let frontier: Vec<_> = refusal
+            .open_frontier()
+            .iter()
+            .map(|requirement| requirement.requirement_id())
+            .collect();
+        assert_eq!(
+            frontier,
+            vec![
+                "stellar_birth.joint_physical_measure",
+                "stellar_birth.realization_coordinate_law",
+            ]
+        );
         assert_eq!(
             refusal.to_string(),
-            "derived or admitted absolute-floor measure 'stellar_birth.realization_measure'"
+            "derived or admitted absolute-floor measure 'stellar_birth.realization_measure' with 2 open leaf requirement(s)"
         );
     }
 }

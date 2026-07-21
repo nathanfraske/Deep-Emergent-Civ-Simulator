@@ -92,7 +92,7 @@ When a sharp question exposes a real gap:
 
 Every new canonical resolution ends with a blockquote of this shape, in prose, with no em dashes:
 
-> Decided. [State the mechanism and causal scope.] Every value-bearing input comes from the admitted absolute physics floor. [Name the derivation ancestry.] If an irreducible candidate remains after derive-first exhaustion, [name the Buckingham-Pi budget, derivation attempts, Gap Law evidence, Residual Law evidence, and unique residual slot]. Unsupported closure refuses. Written state and contingency are generated. [State the alien-system falsifier and the remaining limits.]
+> Decided. [State the mechanism and causal scope.] Every value-bearing input comes from the admitted absolute physics floor. [Name the derivation ancestry.] If an irreducible candidate remains after derive-first exhaustion, [name the Buckingham-Pi budget, derivation attempts, Gap Law evidence including its typed Chaos Protocol branch, Residual Law evidence, and unique residual slot]. Unsupported closure refuses. Written state and contingency are generated. [State the alien-system falsifier and the remaining limits.]
 
 The blockquote records a derivation or a refusal. It never reserves an owner-set magnitude and never treats a citation, tier, or provenance mark as admission.
 
@@ -104,7 +104,8 @@ This is the operational heart of "never fabricate a value." The canonical run ha
 
 - **Accounting.** The seven marks are `[D]` Derived, `[M]` Measured, `[E]` Estimator, `[C]` Closure, `[A]` Authored, `[W]` Written state, and `[X]` Contingency. The four tiers are Universal, Reference, Residue, and Contingency. Counts and tags describe the ledger; they do not authorize a magnitude.
 - **Direct floor.** Universal irreducible leaves are measured fundamentals. Composite constants derive from named ancestry. A generic API may not bind a caller magnitude to an admitted identity.
-- **Exhaustion route.** Every non-derived floor leaf, at any tier, requires nonempty derivation attempts, a per-phenomenon Buckingham-Pi input budget, Gap Law evidence, Residual Law evidence, and a unique residual slot. Vendored evidence supports the receipt but does not grant admission.
+- **Exhaustion route.** Every non-derived floor leaf, at any tier, requires nonempty derivation attempts, a per-phenomenon Buckingham-Pi input budget, Gap Law evidence including its typed Chaos Protocol branch, Residual Law evidence, and a unique residual slot. Vendored evidence supports the receipt but does not grant admission.
+- **Chaos Protocol inside Gap Law.** A candidate either names why no dynamical evolution or branch selection applies, or partitions its dynamical support into explicit validity regimes with a derived transition law. In each regime it proves that admitted input bands remain resolved for direct evolution, or, when divergence becomes sub-resolution, derives a stationary measure, projects conservation, checks stability, and uses a versioned content-derived realization coordinate. Mixed and changing behavior uses multiple regimes; it is never compressed into one global label. Equal coordinates replay exactly. An unsupported regime refuses rather than being misclassified.
 - **Generated categories.** Closure, written state, and contingency are not caller-supplied initial inputs. State and contingency arise inside the causal run and carry their generated provenance.
 - **Failure.** If the required derivation or admission receipt is absent, incomplete, over budget, or outside the repository-owned audited catalog, the stage returns a structured refusal. No profile, manifest, scenario row, fixture, citation, or owner-selected number fills the gap.
 

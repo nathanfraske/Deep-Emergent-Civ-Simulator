@@ -14,6 +14,33 @@ pub enum RefusalCode {
     TranscriptInvariantViolation,
 }
 
+/// One unresolved proof leaf and its canonical ordered closure obligations.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct OpenRequirement {
+    requirement_id: String,
+    obligations: Vec<String>,
+}
+
+impl OpenRequirement {
+    pub(crate) fn new(requirement_id: &str, obligations: &[&str]) -> Self {
+        Self {
+            requirement_id: requirement_id.to_owned(),
+            obligations: obligations
+                .iter()
+                .map(|obligation| (*obligation).to_owned())
+                .collect(),
+        }
+    }
+
+    pub fn requirement_id(&self) -> &str {
+        &self.requirement_id
+    }
+
+    pub fn obligations(&self) -> &[String] {
+        &self.obligations
+    }
+}
+
 impl RefusalCode {
     pub const fn id(self) -> &'static str {
         match self {
@@ -29,13 +56,15 @@ impl RefusalCode {
 
 /// Structured reason a canonical run stopped.
 ///
-/// `detail` is a readable explanation. Verification uses `code`, `stage`, and
-/// `requirement_id` rather than parsing that prose.
+/// `detail` is a readable explanation. Verification uses `code`, `stage`,
+/// `requirement_id`, and the ordered open frontier rather than parsing that
+/// prose.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refusal {
     code: RefusalCode,
     stage: Option<Stage>,
     requirement_id: Option<String>,
+    open_requirements: Vec<OpenRequirement>,
     detail: String,
 }
 
@@ -45,6 +74,7 @@ impl Refusal {
             code: RefusalCode::AbsoluteFloorRequired,
             stage: None,
             requirement_id: Some("absolute_physics_floor".into()),
+            open_requirements: Vec::new(),
             detail: "run_planet requires a validated absolute physics floor".into(),
         }
     }
@@ -54,6 +84,7 @@ impl Refusal {
             code: RefusalCode::FloorCatalogMismatch,
             stage: None,
             requirement_id: Some("repository.absolute_floor_catalog".into()),
+            open_requirements: Vec::new(),
             detail,
         }
     }
@@ -63,19 +94,40 @@ impl Refusal {
             code: RefusalCode::FloorMagnitudeUnavailable,
             stage: None,
             requirement_id: Some("repository.absolute_floor_magnitudes".into()),
+            open_requirements: Vec::new(),
             detail,
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn missing_stage_requirement(stage: Stage, requirement_id: &str) -> Self {
         Self {
             code: RefusalCode::MissingStageRequirement,
             stage: Some(stage),
             requirement_id: Some(requirement_id.to_owned()),
+            open_requirements: Vec::new(),
             detail: format!(
                 "stage '{}' requires derived or admitted absolute-floor measure '{requirement_id}'",
                 stage.id()
             ),
+        }
+    }
+
+    pub(crate) fn missing_stage_requirement_frontier(
+        stage: Stage,
+        requirement_id: &str,
+        open_requirements: Vec<OpenRequirement>,
+    ) -> Self {
+        Self {
+            code: RefusalCode::MissingStageRequirement,
+            stage: Some(stage),
+            requirement_id: Some(requirement_id.to_owned()),
+            detail: format!(
+                "stage '{}' requires derived or admitted absolute-floor measure '{requirement_id}'; {} leaf requirement(s) remain open",
+                stage.id(),
+                open_requirements.len()
+            ),
+            open_requirements,
         }
     }
 
@@ -84,6 +136,7 @@ impl Refusal {
             code: RefusalCode::PipelineIncomplete,
             stage: Some(stage),
             requirement_id: Some(format!("stage.{}.physical_closure", stage.id())),
+            open_requirements: Vec::new(),
             detail: detail.to_owned(),
         }
     }
@@ -93,6 +146,7 @@ impl Refusal {
             code: RefusalCode::TranscriptInvariantViolation,
             stage: None,
             requirement_id: Some("canonical.run_transcript".into()),
+            open_requirements: Vec::new(),
             detail,
         }
     }
@@ -107,6 +161,10 @@ impl Refusal {
 
     pub fn requirement_id(&self) -> Option<&str> {
         self.requirement_id.as_deref()
+    }
+
+    pub fn open_requirements(&self) -> &[OpenRequirement] {
+        &self.open_requirements
     }
 
     pub fn detail(&self) -> &str {
@@ -129,6 +187,7 @@ impl Refusal {
             .cmp(&other.code)
             .then_with(|| self.stage.cmp(&other.stage))
             .then_with(|| self.requirement_id.cmp(&other.requirement_id))
+            .then_with(|| self.open_requirements.cmp(&other.open_requirements))
             .then_with(|| self.detail.cmp(&other.detail))
     }
 }
@@ -314,7 +373,7 @@ fn stage_index(stage: Stage) -> usize {
 
 impl fmt::Display for RunReceipt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "receipt=civsim.planet.run.v5")?;
+        writeln!(f, "receipt=civsim.planet.run.v6")?;
         writeln!(f, "complete={}", self.is_complete())?;
         writeln!(
             f,
@@ -350,19 +409,40 @@ impl fmt::Display for RunReceipt {
                     .unwrap_or_else(|| "<none>".into())
             )?;
         }
-        for refusal in &self.refusals {
+        writeln!(f, "refusal_count={}", self.refusals.len())?;
+        for (index, refusal) in self.refusals.iter().enumerate() {
+            let prefix = format!("refusal.{index:04}");
+            writeln!(f, "{prefix}.code={}", refusal.code.id())?;
             writeln!(
                 f,
-                "refusal.{}.requirement={}",
-                refusal.code.id(),
+                "{prefix}.requirement={}",
                 canonical_text(refusal.requirement_id().unwrap_or(""))
             )?;
             writeln!(
                 f,
-                "refusal.{}.detail={}",
-                refusal.code.id(),
-                canonical_text(&refusal.detail)
+                "{prefix}.open_requirement_count={}",
+                refusal.open_requirements.len()
             )?;
+            for (open_index, requirement) in refusal.open_requirements.iter().enumerate() {
+                writeln!(
+                    f,
+                    "{prefix}.open_requirement.{open_index:04}.id={}",
+                    canonical_text(requirement.requirement_id())
+                )?;
+                writeln!(
+                    f,
+                    "{prefix}.open_requirement.{open_index:04}.obligation_count={}",
+                    requirement.obligations().len()
+                )?;
+                for (obligation_index, obligation) in requirement.obligations().iter().enumerate() {
+                    writeln!(
+                        f,
+                        "{prefix}.open_requirement.{open_index:04}.obligation.{obligation_index:04}={}",
+                        canonical_text(obligation)
+                    )?;
+                }
+            }
+            writeln!(f, "{prefix}.detail={}", canonical_text(&refusal.detail))?;
         }
         write!(f, "{}", self.transcript)
     }

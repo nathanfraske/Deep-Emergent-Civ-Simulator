@@ -1,7 +1,8 @@
 # Stellar-birth measure contract
 
-Status: structural contract and replayable floor implemented; both physical
-obligations remain unresolved and the canonical runner still refuses.
+Status: executable leaf-closure evaluator and replayable floor implemented;
+both physical obligations remain unresolved and the canonical runner reports
+their exact frontier before refusing.
 
 ## Authority
 
@@ -37,7 +38,7 @@ carries source, uncertainty, projection, and full derivation-exhaustion
 evidence. Independent fingerprints seal the representation definitions,
 execution relations, physical admissions, and the complete ordered receipt
 content. Derived values replay from exact projected ancestry published in
-transcript schema major 3, with typed SI dimensions and exact-symbol ancestry
+transcript schema major 4, with typed SI dimensions and exact-symbol ancestry
 checked from the formula. Physical helper APIs require the same sealed
 execution capability and cannot bind or mutate its values. This closes the
 representation and API reachability seams; it does not close either
@@ -54,10 +55,25 @@ joint measure, but it cannot turn them into caller inputs.
 
 Any proposed implementation must establish normalization, support, units and
 dimensionless groups, conditioning, correlations, out-of-domain behavior,
-uncertainty, derivation attempts, Gap Law evidence, Residual Law evidence, and
-one unique residual slot for each irreducible survivor. Admit-the-alien requires
+uncertainty, derivation attempts, Gap Law evidence including the typed Chaos
+Protocol branch, Residual Law evidence, and one unique residual slot for each
+irreducible survivor. Admit-the-alien requires
 continuous physical state and general branch support rather than familiar
 galaxy, star, chemistry, planet count, or named-environment dispatch.
+The proof artifact must also bind the exact absolute floor, artifact schema,
+semantic-checker version, and dependency digest. Runtime type and presence are
+not substitutes for those checks.
+
+The Chaos Protocol is part of Gap Law. A candidate either proves that no
+dynamical evolution or branch selection applies, or supplies a nonempty
+validity-regime partition and a derived transition law. Each regime proves that
+admitted input bands remain resolved for direct evolution or, when divergence
+makes a single trajectory sub-resolution, derives a stationary measure,
+projects conservation, checks stability and domain postconditions, then uses a
+versioned content-derived coordinate for a deterministic draw. Mixed and
+changing behavior uses multiple regimes rather than one global classification.
+Equal coordinates replay exactly. An intentional measure or coordinate-law
+change may claim ensemble equivalence, not identity with the prior trajectory.
 
 The first required artifact is a machine-readable derivation census, not a new
 input manifest. It must enumerate the admitted floor basis, every candidate
@@ -81,6 +97,9 @@ A later proposal must bind the coordinate to versioned canonical semantics and
 prove that presentation or event-record order cannot change physics. Until that
 proposal passes review, the transcript has no contingency append path and no
 realization identity can exist.
+Its proof must bind the same absolute floor, schema, checker version, dependency
+digest, and the exact joint-measure artifact. A proof from another floor,
+measure, version, or validity domain remains an open requirement.
 
 ## Present receipt
 
@@ -89,16 +108,19 @@ three physical floor values, derives `eps_0`, enters Stage 1, and returns
 `stellar_birth.realization_measure`. It emits six transcript events: three
 floor records, one derived-value record, one Stage 1 entry, and one refusal.
 It emits no `[X]`, no `[W]` realization, and no snapshot. Repeated runs are
-byte-identical at `22,134` stdout bytes and SHA-256
-`7058a1d013f19482460cb034bdbea0f35c7b7b9aeae0916a4e07cfe54f5f9c67`.
-The current receipt is `civsim.planet.run.v5`; its transcript schema major is
-`3`.
+byte-identical at `27,941` stdout bytes and SHA-256
+`382bb176b8fbb85afeae07f4200925f63c1c00cb1daadf7924d2bfb692a373af`.
+The current receipt is `civsim.planet.run.v6`; its transcript schema major is
+`4`.
 
-The static three-node graph is currently an obligation contract and always
-returns its root refusal. Before either leaf can close, it must become an
-executable dependency evaluator that proves each leaf from repository-owned
-typed artifacts and reports the exact open frontier. It must never infer leaf
-closure from a matching string, ledger tag, or source citation.
+The three-node graph now executes as a fixed-order conjunction over two opaque
+repository-owned proof capabilities. The production resolver currently
+provides neither capability, so the root refusal serializes both exact leaf
+identities in canonical order. Tests prove the full four-state truth table:
+neither proof, either partial proof, and both proofs. No matching string,
+ledger tag, source citation, scalar, or caller boolean can construct a proof.
+Every open leaf retains a machine-readable obligation list, and both lists
+include `gap_law.chaos_protocol`.
 
 ## Retained mechanism boundary
 
@@ -123,12 +145,13 @@ remain explicit residual or refusal obligations.
 2. Close evidence custody only for candidates that survive derivation. Record
    support, normalization, conditioning, correlations, covariance families,
    uncertainty, and out-of-domain behavior. Custody does not admit them.
-3. Admit each irreducible survivor only with complete Gap Law, Residual Law,
-   and unique residual-slot receipts, or retain the root refusal.
+3. Admit each irreducible survivor only with complete Gap Law including its
+   typed Chaos Protocol branch, Residual Law, and unique residual-slot
+   receipts, or retain the root refusal.
 4. Define and audit a versioned realization-coordinate law independently of
    callers, hidden seeds, observer state, record order, filesystem order, and
    transcript ordinals.
-5. Replace the static root check with an executable leaf-closure evaluator.
+5. Feed both verified proof capabilities into the executable evaluator.
    Generate the first `[X]` only when both leaves prove closed.
 6. Create `[W]` realization identity from that recorded draw, then add SI-native
    collapse, thermal, centrifugal-radius, disk, and embryo-system adapters

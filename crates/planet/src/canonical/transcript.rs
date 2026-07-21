@@ -13,7 +13,9 @@ use super::{
     receipt::Refusal,
     BodyId, ContingencyDrawId, EventId, RealizationId, ReservoirId, Stage,
 };
-use civsim_ledger::{AbsolutePhysicsFloor, Provenance, Tier};
+use civsim_ledger::{
+    AbsolutePhysicsFloor, ChaosProtocolReceipt, ChaosRegimeReceipt, Provenance, Tier,
+};
 use civsim_units::constants::si_representation_magnitudes;
 use civsim_units::fundamentals::{
     ATOMIC_VOLUME_CONVERSION, GAS_CONSTANT, REPRESENTATION_DEFINITIONS, SI_BASE_DIMENSION_IDS,
@@ -22,8 +24,8 @@ use civsim_units::fundamentals::{
 use civsim_units::physics_floor::PHYSICAL_FLOOR_LEN;
 use std::{fmt, num::TryFromIntError};
 
-/// Stable schema identity for the first concrete transcript format.
-pub const RUN_TRANSCRIPT_SCHEMA_ID: &str = "civsim.planet.transcript.v3";
+/// Stable schema identity for the current concrete transcript format.
+pub const RUN_TRANSCRIPT_SCHEMA_ID: &str = "civsim.planet.transcript.v4";
 
 pub(super) fn canonical_text(value: &str) -> CanonicalText<'_> {
     CanonicalText(value)
@@ -60,9 +62,9 @@ pub struct TranscriptSchema {
 }
 
 impl TranscriptSchema {
-    pub const V3: Self = Self {
+    pub const V4: Self = Self {
         id: RUN_TRANSCRIPT_SCHEMA_ID,
-        major: 3,
+        major: 4,
         minor: 0,
     };
 
@@ -382,7 +384,7 @@ pub struct RunTranscript {
 impl RunTranscript {
     pub(super) fn empty(declared_floor_entries: usize) -> Self {
         Self {
-            schema: TranscriptSchema::V3,
+            schema: TranscriptSchema::V4,
             representation: RepresentationReceipt::sealed()
                 .expect("the sealed SI representation must project"),
             declared_floor_entries,
@@ -937,6 +939,32 @@ fn write_event(f: &mut fmt::Formatter<'_>, prefix: &str, kind: &RunEventKind) ->
                 )?;
                 writeln!(
                     f,
+                    "{refusal_prefix}.open_requirement_count={}",
+                    refusal.open_requirements().len()
+                )?;
+                for (open_index, requirement) in refusal.open_requirements().iter().enumerate() {
+                    writeln!(
+                        f,
+                        "{refusal_prefix}.open_requirement.{open_index:04}.id={}",
+                        canonical_text(requirement.requirement_id())
+                    )?;
+                    writeln!(
+                        f,
+                        "{refusal_prefix}.open_requirement.{open_index:04}.obligation_count={}",
+                        requirement.obligations().len()
+                    )?;
+                    for (obligation_index, obligation) in
+                        requirement.obligations().iter().enumerate()
+                    {
+                        writeln!(
+                            f,
+                            "{refusal_prefix}.open_requirement.{open_index:04}.obligation.{obligation_index:04}={}",
+                            canonical_text(obligation)
+                        )?;
+                    }
+                }
+                writeln!(
+                    f,
                     "{refusal_prefix}.detail={}",
                     canonical_text(refusal.detail())
                 )?;
@@ -1067,6 +1095,19 @@ fn write_value(f: &mut fmt::Formatter<'_>, prefix: &str, record: &ExactValueReco
                     &receipt.gap_law.smooth_systematics,
                 ),
                 ("gap.scale_free_limit", &receipt.gap_law.scale_free_limit),
+            ] {
+                writeln!(
+                    f,
+                    "{prefix}.exhaustion.{field}={}",
+                    canonical_text(evidence)
+                )?;
+            }
+            write_chaos_protocol(
+                f,
+                &format!("{prefix}.exhaustion"),
+                &receipt.gap_law.chaos_protocol,
+            )?;
+            for (field, evidence) in [
                 ("residual.conservation", &receipt.residual_law.conservation),
                 (
                     "residual.disequilibrium",
@@ -1102,6 +1143,115 @@ fn write_value(f: &mut fmt::Formatter<'_>, prefix: &str, record: &ExactValueReco
 fn write_scaled(f: &mut fmt::Formatter<'_>, prefix: &str, value: ExactScaledValue) -> fmt::Result {
     writeln!(f, "{prefix}.bits={}", value.bits())?;
     writeln!(f, "{prefix}.scale_bits={}", value.scale_bits())
+}
+
+fn write_chaos_protocol(
+    f: &mut fmt::Formatter<'_>,
+    prefix: &str,
+    protocol: &ChaosProtocolReceipt,
+) -> fmt::Result {
+    writeln!(f, "{prefix}.gap.chaos_protocol={}", protocol.kind_id())?;
+    match protocol {
+        ChaosProtocolReceipt::NotApplicable { basis } => {
+            writeln!(f, "{prefix}.chaos.basis={}", canonical_text(basis))
+        }
+        ChaosProtocolReceipt::Dynamical {
+            classification,
+            regime_partition,
+            transition_law,
+            regimes,
+        } => {
+            writeln!(
+                f,
+                "{prefix}.chaos.classification={}",
+                canonical_text(classification)
+            )?;
+            writeln!(
+                f,
+                "{prefix}.chaos.regime_partition={}",
+                canonical_text(regime_partition)
+            )?;
+            writeln!(
+                f,
+                "{prefix}.chaos.transition_law={}",
+                canonical_text(transition_law)
+            )?;
+            writeln!(f, "{prefix}.chaos.regime_count={}", regimes.len())?;
+            for (index, regime) in regimes.iter().enumerate() {
+                let regime_prefix = format!("{prefix}.chaos.regime.{index:04}");
+                writeln!(f, "{regime_prefix}.kind={}", regime.kind_id())?;
+                match regime {
+                    ChaosRegimeReceipt::ResolvedTrajectory {
+                        validity_domain,
+                        resolution_bound,
+                        evolution_postcondition,
+                        exact_replay,
+                    } => {
+                        writeln!(
+                            f,
+                            "{regime_prefix}.validity_domain={}",
+                            canonical_text(validity_domain)
+                        )?;
+                        writeln!(
+                            f,
+                            "{regime_prefix}.resolution_bound={}",
+                            canonical_text(resolution_bound)
+                        )?;
+                        writeln!(
+                            f,
+                            "{regime_prefix}.evolution_postcondition={}",
+                            canonical_text(evolution_postcondition)
+                        )?;
+                        writeln!(
+                            f,
+                            "{regime_prefix}.exact_replay={}",
+                            canonical_text(exact_replay)
+                        )?;
+                    }
+                    ChaosRegimeReceipt::SubresolutionMeasure {
+                        validity_domain,
+                        stationary_measure,
+                        conservation_projection,
+                        stability_postcondition,
+                        coordinate_discipline,
+                        exact_replay,
+                    } => {
+                        writeln!(
+                            f,
+                            "{regime_prefix}.validity_domain={}",
+                            canonical_text(validity_domain)
+                        )?;
+                        writeln!(
+                            f,
+                            "{regime_prefix}.stationary_measure={}",
+                            canonical_text(stationary_measure)
+                        )?;
+                        writeln!(
+                            f,
+                            "{regime_prefix}.conservation_projection={}",
+                            canonical_text(conservation_projection)
+                        )?;
+                        writeln!(
+                            f,
+                            "{regime_prefix}.stability_postcondition={}",
+                            canonical_text(stability_postcondition)
+                        )?;
+                        writeln!(
+                            f,
+                            "{regime_prefix}.coordinate_discipline={}",
+                            canonical_text(coordinate_discipline)
+                        )?;
+                        writeln!(
+                            f,
+                            "{regime_prefix}.exact_replay={}",
+                            canonical_text(exact_replay)
+                        )?;
+                    }
+                }
+            }
+            Ok(())
+        }
+    }
 }
 
 fn write_law(f: &mut fmt::Formatter<'_>, prefix: &str, law: &LawAncestry) -> fmt::Result {
@@ -1475,7 +1625,7 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(first.to_string(), second.to_string());
         assert!(first.to_string().starts_with(
-            "transcript=civsim.planet.transcript.v3\nschema.major=3\nschema.minor=0\n"
+            "transcript=civsim.planet.transcript.v4\nschema.major=4\nschema.minor=0\n"
         ));
         let last = first.events().last().expect("the refusal is recorded");
         assert!(matches!(

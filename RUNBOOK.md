@@ -35,8 +35,9 @@ For every required magnitude:
 1. search the complete derivation substrate;
 2. derive it from admitted ancestry when possible;
 3. if every derivation fails, prepare the complete exhaustion receipt,
-   Buckingham-Pi budget, Gap Law evidence, Residual Law evidence, and unique
-   residual slot for the non-derived floor candidate, regardless of tier;
+   Buckingham-Pi budget, Gap Law evidence with a typed Chaos Protocol branch,
+   Residual Law evidence, and unique residual slot for the non-derived floor
+   candidate, regardless of tier;
 4. refuse the stage when that admission is absent or incomplete.
 
 Calibration manifests, profiles, scenarios, caller-authored world rows,

@@ -14,16 +14,29 @@ fn the_no_argument_binary_enters_the_floor_only_runner_and_refuses() {
 
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stderr.is_empty());
-    assert!(stdout.starts_with("receipt=civsim.planet.run.v5\ncomplete=false\n"));
+    assert!(stdout.starts_with("receipt=civsim.planet.run.v6\ncomplete=false\n"));
     assert!(stdout.contains("absolute_floor_entries=3\n"));
     assert!(stdout.contains("representation.schema=\"civsim.units.si-representation.v1\"\n"));
     assert!(stdout.contains("event_count=6\n"));
     assert!(stdout.contains("event.0004.kind=stage_entered\n"));
     assert!(stdout.contains("event.0004.stage=star_disk_system\n"));
     assert!(stdout.contains("event.0005.kind=refused\n"));
+    assert!(stdout.contains("refusal.0000.requirement=\"stellar_birth.realization_measure\"\n"));
+    assert!(stdout.contains("refusal.0000.open_requirement_count=2\n"));
     assert!(stdout.contains(
-        "refusal.missing_stage_requirement.requirement=\"stellar_birth.realization_measure\"\n"
+        "refusal.0000.open_requirement.0000.id=\"stellar_birth.joint_physical_measure\"\n"
     ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0001.id=\"stellar_birth.realization_coordinate_law\"\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.obligation.0009=\"gap_law.chaos_protocol\"\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0001.obligation.0006=\"gap_law.chaos_protocol\"\n"
+    ));
+    assert!(stdout.contains(".exhaustion.gap.chaos_protocol=not_applicable\n"));
+    assert!(stdout.contains("transcript=civsim.planet.transcript.v4\n"));
     assert!(!stdout.contains(".kind=contingency\n"));
     assert!(!stdout.contains(".kind=written_state\n"));
 }
@@ -47,9 +60,8 @@ fn readiness_is_a_distinct_zero_floor_refusal() {
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stderr.is_empty());
     assert!(stdout.contains("absolute_floor_entries=0\n"));
-    assert!(
-        stdout.contains("refusal.absolute_floor_required.requirement=\"absolute_physics_floor\"\n")
-    );
+    assert!(stdout.contains("refusal.0000.code=absolute_floor_required\n"));
+    assert!(stdout.contains("refusal.0000.requirement=\"absolute_physics_floor\"\n"));
     assert!(!stdout.contains("stage.star_disk_system=refused\n"));
 }
 

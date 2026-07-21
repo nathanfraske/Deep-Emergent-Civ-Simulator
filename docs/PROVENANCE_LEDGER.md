@@ -47,7 +47,11 @@ derive-first exhaustion is recorded with all of the following:
 
 - nonempty derivation attempts;
 - a per-phenomenon Buckingham-Pi residual budget;
-- Gap Law evidence;
+- Gap Law evidence with a typed Chaos Protocol: either not applicable with a
+  basis, or a nonempty validity-regime partition and transition law. Every
+  regime proves that input bands remain resolved for direct evolution or uses
+  a derived stationary measure with conservation projection, stability checks,
+  coordinate discipline, and exact replay when divergence is sub-resolution;
 - Residual Law evidence;
 - a unique residual slot.
 

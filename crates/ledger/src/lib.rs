@@ -29,8 +29,8 @@
 mod admission;
 
 pub use admission::{
-    AbsolutePhysicsFloor, DerivationExhaustionReceipt, FloorAdmissionError, GapLawReceipt,
-    ResidualLawReceipt,
+    AbsolutePhysicsFloor, ChaosProtocolReceipt, ChaosRegimeReceipt, DerivationExhaustionReceipt,
+    FloorAdmissionError, GapLawReceipt, ResidualLawReceipt,
 };
 
 use std::collections::{BTreeMap, BTreeSet};

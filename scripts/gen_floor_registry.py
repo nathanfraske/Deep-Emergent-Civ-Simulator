@@ -212,7 +212,7 @@ def main():
         "list is where you look for the substrate that derives it BEFORE you ever author a number. If a "
         "quantity you were about to author appears in the deriving-substrate list, authoring it is a "
         "defect. Only an irreducible remainder that survives the derivation hunter, Buckingham-Pi budget, "
-        "Gap Law, and Residual Law may extend the floor. Written state and contingency are generated inside "
+        "Gap Law including its typed Chaos Protocol branch, and Residual Law may extend the floor. Written state and contingency are generated inside "
         "the run from admitted physical measures and the approved realization-coordinate law, never "
         "supplied as world values or caller seeds."
     )
