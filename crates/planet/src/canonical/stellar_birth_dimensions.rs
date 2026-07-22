@@ -8,6 +8,7 @@
 
 use super::{
     floor_magnitudes::AuditedFloorView,
+    stellar_birth_species::COMPLETE_SPECIES_STATE_MEAN_PARTICLE_MASS_LAW_ID,
     stellar_birth_structure::{
         stellar_birth_structure_schema, CarrierKind, StellarBirthStructureSchema,
         StructureSchemaError,
@@ -639,7 +640,7 @@ fn phenomenon_specs() -> Vec<PhenomenonSpec> {
             coverage_complete: false,
             attempts: &[AttemptSpec {
                 attempt_id: "stellar_birth.attempt.mean_particle_mass_from_composition",
-                law_id: "candidate.composition_weighted_particle_mass",
+                law_id: COMPLETE_SPECIES_STATE_MEAN_PARTICLE_MASS_LAW_ID,
                 input_ids: &[
                     "fundamental.m_e",
                     "stellar_birth.composition.species_number_fraction_field",

@@ -14,6 +14,7 @@ mod star_disk_system;
 mod stellar_birth_artifacts;
 mod stellar_birth_dimensions;
 mod stellar_birth_measure;
+mod stellar_birth_species;
 mod stellar_birth_structure;
 mod transcript;
 
