@@ -150,12 +150,13 @@ pub fn rayleigh_sky_rgb(
 
     // Per gas: additive molecular polarizability from the formula, then the mole-fraction-weighted `alpha^2` that
     // scales every band's Rayleigh weight. An unresolvable gas contributes nothing (fail-soft, no guess).
+    let execution = civsim_units::constants::canonical_si_execution_magnitudes().ok()?;
     let mut weighted_alpha_sq = 0.0f64;
     for &(formula, mole_fraction) in gas_mix {
         if mole_fraction <= 0.0 {
             continue;
         }
-        let Some(alpha_mol) = molecular_polarizability_a0_cubed(formula, table) else {
+        let Some(alpha_mol) = molecular_polarizability_a0_cubed(&execution, formula, table) else {
             continue;
         };
         weighted_alpha_sq += mole_fraction * alpha_mol * alpha_mol;
@@ -191,14 +192,19 @@ pub fn rayleigh_sky_rgb(
 /// polarizability is unavailable (fail-soft: an unresolvable element sinks the whole molecule rather than
 /// contributing a guessed zero). Keyed on the formula string and per-element cited data, so a new gas is a data
 /// row (admit-the-alien), never a code change.
-fn molecular_polarizability_a0_cubed(formula: &str, table: &PeriodicTable) -> Option<f64> {
+fn molecular_polarizability_a0_cubed(
+    execution: &civsim_units::constants::SiExecutionMagnitudes,
+    formula: &str,
+    table: &PeriodicTable,
+) -> Option<f64> {
     let atoms = parse_formula(formula);
     if atoms.is_empty() {
         return None;
     }
     let mut alpha = 0.0f64;
     for (symbol, count) in atoms {
-        let a = element_electronic_polarizability_a0_cubed(&symbol, table)?.to_f64_lossy();
+        let a =
+            element_electronic_polarizability_a0_cubed(execution, &symbol, table)?.to_f64_lossy();
         alpha += a * count as f64;
     }
     Some(alpha)

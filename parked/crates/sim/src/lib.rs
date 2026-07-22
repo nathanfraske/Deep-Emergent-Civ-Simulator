@@ -104,6 +104,10 @@ pub mod semantics;
 // Parked-only compatibility identities for the audited abiotic substrate. The
 // legacy simulation compiles the shared sources under its historical module
 // paths without making the raw modules public from `civsim-planet-substrate`.
+// The floor bridge stays private: shared mechanisms can verify and read the
+// repository floor, but parked callers cannot use it as a value surface.
+#[path = "../../../../crates/planet-substrate/src/absolute_floor.rs"]
+mod absolute_floor;
 #[path = "../../../../crates/planet-substrate/src/astro.rs"]
 pub mod astro;
 #[path = "../../../../crates/planet-substrate/src/deeptime.rs"]

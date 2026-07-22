@@ -195,17 +195,13 @@ pub fn derived_gas_constant() -> Fixed {
     use std::sync::OnceLock;
     static R: OnceLock<Fixed> = OnceLock::new();
     *R.get_or_init(|| {
-        // The same significance target and guard the sigma derivation uses (physiology.rs); at these values
-        // the consumed Q32.32 value is invariant to them (they are fixed-point representation knobs).
-        let (bits, scale) = civsim_units::compute::derived_composite_bits(
-            &civsim_units::fundamentals::GAS_CONSTANT,
-            30,
-            1,
-            Fixed::FRAC_BITS,
-        )
-        .expect("the molar gas constant must derive from the fundamentals");
-        let bits = i64::try_from(bits).expect("R at its derived scale fits i64");
-        let q32 = civsim_units::rescale_bits(bits, scale, Fixed::FRAC_BITS)
+        let representation = civsim_units::constants::si_representation_magnitudes()
+            .expect("the SI representation view must derive");
+        let value = representation
+            .get(civsim_units::fundamentals::GAS_CONSTANT.symbol)
+            .expect("the SI representation view must contain the molar gas constant");
+        let bits = i64::try_from(value.bits()).expect("R at its derived scale fits i64");
+        let q32 = civsim_units::rescale_bits(bits, value.scale_bits(), Fixed::FRAC_BITS)
             .expect("R rescale to Q32.32 must not overflow");
         Fixed::from_bits(q32)
     })

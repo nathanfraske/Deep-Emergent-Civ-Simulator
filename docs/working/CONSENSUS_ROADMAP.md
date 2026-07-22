@@ -41,6 +41,7 @@ observer independence bind the full runpath.
 
 ## Recent landings
 
+- 2026-07-22  Parked Linux compatibility is restored through private floor and capability bridges without adding a canonical dependency or physical authority -> `parked/crates/sim/src/lib.rs`, `parked/crates/viewer/src/render.rs`
 - 2026-07-22  A private exact species-state kernel verifies complete normalized support and reduces mean particle mass without familiar tables or switches; production authority and support remain absent -> `crates/planet/src/canonical/stellar_birth_species.rs`
 - 2026-07-21  Physical floor normalized to three measured invariants; exact SI definitions moved to an untagged representation receipt and all execution constants derive from sealed relations -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
 - 2026-07-22  Transcript schema major 8 and run receipt v10 serialize typed Chaos Protocol evidence, the exact indexed Stage 1 frontier, dimensional census v4, and its value-free structure v2 -> `crates/planet/src/canonical/transcript.rs`

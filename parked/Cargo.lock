@@ -447,7 +447,9 @@ name = "civsim-units"
 version = "0.1.0"
 dependencies = [
  "civsim-core",
+ "civsim-ledger",
  "serde",
+ "sha2",
 ]
 
 [[package]]
