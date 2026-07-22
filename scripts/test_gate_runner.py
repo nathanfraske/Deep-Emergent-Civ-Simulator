@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -157,7 +158,7 @@ class InputClosureTests(unittest.TestCase):
                 dry_run=False,
                 manifest_path=manifest,
             )
-        self.assertFalse(raced)
+        self.assertIs(raced, gate_runner.GateOutcome.OperationalFailure)
         self.assertIn("changed during execution", output.getvalue())
 
         output = io.StringIO()
@@ -174,8 +175,111 @@ class InputClosureTests(unittest.TestCase):
                 dry_run=False,
                 manifest_path=manifest,
             )
-        self.assertFalse(invalid_utf8)
+        self.assertIs(invalid_utf8, gate_runner.GateOutcome.OperationalFailure)
         self.assertIn("not valid UTF-8", output.getvalue())
+
+    def test_execute_gate_distinguishes_policy_and_operational_failures(self) -> None:
+        temporary, root, gate = self.make_root()
+        self.addCleanup(temporary.cleanup)
+        manifest = root / "scripts" / "gates.toml"
+
+        (root / "scripts" / "check.py").write_text(
+            "import sys\n"
+            f"print({gate_runner.LEAF_POLICY_DETECTION_MARKER!r}, file=sys.stderr)\n"
+            "raise SystemExit(1)\n",
+            encoding="utf-8",
+        )
+        with mock.patch.object(gate_runner, "ROOT", root):
+            detected = gate_runner.execute_gate(
+                gate,
+                gate.command,
+                dry_run=False,
+                manifest_path=manifest,
+            )
+        self.assertIs(detected, gate_runner.GateOutcome.PolicyDetection)
+
+        (root / "scripts" / "check.py").write_text(
+            "raise SystemExit(1)\n", encoding="utf-8"
+        )
+        with mock.patch.object(gate_runner, "ROOT", root):
+            unmarked = gate_runner.execute_gate(
+                gate,
+                gate.command,
+                dry_run=False,
+                manifest_path=manifest,
+            )
+        self.assertIs(unmarked, gate_runner.GateOutcome.OperationalFailure)
+
+        (root / "scripts" / "check.py").write_text(
+            "import sys\n"
+            f"print({gate_runner.LEAF_POLICY_DETECTION_MARKER!r}, file=sys.stderr)\n"
+            "raise SystemExit(2)\n",
+            encoding="utf-8",
+        )
+        with mock.patch.object(gate_runner, "ROOT", root):
+            wrong_exit = gate_runner.execute_gate(
+                gate,
+                gate.command,
+                dry_run=False,
+                manifest_path=manifest,
+            )
+        self.assertIs(wrong_exit, gate_runner.GateOutcome.OperationalFailure)
+
+        missing = dataclasses.replace(gate, command=("definitely-no-such-program",))
+        with mock.patch.object(gate_runner, "ROOT", root):
+            unavailable = gate_runner.execute_gate(
+                missing,
+                missing.command,
+                dry_run=False,
+                manifest_path=manifest,
+            )
+        self.assertIs(unavailable, gate_runner.GateOutcome.OperationalFailure)
+
+        with mock.patch.object(gate_runner, "ROOT", root), mock.patch.object(
+            gate_runner.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired("synthetic", gate.timeout_seconds),
+        ):
+            timed_out = gate_runner.execute_gate(
+                gate,
+                gate.command,
+                dry_run=False,
+                manifest_path=manifest,
+            )
+        self.assertIs(timed_out, gate_runner.GateOutcome.OperationalFailure)
+
+    def test_only_policy_failure_emits_the_stone0_protocol_marker(self) -> None:
+        inventory = gate_runner.parse_inventory(
+            valid_data(), Path("synthetic-gates.toml")
+        )
+        args = types.SimpleNamespace(
+            tier="pr",
+            gate_id=[],
+            phase="provenance",
+            dry_run=False,
+            fail_fast=False,
+        )
+        output = io.StringIO()
+        with mock.patch.object(
+            gate_runner,
+            "execute_gate",
+            return_value=gate_runner.GateOutcome.PolicyDetection,
+        ), contextlib.redirect_stderr(output):
+            result = gate_runner.command_run(inventory, args)
+        self.assertEqual(result, 1)
+        self.assertEqual(
+            output.getvalue().strip(), gate_runner.POLICY_DETECTION_MARKER
+        )
+
+        output = io.StringIO()
+        with mock.patch.object(
+            gate_runner,
+            "execute_gate",
+            return_value=gate_runner.GateOutcome.OperationalFailure,
+        ), contextlib.redirect_stderr(output):
+            result = gate_runner.command_run(inventory, args)
+        self.assertEqual(result, 2)
+        self.assertNotIn(gate_runner.POLICY_DETECTION_MARKER, output.getvalue())
 
 
 class ClientParityTests(unittest.TestCase):
@@ -340,6 +444,7 @@ cat > "$STONE_STDIN_LOG"
             '&["run", "--tier", "canonical", "--phase", "provenance"]',
             stone0,
         )
+        self.assertIn(gate_runner.POLICY_DETECTION_MARKER, stone0)
 
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
         self.assertIn("GATE_TIER ?= pr", makefile)

@@ -27,13 +27,14 @@ pub mod canonical;
 
 pub use canonical::{
     audited_substrate_ledger, preflight, readiness_receipt, run_planet,
-    sealed_absolute_physics_floor, AuditedCatalogError, BodyId, ConservationBalance,
-    ConservationHolderId, ContingencyDrawId, ContingencyEvent, DimensionalAttemptView,
-    DimensionalPhenomenonView, DimensionalVariableView, EventId, ExactDimensionalCensusView,
-    ExactScaledValue, ExactValueRecord, GeneratedSubjectId, LawAncestry, MeasurementEvidence,
-    PlanetRunOutcome, PlanetSnapshot, RealizationId, Refusal, RefusalCode, RepresentationReceipt,
-    RepresentationValueRecord, RequirementAnalysis, ReservoirId, RunEvent, RunEventKind,
-    RunReceipt, RunTranscript, SealedFloorError, Stage, StageReceipt, StageStatus, TranscriptError,
+    sealed_absolute_physics_floor, AuditedCatalogError, BodyId, CarrierSchemaView,
+    ComponentRegistrySchemaView, ConservationBalance, ConservationHolderId, ContingencyDrawId,
+    ContingencyEvent, DimensionalAttemptView, DimensionalPhenomenonView, DimensionalVariableView,
+    EventId, ExactDimensionalCensusView, ExactScaledValue, ExactValueRecord, GeneratedSubjectId,
+    IndexDomainView, LawAncestry, MeasurementEvidence, PlanetRunOutcome, PlanetSnapshot,
+    RealizationId, Refusal, RefusalCode, RepresentationReceipt, RepresentationValueRecord,
+    RequirementAnalysis, ReservoirId, RunEvent, RunEventKind, RunReceipt, RunTranscript,
+    SealedFloorError, SpeciesRegistrySchemaView, Stage, StageReceipt, StageStatus, TranscriptError,
     TranscriptSchema, TransferLeg, TransferOperation, TransferReceipt, WrittenStateEvent,
     WrittenStateRecord, RUN_TRANSCRIPT_SCHEMA_ID,
 };

@@ -701,10 +701,12 @@ pub fn audited_substrate_ledger() -> Result<Ledger, AuditedCatalogError> {
     Ledger::build(invariants).map_err(AuditedCatalogError::Ledger)
 }
 
-/// Verify both ordered identities and independently pinned receipt contents.
+/// Verify the sealed authority digest, ordered identities, and independently
+/// pinned receipt contents before the floor can authorize magnitudes.
 pub fn verify_absolute_physics_floor(
     floor: &AbsolutePhysicsFloor,
 ) -> Result<(), AuditedCatalogError> {
+    let _authority = sealed_physical_floor_authority_binding()?;
     let expected = audited_substrate_ledger()?;
     let mut admitted_entries = floor.entries();
     let mut expected_entries = expected.entries();

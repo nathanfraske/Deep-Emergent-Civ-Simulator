@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import copy
 import dataclasses
+import enum
 import glob
 import hashlib
 import json
@@ -29,6 +30,8 @@ DEFAULT_MANIFEST = ROOT / "scripts" / "gates.toml"
 SCHEMA_VERSION = 1
 ID_RE = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 PHASES = {"pre", "provenance", "post"}
+POLICY_DETECTION_MARKER = "civsim.gate-runner.policy-detection.v1"
+LEAF_POLICY_DETECTION_MARKER = "civsim.gate-leaf.policy-detection.v1"
 CACHE_POLICIES = {"content-hash", "never"}
 SHELL_PROGRAMS = {"bash", "sh", "zsh", "cmd", "cmd.exe", "powershell", "pwsh"}
 SHELL_EVAL_FLAGS = {"-c", "-lc", "/c", "-command"}
@@ -287,13 +290,7 @@ def load_inventory(path: Path = DEFAULT_MANIFEST) -> Inventory:
 
 
 def _expand_command(command: Sequence[str]) -> list[str]:
-    expanded = []
-    for argument in command:
-        if argument == "{python}":
-            expanded.append(sys.executable)
-        else:
-            expanded.append(argument)
-    return expanded
+    return [sys.executable if argument == "{python}" else argument for argument in command]
 
 
 def _is_reparse_point(path: Path) -> bool:
@@ -391,13 +388,19 @@ def _print_process_output(output: subprocess.CompletedProcess[str]) -> None:
         print(output.stderr.rstrip(), file=sys.stderr)
 
 
+class GateOutcome(enum.Enum):
+    Passed = "passed"
+    PolicyDetection = "policy_detection"
+    OperationalFailure = "operational_failure"
+
+
 def execute_gate(
     gate: Gate,
     command: Sequence[str],
     *,
     dry_run: bool,
     manifest_path: Path | None = None,
-) -> bool:
+) -> GateOutcome:
     argv = _expand_command(command)
     if manifest_path is None:
         digest, file_count = input_hash(gate, ROOT)
@@ -415,7 +418,7 @@ def execute_gate(
                 sort_keys=True,
             )
         )
-        return True
+        return GateOutcome.Passed
 
     started = time.monotonic()
     environment = os.environ.copy()
@@ -434,7 +437,7 @@ def execute_gate(
             f"[FAIL] {gate.gate_id}: command program is unavailable: {error}",
             file=sys.stderr,
         )
-        return False
+        return GateOutcome.OperationalFailure
     except subprocess.TimeoutExpired as error:
         print(
             f"[FAIL] {gate.gate_id}: timed out after {gate.timeout_seconds} seconds",
@@ -444,7 +447,7 @@ def execute_gate(
             print(str(error.stdout).rstrip())
         if error.stderr:
             print(str(error.stderr).rstrip(), file=sys.stderr)
-        return False
+        return GateOutcome.OperationalFailure
 
     try:
         output = subprocess.CompletedProcess(
@@ -458,7 +461,7 @@ def execute_gate(
             f"[FAIL] {gate.gate_id}: command output is not valid UTF-8: {error}",
             file=sys.stderr,
         )
-        return False
+        return GateOutcome.OperationalFailure
 
     try:
         if manifest_path is None:
@@ -472,27 +475,36 @@ def execute_gate(
             f"[FAIL] {gate.gate_id}: declared inputs changed during execution: {error}",
             file=sys.stderr,
         )
-        return False
+        return GateOutcome.OperationalFailure
     if (final_digest, final_file_count) != (digest, file_count):
         print(
             f"[FAIL] {gate.gate_id}: declared inputs changed during execution",
             file=sys.stderr,
         )
-        return False
+        return GateOutcome.OperationalFailure
 
     elapsed = time.monotonic() - started
     _print_process_output(output)
     if output.returncode != 0:
+        leaf_policy_detection = (
+            output.returncode == 1
+            and any(
+                line.strip() == LEAF_POLICY_DETECTION_MARKER
+                for line in (*output.stdout.splitlines(), *output.stderr.splitlines())
+            )
+        )
         print(
             f"[FAIL] {gate.gate_id}: exit {output.returncode}; "
             f"input {digest[:12]} over {file_count} file(s)",
             file=sys.stderr,
         )
-        return False
+        if leaf_policy_detection:
+            return GateOutcome.PolicyDetection
+        return GateOutcome.OperationalFailure
     print(
         f"[PASS] {gate.gate_id} ({elapsed:.2f}s, {digest[:12]}, {file_count} input file(s))"
     )
-    return True
+    return GateOutcome.Passed
 
 
 def _select_from_args(inventory: Inventory, args: argparse.Namespace) -> tuple[Gate, ...]:
@@ -550,18 +562,25 @@ def command_run(inventory: Inventory, args: argparse.Namespace) -> int:
     selected = _select_from_args(inventory, args)
     if not selected:
         raise InventoryError("gate selection is empty")
-    ok = True
+    policy_detection = False
+    operational_failure = False
     for gate in selected:
-        passed = execute_gate(
+        outcome = execute_gate(
             gate,
             gate.command,
             dry_run=args.dry_run,
             manifest_path=inventory.source,
         )
-        ok = passed and ok
-        if not passed and args.fail_fast:
+        policy_detection = policy_detection or outcome is GateOutcome.PolicyDetection
+        operational_failure = operational_failure or outcome is GateOutcome.OperationalFailure
+        if outcome is not GateOutcome.Passed and args.fail_fast:
             break
-    return 0 if ok else 1
+    if operational_failure:
+        return 2
+    if not policy_detection:
+        return 0
+    print(POLICY_DETECTION_MARKER, file=sys.stderr)
+    return 1
 
 
 def command_self_tests(inventory: Inventory, args: argparse.Namespace) -> int:
@@ -574,12 +593,13 @@ def command_self_tests(inventory: Inventory, args: argparse.Namespace) -> int:
         if gate.self_test is None:
             continue
         tested += 1
-        passed = execute_gate(
+        outcome = execute_gate(
             gate,
             gate.self_test,
             dry_run=args.dry_run,
             manifest_path=inventory.source,
         )
+        passed = outcome is GateOutcome.Passed
         ok = passed and ok
         if not passed and args.fail_fast:
             break

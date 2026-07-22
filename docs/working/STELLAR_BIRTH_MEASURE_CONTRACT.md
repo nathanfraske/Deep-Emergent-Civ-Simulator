@@ -1,8 +1,9 @@
 # Stellar-birth measure contract
 
-Status: executable leaf-closure evaluator, replayable floor, and partial exact
-dimensional census implemented; both physical obligations remain unresolved
-and the canonical runner reports their exact frontier before refusing.
+Status: executable leaf-closure evaluator, replayable floor, partial exact
+dimensional census, and modular value-free structure schema implemented; both
+physical obligations remain unresolved and the canonical runner reports their
+exact frontier before refusing.
 
 ## Authority
 
@@ -42,7 +43,7 @@ execution relations, physical admissions, and the complete ordered receipt
 content. One sealed physical-floor authority binding covers those ordered
 registries and receipt pins under
 `civsim.units.physical-floor-authority-binding.v1`. Derived values replay from
-exact projected ancestry published in transcript schema major 6, with typed SI dimensions and exact-symbol ancestry
+exact projected ancestry published in transcript schema major 7, with typed SI dimensions and exact-symbol ancestry
 checked from the formula. Physical helper APIs require the same sealed
 execution capability and cannot bind or mutate its values. This closes the
 representation and API reachability seams; it does not close either
@@ -80,14 +81,40 @@ Equal coordinates replay exactly. An intentional measure or coordinate-law
 change may claim ensemble equivalence, not identity with the prior trajectory.
 
 The first required artifact is now executable as
-`civsim.planet.stellar-birth-dimensional-census.v2`. It is a partial
+`civsim.planet.stellar-birth-dimensional-census.v3`. It is a partial
 derivation census, not a new input manifest. Its 31 typed coordinates contain
 dimensions and carrier shapes but no magnitudes. Seven phenomenon-local exact
 matrices record rank, pivots, free columns, primitive integer null vectors,
-dimension-only target projections, their nonzero support, attempted law identities, missing
-dependencies, and dropped mechanisms. The checker uses checked `i128`
-rational Gauss-Jordan elimination and fails closed on duplicate identities or
-arithmetic overflow.
+dimension-only target projections, their nonzero support, attempted law
+identities, missing dependencies, and dropped mechanisms. The checker uses
+checked `i128` rational Gauss-Jordan elimination and fails closed on duplicate
+identities or arithmetic overflow.
+
+The census embeds `civsim.planet.stellar-birth-structure.v1`. Its separate
+component and species registry contracts contain no instances or authored
+members. Six shared domains cover component identity, species identity,
+spatial position, natural-log frequency, Lagrangian material-element identity,
+and evolution time. Eleven carrier schemas distinguish scalars, spatial
+fields, explicit species number fractions, spectral density per natural-log
+frequency, variable components and topology, time histories, and
+material-time histories. Catalog completeness, identity order, exact canonical
+entries, domain references, and variable-to-carrier bindings are checked before
+serialization.
+
+The schema records obligations for future realizations. Component count must
+come only from the approved realization coordinate within joint-measure
+support. Component identity, canonical physical-content encoding,
+permutation-equivariant multiset behavior, collision handling, and physical
+topology labels must be implemented and checked. Species membership must derive
+from admitted physical state or refuse, and the composition simplex must prove
+complete registry support and unit normalization rather than renormalize an
+incomplete list. Domain realizations must keep physical support separate from
+convergence-derived numerical resolution, derive or gauge their references,
+use ordinals only for serialization, and turn engine limits into typed named
+refusals. None of those realization, normalization, reference, convergence,
+collision, topology, or capacity operations exists yet. The current executable
+behavior validates and bitstreams the obligation schema, then refuses at the
+two absent Stage 1 proof leaves.
 
 The census is deliberately non-admitting. Its wire status is `computed`, its
 `closure_effect` is `none`, and its global `coverage_claim` is `false`. The
@@ -102,15 +129,19 @@ floor-admission review, and it must remain inside the joint measure so
 correlations are not discarded.
 
 The phenomenon-local chain shows how the next derivations interact. An
-open-ended composition field must first derive a mean particle mass from a
-species mass and state registry. Composition, density, column, ionization,
-radiation, magnetic, turbulent, and background fields then feed coupled gas
-and dust thermal balance. Mean particle mass and gas temperature constrain
-sound speed. Sound speed and `G` constrain collapse mass flow. The flow history
-constrains enclosed mass. That mass and the same shell angular-momentum history
-constrain centrifugal radius. Those shared causes are the bridge to disk
-surface density, thermal history, solids, and variable-cardinality bodies;
-they cannot be replaced by independent stellar or planetary knobs.
+open-ended species number-fraction field must first derive a mean particle mass
+from a complete species mass and state registry. Composition, density, column,
+ionization, radiation, magnetic, turbulent, and background fields then feed
+coupled gas and dust thermal balance. Mean particle mass and gas temperature
+constrain sound speed. Sound speed and `G` constrain collapse mass flow. The
+flow and topology histories constrain material-element mass. Material mass and
+the same material angular-momentum history can constrain a local
+circularization-length history only after a component-local frame and
+multicenter binding functional are derived. A familiar shell or centrifugal
+radius may appear only as a proved symmetry reduction. Those shared causes are
+the bridge to disk surface density, thermal history, solids, and
+variable-cardinality bodies; they cannot be replaced by independent stellar
+or planetary knobs.
 
 ## Realization-coordinate law
 
@@ -137,10 +168,10 @@ three physical floor values, derives `eps_0`, enters Stage 1, and returns
 `stellar_birth.realization_measure`. It emits six transcript events: three
 floor records, one derived-value record, one Stage 1 entry, and one refusal.
 It emits no `[X]`, no `[W]` realization, and no snapshot. Repeated runs are
-byte-identical at `274,807` stdout bytes and SHA-256
-`8c956d6860ad674ac1d70f1b0c22c11ebe0e30d25c1e0443201abbd6f7cc4f38`.
-The current receipt is `civsim.planet.run.v8`; its transcript schema major is
-`6`.
+byte-identical at `321,319` stdout bytes and SHA-256
+`6f610c3dde073b41a085394237659ccd680b5aa0ccd0c571f5fe4e7e97197d52`.
+The current receipt is `civsim.planet.run.v9`; its transcript schema major is
+`7`.
 
 The three-node graph now executes as a fixed-order conjunction over two opaque
 repository-owned proof capabilities. The production resolver currently
@@ -152,9 +183,11 @@ Every open leaf retains a machine-readable obligation list, and both lists
 include `gap_law.chaos_protocol`. Only the joint-measure leaf carries the exact
 census analysis. The coordinate-law leaf has analysis count zero. Receipt and
 transcript call one prefix-aware serializer for the shared payload, so their
-two views cannot drift independently. Library callers can inspect every census
-gap through immutable typed views without parsing display text or acquiring a
-proof-construction surface.
+two views cannot drift independently. The structure is serialized only beneath
+the non-admitting joint-measure census. Library callers can inspect both
+registry contracts, every domain and carrier, every variable, phenomenon,
+attempt, and gap through immutable typed views without parsing display text or
+acquiring a proof-construction surface.
 
 ## Retained mechanism boundary
 
@@ -168,22 +201,23 @@ mechanisms.
 The first physical facade must use SI-native typed state and interval
 propagation. It must not select one Shu endpoint, accept a bare AU or solar-mass
 anchor, rebuild `DiskEvolutionState`, expose `DiskClockState` or
-`DiskThermalParams`, or import a world-seed vector. Magnetic braking,
-shell evolution, self-gravity, fragmentation, and any other dropped mechanism
-remain explicit residual or refusal obligations.
+`DiskThermalParams`, or import a world-seed vector. Magnetic braking, material
+transport, self-gravity, fragmentation, multicenter frame choice, and any
+other dropped mechanism remain explicit residual or refusal obligations.
 
 ## Build sequence
 
-1. Extend the partial census to complete stellar-birth support, including
-   one component-index registry, shared field domains, variable-cardinality
-   multiplicity, field and tensor carriers, spectral closure, fragmentation,
-   magnetic braking, shell and time histories, a persistent disk state, and every
-   dynamical regime. Do not decompose the joint measure into authored
-   marginals.
+1. Extend the partial census to complete stellar-birth physics over the landed
+   registry, domain, and carrier contracts. Remaining coverage includes
+   realized component topology, multiplicity interactions, tensor needs,
+   spectral closure, fragmentation, magnetic braking, multicenter reduction,
+   a persistent disk state, and every dynamical regime. Do not decompose the
+   joint measure into authored marginals.
 2. Derive the species mass and state registry, coupled gas and dust thermal
    balance, equation-of-state closure, collapse measure, mass-flow history,
-   angular-momentum transport, and centrifugal-radius distribution in that
-   order. Each rung consumes the correlated outputs below it.
+   material mass and position histories, local-frame angular-momentum
+   transport, and multicenter circularization law in that order. Each rung
+   consumes the correlated outputs below it.
 3. Close evidence custody only for candidates that survive derivation. Record
    support, normalization, conditioning, correlations, covariance families,
    uncertainty, and out-of-domain behavior. Custody does not admit them.
@@ -196,7 +230,7 @@ remain explicit residual or refusal obligations.
 6. Feed both verified proof capabilities into the executable evaluator.
    Generate the first `[X]` only when both leaves prove closed.
 7. Create `[W]` realization identity from that recorded draw, then add SI-native
-   collapse, thermal, centrifugal-radius, disk, and embryo-system adapters
+   collapse, thermal, circularization, disk, and embryo-system adapters
    behind a typed substrate facade with intervals and named residuals.
 8. Carry the same receipt through persistent elemental inventories, assembly,
    orbits, moons, young thermal state, crust, mantle, geodynamics, atmosphere,

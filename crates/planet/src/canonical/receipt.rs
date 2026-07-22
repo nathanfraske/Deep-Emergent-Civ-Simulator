@@ -1,6 +1,7 @@
 use super::{
     requirement_analysis::{RequirementAnalysis, RequirementAnalysisPayload},
     stellar_birth_dimensions::StellarBirthDimensionalCensusArtifact,
+    stellar_birth_structure::write_stellar_birth_structure,
     transcript::canonical_text,
     EventId, RealizationId, RunEventKind, RunTranscript, Stage, TranscriptError,
 };
@@ -391,7 +392,7 @@ fn stage_index(stage: Stage) -> usize {
 
 impl fmt::Display for RunReceipt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "receipt=civsim.planet.run.v8")?;
+        writeln!(f, "receipt=civsim.planet.run.v9")?;
         writeln!(f, "complete={}", self.is_complete())?;
         writeln!(
             f,
@@ -560,6 +561,7 @@ fn write_dimensional_census(
                     canonical_text(id)
                 )?;
             }
+            write_stellar_birth_structure(f, prefix, &census.structure)?;
             writeln!(f, "{prefix}.variable_count={}", census.variables.len())?;
             for (index, variable) in census.variables.iter().enumerate() {
                 let variable_prefix = format!("{prefix}.variable.{index:04}");

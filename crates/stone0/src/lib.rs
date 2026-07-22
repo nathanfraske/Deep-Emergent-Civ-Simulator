@@ -45,9 +45,10 @@
 //!
 //! ## Robustness contract
 //!
-//! The gate fails OPEN on any operational error (python missing, secrets dir absent, git unavailable):
-//! it prints a warning and allows the build. It fails CLOSED only on a positive detection. A gate bug or
-//! a missing dependency must never brick a build.
+//! The authoritative provenance runner fails closed when its interpreter is unavailable. A missing
+//! secrets file still disables only the optional owner override and live-secret canary checks, while
+//! native repository-service errors remain visible warnings. A gate that cannot execute the canonical
+//! provenance tier has not passed.
 
 #![forbid(unsafe_code)]
 
@@ -153,6 +154,7 @@ const PROVENANCE_RUNNER: (&str, &[&str]) = (
     "scripts/gate_runner.py",
     &["run", "--tier", "canonical", "--phase", "provenance"],
 );
+const POLICY_DETECTION_MARKER: &str = "civsim.gate-runner.policy-detection.v1";
 
 /// Which run this is. `Local` runs every check including the live-password and canary scans against the
 /// secrets file. `Ci` runs the provenance, tombstone, and override-env scans only (a hosted runner has
@@ -176,9 +178,10 @@ pub enum Verdict {
 #[derive(Debug, Clone)]
 pub struct GateReport {
     pub verdict: Verdict,
-    /// Positive detections that fail the build closed.
+    /// Positive detections and mandatory authority failures that block the build.
     pub failures: Vec<String>,
-    /// Operational problems that fail open (a warning, never a block).
+    /// Non-authoritative operational notices. Canonical provenance-runner
+    /// unavailability is promoted to a failure before this report is returned.
     pub warnings: Vec<String>,
     /// Informational notices (the loud override banner text lives here).
     pub notices: Vec<String>,
@@ -197,12 +200,34 @@ impl GateReport {
 
 /// The inputs a gate run keys off. Constructed from the environment by [`run`], or by hand in tests.
 pub struct GateConfig {
-    pub repo_root: PathBuf,
-    pub secrets_path: PathBuf,
-    pub tombstones_path: PathBuf,
-    pub mode: Mode,
+    repo_root: PathBuf,
+    secrets_path: PathBuf,
+    tombstones_path: PathBuf,
+    mode: Mode,
     /// The value supplied through `STONE0_OVERRIDE`, if any (only consulted in `Local` mode).
-    pub override_value: Option<String>,
+    override_value: Option<String>,
+}
+
+impl GateConfig {
+    /// Build a scan-only configuration with no authority to override a finding.
+    ///
+    /// This is the public construction path used by tests and embedding tools.
+    /// Only [`run`] may attach the environment's owner override after validating
+    /// that the default out-of-repo trust path is in use.
+    pub fn scan_only(
+        repo_root: PathBuf,
+        secrets_path: PathBuf,
+        tombstones_path: PathBuf,
+        mode: Mode,
+    ) -> Self {
+        Self {
+            repo_root,
+            secrets_path,
+            tombstones_path,
+            mode,
+            override_value: None,
+        }
+    }
 }
 
 /// One tracked file's path and raw bytes. The password scan is byte-exact (it catches a hit even in a
@@ -403,10 +428,9 @@ pub fn override_is_valid(override_value: Option<&str>, password: &str) -> bool {
 
 /// What one gate run produced.
 ///
-/// `Skipped` USED TO EXIST and is deliberately gone. It absorbed three different situations that are
-/// not the same: a script missing from disk, a script that crashed, and an interpreter that could not
-/// be spawned. Only the last is operational. Folding the other two into a skip made deleting or
-/// breaking a gate the two cheapest ways to stop it convicting, and Stone 0 reported neither.
+/// `Skipped` USED TO EXIST and is deliberately gone. A missing runner, a crashing
+/// runner, and an unavailable interpreter are distinct diagnostics but share
+/// one non-overridable result: the authority did not execute, so the build fails.
 enum ScriptResult {
     Clean,
     Detected(String),
@@ -424,7 +448,7 @@ fn run_python_gate(root: &Path, script_rel: &str, args: &[&str]) -> ScriptResult
         // A LISTED SCRIPT THAT IS ABSENT IS A FAILURE, not a skip. This list names what MUST run, so a
         // missing entry means either the gate was deleted or the path drifted, and both should be loud.
         // Skipping made deleting a gate the quietest way to stop it convicting.
-        return ScriptResult::Detected(format!(
+        return ScriptResult::Operational(format!(
             "{script_rel} is the declarative gate-authority runner but does not exist. A gate runner \
              that is not there has not passed; restore it deliberately."
         ));
@@ -433,7 +457,8 @@ fn run_python_gate(root: &Path, script_rel: &str, args: &[&str]) -> ScriptResult
     // same interpreter as `python`. Windows may also install a `python3.exe` Store placeholder that
     // spawns successfully but only prints "Python was not found". Treat that placeholder like an
     // unavailable command and try the next platform candidate. Once a real interpreter runs the
-    // script, every non-zero result remains a positive detection below.
+    // script, only the runner's exact positive protocol can distinguish a policy
+    // detection from a non-overridable authority failure.
     #[cfg(windows)]
     let interpreters: &[(&str, &[&str])] = &[("python", &[]), ("py", &["-3"]), ("python3", &[])];
     #[cfg(not(windows))]
@@ -476,30 +501,30 @@ fn run_python_gate(root: &Path, script_rel: &str, args: &[&str]) -> ScriptResult
     if out.status.success() {
         return ScriptResult::Clean;
     }
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    // A CRASHING GATE HAS NOT PASSED. These three were treated as "operational" and skipped, which made
-    // BREAKING a gate the cheapest way to silence it: introduce a syntax error, or an import of
-    // something absent, and Stone 0 reported an operational skip and moved on. The one genuinely
-    // operational case is python3 itself being unavailable, and that is handled above where the spawn
-    // fails; everything reaching here ran the interpreter and the SCRIPT failed.
-    if stderr.contains("Traceback (most recent call last)")
-        || stderr.contains("ModuleNotFoundError")
-        || stderr.contains("SyntaxError")
-    {
-        let last = stderr.lines().last().unwrap_or("");
-        return ScriptResult::Detected(format!(
-            "{script_rel} CRASHED ({last}). A gate that cannot run has not passed, and treating this as \
-             an operational skip made breaking a gate the cheapest way to silence it."
-        ));
-    }
     let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let policy_detection = has_policy_detection_protocol(out.status.code(), &stdout, &stderr);
     let details = match (stdout.trim(), stderr.trim()) {
         ("", "") => String::from("gate runner exited nonzero without output"),
         (stdout, "") => stdout.to_string(),
         ("", stderr) => stderr.to_string(),
         (stdout, stderr) => format!("{stdout}\n{stderr}"),
     };
-    ScriptResult::Detected(format!("{script_rel}:\n{details}"))
+    if policy_detection {
+        ScriptResult::Detected(format!("{script_rel}:\n{details}"))
+    } else {
+        ScriptResult::Operational(format!(
+            "{script_rel} exited without the required policy-detection protocol marker:\n{details}"
+        ))
+    }
+}
+
+fn has_policy_detection_protocol(exit_code: Option<i32>, stdout: &str, stderr: &str) -> bool {
+    exit_code == Some(1)
+        && stdout
+            .lines()
+            .chain(stderr.lines())
+            .any(|line| line.trim() == POLICY_DETECTION_MARKER)
 }
 
 fn provenance_scan(root: &Path) -> ProvenanceOutcome {
@@ -709,12 +734,21 @@ fn dedup(mut v: Vec<String>) -> Vec<String> {
     set.into_iter().collect()
 }
 
-/// Run every Stone 0 check for the given configuration and return the verdict. Never panics; every
-/// operational failure degrades to a warning and an allowed build.
+/// Run every Stone 0 check for the given configuration and return the verdict.
+///
+/// The canonical provenance runner is mandatory. Its operational failure is a
+/// build failure, not a skipped check.
 pub fn gate(cfg: &GateConfig) -> GateReport {
     let mut failures: Vec<String> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
     let mut notices: Vec<String> = Vec::new();
+
+    if cfg.override_value.is_some() && cfg.secrets_path != Path::new(DEFAULT_SECRETS_PATH) {
+        failures.push(
+            "a caller-selected secrets path cannot authorize an override; use the documented default owner trust path"
+                .to_owned(),
+        );
+    }
 
     // Gather tracked and nonignored untracked worktree files once; the laundering, tombstone,
     // override-env, and canary scans share them.
@@ -730,8 +764,10 @@ pub fn gate(cfg: &GateConfig) -> GateReport {
 
     // Check 1: the provenance scan (both modes).
     let prov = provenance_scan(&cfg.repo_root);
-    for w in prov.operational {
-        warnings.push(w);
+    for operational in prov.operational {
+        failures.push(format!(
+            "canonical provenance runner unavailable: {operational}. A gate that cannot run has not passed."
+        ));
     }
     let provenance_failed = !prov.detections.is_empty();
 
@@ -883,16 +919,23 @@ pub fn run(mode: Mode) -> i32 {
     if mode == Mode::SelfTest {
         return self_test();
     }
-    let repo_root = detect_repo_root();
-    let secrets_path = std::env::var("STONE0_SECRETS_PATH")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(DEFAULT_SECRETS_PATH));
-    let tombstones_path = repo_root.join(TOMBSTONE_REL);
     let override_value = if mode == Mode::Local {
         std::env::var(OVERRIDE_ENV).ok()
     } else {
         None
     };
+    let secrets_path = match select_secrets_path(
+        std::env::var("STONE0_SECRETS_PATH").ok().as_deref(),
+        override_value.as_deref(),
+    ) {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("stone0: FAIL: {error}");
+            return 1;
+        }
+    };
+    let repo_root = detect_repo_root();
+    let tombstones_path = repo_root.join(TOMBSTONE_REL);
     let cfg = GateConfig {
         repo_root,
         secrets_path,
@@ -903,6 +946,23 @@ pub fn run(mode: Mode) -> i32 {
     let report = gate(&cfg);
     emit_report(&report);
     report.exit_code()
+}
+
+fn select_secrets_path(
+    configured_path: Option<&str>,
+    override_value: Option<&str>,
+) -> Result<PathBuf, String> {
+    match configured_path {
+        Some(path) if path.trim().is_empty() => {
+            Err("STONE0_SECRETS_PATH is empty; refusing an ambiguous secrets authority".to_owned())
+        }
+        Some(_) if override_value.is_some() => Err(
+            "STONE0_SECRETS_PATH and STONE0_OVERRIDE cannot be supplied together; a caller-selected secrets file cannot authorize that caller's override"
+                .to_owned(),
+        ),
+        Some(path) => Ok(PathBuf::from(path)),
+        None => Ok(PathBuf::from(DEFAULT_SECRETS_PATH)),
+    }
 }
 
 // ----------------------------------------------------------------------------------------------------
@@ -940,6 +1000,30 @@ fn self_test() -> i32 {
     check(
         "override rejects empty password",
         !override_is_valid(Some(""), ""),
+    );
+    check(
+        "caller-selected secrets cannot authorize caller override",
+        select_secrets_path(Some("synthetic.pass"), Some("synthetic override")).is_err(),
+    );
+    check(
+        "custom secrets path remains usable without an override",
+        select_secrets_path(Some("synthetic.pass"), None) == Ok(PathBuf::from("synthetic.pass")),
+    );
+    check(
+        "empty secrets path is rejected",
+        select_secrets_path(Some(""), None).is_err(),
+    );
+    check(
+        "marked policy detection is override-eligible",
+        has_policy_detection_protocol(Some(1), "", POLICY_DETECTION_MARKER),
+    );
+    check(
+        "unmarked nonzero exit is authority failure",
+        !has_policy_detection_protocol(Some(1), "gate failed", ""),
+    );
+    check(
+        "wrong exit code cannot claim policy detection",
+        !has_policy_detection_protocol(Some(2), POLICY_DETECTION_MARKER, ""),
     );
 
     // password laundering: literal and base64 detection.

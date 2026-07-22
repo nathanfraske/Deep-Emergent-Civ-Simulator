@@ -6,7 +6,13 @@
 //! from being constructed. Each phenomenon is analyzed separately so rank
 //! supplied by one process cannot conceal a gap in another process.
 
-use super::floor_magnitudes::AuditedFloorView;
+use super::{
+    floor_magnitudes::AuditedFloorView,
+    stellar_birth_structure::{
+        stellar_birth_structure_schema, CarrierKind, StellarBirthStructureSchema,
+        StructureSchemaError,
+    },
+};
 use civsim_units::{
     dimensional_analysis::{DimensionAnalysisError, SiDimensionAnalysis, SiDimensionColumn},
     fundamentals::{
@@ -19,7 +25,7 @@ use civsim_units::{
 use std::{collections::BTreeMap, fmt};
 
 pub(super) const STELLAR_BIRTH_DIMENSIONAL_CENSUS_SCHEMA_ID: &str =
-    "civsim.planet.stellar-birth-dimensional-census.v2";
+    "civsim.planet.stellar-birth-dimensional-census.v3";
 pub(super) const EXACT_DIMENSIONAL_CHECKER_ID: &str = "civsim.units.exact-si-rref.v2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -54,40 +60,11 @@ impl DimensionalVariableRole {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) enum DimensionalCarrier {
-    Scalar,
-    SpatialScalarField,
-    SpatialVectorField,
-    SpeciesIndexedSimplex,
-    SpectralFluxDensityPerLogFrequencyField,
-    VariableComponentScalarField,
-    VariableComponentVectorField,
-    VariableCardinalityTopology,
-}
-
-impl DimensionalCarrier {
-    pub(super) const fn id(self) -> &'static str {
-        match self {
-            Self::Scalar => "scalar",
-            Self::SpatialScalarField => "spatial_scalar_field",
-            Self::SpatialVectorField => "spatial_vector_field",
-            Self::SpeciesIndexedSimplex => "species_indexed_simplex",
-            Self::SpectralFluxDensityPerLogFrequencyField => {
-                "spectral_flux_density_per_log_frequency_field"
-            }
-            Self::VariableComponentScalarField => "variable_component_scalar_field",
-            Self::VariableComponentVectorField => "variable_component_vector_field",
-            Self::VariableCardinalityTopology => "variable_cardinality_topology",
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct DimensionalVariable {
     pub(super) id: String,
     pub(super) role: DimensionalVariableRole,
-    pub(super) carrier: DimensionalCarrier,
+    pub(super) carrier: CarrierKind,
     pub(super) dimension: [i8; 7],
     pub(super) coupling_group_id: String,
 }
@@ -155,6 +132,7 @@ pub(super) struct StellarBirthDimensionalCensus {
     pub(super) floor_binding_schema_id: &'static str,
     pub(super) floor_binding_sha256: String,
     pub(super) base_dimension_ids: Vec<&'static str>,
+    pub(super) structure: StellarBirthStructureSchema,
     pub(super) variables: Vec<DimensionalVariable>,
     pub(super) phenomena: Vec<PhenomenonDimensionalCensus>,
     pub(super) coverage_gap_ids: Vec<String>,
@@ -172,7 +150,7 @@ pub(super) struct InvalidStellarBirthDimensionalCensus {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum StellarBirthDimensionalCensusArtifact {
-    Computed(StellarBirthDimensionalCensus),
+    Computed(Box<StellarBirthDimensionalCensus>),
     Invalid(InvalidStellarBirthDimensionalCensus),
 }
 
@@ -216,6 +194,8 @@ impl StellarBirthDimensionalCensusArtifact {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CensusBuildError {
     FloorAuthority(String),
+    Structure(StructureSchemaError),
+    UnknownCarrier(String),
     DuplicateVariable(String),
     DuplicatePhenomenon(String),
     DuplicateAttempt {
@@ -251,6 +231,8 @@ impl CensusBuildError {
     const fn code(&self) -> &'static str {
         match self {
             Self::FloorAuthority(_) => "floor_authority_unavailable",
+            Self::Structure(_) => "structure_schema_invalid",
+            Self::UnknownCarrier(_) => "unknown_carrier",
             Self::DuplicateVariable(_) => "duplicate_variable_id",
             Self::DuplicatePhenomenon(_) => "duplicate_phenomenon_id",
             Self::DuplicateAttempt { .. } => "duplicate_attempt_id",
@@ -268,6 +250,10 @@ impl fmt::Display for CensusBuildError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::FloorAuthority(detail) => write!(f, "floor authority is unavailable: {detail}"),
+            Self::Structure(error) => write!(f, "stellar-birth structure is invalid: {error}"),
+            Self::UnknownCarrier(id) => {
+                write!(f, "dimensional variable references unknown carrier '{id}'")
+            }
             Self::DuplicateVariable(id) => write!(f, "duplicate variable identity '{id}'"),
             Self::DuplicatePhenomenon(id) => write!(f, "duplicate phenomenon identity '{id}'"),
             Self::DuplicateAttempt {
@@ -325,11 +311,17 @@ impl From<DimensionAnalysisError> for CensusBuildError {
     }
 }
 
+impl From<StructureSchemaError> for CensusBuildError {
+    fn from(error: StructureSchemaError) -> Self {
+        Self::Structure(error)
+    }
+}
+
 #[derive(Clone, Copy)]
 struct VariableSpec {
     id: &'static str,
     role: DimensionalVariableRole,
-    carrier: DimensionalCarrier,
+    carrier: CarrierKind,
     dimension: SiDimension,
 }
 
@@ -362,7 +354,7 @@ pub(super) fn stellar_birth_dimensional_census(
     _floor: &AuditedFloorView<'_>,
 ) -> StellarBirthDimensionalCensusArtifact {
     match build_census() {
-        Ok(census) => StellarBirthDimensionalCensusArtifact::Computed(census),
+        Ok(census) => StellarBirthDimensionalCensusArtifact::Computed(Box::new(census)),
         Err(error) => {
             StellarBirthDimensionalCensusArtifact::Invalid(InvalidStellarBirthDimensionalCensus {
                 schema_id: STELLAR_BIRTH_DIMENSIONAL_CENSUS_SCHEMA_ID,
@@ -379,7 +371,8 @@ pub(super) fn stellar_birth_dimensional_census(
 fn build_census() -> Result<StellarBirthDimensionalCensus, CensusBuildError> {
     let binding = sealed_physical_floor_authority_binding()
         .map_err(|error| CensusBuildError::FloorAuthority(error.to_string()))?;
-    let variables = build_variables()?;
+    let structure = stellar_birth_structure_schema()?;
+    let variables = build_variables(&structure)?;
     let registry: BTreeMap<_, _> = variables
         .iter()
         .map(|variable| (variable.id.as_str(), variable))
@@ -403,7 +396,7 @@ fn build_census() -> Result<StellarBirthDimensionalCensus, CensusBuildError> {
     let mut coverage_gap_ids = vec![
         "stellar_birth.gap.fragmentation_and_multiplicity_generalization".to_owned(),
         "stellar_birth.gap.full_field_and_tensor_carriers".to_owned(),
-        "stellar_birth.gap.magnetic_braking_and_shell_history".to_owned(),
+        "stellar_birth.gap.magnetic_braking_and_material_history".to_owned(),
         "stellar_birth.gap.nonbinary_variable_cardinality_dynamics".to_owned(),
         "stellar_birth.gap.radiation_and_cooling_spectral_closure".to_owned(),
         "stellar_birth.gap.stochastic_and_chaotic_regime_measure".to_owned(),
@@ -419,13 +412,16 @@ fn build_census() -> Result<StellarBirthDimensionalCensus, CensusBuildError> {
         floor_binding_schema_id: binding.schema_id().as_str(),
         floor_binding_sha256: binding.digest_hex(),
         base_dimension_ids: SI_BASE_DIMENSION_IDS.to_vec(),
+        structure,
         variables,
         phenomena,
         coverage_gap_ids,
     })
 }
 
-fn build_variables() -> Result<Vec<DimensionalVariable>, CensusBuildError> {
+fn build_variables(
+    structure: &StellarBirthStructureSchema,
+) -> Result<Vec<DimensionalVariable>, CensusBuildError> {
     let physical_floor_columns = sealed_physical_floor_dimension_columns()
         .map_err(|error| CensusBuildError::FloorAuthority(error.to_string()))?;
     let mut variables = REPRESENTATION_DEFINITIONS
@@ -433,7 +429,7 @@ fn build_variables() -> Result<Vec<DimensionalVariable>, CensusBuildError> {
         .map(|definition| DimensionalVariable {
             id: format!("representation.{}", definition.symbol),
             role: DimensionalVariableRole::RepresentationDefinition,
-            carrier: DimensionalCarrier::Scalar,
+            carrier: CarrierKind::Scalar,
             dimension: definition.dimension.exponents(),
             coupling_group_id: JOINT_COUPLING_GROUP.to_owned(),
         })
@@ -443,7 +439,7 @@ fn build_variables() -> Result<Vec<DimensionalVariable>, CensusBuildError> {
                 .map(|column| DimensionalVariable {
                     id: column.id().to_owned(),
                     role: DimensionalVariableRole::AdmittedPhysicalInvariant,
-                    carrier: DimensionalCarrier::Scalar,
+                    carrier: CarrierKind::Scalar,
                     dimension: column.dimension().exponents(),
                     coupling_group_id: JOINT_COUPLING_GROUP.to_owned(),
                 }),
@@ -466,11 +462,18 @@ fn build_variables() -> Result<Vec<DimensionalVariable>, CensusBuildError> {
             return Err(CensusBuildError::DuplicateVariable(pair[0].id.clone()));
         }
     }
+    for variable in &variables {
+        if structure.carrier(variable.carrier).is_none() {
+            return Err(CensusBuildError::UnknownCarrier(
+                variable.carrier.id().to_owned(),
+            ));
+        }
+    }
     Ok(variables)
 }
 
 fn candidate_variable_specs() -> Vec<VariableSpec> {
-    use DimensionalCarrier as Carrier;
+    use CarrierKind as Carrier;
     use DimensionalVariableRole::{
         CandidateCoordinate as Candidate, DerivedIntermediate as Derived,
     };
@@ -483,9 +486,9 @@ fn candidate_variable_specs() -> Vec<VariableSpec> {
             dimension: SiDimension::new(0, 0, 0, 0, 1, 0, 0),
         },
         VariableSpec {
-            id: "stellar_birth.centrifugal_radius",
+            id: "stellar_birth.material_element.circularization_length_history",
             role: Derived,
-            carrier: Carrier::Scalar,
+            carrier: Carrier::MaterialTimeScalarHistory,
             dimension: SiDimension::new(1, 0, 0, 0, 0, 0, 0),
         },
         VariableSpec {
@@ -497,7 +500,7 @@ fn candidate_variable_specs() -> Vec<VariableSpec> {
         VariableSpec {
             id: "stellar_birth.collapse_mass_flow",
             role: Derived,
-            carrier: Carrier::Scalar,
+            carrier: Carrier::TimeScalarHistory,
             dimension: SiDimension::new(0, 1, -1, 0, 0, 0, 0),
         },
         VariableSpec {
@@ -531,9 +534,9 @@ fn candidate_variable_specs() -> Vec<VariableSpec> {
             dimension: SiDimension::new(1, 0, -1, 0, 0, 0, 0),
         },
         VariableSpec {
-            id: "stellar_birth.composition.species_fraction_field",
+            id: "stellar_birth.composition.species_number_fraction_field",
             role: Candidate,
-            carrier: Carrier::SpeciesIndexedSimplex,
+            carrier: Carrier::SpeciesNumberFractionSimplex,
             dimension: SiDimension::DIMENSIONLESS,
         },
         VariableSpec {
@@ -549,9 +552,9 @@ fn candidate_variable_specs() -> Vec<VariableSpec> {
             dimension: SiDimension::new(0, 0, 0, 0, 1, 0, 0),
         },
         VariableSpec {
-            id: "stellar_birth.enclosed_mass",
+            id: "stellar_birth.material_element.mass_history",
             role: Derived,
-            carrier: Carrier::Scalar,
+            carrier: Carrier::MaterialTimeScalarHistory,
             dimension: SiDimension::new(0, 1, 0, 0, 0, 0, 0),
         },
         VariableSpec {
@@ -591,9 +594,9 @@ fn candidate_variable_specs() -> Vec<VariableSpec> {
             dimension: SiDimension::new(1, 0, -1, 0, 0, 0, 0),
         },
         VariableSpec {
-            id: "stellar_birth.specific_angular_momentum_field",
+            id: "stellar_birth.material_element.specific_angular_momentum_history",
             role: Candidate,
-            carrier: Carrier::SpatialVectorField,
+            carrier: Carrier::MaterialTimeVectorHistory,
             dimension: SiDimension::new(2, 0, -1, 0, 0, 0, 0),
         },
         VariableSpec {
@@ -629,7 +632,7 @@ fn phenomenon_specs() -> Vec<PhenomenonSpec> {
             phenomenon_id: "stellar_birth.phenomenon.mean_particle_mass",
             input_ids: &[
                 "fundamental.m_e",
-                "stellar_birth.composition.species_fraction_field",
+                "stellar_birth.composition.species_number_fraction_field",
             ],
             output_ids: &["stellar_birth.mean_particle_mass_field"],
             coverage_complete: false,
@@ -638,7 +641,7 @@ fn phenomenon_specs() -> Vec<PhenomenonSpec> {
                 law_id: "candidate.composition_weighted_particle_mass",
                 input_ids: &[
                     "fundamental.m_e",
-                    "stellar_birth.composition.species_fraction_field",
+                    "stellar_birth.composition.species_number_fraction_field",
                 ],
                 output_id: "stellar_birth.mean_particle_mass_field",
                 missing_dependency_ids: &[
@@ -654,7 +657,7 @@ fn phenomenon_specs() -> Vec<PhenomenonSpec> {
                 "representation.k_B",
                 "stellar_birth.background_temperature",
                 "stellar_birth.column_number_density",
-                "stellar_birth.composition.species_fraction_field",
+                "stellar_birth.composition.species_number_fraction_field",
                 "stellar_birth.core.number_density_field",
                 "stellar_birth.ionization_rate_field",
                 "stellar_birth.magnetic_flux_density_field",
@@ -674,7 +677,7 @@ fn phenomenon_specs() -> Vec<PhenomenonSpec> {
                         "representation.k_B",
                         "stellar_birth.background_temperature",
                         "stellar_birth.column_number_density",
-                        "stellar_birth.composition.species_fraction_field",
+                        "stellar_birth.composition.species_number_fraction_field",
                         "stellar_birth.core.number_density_field",
                         "stellar_birth.ionization_rate_field",
                         "stellar_birth.magnetic_flux_density_field",
@@ -698,7 +701,7 @@ fn phenomenon_specs() -> Vec<PhenomenonSpec> {
                     input_ids: &[
                         "stellar_birth.background_temperature",
                         "stellar_birth.column_number_density",
-                        "stellar_birth.composition.species_fraction_field",
+                        "stellar_birth.composition.species_number_fraction_field",
                         "stellar_birth.radiation_flux_spectrum",
                     ],
                     output_id: "stellar_birth.dust_temperature_field",
@@ -759,23 +762,24 @@ fn phenomenon_specs() -> Vec<PhenomenonSpec> {
             }],
         },
         PhenomenonSpec {
-            phenomenon_id: "stellar_birth.phenomenon.enclosed_mass_history",
+            phenomenon_id: "stellar_birth.phenomenon.material_element_mass_history",
             input_ids: &[
                 "stellar_birth.collapse_elapsed_time",
                 "stellar_birth.collapse_mass_flow",
             ],
-            output_ids: &["stellar_birth.enclosed_mass"],
+            output_ids: &["stellar_birth.material_element.mass_history"],
             coverage_complete: false,
             attempts: &[AttemptSpec {
-                attempt_id: "stellar_birth.attempt.enclosed_mass_from_flow_history",
-                law_id: "candidate.mass_flow_time_integral",
+                attempt_id: "stellar_birth.attempt.material_mass_from_flow_history",
+                law_id: "candidate.material_element_mass_continuity",
                 input_ids: &[
                     "stellar_birth.collapse_elapsed_time",
                     "stellar_birth.collapse_mass_flow",
                 ],
-                output_id: "stellar_birth.enclosed_mass",
+                output_id: "stellar_birth.material_element.mass_history",
                 missing_dependency_ids: &[
-                    "collapse.initial_enclosed_mass_or_integration_boundary",
+                    "collapse.initial_material_mass_or_integration_boundary",
+                    "collapse.material_element_flux_and_topology_history",
                     "collapse.time_dependent_accretion_history",
                     "collapse.mass_loss_and_fragmentation_balance",
                 ],
@@ -783,25 +787,27 @@ fn phenomenon_specs() -> Vec<PhenomenonSpec> {
             }],
         },
         PhenomenonSpec {
-            phenomenon_id: "stellar_birth.phenomenon.centrifugal_radius",
+            phenomenon_id: "stellar_birth.phenomenon.material_element_circularization_length",
             input_ids: &[
                 "fundamental.G",
-                "stellar_birth.enclosed_mass",
-                "stellar_birth.specific_angular_momentum_field",
+                "stellar_birth.material_element.mass_history",
+                "stellar_birth.material_element.specific_angular_momentum_history",
             ],
-            output_ids: &["stellar_birth.centrifugal_radius"],
+            output_ids: &["stellar_birth.material_element.circularization_length_history"],
             coverage_complete: false,
             attempts: &[AttemptSpec {
-                attempt_id: "stellar_birth.attempt.centrifugal_radius_from_shell_state",
-                law_id: "candidate.angular_momentum_centrifugal_balance",
+                attempt_id: "stellar_birth.attempt.circularization_from_material_state",
+                law_id: "candidate.local_angular_momentum_circularization",
                 input_ids: &[
                     "fundamental.G",
-                    "stellar_birth.enclosed_mass",
-                    "stellar_birth.specific_angular_momentum_field",
+                    "stellar_birth.material_element.mass_history",
+                    "stellar_birth.material_element.specific_angular_momentum_history",
                 ],
-                output_id: "stellar_birth.centrifugal_radius",
+                output_id: "stellar_birth.material_element.circularization_length_history",
                 missing_dependency_ids: &[
-                    "collapse.angular_momentum_shell_history",
+                    "kinematics.derived_component_local_frame_law",
+                    "collapse.multicenter_binding_mass_functional",
+                    "collapse.angular_momentum_material_history",
                     "collapse.torque_and_magnetic_braking_law",
                     "multiplicity.variable_component_interaction_law",
                 ],
@@ -1009,7 +1015,7 @@ mod tests {
         let floor = sealed_absolute_physics_floor().unwrap();
         let view = AuditedFloorView::from_floor(&floor).unwrap();
         match stellar_birth_dimensional_census(&view) {
-            StellarBirthDimensionalCensusArtifact::Computed(census) => census,
+            StellarBirthDimensionalCensusArtifact::Computed(census) => *census,
             StellarBirthDimensionalCensusArtifact::Invalid(error) => {
                 panic!("current dimensional census is invalid: {}", error.detail)
             }
@@ -1101,10 +1107,7 @@ mod tests {
             .iter()
             .find(|variable| variable.id == "stellar_birth.component.topology")
             .unwrap();
-        assert_eq!(
-            topology.carrier,
-            DimensionalCarrier::VariableCardinalityTopology
-        );
+        assert_eq!(topology.carrier, CarrierKind::VariableCardinalityTopology);
         assert!(census
             .coverage_gap_ids
             .iter()
@@ -1143,25 +1146,53 @@ mod tests {
             .unwrap();
         assert_eq!(
             radiation.carrier,
-            DimensionalCarrier::SpectralFluxDensityPerLogFrequencyField
+            CarrierKind::SpectralFluxDensityPerLogFrequencyField
+        );
+
+        let collapse_flow = census
+            .variables
+            .iter()
+            .find(|variable| variable.id == "stellar_birth.collapse_mass_flow")
+            .unwrap();
+        assert_eq!(collapse_flow.carrier, CarrierKind::TimeScalarHistory);
+        let material_mass = census
+            .variables
+            .iter()
+            .find(|variable| variable.id == "stellar_birth.material_element.mass_history")
+            .unwrap();
+        assert_eq!(
+            material_mass.carrier,
+            CarrierKind::MaterialTimeScalarHistory
+        );
+        let angular_momentum = census
+            .variables
+            .iter()
+            .find(|variable| {
+                variable.id == "stellar_birth.material_element.specific_angular_momentum_history"
+            })
+            .unwrap();
+        assert_eq!(
+            angular_momentum.carrier,
+            CarrierKind::MaterialTimeVectorHistory
         );
 
         let history = census
             .phenomena
             .iter()
             .find(|phenomenon| {
-                phenomenon.phenomenon_id == "stellar_birth.phenomenon.enclosed_mass_history"
+                phenomenon.phenomenon_id == "stellar_birth.phenomenon.material_element_mass_history"
             })
             .unwrap();
         assert!(history.derivation_attempts[0]
             .missing_dependency_ids
             .iter()
-            .any(|id| id == "collapse.initial_enclosed_mass_or_integration_boundary"));
+            .any(|id| id == "collapse.initial_material_mass_or_integration_boundary"));
     }
 
     #[test]
     fn phenomenon_and_attempt_inputs_are_canonical_under_reordering() {
-        let variables = build_variables().unwrap();
+        let structure = stellar_birth_structure_schema().unwrap();
+        let variables = build_variables(&structure).unwrap();
         let registry: BTreeMap<_, _> = variables
             .iter()
             .map(|variable| (variable.id.as_str(), variable))
@@ -1203,5 +1234,17 @@ mod tests {
         )
         .unwrap();
         assert_eq!(forward, reversed);
+    }
+
+    #[test]
+    fn a_variable_whose_carrier_is_absent_fails_closed() {
+        let mut structure = stellar_birth_structure_schema().unwrap();
+        structure
+            .carrier_schemas
+            .retain(|carrier| carrier.kind != CarrierKind::Scalar);
+        assert!(matches!(
+            build_variables(&structure),
+            Err(CensusBuildError::UnknownCarrier(id)) if id == "scalar"
+        ));
     }
 }

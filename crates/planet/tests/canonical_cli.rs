@@ -16,7 +16,7 @@ fn the_no_argument_binary_enters_the_floor_only_runner_and_refuses() {
 
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stderr.is_empty());
-    assert!(stdout.starts_with("receipt=civsim.planet.run.v8\ncomplete=false\n"));
+    assert!(stdout.starts_with("receipt=civsim.planet.run.v9\ncomplete=false\n"));
     assert!(stdout.contains("absolute_floor_entries=3\n"));
     assert!(stdout.contains("representation.schema=\"civsim.units.si-representation.v1\"\n"));
     assert!(stdout.contains("event_count=6\n"));
@@ -49,7 +49,7 @@ fn the_no_argument_binary_enters_the_floor_only_runner_and_refuses() {
     );
     assert!(stdout.contains("refusal.0000.open_requirement.0001.analysis_count=0\n"));
     assert!(stdout.contains(".exhaustion.gap.chaos_protocol=not_applicable\n"));
-    assert!(stdout.contains("transcript=civsim.planet.transcript.v6\n"));
+    assert!(stdout.contains("transcript=civsim.planet.transcript.v7\n"));
     assert!(!stdout.contains(".kind=contingency\n"));
     assert!(!stdout.contains(".kind=written_state\n"));
 }
@@ -119,6 +119,63 @@ fn refusal_details_have_a_typed_read_only_api() {
     assert_eq!(census.variables().len(), 31);
     assert_eq!(census.phenomena().len(), 7);
     assert_eq!(census.coverage_gap_ids().len(), 6);
+    assert_eq!(
+        census.structure_schema_id(),
+        Some("civsim.planet.stellar-birth-structure.v1")
+    );
+    let component_registry = census
+        .component_registry_schema()
+        .expect("the component registry contract is visible");
+    assert_eq!(
+        component_registry.cardinality_rule_id(),
+        "realization_coordinate_defined_from_joint_measure_support"
+    );
+    assert_eq!(
+        component_registry.symmetry_rule_id(),
+        "permutation_equivariant_multiset"
+    );
+    assert_eq!(
+        component_registry.topology_label_authority_rule_id(),
+        "derived_physical_relation_only"
+    );
+    let species_registry = census
+        .species_registry_schema()
+        .expect("the species registry contract is visible");
+    assert_eq!(
+        species_registry.membership_rule_id(),
+        "floor_derived_only_or_named_refusal"
+    );
+    assert_eq!(census.index_domains().len(), 6);
+    let log_frequency = census
+        .index_domains()
+        .find(|domain| domain.id() == "stellar_birth.domain.log_frequency")
+        .expect("the log-frequency domain is visible");
+    assert_eq!(
+        log_frequency.reference_rule_id(),
+        "log_ratio_reference_is_gauge_shift"
+    );
+    assert_eq!(log_frequency.support_rule_id(), "joint_measure_defined");
+    assert_eq!(
+        log_frequency.resolution_rule_id(),
+        "convergence_derived_or_named_refusal"
+    );
+    assert_eq!(
+        log_frequency.capacity_rule_id(),
+        "engine_limit_is_named_refusal"
+    );
+    assert_eq!(census.carrier_schemas().len(), 11);
+    let composition_carrier = census
+        .carrier_schemas()
+        .find(|carrier| carrier.id() == "species_number_fraction_simplex")
+        .expect("the composition carrier is visible");
+    assert_eq!(
+        composition_carrier.measure_semantics_id(),
+        "number_fraction_over_complete_species_registry"
+    );
+    assert_eq!(
+        composition_carrier.support_rule_id(),
+        "complete_registry_support_or_named_refusal"
+    );
     let radiation = census
         .variables()
         .find(|variable| variable.id() == "stellar_birth.radiation_flux_spectrum")
@@ -127,14 +184,50 @@ fn refusal_details_have_a_typed_read_only_api() {
         radiation.carrier_id(),
         "spectral_flux_density_per_log_frequency_field"
     );
+    let composition = census
+        .variables()
+        .find(|variable| variable.id() == "stellar_birth.composition.species_number_fraction_field")
+        .expect("the number-fraction coordinate is visible");
+    assert_eq!(composition.carrier_id(), "species_number_fraction_simplex");
     let mass_history = census
         .phenomena()
-        .find(|phenomenon| phenomenon.id() == "stellar_birth.phenomenon.enclosed_mass_history")
+        .find(|phenomenon| {
+            phenomenon.id() == "stellar_birth.phenomenon.material_element_mass_history"
+        })
         .expect("the mass-history gap is visible");
     assert!(mass_history.derivation_attempts().any(|attempt| {
         attempt
             .missing_dependency_ids()
             .iter()
-            .any(|id| id == "collapse.initial_enclosed_mass_or_integration_boundary")
+            .any(|id| id == "collapse.initial_material_mass_or_integration_boundary")
     }));
+}
+
+#[test]
+fn the_structure_block_is_versioned_and_repeated_identically_in_both_refusals() {
+    let output = run(&[]);
+    let stdout = String::from_utf8(output.stdout).expect("receipt output is UTF-8");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        stdout
+            .matches(".structure.schema=\"civsim.planet.stellar-birth-structure.v1\"\n")
+            .count(),
+        2
+    );
+    assert_eq!(
+        stdout.matches(".structure.index_domain_count=6\n").count(),
+        2
+    );
+    assert_eq!(stdout.matches(".structure.carrier_count=11\n").count(), 2);
+    assert!(stdout.contains(
+        ".structure.species_registry.membership_rule=floor_derived_only_or_named_refusal\n"
+    ));
+    assert!(stdout.contains(
+        ".structure.component_registry.symmetry_rule=permutation_equivariant_multiset\n"
+    ));
+    assert!(stdout.contains(".structure.index_domain.0002.support_rule=joint_measure_defined\n"));
+    assert!(!stdout.contains(".structure.index_domain.0002.cardinality_rule="));
+    assert!(!stdout.contains("collapse_shell"));
+    assert!(!stdout.contains("enclosed_mass"));
 }

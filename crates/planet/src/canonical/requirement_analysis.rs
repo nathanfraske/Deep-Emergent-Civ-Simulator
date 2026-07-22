@@ -8,6 +8,10 @@ use super::stellar_birth_dimensions::{
     DimensionalDerivationAttempt, DimensionalVariable, PhenomenonDimensionalCensus,
     StellarBirthDimensionalCensus, StellarBirthDimensionalCensusArtifact,
 };
+use super::stellar_birth_structure::{
+    CarrierSchema, CarrierSchemaView, ComponentRegistrySchemaView, IndexDomain, IndexDomainView,
+    SpeciesRegistrySchemaView,
+};
 
 /// A typed, non-admitting analysis attached to an unresolved proof leaf.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -128,6 +132,34 @@ impl<'a> ExactDimensionalCensusView<'a> {
     pub fn base_dimension_ids(self) -> &'a [&'static str] {
         self.computed()
             .map_or(&[], |census| census.base_dimension_ids.as_slice())
+    }
+
+    pub fn structure_schema_id(self) -> Option<&'a str> {
+        self.computed().map(|census| census.structure.schema_id)
+    }
+
+    pub fn component_registry_schema(self) -> Option<ComponentRegistrySchemaView<'a>> {
+        self.computed()
+            .map(|census| ComponentRegistrySchemaView::new(&census.structure.component_registry))
+    }
+
+    pub fn species_registry_schema(self) -> Option<SpeciesRegistrySchemaView<'a>> {
+        self.computed()
+            .map(|census| SpeciesRegistrySchemaView::new(&census.structure.species_registry))
+    }
+
+    pub fn index_domains(self) -> impl ExactSizeIterator<Item = IndexDomainView<'a>> + 'a {
+        let domains: &'a [IndexDomain] = self
+            .computed()
+            .map_or(&[], |census| census.structure.index_domains.as_slice());
+        domains.iter().map(IndexDomainView::new)
+    }
+
+    pub fn carrier_schemas(self) -> impl ExactSizeIterator<Item = CarrierSchemaView<'a>> + 'a {
+        let schemas: &'a [CarrierSchema] = self
+            .computed()
+            .map_or(&[], |census| census.structure.carrier_schemas.as_slice());
+        schemas.iter().map(CarrierSchemaView::new)
     }
 
     pub fn variables(self) -> impl ExactSizeIterator<Item = DimensionalVariableView<'a>> + 'a {

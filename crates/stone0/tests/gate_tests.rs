@@ -146,13 +146,12 @@ fn gate_catches_planted_violations_in_a_temp_repo() {
     git(&["add", "-A"]);
     git(&["commit", "-q", "-m", "init"]);
 
-    let cfg = GateConfig {
-        repo_root: dir.clone(),
-        secrets_path: dir.join("nonexistent-secrets"),
-        tombstones_path: dir.join("stone0_tombstones.txt"),
-        mode: Mode::Local,
-        override_value: None,
-    };
+    let cfg = GateConfig::scan_only(
+        dir.clone(),
+        dir.join("nonexistent-secrets"),
+        dir.join("stone0_tombstones.txt"),
+        Mode::Local,
+    );
     let report = gate(&cfg);
     assert_eq!(
         report.verdict,
@@ -210,13 +209,7 @@ fn gate_catches_a_live_password_in_an_untracked_worktree_file() {
     )
     .unwrap();
 
-    let cfg = GateConfig {
-        repo_root: repo,
-        secrets_path: secrets,
-        tombstones_path: base.join("missing-tombstones"),
-        mode: Mode::Local,
-        override_value: None,
-    };
+    let cfg = GateConfig::scan_only(repo, secrets, base.join("missing-tombstones"), Mode::Local);
     let report = gate(&cfg);
     assert!(
         report
@@ -244,15 +237,14 @@ fn the_real_worktree_is_clean_of_native_detections() {
         }
     };
     let tombstones_path = root.join(TOMBSTONE_REL);
-    let cfg = GateConfig {
-        repo_root: root.clone(),
-        // Point at a nonexistent secrets file so the live-password and canary scans skip cleanly; this
-        // test asserts only that the native tombstone and override-env scans find nothing real.
-        secrets_path: root.join("crates/stone0/tests/__no_such_secret__"),
+    // Point at a nonexistent secrets file so the live-password and canary scans skip cleanly; this
+    // test asserts only that the native tombstone and override-env scans find nothing real.
+    let cfg = GateConfig::scan_only(
+        root.clone(),
+        root.join("crates/stone0/tests/__no_such_secret__"),
         tombstones_path,
-        mode: Mode::Local,
-        override_value: None,
-    };
+        Mode::Local,
+    );
     let report = gate(&cfg);
     // The provenance scan may or may not run (python may be absent). Filter to the native detections.
     let native: Vec<&String> = report

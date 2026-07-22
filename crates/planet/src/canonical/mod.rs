@@ -14,6 +14,7 @@ mod star_disk_system;
 mod stellar_birth_artifacts;
 mod stellar_birth_dimensions;
 mod stellar_birth_measure;
+mod stellar_birth_structure;
 mod transcript;
 
 pub use accounting::{
@@ -37,6 +38,9 @@ pub use requirement_analysis::{
 };
 pub use snapshot::PlanetSnapshot;
 pub use stage::Stage;
+pub use stellar_birth_structure::{
+    CarrierSchemaView, ComponentRegistrySchemaView, IndexDomainView, SpeciesRegistrySchemaView,
+};
 pub use transcript::{
     ContingencyEvent, GeneratedSubjectId, RepresentationReceipt, RepresentationValueRecord,
     RunEvent, RunEventKind, RunTranscript, TranscriptError, TranscriptSchema, WrittenStateEvent,
