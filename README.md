@@ -29,6 +29,11 @@ parked compatibility: biology, civilization, authored worldgen, causal
 presentation, scenarios, and the retired runner
 ```
 
+The [canonical derivation and observer-only viewer pipeline](docs/DERIVATION_AND_VIEWER_PIPELINE.md)
+maps the complete admission, stellar and planetary derivation, artifact,
+materialization, and rendering path. It distinguishes the implemented refusal
+frontier from future work that still lacks physical authority.
+
 `civsim-planet` owns the seven stages:
 
 1. star, disk, and system;
@@ -85,6 +90,7 @@ viewer. Legacy commands carry an explicit `legacy` or `parked` suffix and use
 
 ## Current records
 
+- `docs/DERIVATION_AND_VIEWER_PIPELINE.md`: GitHub-rendered end-to-end architecture map.
 - `HANDOFFS.md`: current state first, followed by preserved session history.
 - `TODOS.md`: the lean canonical planetary queue.
 - `docs/working/CONSENSUS_ROADMAP.md`: the live status board.

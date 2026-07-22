@@ -1,3 +1,13 @@
+> # PR #215 CANONICAL DERIVATION AND VIEWER ARCHITECTURE PAGE (2026-07-22, `claude/thermoelastic-rung3`, draft PR #215).
+>
+> **WHAT CHANGED.** Added `docs/DERIVATION_AND_VIEWER_PIPELINE.md` as the readily discoverable, GitHub-rendered map of the complete derive-first route. It follows physical admission through the sealed floor, current Stage 1 refusal, future stellar and planetary rungs, immutable observation, typed manifests, parent-bound materialization, and observer-only rendering. The root README links the page and the live visualization queue points to it.
+>
+> **AUTHORITY BOUNDARY.** The page is explanatory documentation, not an admission artifact. `CURRENT` and `FUTURE` labels prevent planned edges from appearing implemented. The diagram adds no value, source, provenance mark, closure, realization coordinate, classification branch, materialization permission, or viewer-to-physics edge. All seven marks, `[D]`, `[M]`, `[E]`, `[C]`, `[A]`, `[W]`, and `[X]`, remain accounting labels under the four ledger tiers.
+>
+> **VALIDATION.** Mermaid CLI 10.9.1 parses the complete fenced graph and renders it to SVG. The README link resolves, Markdown fences balance, the maintained-prose scan is clean, `make verify` passes, and repository diff hygiene is clean. The startup doctor produced no verdict before its bounded timeout, so no doctor pass or failure is claimed. The stop gate remains the final closing hook.
+>
+> **NEXT.** Keep implementation at viewer delivery step 1: add typed observer-only scene projections over the existing floor, provenance, transcript, and exact refusal artifacts. Do not construct artifact storage or a completed-system renderer before the corresponding physical and manifest authorities exist.
+>
 > # PR #215 SPECIES AUTHORITY EXHAUSTION AND SEALED OBSERVATION (2026-07-22, `claude/thermoelastic-rung3`, draft PR #215).
 >
 > **WHAT CHANGED.** The open Stage 1 joint-measure leaf now carries a second typed, non-admitting analysis after the exact dimensional census. A private `SpeciesDerivationAnalysisAuthority` can be constructed only from `AuditedFloorView`, the independently sealed physical-floor binding, and the validated stellar-birth structure. It records that `m_e` supplies an exact mass-coordinate anchor while supplying no species membership authority. Three ordered derive-first attempts expose the still-open registry, conditioned-support, exact-resource, ancestry, and integer-projection proofs. Candidate count, verified support count, value payload, and residual-slot claim remain zero or false. Gap Law, Chaos Protocol, Residual Law, and the unique residual slot remain explicitly not reached or not claimed.

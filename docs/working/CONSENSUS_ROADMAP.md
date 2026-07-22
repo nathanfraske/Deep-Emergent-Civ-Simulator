@@ -41,6 +41,7 @@ observer independence bind the full runpath.
 
 ## Recent landings
 
+- 2026-07-22  GitHub-rendered canonical derivation and observer-only viewer map distinguishes current refusal from future authority, artifact, materialization, and rendering layers -> `docs/DERIVATION_AND_VIEWER_PIPELINE.md`
 - 2026-07-22  Parked Linux compatibility is restored through private floor and capability bridges without adding a canonical dependency or physical authority -> `parked/crates/sim/src/lib.rs`, `parked/crates/viewer/src/render.rs`
 - 2026-07-22  A private exact species-state kernel verifies complete normalized support and reduces mean particle mass without familiar tables or switches; production authority and support remain absent -> `crates/planet/src/canonical/stellar_birth_species.rs`
 - 2026-07-22  A sealed species derivation analysis binds the exact floor and open registry schemas while reporting zero members, zero support, no value, no residual slot, and the ordered authority gaps -> `crates/planet/src/canonical/stellar_birth_species/authority_analysis/`
