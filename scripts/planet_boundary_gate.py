@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Seal the canonical planet path and its snapshot-only observer boundary.
+"""Seal the canonical planet path and its immutable observer boundary.
 
 The package half of this gate asks Cargo for the all-features dependency graph
 and walks outward from the workspace's ``civsim-planet`` package. It rejects a
@@ -37,11 +37,11 @@ pair an admitted ID with an arbitrary magnitude.
 
 The observer half starts from the workspace's ``civsim-viewer`` package. Cargo
 may cross its one direct edge to ``civsim-planet``, but that package is treated
-as an opaque snapshot provider: planet's own physics closure is not mistaken
+as an opaque observation provider: planet's own physics closure is not mistaken
 for a viewer dependency. Every other reachable legacy, causal, or parked edge
-is rejected. Viewer Rust may borrow ``PlanetSnapshot`` and adapt its immutable
-fields; it may not construct, evolve, repair, default, or otherwise supply
-planet state.
+is rejected. Viewer Rust may receive a sealed ``PlanetObservation``, borrow
+``PlanetSnapshot``, and inspect an immutable ``RunReceipt``; it may not
+construct, evolve, repair, default, or otherwise supply planet state.
 
 Historical and evidence prose may describe the retired method, but no calibration
 token is legal in executable canonical-front-door source. Canonical planet files
@@ -291,6 +291,41 @@ PLANET_FRONT_DOOR_SOURCE_RULES = (
             r"(?:assume_valid|from_authored|from_per_world|new_unchecked|unchecked)\b",
         ),
     ),
+    (
+        "public PlanetRunOutcome enum",
+        re.compile(r"\bpub\s+enum\s+PlanetRunOutcome\b"),
+    ),
+    (
+        "public PlanetRunOutcome field",
+        re.compile(
+            r"\bpub\s+struct\s+PlanetRunOutcome\s*\{"
+            r"(?:(?!\}).)*\bpub(?:\([^)]*\))?\s+",
+            re.DOTALL,
+        ),
+    ),
+    (
+        "public PlanetRunOutcome tuple field",
+        re.compile(
+            r"\bpub\s+struct\s+PlanetRunOutcome\s*\(\s*"
+            r"pub(?:\([^)]*\))?\s+",
+            re.DOTALL,
+        ),
+    ),
+    (
+        "public PlanetRunOutcome unit constructor",
+        re.compile(r"\bpub\s+struct\s+PlanetRunOutcome\s*;"),
+    ),
+    (
+        "public PlanetRunOutcome constructor",
+        re.compile(
+            r"\bimpl\s+PlanetRunOutcome\s*\{"
+            r"(?:(?!^\}).)*?\bpub(?:\([^)]*\))?\s+"
+            r"(?:const\s+)?fn\s+\w+(?:\s*<[^>{};]*>)?\s*"
+            r"\([^)]*\)\s*->\s*(?:(?!\{).)*"
+            r"\b(?:Self|PlanetRunOutcome)\b",
+            re.DOTALL | re.MULTILINE,
+        ),
+    ),
 )
 
 # Pre-migration abiotic modules compile and run their tests in the separate
@@ -384,8 +419,21 @@ VIEWER_SOURCE_RULES = (
         re.compile(r"\b(?:use|extern\s+crate)\s+civsim_planet\s+as\b"),
     ),
     (
-        "non-snapshot civsim_planet API",
-        re.compile(r"\bcivsim_planet\s*::\s*(?!PlanetSnapshot\b)"),
+        "civsim_planet grouped import",
+        re.compile(r"\buse\s+civsim_planet\s*::\s*\{"),
+    ),
+    (
+        "observer item alias",
+        re.compile(
+            r"\buse\s+civsim_planet\s*::\s*"
+            r"(?:PlanetObservation|PlanetSnapshot|RunReceipt)\s+as\b"
+        ),
+    ),
+    (
+        "non-observer civsim_planet API",
+        re.compile(
+            r"\bcivsim_planet\s*::\s*(?!(?:PlanetObservation|PlanetSnapshot|RunReceipt)\b)"
+        ),
     ),
     ("run_planet", re.compile(r"\brun_planet\b")),
     ("PlanetRunSpec", re.compile(r"\bPlanetRunSpec\b")),
@@ -419,6 +467,44 @@ VIEWER_SOURCE_RULES = (
         "PlanetSnapshot construction",
         re.compile(
             r"\bPlanetSnapshot\s*(?:::|\{\s*(?:[A-Za-z_]\w*\s*:|\}))"
+        ),
+    ),
+    (
+        "mutable PlanetObservation borrow",
+        re.compile(r"&\s*mut\s+(?:civsim_planet\s*::\s*)?PlanetObservation\b"),
+    ),
+    (
+        "PlanetObservation construction",
+        re.compile(
+            r"\bPlanetObservation\s*(?:::|\{\s*(?:[A-Za-z_]\w*\s*:|\}))"
+        ),
+    ),
+    (
+        "mutable RunReceipt borrow",
+        re.compile(r"&\s*mut\s+(?:civsim_planet\s*::\s*)?RunReceipt\b"),
+    ),
+    (
+        "owned RunReceipt input",
+        re.compile(
+            r"(?<!:):(?!:)\s*(?!&)"
+            r"(?:civsim_planet\s*::\s*)?RunReceipt\b"
+        ),
+    ),
+    (
+        "owned RunReceipt output",
+        re.compile(r"->\s*(?:civsim_planet\s*::\s*)?RunReceipt\b"),
+    ),
+    (
+        "RunReceipt construction",
+        re.compile(r"\bRunReceipt\s*(?:::|\{\s*(?:[A-Za-z_]\w*\s*:|\}))"),
+    ),
+    (
+        "observer type alias",
+        re.compile(
+            r"\btype\s+[A-Za-z_]\w*(?:\s*<[^;=]*>)?\s*=\s*"
+            r"(?:civsim_planet\s*::\s*)?"
+            r"(?:PlanetObservation|PlanetSnapshot|RunReceipt)\b",
+            re.DOTALL,
         ),
     ),
     (
@@ -1031,7 +1117,7 @@ def _viewer_dependency_violations(
         order.append(package_id)
         package_name = _package_name(package_by_id, package_id)
         if package_id == canonical_planet_id:
-            # The viewer is allowed to see PlanetSnapshot through this edge. The
+            # The viewer is allowed to see sealed observation artifacts through this edge. The
             # provider's causal closure belongs to the planet gate, not the observer.
             continue
         node = nodes_by_id.get(package_id)
@@ -1325,6 +1411,15 @@ def _source_violations(
                     rules=LEDGER_VALUE_AUTHORITY_SOURCE_RULES,
                 )
             )
+        if package_name == VIEWER_PACKAGE:
+            violations.extend(
+                _whole_source_rule_violations(
+                    active_text,
+                    package_name=package_name,
+                    display=display,
+                    rules=VIEWER_SOURCE_RULES,
+                )
+            )
     return sorted(set(violations))
 
 
@@ -1501,6 +1596,11 @@ def _fixture_clean(root: pathlib.Path) -> None:
             "//! The canonical floor-only surface.\n"
             "pub mod canonical;\n"
             "pub struct PlanetSnapshot;\n"
+            "pub struct RunReceipt;\n"
+            "pub struct PlanetObservation<'a>(&'a RunReceipt);\n"
+            "impl<'a> PlanetObservation<'a> {\n"
+            "    pub fn receipt(&self) -> &'a RunReceipt { self.0 }\n"
+            "}\n"
         ),
     )
     _write_crate(
@@ -1539,11 +1639,18 @@ def _fixture_clean(root: pathlib.Path) -> None:
         VIEWER_PACKAGE,
         dependencies=(("civsim-planet", "../planet"),),
         source=(
+            "use civsim_planet::PlanetObservation;\n"
             "use civsim_planet::PlanetSnapshot;\n"
+            "use civsim_planet::RunReceipt;\n"
             "pub struct View<'a> { snapshot: &'a PlanetSnapshot }\n"
+            "pub struct RunView<'a> { observation: PlanetObservation<'a> }\n"
             "impl<'a> View<'a> {\n"
             "    pub fn new(snapshot: &'a PlanetSnapshot) -> Self { Self { snapshot } }\n"
             "    pub fn world(&self) -> &'a PlanetSnapshot { self.snapshot }\n"
+            "}\n"
+            "impl<'a> RunView<'a> {\n"
+            "    pub fn new(observation: PlanetObservation<'a>) -> Self { Self { observation } }\n"
+            "    pub fn receipt(&self) -> &'a RunReceipt { self.observation.receipt() }\n"
             "}\n"
         ),
     )
@@ -1794,6 +1901,11 @@ fn probe(world_ledger: &Ledger, floor: &AbsolutePhysicsFloor) {
     let _: Option<PerWorldValue> = None;
     let _ = ValidatedAbsolutePhysicsFloor::new_unchecked();
 }
+pub enum PlanetRunOutcome { Refused }
+pub struct PlanetRunOutcome { pub receipt: u8 }
+pub struct PlanetRunOutcome(pub u8);
+pub struct PlanetRunOutcome;
+impl PlanetRunOutcome { pub fn forge() -> Self { loop {} } }
 """
         _write(
             front_door_root
@@ -1991,6 +2103,10 @@ use civsim_world::Coord3;
 extern crate civsim_viewer_legacy;
 use civsim_planet as causal_planet;
 use civsim_planet::run_planet;
+use civsim_planet::{PlanetObservation, PlanetSnapshot, RunReceipt};
+use civsim_planet::PlanetSnapshot as HiddenSnapshot;
+
+type HiddenObservation<'a> = PlanetObservation<'a>;
 
 const MIRROR_WORLD_SEED: u64 = 0;
 const SUN_DEFAULT: u8 = 1;
@@ -2000,6 +2116,19 @@ const PHYSICAL_TIMESTEP_MYR: u8 = 20;
 fn own(snapshot: PlanetSnapshot) -> PlanetSnapshot { snapshot }
 fn mutate(snapshot: &mut PlanetSnapshot) {
     snapshot.advance();
+}
+fn mutate_observation(observation: &mut PlanetObservation<'_>) {
+    observation.advance();
+}
+fn construct_observation() {
+    let _ = PlanetObservation::default();
+}
+fn mutate_receipt(receipt: &mut RunReceipt) {
+    receipt.repair();
+}
+fn own_receipt(receipt: RunReceipt) -> RunReceipt { receipt }
+fn construct_receipt() {
+    let _ = RunReceipt::default();
 }
 
 fn probe() {
@@ -2052,7 +2181,7 @@ fn probe() {
         "planet boundary gate self-test: PASS "
         "(ledger value authority, private active-candidate substrate, typed-adapter-only canonical "
         "front door, integer-only canonical arithmetic, generic floor lookup rejection, viewer "
-        "dependency, snapshot-only source, and alien-default canaries exercised)"
+        "dependency, immutable-observation source, and alien-default canaries exercised)"
     )
     return 0
 
@@ -2085,7 +2214,7 @@ def main(argv: list[str] | None = None) -> int:
         "(ledger cannot authorize values, fourteen raw planet modules and the sealed floor bridge are "
         "private in the separate active-candidate package, canonical runtime reaches only ledger and "
         "units until typed adapters land, canonical arithmetic is integer-only, and viewer is a "
-        "snapshot-only leaf)"
+        "an immutable-observation leaf)"
     )
     return 0
 

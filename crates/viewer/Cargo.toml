@@ -1,6 +1,6 @@
 [package]
 name = "civsim-viewer"
-description = "Observer-only adapter for immutable canonical planet snapshots."
+description = "Observer-only adapter for immutable canonical planet run artifacts."
 authors.workspace = true
 license.workspace = true
 edition.workspace = true

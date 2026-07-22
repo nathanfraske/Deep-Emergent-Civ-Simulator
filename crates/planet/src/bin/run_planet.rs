@@ -1,6 +1,4 @@
-use civsim_planet::{
-    readiness_receipt, run_planet, sealed_absolute_physics_floor, PlanetRunOutcome,
-};
+use civsim_planet::{readiness_receipt, run_planet, sealed_absolute_physics_floor};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -33,7 +31,7 @@ fn main() {
     };
     let outcome = run_planet(&floor);
     print!("{}", outcome.receipt());
-    if matches!(outcome, PlanetRunOutcome::Refused(_)) {
+    if outcome.is_refused() {
         std::process::exit(2);
     }
 }

@@ -51,11 +51,12 @@ impl PlanetSnapshot {
 
 #[cfg(test)]
 mod tests {
-    use crate::canonical::{readiness_receipt, PlanetRunOutcome, PlanetSnapshot};
+    use crate::canonical::{run_planet, sealed_absolute_physics_floor, PlanetSnapshot};
 
     #[test]
     fn a_refusal_cannot_be_promoted_to_a_snapshot() {
-        let outcome = PlanetRunOutcome::Refused(readiness_receipt());
+        let floor = sealed_absolute_physics_floor().expect("the physical floor seals");
+        let outcome = run_planet(&floor);
         assert!(outcome.snapshot().is_none());
         assert!(PlanetSnapshot::from_complete(outcome.receipt().clone()).is_none());
     }

@@ -19,6 +19,14 @@
     )
 )]
 
+mod authority_analysis;
+
+pub(super) use authority_analysis::{
+    analyze_repository_species_state_support, write_species_derivation_analysis,
+    SpeciesDerivationAnalysisArtifact,
+};
+pub use authority_analysis::{SpeciesDerivationAnalysisView, SpeciesDerivationAttemptView};
+
 use civsim_units::bignum::BigRat;
 use std::{cmp::Ordering, fmt};
 

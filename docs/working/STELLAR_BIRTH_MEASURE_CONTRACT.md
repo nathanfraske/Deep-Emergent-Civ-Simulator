@@ -2,7 +2,8 @@
 
 Status: executable leaf-closure evaluator, replayable floor, partial exact
 dimensional census, modular value-free structure schema, open stellar-state
-and classification contracts, and a private exact species-state reducer
+and classification contracts, a private exact species-state reducer, and a
+sealed non-admitting species derivation analysis
 implemented; both physical obligations remain unresolved and the canonical
 runner reports their exact frontier before refusing.
 
@@ -44,7 +45,7 @@ execution relations, physical admissions, and the complete ordered receipt
 content. One sealed physical-floor authority binding covers those ordered
 registries and receipt pins under
 `civsim.units.physical-floor-authority-binding.v1`. Derived values replay from
-exact projected ancestry published in transcript schema major 8, with typed SI
+exact projected ancestry published in transcript schema major 9, with typed SI
 dimensions and exact-symbol ancestry checked from the formula. Physical helper APIs require the same sealed
 execution capability and cannot bind or mutate its values. This closes the
 representation and API reachability seams; it does not close either
@@ -179,12 +180,29 @@ molecular convention.
 This does not derive a species or a mass. The opaque state proof and registry
 authority in this slice are structural seals with no production constructors,
 bound payloads, or semantic checkers. The repository resolver returns `None`,
-so no production path can call the reducer and the refusal bytes remain
-unchanged. A future smart authority must bind content identity, exact mass and
+so no production path can call the reducer. The joint-measure refusal now
+includes a separate `civsim.planet.stellar-birth-species-derivation-analysis.v1`
+report. Its private authority is constructible only from the audited floor, the
+independently sealed floor digest, and the validated structure schemas. It
+records the exact `m_e` coordinate as a mass anchor with
+`membership_authority=false`, then reports zero candidate members, zero
+verified support members, no value payload, and no residual-slot claim. The
+three ordered attempts remain blocked on complete registry descriptors,
+mass and state ancestry, sector and validity proof, conditioned support and
+zero-coordinate semantics, exact resource bounds, joint-measure binding, and
+an integer projection schema. Dimension-only reachability is not physical
+closure, so Gap Law, Chaos Protocol, Residual Law, and the unique residual slot
+remain not reached or not claimed. This analysis has `closure_effect=none` and
+`coverage_claim=false`.
+
+A future smart authority must bind content identity, exact mass and
 dimension ancestry, charge and physical state, active sectors and couplings,
 validity domain, dependency graph, complete joint support measure,
 normalization proof, absolute floor, schemas, checker versions, and replay
-identity before this law can contribute to the joint measure. It must also
+identity before this law can contribute to the joint measure. It must separate
+the realized registry from conditioned positive support and explicitly prove
+whether omitted registry coordinates are exact zero or use an admitted sparse
+encoding. It must also
 declare finite support-count and rational numerator, denominator, and operation
 domains so expanding catalogs cannot create an unbounded execution claim. A
 later quantity schema must separately derive and receipt the finite integer
@@ -221,10 +239,10 @@ three physical floor values, derives `eps_0`, enters Stage 1, and returns
 `stellar_birth.realization_measure`. It emits six transcript events: three
 floor records, one derived-value record, one Stage 1 entry, and one refusal.
 It emits no `[X]`, no `[W]` realization, and no snapshot. Repeated runs are
-byte-identical at `352,852` stdout bytes and SHA-256
-`b008e54a81202216b94eb842a86f928f50eee6c38b19d8b7b4cbb1d3520c8a10`.
-The current receipt is `civsim.planet.run.v10`; its transcript schema major is
-`8`.
+byte-identical at `367,626` stdout bytes and SHA-256
+`ecb2ea0c0aeffe5b487f84d5de1a61d9797fa2e6d6ee6a26b08df980b9ddf392`.
+The current receipt is `civsim.planet.run.v11`; its transcript schema major is
+`9`.
 
 The three-node graph now executes as a fixed-order conjunction over two opaque
 repository-owned proof capabilities. The production resolver currently
@@ -233,15 +251,20 @@ identities in canonical order. Tests prove the full four-state truth table:
 neither proof, either partial proof, and both proofs. No matching string,
 ledger tag, source citation, scalar, or caller boolean can construct a proof.
 Every open leaf retains a machine-readable obligation list, and both lists
-include `gap_law.chaos_protocol`. Only the joint-measure leaf carries the exact
-census analysis. The coordinate-law leaf has analysis count zero. Receipt and
+include `gap_law.chaos_protocol`. Only the joint-measure leaf carries analyses:
+the exact dimensional census first and the species derivation frontier second.
+Both are permanently non-admitting. The coordinate-law leaf has analysis count
+zero. Receipt and
 transcript call one prefix-aware serializer for the shared payload, so their
 two views cannot drift independently. The structure is serialized only beneath
 the non-admitting joint-measure census. Library callers can inspect both
 identity registries, the composed stellar-state contract and its four nested
 registries, every domain and carrier, every variable, phenomenon, attempt, and
 gap through immutable typed views without parsing display text or acquiring a
-proof-construction surface.
+proof-construction surface. `PlanetRunOutcome::observation()` also exposes the
+same refused receipt through a sealed borrowed projection. The viewer can read
+that projection but cannot receive the causal outcome, call the runner,
+construct the token, promote a refusal, or mutate physical state.
 
 ## Retained mechanism boundary
 

@@ -36,8 +36,9 @@ real binary. It follows these rules:
   loads/flexure, then an immutable snapshot.
 - Physical time and termination belong to the planet runner. Observer cadence,
   playback, camera, and rendering cannot advance or mutate planet state.
-- A canonical viewer borrows only a completed immutable `PlanetSnapshot` and
-  may transform that snapshot into presentation data.
+- A canonical viewer receives only a sealed borrowed `PlanetObservation`. It
+  may inspect an exact refusal or transform a completed immutable
+  `PlanetSnapshot` into presentation data.
 
 The four tiers describe where a value resides, not four equivalent input
 channels. Universal floor entries can enter preflight. Reference and Residue

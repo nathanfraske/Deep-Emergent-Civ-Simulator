@@ -1,6 +1,7 @@
 use super::{
     requirement_analysis::{RequirementAnalysis, RequirementAnalysisPayload},
     stellar_birth_dimensions::StellarBirthDimensionalCensusArtifact,
+    stellar_birth_species::write_species_derivation_analysis,
     stellar_birth_structure::write_stellar_birth_structure,
     transcript::canonical_text,
     EventId, RealizationId, RunEventKind, RunTranscript, Stage, TranscriptError,
@@ -392,7 +393,7 @@ fn stage_index(stage: Stage) -> usize {
 
 impl fmt::Display for RunReceipt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "receipt=civsim.planet.run.v10")?;
+        writeln!(f, "receipt=civsim.planet.run.v11")?;
         writeln!(f, "complete={}", self.is_complete())?;
         writeln!(
             f,
@@ -511,6 +512,9 @@ fn write_requirement_analysis(
     match &analysis.payload {
         RequirementAnalysisPayload::ExactDimensionalCensus(census) => {
             write_dimensional_census(f, prefix, census)
+        }
+        RequirementAnalysisPayload::SpeciesStateDerivation(analysis) => {
+            write_species_derivation_analysis(f, prefix, analysis)
         }
     }
 }

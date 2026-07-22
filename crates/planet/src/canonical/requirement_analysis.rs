@@ -8,6 +8,10 @@ use super::stellar_birth_dimensions::{
     DimensionalDerivationAttempt, DimensionalVariable, PhenomenonDimensionalCensus,
     StellarBirthDimensionalCensus, StellarBirthDimensionalCensusArtifact,
 };
+use super::stellar_birth_species::SpeciesDerivationAnalysisArtifact;
+pub use super::stellar_birth_species::{
+    SpeciesDerivationAnalysisView, SpeciesDerivationAttemptView,
+};
 use super::stellar_birth_structure::{
     CarrierSchema, CarrierSchemaView, ComponentRegistrySchemaView, IndexDomain, IndexDomainView,
     SpeciesRegistrySchemaView, StellarStateSchemaView,
@@ -46,6 +50,7 @@ pub struct DimensionalAttemptView<'a> {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum RequirementAnalysisPayload {
     ExactDimensionalCensus(StellarBirthDimensionalCensusArtifact),
+    SpeciesStateDerivation(SpeciesDerivationAnalysisArtifact),
 }
 
 impl RequirementAnalysis {
@@ -55,27 +60,37 @@ impl RequirementAnalysis {
         }
     }
 
+    pub(super) fn species_state_derivation(analysis: SpeciesDerivationAnalysisArtifact) -> Self {
+        Self {
+            payload: RequirementAnalysisPayload::SpeciesStateDerivation(analysis),
+        }
+    }
+
     pub const fn kind_id(&self) -> &'static str {
         match self.payload {
             RequirementAnalysisPayload::ExactDimensionalCensus(_) => "exact_dimensional_census",
+            RequirementAnalysisPayload::SpeciesStateDerivation(_) => "species_state_derivation",
         }
     }
 
     pub const fn schema_id(&self) -> &'static str {
         match &self.payload {
             RequirementAnalysisPayload::ExactDimensionalCensus(census) => census.schema_id(),
+            RequirementAnalysisPayload::SpeciesStateDerivation(analysis) => analysis.schema_id(),
         }
     }
 
     pub const fn checker_id(&self) -> &'static str {
         match &self.payload {
             RequirementAnalysisPayload::ExactDimensionalCensus(census) => census.checker_id(),
+            RequirementAnalysisPayload::SpeciesStateDerivation(analysis) => analysis.checker_id(),
         }
     }
 
     pub const fn status_id(&self) -> &'static str {
         match &self.payload {
             RequirementAnalysisPayload::ExactDimensionalCensus(census) => census.status_id(),
+            RequirementAnalysisPayload::SpeciesStateDerivation(analysis) => analysis.status_id(),
         }
     }
 
@@ -84,12 +99,18 @@ impl RequirementAnalysis {
             RequirementAnalysisPayload::ExactDimensionalCensus(census) => {
                 census.closure_effect().id()
             }
+            RequirementAnalysisPayload::SpeciesStateDerivation(analysis) => {
+                analysis.closure_effect_id()
+            }
         }
     }
 
     pub const fn coverage_claim(&self) -> bool {
         match &self.payload {
             RequirementAnalysisPayload::ExactDimensionalCensus(census) => census.coverage_claim(),
+            RequirementAnalysisPayload::SpeciesStateDerivation(analysis) => {
+                analysis.coverage_claim()
+            }
         }
     }
 
@@ -98,6 +119,19 @@ impl RequirementAnalysis {
         match &self.payload {
             RequirementAnalysisPayload::ExactDimensionalCensus(artifact) => {
                 Some(ExactDimensionalCensusView { artifact })
+            }
+            RequirementAnalysisPayload::SpeciesStateDerivation(_) => None,
+        }
+    }
+
+    /// Inspect why species-state authority remains unavailable without gaining it.
+    pub const fn species_derivation_analysis_view(
+        &self,
+    ) -> Option<SpeciesDerivationAnalysisView<'_>> {
+        match &self.payload {
+            RequirementAnalysisPayload::ExactDimensionalCensus(_) => None,
+            RequirementAnalysisPayload::SpeciesStateDerivation(artifact) => {
+                Some(SpeciesDerivationAnalysisView::new(artifact))
             }
         }
     }

@@ -4,6 +4,7 @@ mod accounting;
 mod catalog;
 mod floor_magnitudes;
 mod identity;
+mod observation;
 mod pipeline;
 mod preflight;
 mod receipt;
@@ -30,12 +31,14 @@ pub use civsim_ledger::{
     FloorAdmissionError, GapLawReceipt, ResidualLawReceipt,
 };
 pub use identity::{BodyId, ContingencyDrawId, EventId, RealizationId, ReservoirId};
+pub use observation::PlanetObservation;
 pub use pipeline::{readiness_receipt, run_planet, PlanetRunOutcome};
 pub use preflight::preflight;
 pub use receipt::{OpenRequirement, Refusal, RefusalCode, RunReceipt, StageReceipt, StageStatus};
 pub use requirement_analysis::{
     DimensionalAttemptView, DimensionalPhenomenonView, DimensionalVariableView,
-    ExactDimensionalCensusView, RequirementAnalysis,
+    ExactDimensionalCensusView, RequirementAnalysis, SpeciesDerivationAnalysisView,
+    SpeciesDerivationAttemptView,
 };
 pub use snapshot::PlanetSnapshot;
 pub use stage::Stage;

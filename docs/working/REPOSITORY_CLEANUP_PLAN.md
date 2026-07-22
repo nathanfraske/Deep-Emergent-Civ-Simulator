@@ -46,7 +46,7 @@ sealed floor + ledger + units
               |
       canonical planet stages
               +--> receipts and immutable snapshots
-              `--> viewer, as a snapshot-only leaf
+              `--> viewer, as an immutable-observation leaf
 
 active candidate substrate
   core + physics + materials + physical world operators
@@ -286,8 +286,9 @@ treated as display cadence.
 Preserve the existing causal viewer as historical evidence under `parked/`.
 Compatibility edits may make new absence and refusal contracts explicit, but
 may not supply a replacement physical value. The root viewer
-is a new snapshot-only leaf and must refuse until an immutable snapshot input is
-wired. Rebuild any useful observer transformations from snapshot fields; do not
+is a new immutable-observation leaf. It may inspect a typed refusal now and
+must refuse rendering until an immutable snapshot input is wired. Rebuild any
+useful observer transformations from snapshot fields; do not
 promote the old viewer's fixture constants or integration loop into `planet`.
 
 Acceptance receipt: the viewer depends on immutable snapshots and receipts,
@@ -352,7 +353,7 @@ Evidence custody does not admit a canonical magnitude.
 
 1. LANDED IN WORKTREE: control-plane repair, parked legacy boundary,
    `civsim-planet`, dependency gate, generated ledger inventory, typed sealed
-   magnitudes, snapshot-only viewer, sole log-sum-exp provider, and named Stage
+   magnitudes, immutable-observation viewer, sole log-sum-exp provider, and named Stage
    1 refusal. Missing fusion volume and the incomplete H&K pressure range now
    produce structured Gap Law refusals. Active physics, world, GPU, and core
    legacy surfaces are separated from their parked compatibility facades.

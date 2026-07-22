@@ -290,9 +290,9 @@ Two direct no-argument runs produced:
 - zero stderr bytes;
 - six transcript events;
 - no `[W]`, no `[X]`, and no snapshot;
-- byte-identical stdout of `352,852` bytes, SHA-256
-  `b008e54a81202216b94eb842a86f928f50eee6c38b19d8b7b4cbb1d3520c8a10`;
-- receipt `civsim.planet.run.v10` and transcript schema major `8`;
+- byte-identical stdout of `367,626` bytes, SHA-256
+  `ecb2ea0c0aeffe5b487f84d5de1a61d9797fa2e6d6ee6a26b08df980b9ddf392`;
+- receipt `civsim.planet.run.v11` and transcript schema major `9`;
 - refusal `stellar_birth.realization_measure` at Stage 1.
 
 The umbrella refusal has two unresolved leaves:
@@ -300,18 +300,27 @@ The umbrella refusal has two unresolved leaves:
 `stellar_birth.realization_coordinate_law`. The executable evaluator serializes
 those leaves in fixed canonical order. The repository resolver supplies neither
 opaque proof capability yet, so the root refusal is the correct output.
-Only the open joint-measure leaf carries one
-`exact_dimensional_census` analysis. Census v4 contains 31 typed, value-free
+Only the open joint-measure leaf carries analyses. The first is the
+`exact_dimensional_census`. Census v4 contains 31 typed, value-free
 coordinates, seven phenomenon-local matrices, two realized-membership
 contracts, six shared domains, eleven carrier schemas, and the composed open
 stellar-state contract with coordinate, dimension-basis, interaction-sector,
 physical-regime, and classification registries. Its status is `computed`, its
-`closure_effect` is `none`, and its `coverage_claim` is `false`. The open
-coordinate-law leaf carries analysis count zero.
+`closure_effect` is `none`, and its `coverage_claim` is `false`. The second is
+the v1 species derivation analysis. It binds the floor digest and exact mass
+anchor to the validated open schemas while reporting zero candidate members,
+zero verified support, no value payload, no residual slot, and eight ordered
+open proofs. Its status is `open_dependencies`, its `closure_effect` is `none`,
+and its `coverage_claim` is `false`. Gap Law, Chaos Protocol, and Residual Law
+remain not reached. The open coordinate-law leaf carries analysis count zero.
 
 ## Verified reachability
 
-The active viewer borrows an immutable snapshot and cannot construct or
+The active viewer accepts only a sealed borrowed observation of an immutable
+snapshot or exact refusal receipt. `PlanetRunOutcome` is a public query wrapper
+over private state, so an external caller cannot forge an outcome and use it to
+mint an observation. The viewer cannot receive the causal outcome, call the
+runner, construct the observation, promote a refusal, mutate a receipt, or
 advance a world. The canonical package depends at runtime only on ledger and
 units. Retained star, disk, planet, crust, geodynamics, deep-time, moon, and
 flexure code is private in `civsim-planet-substrate`; it is not reachable from
@@ -321,21 +330,32 @@ civilization, authored world generation, and the old causal viewer remain in
 
 ## Validation
 
-The complete planet library passes 67 tests. Seven external CLI tests cover the
-typed views, duplicated refusal wire, deterministic output, canonical versions,
-and input refusal. Focused warnings-denied planet and units Clippy, formatting,
-diff hygiene, and the planet boundary gate are clean. The complete Linux
-`check-pr` recipe passed with exit 0 in 854 seconds. It covered hook and gate
-canaries, every declarative PR boundary, the canonical inventory, the
-ten-package all-target suite, GPU integer/no-float and available-backend parity,
+Focused warnings-denied Clippy, 71 planet library tests, eight CLI tests, three
+viewer tests, and doctests cover the typed views, duplicated refusal wire,
+deterministic output, canonical versions, input refusal, observer projection,
+and the non-admitting species frontier. Formatting, diff hygiene, and the
+strengthened planet boundary self-test are clean. The complete Linux
+`check-pr` parity recipe passes in 793.6 seconds, including hooks and canaries,
+every declarative gate, ledger regeneration, the ten-package all-target suite,
+deterministic GPU integer and no-float checks, available-backend parity,
 warnings-denied Clippy, Rustdoc, and doctests.
 
-Two post-gate direct binary runs confirm exit `2`, zero stderr bytes,
-`352,852` stdout bytes, byte equality, and SHA-256
-`b008e54a81202216b94eb842a86f928f50eee6c38b19d8b7b4cbb1d3520c8a10`.
-No earlier receipt or inventory pin is evidence for the v10 result.
+Clean and hostile-environment direct binary runs confirm exit `2`, zero stderr
+bytes, `367,626` stdout bytes, byte equality, and SHA-256
+`ecb2ea0c0aeffe5b487f84d5de1a61d9797fa2e6d6ee6a26b08df980b9ddf392`.
+No earlier receipt or inventory pin is evidence for the v11 result.
 
-One blind-generalizer pass was run against frozen candidate and specification
+One bounded blind-generalizer pass over the species-analysis and observation
+slice found one live observer-provenance defect. The public outcome enum could
+be forged by an external caller and projected into a nominally sealed
+observation without running the canonical pipeline. Replacing it with a public
+query wrapper over private state closes that path, and source canaries now
+reject a public outcome enum, named or tuple field, unit form, or constructor.
+The pass found no other live false closure, Gap Law, Chaos Protocol, or Residual
+Law shortcut, Terran selector, nondeterministic wire order, or schema-version
+mismatch. The dormant species proofs remain explicit future activation debt.
+
+One earlier floor blind-generalizer pass was run against frozen candidate and specification
 packets, as requested instead of the historical six-pass overnight loop:
 
 - candidate SHA-256

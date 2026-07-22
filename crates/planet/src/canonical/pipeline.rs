@@ -5,26 +5,55 @@ use super::{
 use civsim_ledger::AbsolutePhysicsFloor;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PlanetRunOutcome {
-    Complete {
-        receipt: RunReceipt,
-        snapshot: PlanetSnapshot,
-    },
+pub struct PlanetRunOutcome {
+    state: PlanetRunState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PlanetRunState {
+    #[expect(
+        dead_code,
+        reason = "armed for the first complete canonical planet snapshot"
+    )]
+    Complete(PlanetSnapshot),
     Refused(RunReceipt),
 }
 
 impl PlanetRunOutcome {
+    fn refused(receipt: RunReceipt) -> Self {
+        Self {
+            state: PlanetRunState::Refused(receipt),
+        }
+    }
+
     pub fn receipt(&self) -> &RunReceipt {
-        match self {
-            Self::Complete { receipt, .. } | Self::Refused(receipt) => receipt,
+        match &self.state {
+            PlanetRunState::Complete(snapshot) => snapshot.receipt(),
+            PlanetRunState::Refused(receipt) => receipt,
         }
     }
 
     /// Immutable state is present only for a completed physical closure.
     pub fn snapshot(&self) -> Option<&PlanetSnapshot> {
-        match self {
-            Self::Complete { snapshot, .. } => Some(snapshot),
-            Self::Refused(_) => None,
+        match &self.state {
+            PlanetRunState::Complete(snapshot) => Some(snapshot),
+            PlanetRunState::Refused(_) => None,
+        }
+    }
+
+    pub const fn is_complete(&self) -> bool {
+        matches!(&self.state, PlanetRunState::Complete(_))
+    }
+
+    pub const fn is_refused(&self) -> bool {
+        matches!(&self.state, PlanetRunState::Refused(_))
+    }
+
+    /// Seal this outcome behind the immutable observer boundary.
+    pub const fn observation(&self) -> super::PlanetObservation<'_> {
+        match &self.state {
+            PlanetRunState::Complete(snapshot) => super::PlanetObservation::from_snapshot(snapshot),
+            PlanetRunState::Refused(receipt) => super::PlanetObservation::from_refusal(receipt),
         }
     }
 }
@@ -39,13 +68,13 @@ impl PlanetRunOutcome {
 pub fn run_planet(floor: &AbsolutePhysicsFloor) -> PlanetRunOutcome {
     let refusals = preflight(floor);
     if !refusals.is_empty() {
-        return PlanetRunOutcome::Refused(RunReceipt::refused(floor.len(), refusals));
+        return PlanetRunOutcome::refused(RunReceipt::refused(floor.len(), refusals));
     }
 
     let floor_view = match AuditedFloorView::from_floor(floor) {
         Ok(floor_view) => floor_view,
         Err(error) => {
-            return PlanetRunOutcome::Refused(RunReceipt::refused(
+            return PlanetRunOutcome::refused(RunReceipt::refused(
                 floor.len(),
                 vec![Refusal::floor_magnitude_unavailable(error.to_string())],
             ));
@@ -56,14 +85,14 @@ pub fn run_planet(floor: &AbsolutePhysicsFloor) -> PlanetRunOutcome {
     let mut transcript = match RunTranscript::from_audited_floor(floor, &floor_view) {
         Ok(transcript) => transcript,
         Err(error) => {
-            return PlanetRunOutcome::Refused(RunReceipt::refused(
+            return PlanetRunOutcome::refused(RunReceipt::refused(
                 floor.len(),
                 vec![Refusal::transcript_invariant(error.to_string())],
             ));
         }
     };
     if let Err(error) = transcript.enter_stage(Stage::StarDiskSystem) {
-        return PlanetRunOutcome::Refused(RunReceipt::refused(
+        return PlanetRunOutcome::refused(RunReceipt::refused(
             floor.len(),
             vec![Refusal::transcript_invariant(error.to_string())],
         ));
@@ -91,7 +120,7 @@ pub fn run_planet(floor: &AbsolutePhysicsFloor) -> PlanetRunOutcome {
             reason.requirement_id(),
             open_requirements,
         );
-        return PlanetRunOutcome::Refused(close_refused_transcript(
+        return PlanetRunOutcome::refused(close_refused_transcript(
             floor.len(),
             transcript,
             Stage::StarDiskSystem,
@@ -99,7 +128,7 @@ pub fn run_planet(floor: &AbsolutePhysicsFloor) -> PlanetRunOutcome {
         ));
     }
 
-    PlanetRunOutcome::Refused(close_refused_transcript(
+    PlanetRunOutcome::refused(close_refused_transcript(
         floor.len(),
         transcript,
         Stage::StarDiskSystem,
@@ -161,7 +190,7 @@ mod tests {
 
     #[test]
     fn a_refused_run_exposes_no_snapshot() {
-        let outcome = PlanetRunOutcome::Refused(readiness_receipt());
+        let outcome = PlanetRunOutcome::refused(readiness_receipt());
         assert!(outcome.snapshot().is_none());
     }
 
@@ -196,7 +225,7 @@ mod tests {
                 .iter()
                 .any(|obligation| obligation == "gap_law.chaos_protocol")
         }));
-        assert_eq!(refusal.open_requirements()[0].analyses().len(), 1);
+        assert_eq!(refusal.open_requirements()[0].analyses().len(), 2);
         assert!(refusal.open_requirements()[1].analyses().is_empty());
         assert_eq!(outcome.receipt().stages()[0].status(), StageStatus::Refused);
         assert!(outcome.receipt().stages()[1..]

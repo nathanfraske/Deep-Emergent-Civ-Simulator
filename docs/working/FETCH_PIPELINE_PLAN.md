@@ -471,7 +471,7 @@ of 45.4 MB against a 226 MB `.git`). The decision is where to draw it and whethe
 slimmed now, converted to `witness`, or grandfathered indefinitely.
 
 **D2 resolved.** `FloorCandidateRecord` now carries `sources: Vec<String>`. The candidate registry remains
-off the canonical planet runpath and the viewer remains snapshot-only. A source link is evidence custody,
+off the canonical planet runpath and the viewer remains observation-only. A source link is evidence custody,
 not admission.
 
 **D3. Remediation order for the 27 grandfathered sources.** The ratchet resolves them as they are touched.

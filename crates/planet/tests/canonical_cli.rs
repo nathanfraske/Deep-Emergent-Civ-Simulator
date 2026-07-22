@@ -16,7 +16,7 @@ fn the_no_argument_binary_enters_the_floor_only_runner_and_refuses() {
 
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stderr.is_empty());
-    assert!(stdout.starts_with("receipt=civsim.planet.run.v10\ncomplete=false\n"));
+    assert!(stdout.starts_with("receipt=civsim.planet.run.v11\ncomplete=false\n"));
     assert!(stdout.contains("absolute_floor_entries=3\n"));
     assert!(stdout.contains("representation.schema=\"civsim.units.si-representation.v1\"\n"));
     assert!(stdout.contains("event_count=6\n"));
@@ -48,7 +48,7 @@ fn the_no_argument_binary_enters_the_floor_only_runner_and_refuses() {
     assert!(stdout.contains(
         "refusal.0000.open_requirement.0001.obligation.0024=\"measure_consistent_push_forward\"\n"
     ));
-    assert!(stdout.contains("refusal.0000.open_requirement.0000.analysis_count=1\n"));
+    assert!(stdout.contains("refusal.0000.open_requirement.0000.analysis_count=2\n"));
     assert!(stdout.contains(
         "refusal.0000.open_requirement.0000.analysis.0000.kind=exact_dimensional_census\n"
     ));
@@ -58,9 +58,21 @@ fn the_no_argument_binary_enters_the_floor_only_runner_and_refuses() {
     assert!(
         stdout.contains("refusal.0000.open_requirement.0000.analysis.0000.coverage_claim=false\n")
     );
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.kind=species_state_derivation\n"
+    ));
+    assert!(stdout
+        .contains("refusal.0000.open_requirement.0000.analysis.0001.status=open_dependencies\n"));
+    assert!(stdout
+        .contains("refusal.0000.open_requirement.0000.analysis.0001.candidate_member_count=0\n"));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.floor_anchor.membership_authority=false\n"
+    ));
+    assert!(stdout
+        .contains("refusal.0000.open_requirement.0000.analysis.0001.protocol.chaos=not_reached\n"));
     assert!(stdout.contains("refusal.0000.open_requirement.0001.analysis_count=0\n"));
     assert!(stdout.contains(".exhaustion.gap.chaos_protocol=not_applicable\n"));
-    assert!(stdout.contains("transcript=civsim.planet.transcript.v8\n"));
+    assert!(stdout.contains("transcript=civsim.planet.transcript.v9\n"));
     assert!(!stdout.contains(".kind=contingency\n"));
     assert!(!stdout.contains(".kind=written_state\n"));
 }
@@ -294,6 +306,39 @@ fn refusal_details_have_a_typed_read_only_api() {
             .iter()
             .any(|id| id == "collapse.initial_material_mass_or_integration_boundary")
     }));
+}
+
+#[test]
+fn species_authority_exhaustion_has_a_typed_read_only_api() {
+    let floor = sealed_absolute_physics_floor().expect("the repository floor seals");
+    let outcome = run_planet(&floor);
+    let analyses = outcome.receipt().refusals()[0].open_requirements()[0].analyses();
+    let species = analyses[1]
+        .species_derivation_analysis_view()
+        .expect("the joint leaf carries species authority exhaustion");
+
+    assert!(species.is_computed());
+    assert_eq!(species.floor_anchor_id(), Some("fundamental.m_e"));
+    assert_eq!(species.floor_anchor_membership_authority(), Some(false));
+    assert_eq!(species.candidate_member_count(), Some(0));
+    assert_eq!(species.verified_support_member_count(), Some(0));
+    assert_eq!(species.value_payload_present(), Some(false));
+    assert_eq!(species.residual_slot_claim(), Some(false));
+    assert_eq!(
+        species.buckingham_pi_status_id(),
+        Some("dimension_only_relation_not_physical_closure")
+    );
+    assert_eq!(species.gap_law_status_id(), Some("not_reached"));
+    assert_eq!(species.chaos_protocol_status_id(), Some("not_reached"));
+    assert_eq!(species.attempts().len(), 3);
+    assert!(species
+        .open_proof_ids()
+        .iter()
+        .any(|id| id == "physical_species_membership_derivation_unavailable"));
+    assert!(species
+        .open_proof_ids()
+        .iter()
+        .any(|id| id == "finite_exact_resource_domain_unavailable"));
 }
 
 #[test]

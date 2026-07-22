@@ -14,6 +14,7 @@ use super::{
         VerifiedJointPhysicalMeasure, VerifiedRealizationCoordinateLaw,
     },
     stellar_birth_dimensions::stellar_birth_dimensional_census,
+    stellar_birth_species::analyze_repository_species_state_support,
 };
 use std::fmt;
 
@@ -230,7 +231,7 @@ impl fmt::Display for StellarBirthMeasureRefusal {
 
 fn evaluate_artifacts(
     artifacts: RepositoryStellarBirthArtifacts,
-    joint_measure_analysis: Option<RequirementAnalysis>,
+    joint_measure_analyses: Vec<RequirementAnalysis>,
 ) -> Result<StellarBirthMeasureCapability, StellarBirthMeasureRefusal> {
     let mut frontier = Vec::new();
     for leaf in StellarBirthLeaf::ORDERED {
@@ -240,7 +241,7 @@ fn evaluate_artifacts(
         };
         if !closed {
             let analyses = if leaf == StellarBirthLeaf::JointPhysicalMeasure {
-                joint_measure_analysis.clone().into_iter().collect()
+                joint_measure_analyses.clone()
             } else {
                 Vec::new()
             };
@@ -268,7 +269,10 @@ pub(crate) fn require_birth_measure(
 ) -> Result<StellarBirthMeasureCapability, StellarBirthMeasureRefusal> {
     let census =
         RequirementAnalysis::exact_dimensional_census(stellar_birth_dimensional_census(floor));
-    evaluate_artifacts(resolve_repository_artifacts(floor), Some(census))
+    let species = RequirementAnalysis::species_state_derivation(
+        analyze_repository_species_state_support(floor),
+    );
+    evaluate_artifacts(resolve_repository_artifacts(floor), vec![census, species])
 }
 
 #[cfg(test)]
@@ -311,7 +315,7 @@ mod tests {
     fn each_partial_proof_reports_only_the_other_leaf() {
         let joint_only = evaluate_artifacts(
             RepositoryStellarBirthArtifacts::test_fixture(true, false),
-            None,
+            Vec::new(),
         )
         .unwrap_err();
         assert_eq!(
@@ -321,7 +325,7 @@ mod tests {
 
         let coordinate_only = evaluate_artifacts(
             RepositoryStellarBirthArtifacts::test_fixture(false, true),
-            None,
+            Vec::new(),
         )
         .unwrap_err();
         assert_eq!(
@@ -334,22 +338,22 @@ mod tests {
     fn the_root_closes_only_from_both_verified_typed_leaf_proofs() {
         assert!(evaluate_artifacts(
             RepositoryStellarBirthArtifacts::test_fixture(false, false),
-            None,
+            Vec::new(),
         )
         .is_err());
         assert!(evaluate_artifacts(
             RepositoryStellarBirthArtifacts::test_fixture(true, false),
-            None,
+            Vec::new(),
         )
         .is_err());
         assert!(evaluate_artifacts(
             RepositoryStellarBirthArtifacts::test_fixture(false, true),
-            None,
+            Vec::new(),
         )
         .is_err());
         assert!(evaluate_artifacts(
             RepositoryStellarBirthArtifacts::test_fixture(true, true),
-            None,
+            Vec::new(),
         )
         .is_ok());
     }
@@ -358,12 +362,12 @@ mod tests {
     fn frontier_order_is_canonical_and_repeatable() {
         let first = evaluate_artifacts(
             RepositoryStellarBirthArtifacts::test_fixture(false, false),
-            None,
+            Vec::new(),
         )
         .unwrap_err();
         let second = evaluate_artifacts(
             RepositoryStellarBirthArtifacts::test_fixture(false, false),
-            None,
+            Vec::new(),
         )
         .unwrap_err();
         assert_eq!(first, second);
@@ -436,7 +440,7 @@ mod tests {
     }
 
     #[test]
-    fn production_attaches_one_non_admitting_census_only_to_the_joint_leaf() {
+    fn production_attaches_two_non_admitting_analyses_only_to_the_joint_leaf() {
         let floor = audited_floor();
         let floor_view =
             AuditedFloorView::from_floor(&floor).expect("the audited floor has typed magnitudes");
@@ -444,11 +448,22 @@ mod tests {
         let joint = &refusal.open_frontier()[0];
         let coordinate = &refusal.open_frontier()[1];
 
-        assert_eq!(joint.analyses().len(), 1);
+        assert_eq!(joint.analyses().len(), 2);
         assert_eq!(joint.analyses()[0].kind_id(), "exact_dimensional_census");
         assert_eq!(joint.analyses()[0].status_id(), "computed");
         assert_eq!(joint.analyses()[0].closure_effect_id(), "none");
         assert!(!joint.analyses()[0].coverage_claim());
+        assert_eq!(joint.analyses()[1].kind_id(), "species_state_derivation");
+        assert_eq!(joint.analyses()[1].status_id(), "open_dependencies");
+        assert_eq!(joint.analyses()[1].closure_effect_id(), "none");
+        assert!(!joint.analyses()[1].coverage_claim());
+        let species = joint.analyses()[1]
+            .species_derivation_analysis_view()
+            .expect("the joint leaf carries its species derivation frontier");
+        assert_eq!(species.candidate_member_count(), Some(0));
+        assert_eq!(species.verified_support_member_count(), Some(0));
+        assert_eq!(species.value_payload_present(), Some(false));
+        assert_eq!(species.residual_slot_claim(), Some(false));
         assert!(coordinate.analyses().is_empty());
     }
 

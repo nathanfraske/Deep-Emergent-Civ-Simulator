@@ -42,8 +42,8 @@ not a canonical planet input.
   evidence audit, not a second floor. It recognizes the exact seven marks plus
   one fail-closed sentinel that never renders `[M]`.
 - The old viewer is being preserved under `parked/`. The root viewer can borrow
-  only a completed immutable `PlanetSnapshot`; it has no physical clock or
-  causal state mutation.
+  only a sealed immutable `PlanetObservation` containing a refusal or completed
+  `PlanetSnapshot`; it has no physical clock or causal state mutation.
 - A dependency and source gate enforces both the planet boundary and the
   observer-only viewer boundary.
 - The Earth-default `WorldStructure` selector moved to the parked world facade;
