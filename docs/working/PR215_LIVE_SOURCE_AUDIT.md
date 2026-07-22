@@ -1,12 +1,13 @@
 # PR #215 live-source audit
 
 Status: implementation audit for the canonical integration on PR #215 branch
-`claude/thermoelastic-rung3`, updated 2026-07-21.
+`claude/thermoelastic-rung3`, updated 2026-07-22.
 
 This record covers the integration worktree that normalizes the physical floor,
 separates SI representation from causal information, gives the open
-stellar-birth census a modular value-free structure, and preserves the Stage 1
-refusal while the stellar-birth measure remains open.
+stellar-birth census a modular value-free structure and stellar-state
+contract, and preserves the Stage 1 refusal while the stellar-birth measure
+remains open.
 
 ## Governing invariant
 
@@ -228,6 +229,22 @@ the causal bitstream.
     A temporary-repository test proves a clean commit scans without the notice
     and a later commit carrying a synthetic live token blocks without printing
     that token.
+31. **Named stellar classes could have become causal selectors.** Five focused
+    structure modules now separate open state-coordinate membership,
+    interaction-sector admission, physical predicate and mechanism proofs,
+    complete stellar-state history, and noncausal classification projection.
+    Every law, coupling, basis extension, sector, predicate formula, threshold,
+    and use must derive or complete immutable pre-seal admission. One acyclic
+    pre-dispatch physical DAG authorizes only a unique, globally conservative,
+    non-double-counting transition. Coordinate identity binds the complete
+    physical descriptor over an open variable-cardinality basis; sector identity
+    binds the complete admitted artifact; unresolved identity collisions refuse.
+    State history is lineage-preserving across physical birth, death, merge, and
+    split. Presentation uses typed taxonomy identities over a total read-only
+    projection and has no causal authority. The schema enumerates no named class
+    or hypothetical sector. Structure v2 and census v4 expose the rules in the
+    exact refusal wire, while a seventh coverage gap and complete common
+    admission obligations on both leaves keep realized behavior open.
 
 The resulting projected composite values are replayable from the transcript:
 
@@ -260,9 +277,9 @@ Two direct no-argument runs produced:
 - zero stderr bytes;
 - six transcript events;
 - no `[W]`, no `[X]`, and no snapshot;
-- byte-identical stdout of `321,319` bytes, SHA-256
-  `6f610c3dde073b41a085394237659ccd680b5aa0ccd0c571f5fe4e7e97197d52`;
-- receipt `civsim.planet.run.v9` and transcript schema major `7`;
+- byte-identical stdout of `352,852` bytes, SHA-256
+  `b008e54a81202216b94eb842a86f928f50eee6c38b19d8b7b4cbb1d3520c8a10`;
+- receipt `civsim.planet.run.v10` and transcript schema major `8`;
 - refusal `stellar_birth.realization_measure` at Stage 1.
 
 The umbrella refusal has two unresolved leaves:
@@ -271,9 +288,11 @@ The umbrella refusal has two unresolved leaves:
 those leaves in fixed canonical order. The repository resolver supplies neither
 opaque proof capability yet, so the root refusal is the correct output.
 Only the open joint-measure leaf carries one
-`exact_dimensional_census` analysis. Census v3 contains 31 typed, value-free
-coordinates, seven phenomenon-local matrices, two registry contracts, six
-shared domains, and eleven carrier schemas. Its status is `computed`, its
+`exact_dimensional_census` analysis. Census v4 contains 31 typed, value-free
+coordinates, seven phenomenon-local matrices, two realized-membership
+contracts, six shared domains, eleven carrier schemas, and the composed open
+stellar-state contract with coordinate, dimension-basis, interaction-sector,
+physical-regime, and classification registries. Its status is `computed`, its
 `closure_effect` is `none`, and its `coverage_claim` is `false`. The open
 coordinate-law leaf carries analysis count zero.
 
@@ -289,21 +308,19 @@ civilization, authored world generation, and the old causal viewer remain in
 
 ## Validation
 
-The structure and stellar-birth targets pass 25 focused library tests. Seven
-external CLI tests cover the typed views, duplicated refusal wire, deterministic
-output, and input refusal. Eight focused floor-authority tests, ten Stone 0
-integration tests, and sixteen gate-runner tests pass, with one platform-specific
-gate-runner test skipped. The canonical provenance tier, warnings-denied planet,
-units, and Stone 0 Clippy, and the planet boundary gate are clean. The complete
-post-hook Linux `check-pr` recipe passed with exit 0 in 703.3 seconds. It covered hook
-canaries, all declarative gates, the ten-package all-target suite, GPU
-integer/no-float and available backend parity checks, warnings-denied Clippy,
-Rustdoc, and doctests.
+The complete planet library passes 61 tests. Seven external CLI tests cover the
+typed views, duplicated refusal wire, deterministic output, canonical versions,
+and input refusal. Focused warnings-denied planet and units Clippy, formatting,
+diff hygiene, and the planet boundary gate are clean. The complete Linux
+`check-pr` recipe passed with exit 0 in 877.5 seconds. It covered hook and gate
+canaries, every declarative PR boundary, the canonical inventory, the
+ten-package all-target suite, GPU integer/no-float and available-backend parity,
+warnings-denied Clippy, Rustdoc, and doctests.
 
-Two post-gate direct binary runs confirm exit `2`, zero stderr bytes, `321,319` stdout
-bytes, byte equality, and SHA-256
-`6f610c3dde073b41a085394237659ccd680b5aa0ccd0c571f5fe4e7e97197d52`.
-No earlier receipt or inventory pin is evidence for the v9 result.
+Two post-gate direct binary runs confirm exit `2`, zero stderr bytes,
+`352,852` stdout bytes, byte equality, and SHA-256
+`b008e54a81202216b94eb842a86f928f50eee6c38b19d8b7b4cbb1d3520c8a10`.
+No earlier receipt or inventory pin is evidence for the v10 result.
 
 One blind-generalizer pass was run against frozen candidate and specification
 packets, as requested instead of the historical six-pass overnight loop:
@@ -381,6 +398,31 @@ serialization test. Every accepted finding was reproduced against live source
 before repair. Future normalization, collision, topology, convergence,
 capacity, and proof-constructor behavior received no clearance from this panel.
 
+The open stellar-state slice then received its own sealed packet panel. The
+initial 166,000-byte-class candidate was SHA-256
+`c111618039b98063c0915c52ad5b8a562285d5c03ef77f0b9028120688e8de76`.
+The strongest-model input-bias smoke returned `CLEAR` before six distinct
+confirmation, derive-versus-author, alien-feasibility, Terran/Solar,
+steering/observer, and exact-correctness lenses ran. Source verification
+accepted and repaired the live findings: nested writer revalidation, canonical
+wire-prefix validation, complete common admission obligations on both Stage 1
+leaves, coordinate totality and measure-consistent push-forward, joint observer
+and presentation independence, complete coordinate and sector identities,
+variable-cardinality basis extension, applicability-qualified state history,
+law-entailed boundary completeness, and explicit birth/death/merge/split
+lineage. Packet suspicions that the current absent proof artifacts could close
+Stage 1 were refuted against their private seals, absent constructors, and
+production `None` resolver.
+
+The repaired packet was 203,254 bytes at SHA-256
+`012a2b1058dd881a59d3a05982175b4d1a0f89b593497c3a94c923d456193f9e`.
+Its strongest-smoke record was SHA-256
+`83dea0732dcc7e2ccc692fe76c1f158a79f3d7bb97a3ec8ed60b7527b6f3ceca`
+and returned `CLEAR`. Repaired correctness, derive-versus-author, Terran/Solar,
+and steering/observer lenses found no source-traceable live defect. They grant
+no clearance to future registry members, digest implementations, proof smart
+constructors, semantic checkers, measures, or transition executors.
+
 ## Remaining audit debt
 
 - Admission structures still carry human-readable receipt strings. The current
@@ -398,13 +440,14 @@ capacity, and proof-constructor behavior received no clearance from this panel.
   schema, checker, dependencies, validity domain, and joint measure, and return
   structured invalid reasons. Runtime type and presence cannot stand in for
   those checks.
-- Stage 1 leaf proofs remain absent. The partial v3 census now encodes component
+- Stage 1 leaf proofs remain absent. The partial v4 census now encodes component
   and species registry contracts, shared support and resolution domains,
-  topology shape, spectral measure convention, and material/time histories. It
-  does not supply registry contents, multiplicity interactions, full spectral
-  transport, remaining tensor carriers, fragmentation, magnetic braking,
-  persistent disk state, or the required stochastic and chaotic regime
-  measure.
+  topology shape, spectral measure convention, material/time histories, and
+  open coordinate, basis, sector, regime, and presentation contracts. It does
+  not supply registry contents, digest implementations, semantic checkers,
+  multiplicity interactions, full spectral transport, remaining tensor
+  carriers, fragmentation, magnetic braking, persistent disk state, or the
+  required stochastic and chaotic regime measure.
 - Current vector carriers do not distinguish polar from axial transformation
   character, and the census has no full tensor family. The explicit
   full-field-and-tensor gap and `coverage_claim=false` keep this from closing a
@@ -437,11 +480,13 @@ capacity, and proof-constructor behavior received no clearance from this panel.
 
 ## Audit-process limitation
 
-This was one frozen-packet blind-generalizer pass plus distinct live-source
-value-boundary, admit-the-alien, Terran/Solar, observer-reachability, and exact
-correctness roles. It was not six repetitions seeking the same result. Packet
-omissions still limit claims about code not present in the packet; live-source
-findings were checked against the current worktree before repair.
+Each slice used one frozen-packet generalizer or one panel of distinct
+value-boundary, derive-first, admit-the-alien, Terran/Solar,
+observer-reachability, and exact-correctness roles. This was not six repetitions
+seeking the same result. Packet omissions still limit claims about code not
+present in the packet; every accepted live-source finding was checked against
+the current worktree before repair, and affected lenses were replayed against
+the repaired stellar-state packet.
 
 ## Next derivation order
 

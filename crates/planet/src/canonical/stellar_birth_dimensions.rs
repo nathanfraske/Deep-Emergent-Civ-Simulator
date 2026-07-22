@@ -25,7 +25,7 @@ use civsim_units::{
 use std::{collections::BTreeMap, fmt};
 
 pub(super) const STELLAR_BIRTH_DIMENSIONAL_CENSUS_SCHEMA_ID: &str =
-    "civsim.planet.stellar-birth-dimensional-census.v3";
+    "civsim.planet.stellar-birth-dimensional-census.v4";
 pub(super) const EXACT_DIMENSIONAL_CHECKER_ID: &str = "civsim.units.exact-si-rref.v2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -398,6 +398,7 @@ fn build_census() -> Result<StellarBirthDimensionalCensus, CensusBuildError> {
         "stellar_birth.gap.full_field_and_tensor_carriers".to_owned(),
         "stellar_birth.gap.magnetic_braking_and_material_history".to_owned(),
         "stellar_birth.gap.nonbinary_variable_cardinality_dynamics".to_owned(),
+        "stellar_birth.gap.realized_stellar_state_interaction_and_projection".to_owned(),
         "stellar_birth.gap.radiation_and_cooling_spectral_closure".to_owned(),
         "stellar_birth.gap.stochastic_and_chaotic_regime_measure".to_owned(),
     ];
@@ -1036,6 +1037,9 @@ mod tests {
                 .count()
                 >= 6
         );
+        assert!(census.coverage_gap_ids.iter().any(|gap| {
+            gap == "stellar_birth.gap.realized_stellar_state_interaction_and_projection"
+        }));
     }
 
     #[test]

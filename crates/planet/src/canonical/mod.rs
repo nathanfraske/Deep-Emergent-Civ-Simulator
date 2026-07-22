@@ -39,7 +39,10 @@ pub use requirement_analysis::{
 pub use snapshot::PlanetSnapshot;
 pub use stage::Stage;
 pub use stellar_birth_structure::{
-    CarrierSchemaView, ComponentRegistrySchemaView, IndexDomainView, SpeciesRegistrySchemaView,
+    CarrierSchemaView, ClassificationRegistrySchemaView, ComponentRegistrySchemaView,
+    DimensionBasisRegistrySchemaView, IndexDomainView, InteractionSectorRegistrySchemaView,
+    PhysicalRegimeRegistrySchemaView, SpeciesRegistrySchemaView, StateCoordinateRegistrySchemaView,
+    StellarStateSchemaView,
 };
 pub use transcript::{
     ContingencyEvent, GeneratedSubjectId, RepresentationReceipt, RepresentationValueRecord,

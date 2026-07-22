@@ -16,7 +16,7 @@ observer independence bind the full runpath.
 ## Active arcs
 
 - 2026-07-21  PR #215 is the draft integration base -> branch `claude/thermoelastic-rung3`, `HANDOFFS.md`
-- 2026-07-21  Derive the open stellar-birth mechanism chain through the landed modular structure, then close the joint measure and realization-coordinate law -> `docs/working/STELLAR_BIRTH_MEASURE_CONTRACT.md`
+- 2026-07-22  Derive the open stellar-birth mechanism chain through the landed state, sector, regime, and classification contracts, then close the joint measure and realization-coordinate law -> `docs/working/STELLAR_BIRTH_MEASURE_CONTRACT.md`
 - 2026-07-21  Stage 1 SI-native adapters are blocked until both stellar-birth measure leaves close -> `TODOS.md` P-STAGE1-ADAPTERS
 - 2026-07-21  Canonical GPU use remains blocked on typed adapters and exact CPU/GPU Q32.32 parity for every enabled backend -> `TODOS.md` P-GPU-BIT-PARITY
 - 2026-07-20  Stage 1 star, collapse, disk, and embryo-system realization -> `TODOS.md` P-STAR-DISK-SYSTEM
@@ -42,27 +42,27 @@ observer independence bind the full runpath.
 ## Recent landings
 
 - 2026-07-21  Physical floor normalized to three measured invariants; exact SI definitions moved to an untagged representation receipt and all execution constants derive from sealed relations -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
-- 2026-07-21  Transcript schema major 7 and run receipt v9 serialize typed Chaos Protocol evidence, the exact indexed Stage 1 frontier, dimensional census v3, and its value-free structure schema -> `crates/planet/src/canonical/transcript.rs`
+- 2026-07-22  Transcript schema major 8 and run receipt v10 serialize typed Chaos Protocol evidence, the exact indexed Stage 1 frontier, dimensional census v4, and its value-free structure v2 -> `crates/planet/src/canonical/transcript.rs`
 - 2026-07-20  Root workspace narrowed to the abiotic dependency graph; biology, civilization, compose, scenarios, and calibration moved under `parked/` -> `parked/README.md`
 - 2026-07-20  `civsim-planet-substrate` privately owns the retained star, system, planet, geodynamics, deep-time, moon, and flexure modules with 372 passing tests -> `crates/planet-substrate/src/lib.rs`
 - 2026-07-20  Root viewer reduced to an immutable snapshot consumer; causal viewer preserved under `parked/` -> `crates/viewer/src/lib.rs`
 - 2026-07-20  Boundary gate enforces canonical ownership, dependency direction, floor ingress, and snapshot-only viewing -> `scripts/planet_boundary_gate.py`
 - 2026-07-20  Nested canonical modules receive the same strict ingress scan; the self-test plants its canary below `canonical/stages/stellar_birth/` -> `scripts/planet_boundary_gate.py`
 - 2026-07-21  The Stage 1 refusal is backed by an executable typed conjunction over the joint-measure and coordinate-law proof capabilities -> `crates/planet/src/canonical/stellar_birth_measure.rs`
-- 2026-07-21  Partial census v3 binds 31 value-free coordinates and seven exact phenomenon reports to component and species registry contracts, six shared domains, and eleven carrier schemas beneath the open joint-measure leaf -> `crates/planet/src/canonical/stellar_birth_structure/`
+- 2026-07-22  Partial census v4 adds open stellar-state, coordinate, interaction-sector, physical-regime, and noncausal classification contracts without adding a value, class, sector, or proof -> `docs/working/STELLAR_STATE_CLASSIFICATION_CONTRACT.md`
 - 2026-07-21  Stone 0 now fails closed on unrecognized runner and leaf failures, requires exact two-layer policy markers for owner override, and rejects caller-selected override trust paths -> `crates/stone0/src/lib.rs`, `scripts/gate_runner.py`
 - 2026-07-21  Pre-push history scanning now streams credential patterns through stdin for Git for Windows and Linux parity, with clean and blocking temporary-repository tests -> `scripts/stone0-pre-push-hook.sh`
 - 2026-07-21  Physical-floor verification now requires the independently pinned v1 authority digest before the value-opaque singleton capability can project execution magnitudes -> `crates/units/src/physics_floor.rs`
 - 2026-07-21  Blind-audit repairs make dimensional arithmetic total at signed edges, label target reachability without law claims, expose nonzero support and typed read-only gap views, and name spectral and history semantics -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
 - 2026-07-21  One sealed v1 SHA-256 binds the ordered SI representation, physical admissions, exhaustion-receipt pins, and execution relations -> `crates/units/src/physics_floor.rs`
 - 2026-07-21  Gap Law carries a typed multi-regime Chaos Protocol; resolved trajectories and sub-resolution stationary-measure dispositions are explicit and independently pinned -> `crates/ledger/src/admission.rs`
-- 2026-07-21  Direct CLI tests pin exit 2, six events, receipt v9, schema major 7, the exact two-leaf frontier, structure placement, immutable typed views, repeatability, readiness separation, and rejection of world, profile, and seed arguments -> `crates/planet/tests/canonical_cli.rs`
+- 2026-07-22  Direct CLI tests pin exit 2, six events, receipt v10, schema major 8, census v4, structure v2, the exact two-leaf frontier, immutable typed views, repeatability, readiness separation, and rejection of world, profile, and seed arguments -> `crates/planet/tests/canonical_cli.rs`
 - 2026-07-21  Canonical ledger exposes four-tier by seven-mark generated accounting; current physical-floor total is three Universal `[M]` invariants -> `docs/working/CANONICAL_LEDGER_INVENTORY.txt`
 - 2026-07-21  Typed sealed access separates the ten-identity noncausal SI representation view from the fourteen-identity execution capability, with private values and no caller binding or mutation surface -> `crates/units/src/constants.rs`
 - 2026-07-21  Physical folds across physics and materials require the verified execution capability; representation-only conversions use the noncausal representation view -> `crates/units/src/constants.rs`
 - 2026-07-21  One frozen-packet blind-generalizer pass found and closed physical API reachability, shared receipt authority, and order-insensitive declaration checks -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
-- 2026-07-21  Direct canonical stdout is pinned at 321,319 bytes and SHA-256 `6f610c3dde073b41a085394237659ccd680b5aa0ccd0c571f5fe4e7e97197d52` -> `docs/working/STELLAR_BIRTH_MEASURE_CONTRACT.md`
-- 2026-07-21  Focused structure, census, CLI, and warnings-denied Clippy checks pass; post-hook complete Linux `check-pr` parity passes in 703.3 seconds for the v9 slice -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
+- 2026-07-22  Direct canonical stdout is pinned at 352,852 bytes and SHA-256 `b008e54a81202216b94eb842a86f928f50eee6c38b19d8b7b4cbb1d3520c8a10` -> `docs/working/STELLAR_BIRTH_MEASURE_CONTRACT.md`
+- 2026-07-22  Focused structure, census, CLI, and warnings-denied Clippy checks pass; complete Linux `check-pr` parity passes in 877.5 seconds for the v10 slice -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
 - 2026-07-20  Active physics is abiotic-only; organism laws and data survive through parked compatibility facades -> `crates/physics/src/lib.rs`, `parked/crates/physics/`
 - 2026-07-20  Legacy emic, celestial, disk-composition, and organism GPU surfaces moved behind parked facades -> `parked/crates/`
 - 2026-07-20  One 25-gate declarative inventory drives CI, Stone 0, Stop, Just, Make, PowerShell, local CI, and tracked pre-push routes -> `scripts/gates.toml`, `scripts/githooks/pre-push`

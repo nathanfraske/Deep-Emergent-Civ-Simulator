@@ -5,16 +5,29 @@
 //! constructors, or fallback state.
 
 mod carrier;
+mod classification_registry;
 mod component_registry;
 mod index_domain;
+mod interaction_sector_registry;
+mod physical_regime_registry;
 mod species_registry;
+mod state_coordinate_registry;
+mod stellar_state;
 mod view;
 mod wire;
 
 pub(crate) use carrier::{CarrierKind, CarrierSchema};
+pub use classification_registry::ClassificationRegistrySchemaView;
 pub(crate) use component_registry::ComponentRegistrySchema;
 pub(crate) use index_domain::IndexDomain;
+pub use interaction_sector_registry::InteractionSectorRegistrySchemaView;
+pub use physical_regime_registry::PhysicalRegimeRegistrySchemaView;
 pub(crate) use species_registry::SpeciesRegistrySchema;
+pub use state_coordinate_registry::{
+    DimensionBasisRegistrySchemaView, StateCoordinateRegistrySchemaView,
+};
+pub(crate) use stellar_state::StellarStateSchema;
+pub use stellar_state::StellarStateSchemaView;
 pub use view::{
     CarrierSchemaView, ComponentRegistrySchemaView, IndexDomainView, SpeciesRegistrySchemaView,
 };
@@ -25,15 +38,17 @@ use component_registry::{canonical_component_registry_schema, COMPONENT_REGISTRY
 use index_domain::canonical_index_domains;
 use species_registry::{canonical_species_registry_schema, SPECIES_REGISTRY_SCHEMA_ID};
 use std::{collections::BTreeSet, fmt};
+use stellar_state::{canonical_stellar_state_schema, STELLAR_STATE_SCHEMA_ID};
 
 pub(super) const STELLAR_BIRTH_STRUCTURE_SCHEMA_ID: &str =
-    "civsim.planet.stellar-birth-structure.v1";
+    "civsim.planet.stellar-birth-structure.v2";
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct StellarBirthStructureSchema {
     pub(super) schema_id: &'static str,
     pub(super) component_registry: ComponentRegistrySchema,
     pub(super) species_registry: SpeciesRegistrySchema,
+    pub(super) stellar_state: StellarStateSchema,
     pub(super) index_domains: Vec<IndexDomain>,
     pub(super) carrier_schemas: Vec<CarrierSchema>,
 }
@@ -51,6 +66,7 @@ pub(super) enum StructureSchemaError {
     SchemaIdentityMismatch,
     ComponentRegistryMismatch,
     SpeciesRegistryMismatch,
+    StellarStateMismatch,
     DuplicateIndexDomain(String),
     DuplicateCarrier(String),
     CatalogCardinalityMismatch {
@@ -84,6 +100,10 @@ impl fmt::Display for StructureSchemaError {
             Self::SpeciesRegistryMismatch => write!(
                 f,
                 "species registry does not match sealed schema '{SPECIES_REGISTRY_SCHEMA_ID}'"
+            ),
+            Self::StellarStateMismatch => write!(
+                f,
+                "stellar state does not match sealed schema '{STELLAR_STATE_SCHEMA_ID}'"
             ),
             Self::DuplicateIndexDomain(id) => {
                 write!(f, "duplicate stellar-birth index domain '{id}'")
@@ -136,6 +156,7 @@ pub(super) fn stellar_birth_structure_schema(
         schema_id: STELLAR_BIRTH_STRUCTURE_SCHEMA_ID,
         component_registry: canonical_component_registry_schema(),
         species_registry: canonical_species_registry_schema(),
+        stellar_state: canonical_stellar_state_schema(),
         index_domains: canonical_index_domains(),
         carrier_schemas: canonical_carrier_schemas(),
     };
@@ -154,6 +175,9 @@ fn validate_structure_schema(
     }
     if !schema.species_registry.is_canonical() {
         return Err(StructureSchemaError::SpeciesRegistryMismatch);
+    }
+    if !schema.stellar_state.is_canonical() {
+        return Err(StructureSchemaError::StellarStateMismatch);
     }
     let mut domain_ids = BTreeSet::new();
     for domain in &schema.index_domains {
@@ -451,11 +475,86 @@ mod tests {
             "caller",
             "citation",
             "seed",
+            "population",
+            "magnetar",
+            "giant",
+            "dwarf",
+            "neutron",
+            "black_hole",
+            "blackhole",
+            "classiii",
+            "thaumic",
         ] {
             assert!(
                 !debug.contains(forbidden),
                 "found forbidden token '{forbidden}'"
             );
         }
+    }
+
+    #[test]
+    fn stellar_state_is_open_lawful_and_classification_noncausal() {
+        let schema = stellar_birth_structure_schema().unwrap();
+        let state = &schema.stellar_state;
+        assert_eq!(state.schema_id, "civsim.planet.stellar-state.v1");
+        assert_eq!(
+            state.value_authority_rule.id(),
+            "sealed_absolute_floor_and_derived_state_only"
+        );
+        assert_eq!(
+            state.realization_rule.id(),
+            "preseal_derived_floor_laws_measure_coordinate_or_refusal"
+        );
+        assert_eq!(
+            state.state_coordinate_registry.membership_rule.id(),
+            "physical_closure_derived_or_named_refusal"
+        );
+        assert_eq!(
+            state
+                .state_coordinate_registry
+                .dimension_basis_registry
+                .cardinality_rule
+                .id(),
+            "variable_cardinality"
+        );
+        assert_eq!(
+            state.interaction_sector_registry.admission_rule.id(),
+            "derive_first_buckingham_pi_gap_chaos_residual_unique_or_refusal"
+        );
+        assert_eq!(
+            state.interaction_sector_registry.execution_rule.id(),
+            "identity_blind_common_execution_path"
+        );
+        assert_eq!(
+            state.physical_regime_registry.predicate_admission_rule.id(),
+            "every_entry_formula_threshold_and_use_derive_first_or_refusal"
+        );
+        assert_eq!(
+            state.physical_regime_registry.compatibility_rule.id(),
+            "unique_jointly_satisfiable_non_double_counting_transition"
+        );
+        assert_eq!(
+            state.classification_registry.causal_authority_rule.id(),
+            "none"
+        );
+        assert_eq!(
+            state.classification_registry.mutation_rule.id(),
+            "add_remove_rename_reorder_preserves_physical_transcript"
+        );
+        assert_eq!(
+            state.lineage_rule.id(),
+            "physical_birth_death_merge_split_lineage_or_named_refusal"
+        );
+    }
+
+    #[test]
+    fn a_stellar_state_contract_mutation_fails_before_wire_output() {
+        let mut schema = stellar_birth_structure_schema().unwrap();
+        schema.stellar_state.value_authority_rule =
+            stellar_state::StellarStateRule::NoClassificationFeedback;
+        assert!(matches!(
+            validate_structure_schema(&schema),
+            Err(StructureSchemaError::StellarStateMismatch)
+        ));
     }
 }

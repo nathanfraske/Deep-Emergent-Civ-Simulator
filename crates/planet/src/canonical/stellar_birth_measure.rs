@@ -70,6 +70,14 @@ pub(crate) enum StellarBirthClosureObligation {
     SemanticCheckerVersion,
     DependencyDigest,
     JointMeasureBinding,
+    OpenStellarStateCoverage,
+    DimensionalClosure,
+    DependencyAdmission,
+    ValidityDomainProof,
+    GlobalConservationProof,
+    CoordinateTotalityOverJointSupport,
+    MeasureConsistentPushForward,
+    PresentationIndependence,
 }
 
 impl StellarBirthClosureObligation {
@@ -97,6 +105,14 @@ impl StellarBirthClosureObligation {
             Self::SemanticCheckerVersion => "semantic_checker_version",
             Self::DependencyDigest => "dependency_digest",
             Self::JointMeasureBinding => "joint_measure_binding",
+            Self::OpenStellarStateCoverage => "open_stellar_state_and_projection_coverage",
+            Self::DimensionalClosure => "dimensional_closure",
+            Self::DependencyAdmission => "dependency_admission",
+            Self::ValidityDomainProof => "validity_domain_proof",
+            Self::GlobalConservationProof => "global_conservation_proof",
+            Self::CoordinateTotalityOverJointSupport => "coordinate_totality_over_joint_support",
+            Self::MeasureConsistentPushForward => "measure_consistent_push_forward",
+            Self::PresentationIndependence => "presentation_identity_and_taxonomy_independence",
         }
     }
 }
@@ -118,6 +134,14 @@ const JOINT_MEASURE_OBLIGATIONS: &[StellarBirthClosureObligation] = &[
     StellarBirthClosureObligation::ArtifactSchemaVersion,
     StellarBirthClosureObligation::SemanticCheckerVersion,
     StellarBirthClosureObligation::DependencyDigest,
+    StellarBirthClosureObligation::OpenStellarStateCoverage,
+    StellarBirthClosureObligation::DimensionalClosure,
+    StellarBirthClosureObligation::DependencyAdmission,
+    StellarBirthClosureObligation::ValidityDomainProof,
+    StellarBirthClosureObligation::GlobalConservationProof,
+    StellarBirthClosureObligation::ObserverIndependence,
+    StellarBirthClosureObligation::OrderingIndependence,
+    StellarBirthClosureObligation::PresentationIndependence,
 ];
 
 const COORDINATE_LAW_OBLIGATIONS: &[StellarBirthClosureObligation] = &[
@@ -135,6 +159,18 @@ const COORDINATE_LAW_OBLIGATIONS: &[StellarBirthClosureObligation] = &[
     StellarBirthClosureObligation::SemanticCheckerVersion,
     StellarBirthClosureObligation::DependencyDigest,
     StellarBirthClosureObligation::JointMeasureBinding,
+    StellarBirthClosureObligation::DerivationCensus,
+    StellarBirthClosureObligation::BuckinghamPiCensus,
+    StellarBirthClosureObligation::EvidenceCustody,
+    StellarBirthClosureObligation::TypedSupport,
+    StellarBirthClosureObligation::DimensionalClosure,
+    StellarBirthClosureObligation::DependencyAdmission,
+    StellarBirthClosureObligation::ValidityDomainProof,
+    StellarBirthClosureObligation::GlobalConservationProof,
+    StellarBirthClosureObligation::OpenStellarStateCoverage,
+    StellarBirthClosureObligation::CoordinateTotalityOverJointSupport,
+    StellarBirthClosureObligation::MeasureConsistentPushForward,
+    StellarBirthClosureObligation::PresentationIndependence,
 ];
 
 /// One unresolved typed leaf and the clauses its future proof must satisfy.
@@ -352,6 +388,51 @@ mod tests {
             .collect();
         assert!(coordinate_ids.contains(&"residual_law"));
         assert!(coordinate_ids.contains(&"unique_residual_slot_if_irreducible"));
+        let joint_ids: Vec<_> = StellarBirthLeaf::JointPhysicalMeasure
+            .obligations()
+            .iter()
+            .map(|obligation| obligation.id())
+            .collect();
+        assert!(joint_ids.contains(&"open_stellar_state_and_projection_coverage"));
+    }
+
+    #[test]
+    fn both_leaves_carry_the_complete_causal_admission_bundle() {
+        let common = [
+            StellarBirthClosureObligation::DerivationCensus,
+            StellarBirthClosureObligation::BuckinghamPiCensus,
+            StellarBirthClosureObligation::EvidenceCustody,
+            StellarBirthClosureObligation::TypedSupport,
+            StellarBirthClosureObligation::GapLaw,
+            StellarBirthClosureObligation::ChaosProtocol,
+            StellarBirthClosureObligation::ResidualLaw,
+            StellarBirthClosureObligation::UniqueResidualSlotIfIrreducible,
+            StellarBirthClosureObligation::AbsoluteFloorBinding,
+            StellarBirthClosureObligation::ArtifactSchemaVersion,
+            StellarBirthClosureObligation::SemanticCheckerVersion,
+            StellarBirthClosureObligation::DependencyDigest,
+            StellarBirthClosureObligation::DimensionalClosure,
+            StellarBirthClosureObligation::DependencyAdmission,
+            StellarBirthClosureObligation::ValidityDomainProof,
+            StellarBirthClosureObligation::GlobalConservationProof,
+            StellarBirthClosureObligation::OpenStellarStateCoverage,
+        ];
+        for leaf in StellarBirthLeaf::ORDERED {
+            for &obligation in &common {
+                assert!(leaf.obligations().contains(&obligation));
+            }
+        }
+
+        let joint = StellarBirthLeaf::JointPhysicalMeasure.obligations();
+        assert!(joint.contains(&StellarBirthClosureObligation::ObserverIndependence));
+        assert!(joint.contains(&StellarBirthClosureObligation::OrderingIndependence));
+        assert!(joint.contains(&StellarBirthClosureObligation::PresentationIndependence));
+
+        let coordinate = StellarBirthLeaf::RealizationCoordinateLaw.obligations();
+        assert!(
+            coordinate.contains(&StellarBirthClosureObligation::CoordinateTotalityOverJointSupport)
+        );
+        assert!(coordinate.contains(&StellarBirthClosureObligation::MeasureConsistentPushForward));
     }
 
     #[test]

@@ -1,9 +1,10 @@
 # Stellar-birth measure contract
 
 Status: executable leaf-closure evaluator, replayable floor, partial exact
-dimensional census, and modular value-free structure schema implemented; both
-physical obligations remain unresolved and the canonical runner reports their
-exact frontier before refusing.
+dimensional census, modular value-free structure schema, and open stellar-state
+and classification contracts implemented; both physical obligations remain
+unresolved and the canonical runner reports their exact frontier before
+refusing.
 
 ## Authority
 
@@ -43,8 +44,8 @@ execution relations, physical admissions, and the complete ordered receipt
 content. One sealed physical-floor authority binding covers those ordered
 registries and receipt pins under
 `civsim.units.physical-floor-authority-binding.v1`. Derived values replay from
-exact projected ancestry published in transcript schema major 7, with typed SI dimensions and exact-symbol ancestry
-checked from the formula. Physical helper APIs require the same sealed
+exact projected ancestry published in transcript schema major 8, with typed SI
+dimensions and exact-symbol ancestry checked from the formula. Physical helper APIs require the same sealed
 execution capability and cannot bind or mutate its values. This closes the
 representation and API reachability seams; it does not close either
 stellar-birth leaf.
@@ -81,7 +82,7 @@ Equal coordinates replay exactly. An intentional measure or coordinate-law
 change may claim ensemble equivalence, not identity with the prior trajectory.
 
 The first required artifact is now executable as
-`civsim.planet.stellar-birth-dimensional-census.v3`. It is a partial
+`civsim.planet.stellar-birth-dimensional-census.v4`. It is a partial
 derivation census, not a new input manifest. Its 31 typed coordinates contain
 dimensions and carrier shapes but no magnitudes. Seven phenomenon-local exact
 matrices record rank, pivots, free columns, primitive integer null vectors,
@@ -90,7 +91,7 @@ identities, missing dependencies, and dropped mechanisms. The checker uses
 checked `i128` rational Gauss-Jordan elimination and fails closed on duplicate
 identities or arithmetic overflow.
 
-The census embeds `civsim.planet.stellar-birth-structure.v1`. Its separate
+The census embeds `civsim.planet.stellar-birth-structure.v2`. Its separate
 component and species registry contracts contain no instances or authored
 members. Six shared domains cover component identity, species identity,
 spatial position, natural-log frequency, Lagrangian material-element identity,
@@ -100,6 +101,16 @@ frequency, variable components and topology, time histories, and
 material-time histories. Catalog completeness, identity order, exact canonical
 entries, domain references, and variable-to-carrier bindings are checked before
 serialization.
+
+Structure v2 also embeds a composed value-free stellar-state contract. Open
+registries define physical-closure-derived state coordinates, pre-seal
+interaction-sector admission, acyclic physical-regime proofs, globally
+conservative mechanism composition, and a one-way noncausal classification
+projection. They enumerate no class, sector, predicate, threshold, state
+member, law, or value. A lawful unfamiliar sector uses the ordinary execution
+path, while an absent or label-only sector refuses. The full contract and its
+named-class generality tests are in
+`docs/working/STELLAR_STATE_CLASSIFICATION_CONTRACT.md`.
 
 The schema records obligations for future realizations. Component count must
 come only from the approved realization coordinate within joint-measure
@@ -159,7 +170,12 @@ Its proof must bind the same absolute floor, schema, checker version, dependency
 digest, and the exact joint-measure artifact. A proof from another floor,
 measure, version, or validity domain remains an open requirement. Gap Law,
 Chaos Protocol, Residual Law, and a unique residual slot if irreducible apply
-to this leaf as well as to the joint measure.
+to this leaf as well as to the joint measure. Both leaves also require
+dimensional closure, admitted dependencies, validity-domain proof, global
+conservation, and open stellar-state coverage. The coordinate law additionally
+proves totality over joint-measure support and a measure-consistent
+push-forward; the joint measure additionally proves observer, ordering, and
+presentation independence.
 
 ## Present receipt
 
@@ -168,10 +184,10 @@ three physical floor values, derives `eps_0`, enters Stage 1, and returns
 `stellar_birth.realization_measure`. It emits six transcript events: three
 floor records, one derived-value record, one Stage 1 entry, and one refusal.
 It emits no `[X]`, no `[W]` realization, and no snapshot. Repeated runs are
-byte-identical at `321,319` stdout bytes and SHA-256
-`6f610c3dde073b41a085394237659ccd680b5aa0ccd0c571f5fe4e7e97197d52`.
-The current receipt is `civsim.planet.run.v9`; its transcript schema major is
-`7`.
+byte-identical at `352,852` stdout bytes and SHA-256
+`b008e54a81202216b94eb842a86f928f50eee6c38b19d8b7b4cbb1d3520c8a10`.
+The current receipt is `civsim.planet.run.v10`; its transcript schema major is
+`8`.
 
 The three-node graph now executes as a fixed-order conjunction over two opaque
 repository-owned proof capabilities. The production resolver currently
@@ -185,9 +201,10 @@ census analysis. The coordinate-law leaf has analysis count zero. Receipt and
 transcript call one prefix-aware serializer for the shared payload, so their
 two views cannot drift independently. The structure is serialized only beneath
 the non-admitting joint-measure census. Library callers can inspect both
-registry contracts, every domain and carrier, every variable, phenomenon,
-attempt, and gap through immutable typed views without parsing display text or
-acquiring a proof-construction surface.
+identity registries, the composed stellar-state contract and its four nested
+registries, every domain and carrier, every variable, phenomenon, attempt, and
+gap through immutable typed views without parsing display text or acquiring a
+proof-construction surface.
 
 ## Retained mechanism boundary
 
@@ -208,7 +225,8 @@ other dropped mechanism remain explicit residual or refusal obligations.
 ## Build sequence
 
 1. Extend the partial census to complete stellar-birth physics over the landed
-   registry, domain, and carrier contracts. Remaining coverage includes
+   registry, domain, carrier, open-sector, physical-regime, and state-history
+   contracts. Remaining coverage includes
    realized component topology, multiplicity interactions, tensor needs,
    spectral closure, fragmentation, magnetic braking, multicenter reduction,
    a persistent disk state, and every dynamical regime. Do not decompose the

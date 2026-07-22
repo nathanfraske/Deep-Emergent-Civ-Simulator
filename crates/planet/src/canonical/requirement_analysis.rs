@@ -10,7 +10,7 @@ use super::stellar_birth_dimensions::{
 };
 use super::stellar_birth_structure::{
     CarrierSchema, CarrierSchemaView, ComponentRegistrySchemaView, IndexDomain, IndexDomainView,
-    SpeciesRegistrySchemaView,
+    SpeciesRegistrySchemaView, StellarStateSchemaView,
 };
 
 /// A typed, non-admitting analysis attached to an unresolved proof leaf.
@@ -146,6 +146,11 @@ impl<'a> ExactDimensionalCensusView<'a> {
     pub fn species_registry_schema(self) -> Option<SpeciesRegistrySchemaView<'a>> {
         self.computed()
             .map(|census| SpeciesRegistrySchemaView::new(&census.structure.species_registry))
+    }
+
+    pub fn stellar_state_schema(self) -> Option<StellarStateSchemaView<'a>> {
+        self.computed()
+            .map(|census| StellarStateSchemaView::new(&census.structure.stellar_state))
     }
 
     pub fn index_domains(self) -> impl ExactSizeIterator<Item = IndexDomainView<'a>> + 'a {

@@ -25,7 +25,7 @@ use civsim_units::physics_floor::PHYSICAL_FLOOR_LEN;
 use std::{fmt, num::TryFromIntError};
 
 /// Stable schema identity for the current concrete transcript format.
-pub const RUN_TRANSCRIPT_SCHEMA_ID: &str = "civsim.planet.transcript.v7";
+pub const RUN_TRANSCRIPT_SCHEMA_ID: &str = "civsim.planet.transcript.v8";
 
 pub(super) fn canonical_text(value: &str) -> CanonicalText<'_> {
     CanonicalText(value)
@@ -62,9 +62,9 @@ pub struct TranscriptSchema {
 }
 
 impl TranscriptSchema {
-    pub const V7: Self = Self {
+    pub const V8: Self = Self {
         id: RUN_TRANSCRIPT_SCHEMA_ID,
-        major: 7,
+        major: 8,
         minor: 0,
     };
 
@@ -384,7 +384,7 @@ pub struct RunTranscript {
 impl RunTranscript {
     pub(super) fn empty(declared_floor_entries: usize) -> Self {
         Self {
-            schema: TranscriptSchema::V7,
+            schema: TranscriptSchema::V8,
             representation: RepresentationReceipt::sealed()
                 .expect("the sealed SI representation must project"),
             declared_floor_entries,
@@ -1600,7 +1600,7 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(first.to_string(), second.to_string());
         assert!(first.to_string().starts_with(
-            "transcript=civsim.planet.transcript.v7\nschema.major=7\nschema.minor=0\n"
+            "transcript=civsim.planet.transcript.v8\nschema.major=8\nschema.minor=0\n"
         ));
         let last = first.events().last().expect("the refusal is recorded");
         assert!(matches!(
