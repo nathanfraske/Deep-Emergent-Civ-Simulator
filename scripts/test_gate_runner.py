@@ -415,6 +415,91 @@ cat > "$STONE_STDIN_LOG"
             self.assertFalse(logs["STONE_ARGS_LOG"].exists())
             self.assertFalse(logs["STONE_STDIN_LOG"].exists())
 
+    def test_stone0_history_scan_works_without_process_substitution(self) -> None:
+        bash = self.require_bash()
+        with tempfile.TemporaryDirectory(prefix="stone0-history-test-") as temporary:
+            root = Path(temporary) / "repo"
+            root.mkdir()
+            scripts = root / "scripts"
+            scripts.mkdir()
+            shutil.copy2(
+                ROOT / "scripts" / "stone0-pre-push-hook.sh",
+                scripts / "stone0-pre-push-hook.sh",
+            )
+            (scripts / "stone0-pre-push-hook.sh").chmod(0o755)
+            (scripts / "stone0_tombstones.txt").write_text("", encoding="utf-8")
+            secret = Path(temporary) / "synthetic-secret.pass"
+            token = "stone0-synthetic-live-token-4d8f"
+            secret.write_text(token + "\n", encoding="utf-8")
+
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "stone0@example.invalid"],
+                cwd=root,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Stone0 Test"],
+                cwd=root,
+                check=True,
+            )
+            (root / "clean.txt").write_text("clean\n", encoding="utf-8")
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "clean"], cwd=root, check=True
+            )
+            clean_sha = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+
+            environment = os.environ.copy()
+            environment["STONE0_SECRETS_PATH"] = secret.as_posix()
+            zero = "0" * 40
+            clean_update = f"refs/heads/topic {clean_sha} refs/heads/topic {zero}\n"
+            clean = subprocess.run(
+                [bash, "scripts/stone0-pre-push-hook.sh", "origin", "ssh://example/repo"],
+                cwd=root,
+                input=clean_update,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(clean.returncode, 0, clean.stdout + clean.stderr)
+            self.assertNotIn("Could not scan commit", clean.stderr)
+
+            (root / "laundered.txt").write_text(token + "\n", encoding="utf-8")
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "laundered"], cwd=root, check=True
+            )
+            bad_sha = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            bad_update = (
+                f"refs/heads/topic {bad_sha} refs/heads/topic {clean_sha}\n"
+            )
+            blocked = subprocess.run(
+                [bash, "scripts/stone0-pre-push-hook.sh", "origin", "ssh://example/repo"],
+                cwd=root,
+                input=bad_update,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(blocked.returncode, 1, blocked.stdout + blocked.stderr)
+            self.assertIn("stone0 pre-push: BLOCKED", blocked.stdout)
+            self.assertNotIn(token, blocked.stdout + blocked.stderr)
+
     def test_static_clients_point_to_the_declarative_authority(self) -> None:
         ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"

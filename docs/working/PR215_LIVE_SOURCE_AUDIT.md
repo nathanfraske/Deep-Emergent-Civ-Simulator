@@ -219,6 +219,15 @@ the causal bitstream.
     validates the complete sealed structure before its first write. A negative
     test proves a reordered domain catalog returns a formatting error and leaves
     the output buffer empty.
+30. **The Git for Windows history hook could not open Bash process
+    substitution.** The declarative pre-push gates passed, but the credential
+    range scan handed `git grep` a `/proc/.../fd/...` pattern path that the child
+    Git process could not reopen, then followed its documented fail-open
+    operational policy. The hook now streams patterns through `git grep -f -`.
+    Pattern bytes remain in memory and never enter a file or command argument.
+    A temporary-repository test proves a clean commit scans without the notice
+    and a later commit carrying a synthetic live token blocks without printing
+    that token.
 
 The resulting projected composite values are replayable from the transcript:
 
@@ -283,10 +292,10 @@ civilization, authored world generation, and the old causal viewer remain in
 The structure and stellar-birth targets pass 25 focused library tests. Seven
 external CLI tests cover the typed views, duplicated refusal wire, deterministic
 output, and input refusal. Eight focused floor-authority tests, ten Stone 0
-integration tests, and fifteen gate-runner tests pass, with one platform-specific
+integration tests, and sixteen gate-runner tests pass, with one platform-specific
 gate-runner test skipped. The canonical provenance tier, warnings-denied planet,
 units, and Stone 0 Clippy, and the planet boundary gate are clean. The complete
-Linux `check-pr` recipe passed with exit 0 in 1,053.4 seconds. It covered hook
+post-hook Linux `check-pr` recipe passed with exit 0 in 703.3 seconds. It covered hook
 canaries, all declarative gates, the ten-package all-target suite, GPU
 integer/no-float and available backend parity checks, warnings-denied Clippy,
 Rustdoc, and doctests.

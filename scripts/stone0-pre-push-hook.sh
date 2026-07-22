@@ -10,8 +10,9 @@
 #
 # ROBUSTNESS: this hook fails OPEN. Any operational problem (git error, no secrets file) allows the push;
 # it blocks ONLY on a positive detection. It NEVER prints, logs, or writes the password: patterns are fed
-# to grep through a process substitution (a /dev/fd pipe, never a disk file, never a command-line
-# argument), and matches are found with `grep -q` so no matched content is ever emitted.
+# to `git grep` through standard input, never a disk file or command-line argument, and matches are found
+# with `grep -q` so no matched content is ever emitted. Standard input is required here because Git for
+# Windows cannot reopen Bash's `/proc/.../fd/...` process-substitution path in its child `git` process.
 #
 # INSTALL (do this once, per clone; it does NOT change tracked repository data):
 #   just hooks-install
@@ -66,6 +67,9 @@ fi
 
 fail=0
 while read -r local_ref local_sha remote_ref remote_sha; do
+  # Git writes LF records, while direct Windows harnesses may supply CRLF.
+  # Normalize only the final field so either transport names the same commit.
+  remote_sha="${remote_sha%$'\r'}"
   # A ref deletion pushes a zero local sha; nothing to scan.
   [ "$local_sha" = "$ZERO" ] && continue
 
@@ -104,7 +108,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     # Exclude the tombstone list itself: it legitimately holds every retired
     # phrase. `git grep <commit>` searches the full committed snapshot, including
     # binary blobs, without exposing the matched bytes.
-    git grep -q -F -f <(emit_patterns) "$commit" -- . ':(exclude)scripts/stone0_tombstones.txt' 2>/dev/null
+    emit_patterns | git grep -q -F -f - "$commit" -- . ':(exclude)scripts/stone0_tombstones.txt' 2>/dev/null
     grep_status=$?
     if [ "$grep_status" -eq 0 ]; then
       echo "stone0 pre-push: BLOCKED. A live override password or a retired tombstone phrase appears in commit $commit"

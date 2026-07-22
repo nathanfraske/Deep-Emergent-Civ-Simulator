@@ -51,6 +51,7 @@ observer independence bind the full runpath.
 - 2026-07-21  The Stage 1 refusal is backed by an executable typed conjunction over the joint-measure and coordinate-law proof capabilities -> `crates/planet/src/canonical/stellar_birth_measure.rs`
 - 2026-07-21  Partial census v3 binds 31 value-free coordinates and seven exact phenomenon reports to component and species registry contracts, six shared domains, and eleven carrier schemas beneath the open joint-measure leaf -> `crates/planet/src/canonical/stellar_birth_structure/`
 - 2026-07-21  Stone 0 now fails closed on unrecognized runner and leaf failures, requires exact two-layer policy markers for owner override, and rejects caller-selected override trust paths -> `crates/stone0/src/lib.rs`, `scripts/gate_runner.py`
+- 2026-07-21  Pre-push history scanning now streams credential patterns through stdin for Git for Windows and Linux parity, with clean and blocking temporary-repository tests -> `scripts/stone0-pre-push-hook.sh`
 - 2026-07-21  Physical-floor verification now requires the independently pinned v1 authority digest before the value-opaque singleton capability can project execution magnitudes -> `crates/units/src/physics_floor.rs`
 - 2026-07-21  Blind-audit repairs make dimensional arithmetic total at signed edges, label target reachability without law claims, expose nonzero support and typed read-only gap views, and name spectral and history semantics -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
 - 2026-07-21  One sealed v1 SHA-256 binds the ordered SI representation, physical admissions, exhaustion-receipt pins, and execution relations -> `crates/units/src/physics_floor.rs`
@@ -61,10 +62,10 @@ observer independence bind the full runpath.
 - 2026-07-21  Physical folds across physics and materials require the verified execution capability; representation-only conversions use the noncausal representation view -> `crates/units/src/constants.rs`
 - 2026-07-21  One frozen-packet blind-generalizer pass found and closed physical API reachability, shared receipt authority, and order-insensitive declaration checks -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
 - 2026-07-21  Direct canonical stdout is pinned at 321,319 bytes and SHA-256 `6f610c3dde073b41a085394237659ccd680b5aa0ccd0c571f5fe4e7e97197d52` -> `docs/working/STELLAR_BIRTH_MEASURE_CONTRACT.md`
-- 2026-07-21  Focused structure, census, CLI, and warnings-denied Clippy checks pass; complete Linux `check-pr` parity passes in 1,053.4 seconds for the v9 slice -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
+- 2026-07-21  Focused structure, census, CLI, and warnings-denied Clippy checks pass; post-hook complete Linux `check-pr` parity passes in 703.3 seconds for the v9 slice -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
 - 2026-07-20  Active physics is abiotic-only; organism laws and data survive through parked compatibility facades -> `crates/physics/src/lib.rs`, `parked/crates/physics/`
 - 2026-07-20  Legacy emic, celestial, disk-composition, and organism GPU surfaces moved behind parked facades -> `parked/crates/`
-- 2026-07-20  One 25-gate declarative inventory drives CI, Stone 0, Stop, Just, Make, PowerShell, local CI, and fail-closed pre-push routes -> `scripts/gates.toml`, `scripts/githooks/pre-push`
+- 2026-07-20  One 25-gate declarative inventory drives CI, Stone 0, Stop, Just, Make, PowerShell, local CI, and tracked pre-push routes -> `scripts/gates.toml`, `scripts/githooks/pre-push`
 - 2026-07-20  Legacy design, audit, research, runbook, roadmap, queue, and harness authority surfaces parked -> `parked/`
 - 2026-07-20  `Fixed::log_sum_exp` is the sole N-ary provider; strict Diamond reports 110 providers for 110 quantities -> `crates/core/src/fixed.rs`
 - 2026-07-20  No-argument and `run-derived` entrypoints construct the sealed floor, while readiness remains a separate missing-floor receipt -> `crates/planet/src/bin/run_planet.rs`
