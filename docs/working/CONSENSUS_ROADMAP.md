@@ -41,6 +41,9 @@ observer independence bind the full runpath.
 
 ## Recent landings
 
+- 2026-07-22  Observer-only scene DTOs expose transcript order, exact noncausal SI representation integers, stage reachability, refusal leaves, and open analyses while marking value payload accounting opaque at the viewer boundary -> `crates/viewer/src/scene.rs`
+- 2026-07-22  Direct public-API evidence pins the three measured floor records, one derived ancestry hop, complete Stage 1 refusal frontier, seven-stage reachability vector, and absence of realization, written state, and contingency -> `crates/planet/tests/canonical_observation.rs`
+- 2026-07-22  A planning-only file-to-invariant map records facade, shared-source, gate-baseline, evidence, and split-order constraints without moving a formula or broadening authority -> `docs/working/CANONICAL_FILE_INVARIANT_MAP.md`
 - 2026-07-22  GitHub-rendered canonical derivation and observer-only viewer map distinguishes current refusal from future authority, artifact, materialization, and rendering layers -> `docs/DERIVATION_AND_VIEWER_PIPELINE.md`
 - 2026-07-22  Parked Linux compatibility is restored through private floor and capability bridges without adding a canonical dependency or physical authority -> `parked/crates/sim/src/lib.rs`, `parked/crates/viewer/src/render.rs`
 - 2026-07-22  A private exact species-state kernel verifies complete normalized support and reduces mean particle mass without familiar tables or switches; production authority and support remain absent -> `crates/planet/src/canonical/stellar_birth_species.rs`

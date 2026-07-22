@@ -23,6 +23,15 @@
 
 use std::fmt;
 
+mod scene;
+
+pub use scene::{
+    AnalysisScene, DimensionalCensusScene, FloorEventScene, FloorScene, ObservationScene,
+    ObservationSceneStatus, OpenRequirementScene, ProvenanceScene, RefusalReasonScene,
+    RefusalScene, RepresentationValueScene, SpeciesAttemptScene, SpeciesDerivationScene,
+    StageScene, TranscriptEventScene, TranscriptScene, ValuePayloadVisibility,
+};
+
 /// A read-only handle to a completed planet snapshot.
 #[derive(Debug, Clone, Copy)]
 pub struct SnapshotView<'a> {
@@ -83,6 +92,11 @@ impl<'a> ObservationView<'a> {
     /// Refusal view, when and only when the canonical run refused.
     pub fn refusal(self) -> Option<RefusalView<'a>> {
         self.observation.refusal_receipt().map(RefusalView::new)
+    }
+
+    /// Project the sealed observation into immutable presentation data.
+    pub const fn scene(self) -> ObservationScene<'a> {
+        ObservationScene::new(self)
     }
 
     /// Whether the canonical outcome completed.

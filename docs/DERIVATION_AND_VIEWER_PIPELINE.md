@@ -176,7 +176,7 @@ flowchart TB
         OBSERVATION["PlanetObservation<br/>Sealed borrowed projection"]
         REFUSAL_VIEW["Refusal observation<br/>Exact RunReceipt and transcript<br/>No snapshot"]
         SNAPSHOT_VIEW["Completed observation<br/>Immutable PlanetSnapshot<br/>with embedded completion receipt"]
-        EXPLORER["CURRENT useful viewer surface<br/>Typed floor, provenance, stages,<br/>open proofs, Gap and Chaos status,<br/>residuals, and refusal frontier"]
+        EXPLORER["CURRENT useful viewer surface<br/>Typed transcript and floor-event envelope,<br/>stages, open proofs, Gap and Chaos status,<br/>and refusal frontier<br/>Value provenance remains planet-owned"]
 
         CURRENT_REFUSAL --> OUTCOME
         SNAPSHOT --> OUTCOME
@@ -300,8 +300,8 @@ flowchart TB
         direction LR
 
         V0["0. DONE in PR #215<br/>Private outcome state and<br/>sealed observation token"]
-        V1["1. NEXT<br/>Typed provenance and refusal<br/>scene projections<br/>Viewer binary remains unwired"]
-        V2["2. Artifact identity<br/>Domain-separated typed keys<br/>Byte-neutral receipt key"]
+        V1["1. DONE<br/>Typed transcript and refusal scenes<br/>Opaque value provenance is explicit<br/>Viewer binary remains unwired"]
+        V2["2. NEXT: artifact identity<br/>Domain-separated typed keys<br/>Byte-neutral receipt key"]
         V3["3. Snapshot manifests<br/>System, body, field,<br/>and provenance roots"]
         V4["4. Paged provenance<br/>Event digests and transcript roots"]
         V5["5. Verified CAS and materializer<br/>Parent-bound tickets<br/>Exact backend parity"]
