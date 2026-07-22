@@ -2213,8 +2213,8 @@ def main(argv: list[str] | None = None) -> int:
         "planet boundary gate: clean "
         "(ledger cannot authorize values, fourteen raw planet modules and the sealed floor bridge are "
         "private in the separate active-candidate package, canonical runtime reaches only ledger and "
-        "units until typed adapters land, canonical arithmetic is integer-only, and viewer is a "
-        "an immutable-observation leaf)"
+        "units until typed adapters land, canonical arithmetic is integer-only, and viewer is an "
+        "immutable-observation leaf)"
     )
     return 0
 
