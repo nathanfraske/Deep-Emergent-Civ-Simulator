@@ -30,6 +30,33 @@ pub(super) const COMPLETE_SPECIES_STATE_MEAN_PARTICLE_MASS_LAW_ID: &str =
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct SpeciesContentIdentity([u8; 32]);
 
+/// Exact magnitude in the sealed SI mass-coordinate representation.
+///
+/// This type distinguishes an engine coordinate from a dimensionless support
+/// weight. It does not derive, admit, or otherwise authorize the magnitude it
+/// contains.
+#[derive(Debug, Clone)]
+struct ExactSiMassMagnitude(BigRat);
+
+impl ExactSiMassMagnitude {
+    fn exact(&self) -> &BigRat {
+        &self.0
+    }
+}
+
+/// Exact dimensionless number-fraction coordinate.
+///
+/// Physical support authority remains responsible for deriving the measure;
+/// this wrapper only prevents a mass coordinate from occupying its slot.
+#[derive(Debug, Clone)]
+struct ExactNumberFraction(BigRat);
+
+impl ExactNumberFraction {
+    fn exact(&self) -> &BigRat {
+        &self.0
+    }
+}
+
 /// Opaque proof that the candidate's charge, state, active sectors, validity
 /// domain, dependency ancestry, and floor binding admit it on this support.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,7 +73,7 @@ struct SpeciesStateProofSeal;
 #[derive(Debug, Clone)]
 struct DerivedSpeciesStateCandidate {
     identity: SpeciesContentIdentity,
-    rest_mass: Option<BigRat>,
+    rest_mass: Option<ExactSiMassMagnitude>,
     state_proof: Option<DerivedSpeciesStateProof>,
 }
 
@@ -54,7 +81,7 @@ struct DerivedSpeciesStateCandidate {
 #[derive(Debug, Clone)]
 struct SpeciesSupportWeight {
     identity: SpeciesContentIdentity,
-    number_fraction: BigRat,
+    number_fraction: ExactNumberFraction,
 }
 
 /// Authority needed to verify a realized registry. There is no production
@@ -70,8 +97,8 @@ struct SpeciesRegistryAuthoritySeal;
 #[derive(Debug, Clone)]
 struct VerifiedSpeciesStateEntry {
     identity: SpeciesContentIdentity,
-    rest_mass: BigRat,
-    number_fraction: BigRat,
+    rest_mass: ExactSiMassMagnitude,
+    number_fraction: ExactNumberFraction,
 }
 
 /// Canonically ordered, complete support whose exact number fractions sum to
@@ -88,7 +115,7 @@ pub(super) struct VerifiedSpeciesStateSupport {
 /// written as physical state.
 #[derive(Debug, Clone)]
 pub(super) struct DerivedMeanParticleMass {
-    value: BigRat,
+    value: ExactSiMassMagnitude,
     support_identities: Vec<SpeciesContentIdentity>,
 }
 
@@ -98,7 +125,7 @@ impl DerivedMeanParticleMass {
     }
 
     pub(super) fn exact_value(&self) -> &BigRat {
-        &self.value
+        self.value.exact()
     }
 
     pub(super) fn support_identities(&self) -> &[SpeciesContentIdentity] {
@@ -198,7 +225,7 @@ fn same_candidate_content(
 ) -> bool {
     match (&left.rest_mass, &right.rest_mass) {
         (Some(left_mass), Some(right_mass)) => {
-            left_mass.cmp_rat(right_mass) == Ordering::Equal
+            left_mass.exact().cmp_rat(right_mass.exact()) == Ordering::Equal
                 && left.state_proof == right.state_proof
         }
         (None, None) => left.state_proof == right.state_proof,
@@ -243,7 +270,7 @@ fn verify_species_state_support(
                 candidate.identity,
             ));
         };
-        if !nonnegative(rest_mass) {
+        if !nonnegative(rest_mass.exact()) {
             return Err(SpeciesStateSupportRefusal::NegativeRestMass(
                 candidate.identity,
             ));
@@ -264,7 +291,7 @@ fn verify_species_state_support(
         }
     }
     for weight in &weights {
-        if !strictly_positive(&weight.number_fraction) {
+        if !strictly_positive(weight.number_fraction.exact()) {
             return Err(SpeciesStateSupportRefusal::NonPositiveSupportWeight(
                 weight.identity,
             ));
@@ -290,7 +317,7 @@ fn verify_species_state_support(
     }
 
     let total_weight = weights.iter().fold(BigRat::from_i64(0), |sum, weight| {
-        sum.add(&weight.number_fraction).reduce()
+        sum.add(weight.number_fraction.exact()).reduce()
     });
     if total_weight.cmp_rat(&BigRat::from_i64(1)) != Ordering::Equal {
         return Err(SpeciesStateSupportRefusal::NonUnitCompositionSimplex);
@@ -340,13 +367,13 @@ pub(super) fn derive_mean_particle_mass(
     let mut support_identities = Vec::with_capacity(support.entries.len());
     for entry in &support.entries {
         weighted_mass = weighted_mass
-            .add(&entry.number_fraction.mul(&entry.rest_mass))
+            .add(&entry.number_fraction.exact().mul(entry.rest_mass.exact()))
             .reduce();
-        total_weight = total_weight.add(&entry.number_fraction).reduce();
+        total_weight = total_weight.add(entry.number_fraction.exact()).reduce();
         support_identities.push(entry.identity);
     }
     DerivedMeanParticleMass {
-        value: weighted_mass.div(&total_weight).reduce(),
+        value: ExactSiMassMagnitude(weighted_mass.div(&total_weight).reduce()),
         support_identities,
     }
 }
@@ -374,7 +401,7 @@ mod tests {
     fn state(tag: u8, rest_mass: Option<BigRat>) -> DerivedSpeciesStateCandidate {
         DerivedSpeciesStateCandidate {
             identity: identity(tag),
-            rest_mass,
+            rest_mass: rest_mass.map(ExactSiMassMagnitude),
             state_proof: Some(DerivedSpeciesStateProof {
                 _seal: SpeciesStateProofSeal,
             }),
@@ -384,7 +411,7 @@ mod tests {
     fn weight(tag: u8, number_fraction: BigRat) -> SpeciesSupportWeight {
         SpeciesSupportWeight {
             identity: identity(tag),
-            number_fraction,
+            number_fraction: ExactNumberFraction(number_fraction),
         }
     }
 
