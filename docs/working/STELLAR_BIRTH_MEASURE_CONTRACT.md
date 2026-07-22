@@ -1,10 +1,10 @@
 # Stellar-birth measure contract
 
 Status: executable leaf-closure evaluator, replayable floor, partial exact
-dimensional census, modular value-free structure schema, and open stellar-state
-and classification contracts implemented; both physical obligations remain
-unresolved and the canonical runner reports their exact frontier before
-refusing.
+dimensional census, modular value-free structure schema, open stellar-state
+and classification contracts, and a private exact species-state reducer
+implemented; both physical obligations remain unresolved and the canonical
+runner reports their exact frontier before refusing.
 
 ## Authority
 
@@ -122,10 +122,14 @@ complete registry support and unit normalization rather than renormalize an
 incomplete list. Domain realizations must keep physical support separate from
 convergence-derived numerical resolution, derive or gauge their references,
 use ordinals only for serialization, and turn engine limits into typed named
-refusals. None of those realization, normalization, reference, convergence,
-collision, topology, or capacity operations exists yet. The current executable
-behavior validates and bitstreams the obligation schema, then refuses at the
-two absent Stage 1 proof leaves.
+refusals. A private structural verifier now implements canonical species
+identity ordering, collision and duplicate refusal, exact support equality,
+positive number fractions, nonnegative rest mass, and exact unit-simplex
+checking. It has no realized membership, content encoder, physical proof
+binding, production authority, reference or convergence controller, topology
+validator, capacity check, or typed capacity refusal. The current executable
+behavior still validates and bitstreams only the obligation schema, then
+refuses at the two absent Stage 1 proof leaves.
 
 The census is deliberately non-admitting. Its wire status is `computed`, its
 `closure_effect` is `none`, and its global `coverage_claim` is `false`. The
@@ -153,6 +157,39 @@ radius may appear only as a proved symmetry reduction. Those shared causes are
 the bridge to disk surface density, thermal history, solids, and
 variable-cardinality bodies; they cannot be replaced by independent stellar
 or planetary knobs.
+
+### Exact species-state reduction boundary
+
+`canonical/stellar_birth_species.rs` salvages one identity-neutral mathematical
+law from the retained substrate:
+
+```text
+mean_free_particle_mass = sum(number_fraction_i * rest_mass_i)
+```
+
+The implementation uses exact rational arithmetic and distinct types for the
+SI mass-coordinate magnitude and dimensionless number fraction. It sorts by
+content identity, requires exact candidate and support equality, refuses
+identity collisions and duplicate weights, requires every weight to be
+strictly positive, accepts a lawful zero-rest-mass state, and requires the
+fractions to sum exactly to one. It never normalizes an incomplete support and
+has no branch for a familiar species, stellar population, chemistry table, or
+molecular convention.
+
+This does not derive a species or a mass. The opaque state proof and registry
+authority in this slice are structural seals with no production constructors,
+bound payloads, or semantic checkers. The repository resolver returns `None`,
+so no production path can call the reducer and the refusal bytes remain
+unchanged. A future smart authority must bind content identity, exact mass and
+dimension ancestry, charge and physical state, active sectors and couplings,
+validity domain, dependency graph, complete joint support measure,
+normalization proof, absolute floor, schemas, checker versions, and replay
+identity before this law can contribute to the joint measure. It must also
+declare finite support-count and rational numerator, denominator, and operation
+domains so expanding catalogs cannot create an unbounded execution claim. A
+later quantity schema must separately derive and receipt the finite integer
+projection used by production GPU kernels. SI coordinates and `BigRat`
+arithmetic do not supply physical provenance.
 
 ## Realization-coordinate law
 
@@ -231,26 +268,31 @@ other dropped mechanism remain explicit residual or refusal obligations.
    spectral closure, fragmentation, magnetic braking, multicenter reduction,
    a persistent disk state, and every dynamical regime. Do not decompose the
    joint measure into authored marginals.
-2. Derive the species mass and state registry, coupled gas and dust thermal
-   balance, equation-of-state closure, collapse measure, mass-flow history,
-   material mass and position histories, local-frame angular-momentum
-   transport, and multicenter circularization law in that order. Each rung
-   consumes the correlated outputs below it.
-3. Close evidence custody only for candidates that survive derivation. Record
+2. Complete the authority-bound species mass and state registry. The structural
+   exact reducer is landed, but its content identity, physical proof, complete
+   support measure, floor, checker, and replay bindings remain absent. Only
+   after those bind may it derive mean particle mass.
+3. Derive coupled gas and dust thermal balance, equation-of-state closure,
+   collapse measure, mass-flow history, material mass and position histories,
+   local-frame angular-momentum transport, and multicenter circularization law
+   in that order. Each rung consumes the correlated outputs below it. Thermal
+   closure must prove a sign-changing residual bracket rather than accept an
+   authored temperature.
+4. Close evidence custody only for candidates that survive derivation. Record
    support, normalization, conditioning, correlations, covariance families,
    uncertainty, and out-of-domain behavior. Custody does not admit them.
-4. Admit each irreducible survivor only with complete Gap Law including its
+5. Admit each irreducible survivor only with complete Gap Law including its
    typed Chaos Protocol branch, Residual Law, and unique residual-slot
    receipts, or retain the root refusal.
-5. Define and audit a versioned realization-coordinate law independently of
+6. Define and audit a versioned realization-coordinate law independently of
    callers, hidden seeds, observer state, record order, filesystem order, and
    transcript ordinals.
-6. Feed both verified proof capabilities into the executable evaluator.
+7. Feed both verified proof capabilities into the executable evaluator.
    Generate the first `[X]` only when both leaves prove closed.
-7. Create `[W]` realization identity from that recorded draw, then add SI-native
+8. Create `[W]` realization identity from that recorded draw, then add SI-native
    collapse, thermal, circularization, disk, and embryo-system adapters
    behind a typed substrate facade with intervals and named residuals.
-8. Carry the same receipt through persistent elemental inventories, assembly,
+9. Carry the same receipt through persistent elemental inventories, assembly,
    orbits, moons, young thermal state, crust, mantle, geodynamics, atmosphere,
    hydrology, loads, flexure, and immutable snapshot transport.
 

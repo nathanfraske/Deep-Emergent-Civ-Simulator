@@ -245,6 +245,19 @@ the causal bitstream.
     or hypothetical sector. Structure v2 and census v4 expose the rules in the
     exact refusal wire, while a seventh coverage gap and complete common
     admission obligations on both leaves keep realized behavior open.
+32. **The retained mean-particle-mass path authored familiar chemistry.** Its
+    element table, Solar abundance convention, logarithmic conversion,
+    caller-selected molecular state, and familiar collapse endpoints cannot
+    enter the canonical runpath. One private exact kernel now keeps only the
+    complete-support weighted reduction. It distinguishes exact SI mass
+    coordinates from dimensionless number fractions, orders content identities,
+    refuses duplicates, unequal-content collisions, support mismatch,
+    nonpositive weights, absent state proof, missing or negative mass, and a
+    nonunit simplex, and admits an unfamiliar or massless state through the same
+    structural path. Its authority and proof seals have no production
+    constructors or physical bindings, its resolver returns `None`, and no
+    production caller exists. The repair is therefore byte-neutral and does not
+    claim a derived species registry or close Stage 1.
 
 The resulting projected composite values are replayable from the transcript:
 
@@ -308,11 +321,11 @@ civilization, authored world generation, and the old causal viewer remain in
 
 ## Validation
 
-The complete planet library passes 61 tests. Seven external CLI tests cover the
+The complete planet library passes 67 tests. Seven external CLI tests cover the
 typed views, duplicated refusal wire, deterministic output, canonical versions,
 and input refusal. Focused warnings-denied planet and units Clippy, formatting,
 diff hygiene, and the planet boundary gate are clean. The complete Linux
-`check-pr` recipe passed with exit 0 in 877.5 seconds. It covered hook and gate
+`check-pr` recipe passed with exit 0 in 854 seconds. It covered hook and gate
 canaries, every declarative PR boundary, the canonical inventory, the
 ten-package all-target suite, GPU integer/no-float and available-backend parity,
 warnings-denied Clippy, Rustdoc, and doctests.
@@ -423,6 +436,23 @@ and steering/observer lenses found no source-traceable live defect. They grant
 no clearance to future registry members, digest implementations, proof smart
 constructors, semantic checkers, measures, or transition executors.
 
+The exact species-state reducer then received one frozen source-blind
+generalizer process, not a repeated panel loop. The candidate source freeze is
+commit `0b49c33aaefa237003c92a0c57deb0657379d8c9`, tree
+`50414e921e5decf495a0e6740884b66164189f0b`, with module SHA-256
+`f97ccfc794aee49d0ce4843aac5bfeb193f6ccfdcd17b8089cf37dd962d760e5`.
+Its clean and hostile-environment runner differential is byte-identical to the
+baseline refusal. The broader panel-construction smoke could not prove its
+requested isolation, chronology, schema-completeness, or adjudication
+properties, so no panel clearance is claimed. The source-blind contract was
+stricter than this dormant slice and usefully exposed that zero-sized type
+seals cannot stand in for physical authority. That is recorded as an activation
+blocker rather than hidden behind the passing structural tests. Stage B found
+no live defect attributable to the diff: the only production-reachable symbol
+is the byte-identical law identity in non-admitting refusal metadata. It grants
+no universal-property proof beyond the bounded exact tests and requires finite
+support-count and rational-resource domains before activation.
+
 ## Remaining audit debt
 
 - Admission structures still carry human-readable receipt strings. The current
@@ -465,11 +495,13 @@ constructors, semantic checkers, measures, or transition executors.
   collision, symmetry, topology-label, permutation, and capacity-refusal
   implementations plus a multiplicity phenomenon. Structural rule identifiers
   alone cannot validate a realized graph.
-- Species and index-domain schemas still need realized membership, complete
-  support and normalization checks, derived chart and time-reference handling,
-  convergence control, and typed capacity refusals. Current rule identifiers
-  are not evidence that any of those operations can accept or specifically
-  refuse an unfamiliar system.
+- Species and index-domain schemas still need realized membership, physical
+  content identity, mass and dimension ancestry, state and sector proof,
+  authority and replay bindings, derived chart and time-reference handling,
+  convergence control, and typed capacity refusals. The private reducer now
+  checks structural support equality, exact unit normalization, collisions, and
+  weights, but its zero-sized seals are not evidence that an unfamiliar system
+  is physically admitted.
 - Material histories still need derived position and velocity state, local
   frame semantics, multicenter binding, translation and rotation invariance,
   flux topology, and conservation before a shell reduction or disk state can
@@ -493,20 +525,23 @@ the repaired stellar-state packet.
 1. Extend the partial machine-readable census from its landed registry, domain,
    and carrier contracts to complete physical coverage while preserving one
    correlation-carrying joint measure.
-2. Derive the species mass registry and coupled gas and dust thermal balance,
-   then derive equation-of-state closure, collapse flow, material mass and
-   position histories, local-frame angular-momentum transport, multicenter
-   binding, and circularization from the shared state.
-3. For each irreducible survivor, complete source custody, uncertainty,
+2. Derive and bind the complete species mass and state registry to the floor,
+   joint support, semantic checkers, and replay identity. Only then activate the
+   landed exact weighted reducer.
+3. Derive coupled gas and dust thermal balance with a proved residual bracket,
+   then equation-of-state closure, collapse flow, material mass and position
+   histories, local-frame angular-momentum transport, multicenter binding, and
+   circularization from the shared state.
+4. For each irreducible survivor, complete source custody, uncertainty,
    support, normalization, conditioning, Gap Law including the typed Chaos
    Protocol branch, Residual Law, and unique residual-slot receipts. If any
    item is incomplete, keep the Stage 1 refusal.
-4. Define the realization-coordinate law independently of callers, hidden
+5. Define the realization-coordinate law independently of callers, hidden
    seeds, enumeration order, transcript ordinals, and observer state.
-5. Only after both leaves close, issue the first `[X]`, derive `[W]` identity,
+6. Only after both leaves close, issue the first `[X]`, derive `[W]` identity,
    and expose SI-native typed adapters for collapse, disk formation, and embryo
    systems.
-6. Carry the same bitstream and refusal discipline through assembly,
+7. Carry the same bitstream and refusal discipline through assembly,
    composition, orbits, moons, young thermal state, crust, mantle,
    geodynamics, atmosphere, hydrology, loads, flexure, and immutable snapshot
    transport.

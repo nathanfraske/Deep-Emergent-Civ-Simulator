@@ -16,7 +16,7 @@ observer independence bind the full runpath.
 ## Active arcs
 
 - 2026-07-21  PR #215 is the draft integration base -> branch `claude/thermoelastic-rung3`, `HANDOFFS.md`
-- 2026-07-22  Derive the open stellar-birth mechanism chain through the landed state, sector, regime, and classification contracts, then close the joint measure and realization-coordinate law -> `docs/working/STELLAR_BIRTH_MEASURE_CONTRACT.md`
+- 2026-07-22  Derive the authority-bound species and state registry, then thermal residual closure and the remaining open stellar-birth chain before closing the joint measure and realization-coordinate law -> `docs/working/STELLAR_BIRTH_MEASURE_CONTRACT.md`
 - 2026-07-21  Stage 1 SI-native adapters are blocked until both stellar-birth measure leaves close -> `TODOS.md` P-STAGE1-ADAPTERS
 - 2026-07-21  Canonical GPU use remains blocked on typed adapters and exact CPU/GPU Q32.32 parity for every enabled backend -> `TODOS.md` P-GPU-BIT-PARITY
 - 2026-07-20  Stage 1 star, collapse, disk, and embryo-system realization -> `TODOS.md` P-STAR-DISK-SYSTEM
@@ -41,6 +41,7 @@ observer independence bind the full runpath.
 
 ## Recent landings
 
+- 2026-07-22  A private exact species-state kernel verifies complete normalized support and reduces mean particle mass without familiar tables or switches; production authority and support remain absent -> `crates/planet/src/canonical/stellar_birth_species.rs`
 - 2026-07-21  Physical floor normalized to three measured invariants; exact SI definitions moved to an untagged representation receipt and all execution constants derive from sealed relations -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
 - 2026-07-22  Transcript schema major 8 and run receipt v10 serialize typed Chaos Protocol evidence, the exact indexed Stage 1 frontier, dimensional census v4, and its value-free structure v2 -> `crates/planet/src/canonical/transcript.rs`
 - 2026-07-20  Root workspace narrowed to the abiotic dependency graph; biology, civilization, compose, scenarios, and calibration moved under `parked/` -> `parked/README.md`
