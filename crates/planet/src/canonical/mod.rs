@@ -7,10 +7,12 @@ mod identity;
 mod pipeline;
 mod preflight;
 mod receipt;
+mod requirement_analysis;
 mod snapshot;
 mod stage;
 mod star_disk_system;
 mod stellar_birth_artifacts;
+mod stellar_birth_dimensions;
 mod stellar_birth_measure;
 mod transcript;
 
@@ -29,6 +31,10 @@ pub use identity::{BodyId, ContingencyDrawId, EventId, RealizationId, ReservoirI
 pub use pipeline::{readiness_receipt, run_planet, PlanetRunOutcome};
 pub use preflight::preflight;
 pub use receipt::{OpenRequirement, Refusal, RefusalCode, RunReceipt, StageReceipt, StageStatus};
+pub use requirement_analysis::{
+    DimensionalAttemptView, DimensionalPhenomenonView, DimensionalVariableView,
+    ExactDimensionalCensusView, RequirementAnalysis,
+};
 pub use snapshot::PlanetSnapshot;
 pub use stage::Stage;
 pub use transcript::{

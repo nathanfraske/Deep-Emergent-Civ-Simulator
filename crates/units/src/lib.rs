@@ -42,6 +42,7 @@ use std::collections::HashMap;
 pub mod bignum;
 pub mod compute;
 pub mod constants;
+pub mod dimensional_analysis;
 pub mod fundamentals;
 pub mod guard;
 pub mod physics_floor;

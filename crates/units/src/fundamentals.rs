@@ -151,7 +151,9 @@ impl SiDimension {
             .map_err(|_| "dimension exponent does not fit the evaluator".to_owned())?;
         let mut out = [0_i8; 7];
         for (index, value) in self.exponents.into_iter().enumerate() {
-            let product = i16::from(value) * exponent;
+            let product = i16::from(value)
+                .checked_mul(exponent)
+                .ok_or_else(|| "dimension exponent overflow in formula power".to_owned())?;
             out[index] = i8::try_from(product)
                 .map_err(|_| "dimension exponent overflow in formula power".to_owned())?;
         }
@@ -525,6 +527,15 @@ pub fn composite(symbol: &str) -> Option<&'static Composite> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dimension_power_refuses_an_overflow_instead_of_panicking() {
+        let result = SiDimension::new(i8::MIN, 0, 0, 0, 0, 0, 0).pow(257);
+        assert_eq!(
+            result,
+            Err("dimension exponent overflow in formula power".to_owned())
+        );
+    }
 
     // The drift-check computes the composite from the stored fundamentals and confirms it reproduces the
     // recorded CODATA value. It uses `f64` DELIBERATELY and ONLY here, in a test, to validate the recorded

@@ -1,6 +1,8 @@
 use super::{
-    transcript::canonical_text, EventId, RealizationId, RunEventKind, RunTranscript, Stage,
-    TranscriptError,
+    requirement_analysis::{RequirementAnalysis, RequirementAnalysisPayload},
+    stellar_birth_dimensions::StellarBirthDimensionalCensusArtifact,
+    transcript::canonical_text,
+    EventId, RealizationId, RunEventKind, RunTranscript, Stage, TranscriptError,
 };
 use std::{cmp::Ordering, fmt};
 
@@ -19,6 +21,7 @@ pub enum RefusalCode {
 pub struct OpenRequirement {
     requirement_id: String,
     obligations: Vec<String>,
+    analyses: Vec<RequirementAnalysis>,
 }
 
 impl OpenRequirement {
@@ -29,7 +32,18 @@ impl OpenRequirement {
                 .iter()
                 .map(|obligation| (*obligation).to_owned())
                 .collect(),
+            analyses: Vec::new(),
         }
+    }
+
+    pub(crate) fn with_analyses(
+        requirement_id: &str,
+        obligations: &[&str],
+        analyses: Vec<RequirementAnalysis>,
+    ) -> Self {
+        let mut requirement = Self::new(requirement_id, obligations);
+        requirement.analyses = analyses;
+        requirement
     }
 
     pub fn requirement_id(&self) -> &str {
@@ -38,6 +52,10 @@ impl OpenRequirement {
 
     pub fn obligations(&self) -> &[String] {
         &self.obligations
+    }
+
+    pub fn analyses(&self) -> &[RequirementAnalysis] {
+        &self.analyses
     }
 }
 
@@ -373,7 +391,7 @@ fn stage_index(stage: Stage) -> usize {
 
 impl fmt::Display for RunReceipt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "receipt=civsim.planet.run.v6")?;
+        writeln!(f, "receipt=civsim.planet.run.v8")?;
         writeln!(f, "complete={}", self.is_complete())?;
         writeln!(
             f,
@@ -418,34 +436,310 @@ impl fmt::Display for RunReceipt {
                 "{prefix}.requirement={}",
                 canonical_text(refusal.requirement_id().unwrap_or(""))
             )?;
-            writeln!(
-                f,
-                "{prefix}.open_requirement_count={}",
-                refusal.open_requirements.len()
-            )?;
-            for (open_index, requirement) in refusal.open_requirements.iter().enumerate() {
-                writeln!(
-                    f,
-                    "{prefix}.open_requirement.{open_index:04}.id={}",
-                    canonical_text(requirement.requirement_id())
-                )?;
-                writeln!(
-                    f,
-                    "{prefix}.open_requirement.{open_index:04}.obligation_count={}",
-                    requirement.obligations().len()
-                )?;
-                for (obligation_index, obligation) in requirement.obligations().iter().enumerate() {
-                    writeln!(
-                        f,
-                        "{prefix}.open_requirement.{open_index:04}.obligation.{obligation_index:04}={}",
-                        canonical_text(obligation)
-                    )?;
-                }
-            }
+            write_open_requirements(f, &prefix, &refusal.open_requirements)?;
             writeln!(f, "{prefix}.detail={}", canonical_text(&refusal.detail))?;
         }
         write!(f, "{}", self.transcript)
     }
+}
+
+pub(super) fn write_open_requirements(
+    f: &mut fmt::Formatter<'_>,
+    prefix: &str,
+    requirements: &[OpenRequirement],
+) -> fmt::Result {
+    writeln!(f, "{prefix}.open_requirement_count={}", requirements.len())?;
+    for (open_index, requirement) in requirements.iter().enumerate() {
+        let open_prefix = format!("{prefix}.open_requirement.{open_index:04}");
+        writeln!(
+            f,
+            "{open_prefix}.id={}",
+            canonical_text(requirement.requirement_id())
+        )?;
+        writeln!(
+            f,
+            "{open_prefix}.obligation_count={}",
+            requirement.obligations().len()
+        )?;
+        for (obligation_index, obligation) in requirement.obligations().iter().enumerate() {
+            writeln!(
+                f,
+                "{open_prefix}.obligation.{obligation_index:04}={}",
+                canonical_text(obligation)
+            )?;
+        }
+        writeln!(
+            f,
+            "{open_prefix}.analysis_count={}",
+            requirement.analyses().len()
+        )?;
+        for (analysis_index, analysis) in requirement.analyses().iter().enumerate() {
+            write_requirement_analysis(
+                f,
+                &format!("{open_prefix}.analysis.{analysis_index:04}"),
+                analysis,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn write_requirement_analysis(
+    f: &mut fmt::Formatter<'_>,
+    prefix: &str,
+    analysis: &RequirementAnalysis,
+) -> fmt::Result {
+    writeln!(f, "{prefix}.kind={}", analysis.kind_id())?;
+    writeln!(
+        f,
+        "{prefix}.schema={}",
+        canonical_text(analysis.schema_id())
+    )?;
+    writeln!(
+        f,
+        "{prefix}.checker={}",
+        canonical_text(analysis.checker_id())
+    )?;
+    writeln!(f, "{prefix}.status={}", analysis.status_id())?;
+    writeln!(
+        f,
+        "{prefix}.closure_effect={}",
+        analysis.closure_effect_id()
+    )?;
+    writeln!(f, "{prefix}.coverage_claim={}", analysis.coverage_claim())?;
+    match &analysis.payload {
+        RequirementAnalysisPayload::ExactDimensionalCensus(census) => {
+            write_dimensional_census(f, prefix, census)
+        }
+    }
+}
+
+fn write_dimensional_census(
+    f: &mut fmt::Formatter<'_>,
+    prefix: &str,
+    artifact: &StellarBirthDimensionalCensusArtifact,
+) -> fmt::Result {
+    use super::stellar_birth_dimensions::StellarBirthDimensionalCensusArtifact::{
+        Computed, Invalid,
+    };
+
+    match artifact {
+        Invalid(census) => {
+            writeln!(f, "{prefix}.error.code={}", census.error_code)?;
+            writeln!(
+                f,
+                "{prefix}.error.detail={}",
+                canonical_text(&census.detail)
+            )
+        }
+        Computed(census) => {
+            writeln!(
+                f,
+                "{prefix}.representation_schema={}",
+                canonical_text(census.representation_schema_id)
+            )?;
+            writeln!(
+                f,
+                "{prefix}.floor_binding.schema={}",
+                canonical_text(census.floor_binding_schema_id)
+            )?;
+            writeln!(
+                f,
+                "{prefix}.floor_binding.sha256={}",
+                census.floor_binding_sha256
+            )?;
+            writeln!(
+                f,
+                "{prefix}.base_dimension_count={}",
+                census.base_dimension_ids.len()
+            )?;
+            for (index, id) in census.base_dimension_ids.iter().enumerate() {
+                writeln!(
+                    f,
+                    "{prefix}.base_dimension.{index:04}={}",
+                    canonical_text(id)
+                )?;
+            }
+            writeln!(f, "{prefix}.variable_count={}", census.variables.len())?;
+            for (index, variable) in census.variables.iter().enumerate() {
+                let variable_prefix = format!("{prefix}.variable.{index:04}");
+                writeln!(f, "{variable_prefix}.id={}", canonical_text(&variable.id))?;
+                writeln!(f, "{variable_prefix}.role={}", variable.role.id())?;
+                writeln!(f, "{variable_prefix}.carrier={}", variable.carrier.id())?;
+                writeln!(
+                    f,
+                    "{variable_prefix}.coupling_group={}",
+                    canonical_text(&variable.coupling_group_id)
+                )?;
+                write_dimension(f, &variable_prefix, variable.dimension)?;
+            }
+            writeln!(f, "{prefix}.phenomenon_count={}", census.phenomena.len())?;
+            for (index, phenomenon) in census.phenomena.iter().enumerate() {
+                let phenomenon_prefix = format!("{prefix}.phenomenon.{index:04}");
+                writeln!(
+                    f,
+                    "{phenomenon_prefix}.id={}",
+                    canonical_text(&phenomenon.phenomenon_id)
+                )?;
+                writeln!(
+                    f,
+                    "{phenomenon_prefix}.coverage_complete={}",
+                    phenomenon.coverage_complete
+                )?;
+                writeln!(
+                    f,
+                    "{phenomenon_prefix}.matrix.orientation={}",
+                    canonical_text(phenomenon.matrix_orientation)
+                )?;
+                write_string_list(f, &phenomenon_prefix, "input", &phenomenon.input_ids)?;
+                write_string_list(f, &phenomenon_prefix, "output", &phenomenon.output_ids)?;
+                writeln!(
+                    f,
+                    "{phenomenon_prefix}.matrix.column_count={}",
+                    phenomenon.matrix_columns.len()
+                )?;
+                for (column_index, column) in phenomenon.matrix_columns.iter().enumerate() {
+                    let column_prefix =
+                        format!("{phenomenon_prefix}.matrix.column.{column_index:04}");
+                    writeln!(f, "{column_prefix}.id={}", canonical_text(&column.id))?;
+                    write_dimension(f, &column_prefix, column.dimension)?;
+                }
+                writeln!(f, "{phenomenon_prefix}.rank={}", phenomenon.rank)?;
+                writeln!(f, "{phenomenon_prefix}.nullity={}", phenomenon.nullity())?;
+                write_index_list(
+                    f,
+                    &phenomenon_prefix,
+                    "pivot_column",
+                    &phenomenon.pivot_columns,
+                )?;
+                write_index_list(
+                    f,
+                    &phenomenon_prefix,
+                    "free_column",
+                    &phenomenon.free_columns,
+                )?;
+                writeln!(
+                    f,
+                    "{phenomenon_prefix}.null_vector_count={}",
+                    phenomenon.null_space_basis.len()
+                )?;
+                for (vector_index, vector) in phenomenon.null_space_basis.iter().enumerate() {
+                    let vector_prefix =
+                        format!("{phenomenon_prefix}.null_vector.{vector_index:04}");
+                    writeln!(f, "{vector_prefix}.coefficient_count={}", vector.len())?;
+                    for (coefficient_index, coefficient) in vector.iter().enumerate() {
+                        writeln!(
+                            f,
+                            "{vector_prefix}.coefficient.{coefficient_index:04}={coefficient}"
+                        )?;
+                    }
+                }
+                writeln!(
+                    f,
+                    "{phenomenon_prefix}.derivation_attempt_count={}",
+                    phenomenon.derivation_attempts.len()
+                )?;
+                for (attempt_index, attempt) in phenomenon.derivation_attempts.iter().enumerate() {
+                    let attempt_prefix =
+                        format!("{phenomenon_prefix}.derivation_attempt.{attempt_index:04}");
+                    writeln!(
+                        f,
+                        "{attempt_prefix}.id={}",
+                        canonical_text(&attempt.attempt_id)
+                    )?;
+                    writeln!(
+                        f,
+                        "{attempt_prefix}.law_id={}",
+                        canonical_text(&attempt.law_id)
+                    )?;
+                    writeln!(f, "{attempt_prefix}.status={}", attempt.status.id())?;
+                    write_string_list(f, &attempt_prefix, "input", &attempt.input_ids)?;
+                    writeln!(
+                        f,
+                        "{attempt_prefix}.output={}",
+                        canonical_text(&attempt.output_id)
+                    )?;
+                    writeln!(
+                        f,
+                        "{attempt_prefix}.dimension_only_projection_count={}",
+                        attempt.dimension_only_projection.len()
+                    )?;
+                    for (projection_index, exponent) in
+                        attempt.dimension_only_projection.iter().enumerate()
+                    {
+                        let projection_prefix = format!(
+                            "{attempt_prefix}.dimension_only_projection.{projection_index:04}"
+                        );
+                        writeln!(f, "{projection_prefix}.numerator={}", exponent.numerator)?;
+                        writeln!(
+                            f,
+                            "{projection_prefix}.denominator={}",
+                            exponent.denominator
+                        )?;
+                    }
+                    write_string_list(
+                        f,
+                        &attempt_prefix,
+                        "dimension_only_support",
+                        &attempt.dimension_only_support_ids,
+                    )?;
+                    write_string_list(
+                        f,
+                        &attempt_prefix,
+                        "missing_dependency",
+                        &attempt.missing_dependency_ids,
+                    )?;
+                    write_string_list(
+                        f,
+                        &attempt_prefix,
+                        "dropped_mechanism",
+                        &attempt.dropped_mechanism_ids,
+                    )?;
+                }
+            }
+            write_string_list(f, prefix, "coverage_gap", &census.coverage_gap_ids)
+        }
+    }
+}
+
+fn write_dimension(f: &mut fmt::Formatter<'_>, prefix: &str, dimension: [i8; 7]) -> fmt::Result {
+    let [length, mass, time, current, temperature, amount, luminous_intensity] = dimension;
+    writeln!(f, "{prefix}.dimension.length={length}")?;
+    writeln!(f, "{prefix}.dimension.mass={mass}")?;
+    writeln!(f, "{prefix}.dimension.time={time}")?;
+    writeln!(f, "{prefix}.dimension.current={current}")?;
+    writeln!(f, "{prefix}.dimension.temperature={temperature}")?;
+    writeln!(f, "{prefix}.dimension.amount={amount}")?;
+    writeln!(
+        f,
+        "{prefix}.dimension.luminous_intensity={luminous_intensity}"
+    )
+}
+
+fn write_string_list(
+    f: &mut fmt::Formatter<'_>,
+    prefix: &str,
+    field: &str,
+    values: &[String],
+) -> fmt::Result {
+    writeln!(f, "{prefix}.{field}_count={}", values.len())?;
+    for (index, value) in values.iter().enumerate() {
+        writeln!(f, "{prefix}.{field}.{index:04}={}", canonical_text(value))?;
+    }
+    Ok(())
+}
+
+fn write_index_list(
+    f: &mut fmt::Formatter<'_>,
+    prefix: &str,
+    field: &str,
+    values: &[usize],
+) -> fmt::Result {
+    writeln!(f, "{prefix}.{field}_count={}", values.len())?;
+    for (index, value) in values.iter().enumerate() {
+        writeln!(f, "{prefix}.{field}.{index:04}={value}")?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

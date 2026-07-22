@@ -10,7 +10,7 @@
 use super::{
     accounting::{ExactScaledValue, ExactValueRecord, LawAncestry, TransferReceipt},
     floor_magnitudes::AuditedFloorView,
-    receipt::Refusal,
+    receipt::{write_open_requirements, Refusal},
     BodyId, ContingencyDrawId, EventId, RealizationId, ReservoirId, Stage,
 };
 use civsim_ledger::{
@@ -25,7 +25,7 @@ use civsim_units::physics_floor::PHYSICAL_FLOOR_LEN;
 use std::{fmt, num::TryFromIntError};
 
 /// Stable schema identity for the current concrete transcript format.
-pub const RUN_TRANSCRIPT_SCHEMA_ID: &str = "civsim.planet.transcript.v4";
+pub const RUN_TRANSCRIPT_SCHEMA_ID: &str = "civsim.planet.transcript.v6";
 
 pub(super) fn canonical_text(value: &str) -> CanonicalText<'_> {
     CanonicalText(value)
@@ -62,9 +62,9 @@ pub struct TranscriptSchema {
 }
 
 impl TranscriptSchema {
-    pub const V4: Self = Self {
+    pub const V6: Self = Self {
         id: RUN_TRANSCRIPT_SCHEMA_ID,
-        major: 4,
+        major: 6,
         minor: 0,
     };
 
@@ -384,7 +384,7 @@ pub struct RunTranscript {
 impl RunTranscript {
     pub(super) fn empty(declared_floor_entries: usize) -> Self {
         Self {
-            schema: TranscriptSchema::V4,
+            schema: TranscriptSchema::V6,
             representation: RepresentationReceipt::sealed()
                 .expect("the sealed SI representation must project"),
             declared_floor_entries,
@@ -937,32 +937,7 @@ fn write_event(f: &mut fmt::Formatter<'_>, prefix: &str, kind: &RunEventKind) ->
                     "{refusal_prefix}.requirement_id={}",
                     canonical_text(refusal.requirement_id().unwrap_or(""))
                 )?;
-                writeln!(
-                    f,
-                    "{refusal_prefix}.open_requirement_count={}",
-                    refusal.open_requirements().len()
-                )?;
-                for (open_index, requirement) in refusal.open_requirements().iter().enumerate() {
-                    writeln!(
-                        f,
-                        "{refusal_prefix}.open_requirement.{open_index:04}.id={}",
-                        canonical_text(requirement.requirement_id())
-                    )?;
-                    writeln!(
-                        f,
-                        "{refusal_prefix}.open_requirement.{open_index:04}.obligation_count={}",
-                        requirement.obligations().len()
-                    )?;
-                    for (obligation_index, obligation) in
-                        requirement.obligations().iter().enumerate()
-                    {
-                        writeln!(
-                            f,
-                            "{refusal_prefix}.open_requirement.{open_index:04}.obligation.{obligation_index:04}={}",
-                            canonical_text(obligation)
-                        )?;
-                    }
-                }
+                write_open_requirements(f, &refusal_prefix, refusal.open_requirements())?;
                 writeln!(
                     f,
                     "{refusal_prefix}.detail={}",
@@ -1625,7 +1600,7 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(first.to_string(), second.to_string());
         assert!(first.to_string().starts_with(
-            "transcript=civsim.planet.transcript.v4\nschema.major=4\nschema.minor=0\n"
+            "transcript=civsim.planet.transcript.v6\nschema.major=6\nschema.minor=0\n"
         ));
         let last = first.events().last().expect("the refusal is recorded");
         assert!(matches!(

@@ -1,5 +1,7 @@
 use std::process::{Command, Output};
 
+use civsim_planet::{run_planet, sealed_absolute_physics_floor};
+
 fn run(arguments: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_run_planet"))
         .args(arguments)
@@ -14,7 +16,7 @@ fn the_no_argument_binary_enters_the_floor_only_runner_and_refuses() {
 
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stderr.is_empty());
-    assert!(stdout.starts_with("receipt=civsim.planet.run.v6\ncomplete=false\n"));
+    assert!(stdout.starts_with("receipt=civsim.planet.run.v8\ncomplete=false\n"));
     assert!(stdout.contains("absolute_floor_entries=3\n"));
     assert!(stdout.contains("representation.schema=\"civsim.units.si-representation.v1\"\n"));
     assert!(stdout.contains("event_count=6\n"));
@@ -35,8 +37,19 @@ fn the_no_argument_binary_enters_the_floor_only_runner_and_refuses() {
     assert!(stdout.contains(
         "refusal.0000.open_requirement.0001.obligation.0006=\"gap_law.chaos_protocol\"\n"
     ));
+    assert!(stdout.contains("refusal.0000.open_requirement.0000.analysis_count=1\n"));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0000.kind=exact_dimensional_census\n"
+    ));
+    assert!(
+        stdout.contains("refusal.0000.open_requirement.0000.analysis.0000.closure_effect=none\n")
+    );
+    assert!(
+        stdout.contains("refusal.0000.open_requirement.0000.analysis.0000.coverage_claim=false\n")
+    );
+    assert!(stdout.contains("refusal.0000.open_requirement.0001.analysis_count=0\n"));
     assert!(stdout.contains(".exhaustion.gap.chaos_protocol=not_applicable\n"));
-    assert!(stdout.contains("transcript=civsim.planet.transcript.v4\n"));
+    assert!(stdout.contains("transcript=civsim.planet.transcript.v6\n"));
     assert!(!stdout.contains(".kind=contingency\n"));
     assert!(!stdout.contains(".kind=written_state\n"));
 }
@@ -91,4 +104,37 @@ fn help_exposes_no_world_value_surface() {
     assert!(output.stderr.is_empty());
     assert!(stdout.starts_with("run_planet [--readiness]\n"));
     assert!(stdout.contains("accepts no world values, profile, identity, or seed"));
+}
+
+#[test]
+fn refusal_details_have_a_typed_read_only_api() {
+    let floor = sealed_absolute_physics_floor().expect("the repository floor seals");
+    let outcome = run_planet(&floor);
+    let analysis = &outcome.receipt().refusals()[0].open_requirements()[0].analyses()[0];
+    let census = analysis
+        .exact_dimensional_census_view()
+        .expect("the open joint measure carries an exact census");
+
+    assert!(census.is_computed());
+    assert_eq!(census.variables().len(), 31);
+    assert_eq!(census.phenomena().len(), 7);
+    assert_eq!(census.coverage_gap_ids().len(), 6);
+    let radiation = census
+        .variables()
+        .find(|variable| variable.id() == "stellar_birth.radiation_flux_spectrum")
+        .expect("the radiation coordinate is visible");
+    assert_eq!(
+        radiation.carrier_id(),
+        "spectral_flux_density_per_log_frequency_field"
+    );
+    let mass_history = census
+        .phenomena()
+        .find(|phenomenon| phenomenon.id() == "stellar_birth.phenomenon.enclosed_mass_history")
+        .expect("the mass-history gap is visible");
+    assert!(mass_history.derivation_attempts().any(|attempt| {
+        attempt
+            .missing_dependency_ids()
+            .iter()
+            .any(|id| id == "collapse.initial_enclosed_mass_or_integration_boundary")
+    }));
 }

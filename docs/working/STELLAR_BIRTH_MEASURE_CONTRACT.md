@@ -1,12 +1,14 @@
 # Stellar-birth measure contract
 
-Status: executable leaf-closure evaluator and replayable floor implemented;
-both physical obligations remain unresolved and the canonical runner reports
-their exact frontier before refusing.
+Status: executable leaf-closure evaluator, replayable floor, and partial exact
+dimensional census implemented; both physical obligations remain unresolved
+and the canonical runner reports their exact frontier before refusing.
 
 ## Authority
 
-The sealed absolute physics floor is the sole value-bearing input. The current
+The sealed absolute physics floor is the sole source of physical causal
+values. Exact SI numerical definitions are immutable coordinate metadata, not
+caller inputs or physical degrees of freedom. The current
 floor contains three Universal `[M]` invariant coordinates: `alpha`, `G`, and
 `m_e`. Seven exact SI definitions are versioned representation metadata and
 carry no provenance mark. `eps_0` derives at runtime from `alpha`, `e`, `h`,
@@ -37,8 +39,10 @@ self-authorized by its declaration table. The ordered authority lives in
 carries source, uncertainty, projection, and full derivation-exhaustion
 evidence. Independent fingerprints seal the representation definitions,
 execution relations, physical admissions, and the complete ordered receipt
-content. Derived values replay from exact projected ancestry published in
-transcript schema major 4, with typed SI dimensions and exact-symbol ancestry
+content. One sealed physical-floor authority binding covers those ordered
+registries and receipt pins under
+`civsim.units.physical-floor-authority-binding.v1`. Derived values replay from
+exact projected ancestry published in transcript schema major 6, with typed SI dimensions and exact-symbol ancestry
 checked from the formula. Physical helper APIs require the same sealed
 execution capability and cannot bind or mutate its values. This closes the
 representation and API reachability seams; it does not close either
@@ -75,15 +79,38 @@ changing behavior uses multiple regimes rather than one global classification.
 Equal coordinates replay exactly. An intentional measure or coordinate-law
 change may claim ensemble equivalence, not identity with the prior trajectory.
 
-The first required artifact is a machine-readable derivation census, not a new
-input manifest. It must enumerate the admitted floor basis, every candidate
-output dimension, the Buckingham-Pi null space, formulas attempted, assumptions
-and symmetry arguments, dependencies, failure modes, and the residual degrees
-of freedom that remain. A cited stellar mass, metallicity, cloud temperature,
-rotation, epoch, or environment row is not a permissible shortcut. Only a
-survivor that cannot be derived after this process may enter floor-admission
-review, and it must remain inside the joint measure so correlations are not
-discarded.
+The first required artifact is now executable as
+`civsim.planet.stellar-birth-dimensional-census.v2`. It is a partial
+derivation census, not a new input manifest. Its 31 typed coordinates contain
+dimensions and carrier shapes but no magnitudes. Seven phenomenon-local exact
+matrices record rank, pivots, free columns, primitive integer null vectors,
+dimension-only target projections, their nonzero support, attempted law identities, missing
+dependencies, and dropped mechanisms. The checker uses checked `i128`
+rational Gauss-Jordan elimination and fails closed on duplicate identities or
+arithmetic overflow.
+
+The census is deliberately non-admitting. Its wire status is `computed`, its
+`closure_effect` is `none`, and its global `coverage_claim` is `false`. The
+seven exact SI definitions span the seven SI dimensions, so dimensional
+reachability is necessary but cannot establish a law, coefficient, value,
+support, normalization, or probability measure. The report keeps that
+distinction visible by labeling every candidate only
+`target_dimension_reachable`. A cited stellar mass, metallicity, cloud temperature,
+rotation, epoch, or environment row remains an impermissible shortcut. Only a
+survivor that cannot be derived after the full process may enter
+floor-admission review, and it must remain inside the joint measure so
+correlations are not discarded.
+
+The phenomenon-local chain shows how the next derivations interact. An
+open-ended composition field must first derive a mean particle mass from a
+species mass and state registry. Composition, density, column, ionization,
+radiation, magnetic, turbulent, and background fields then feed coupled gas
+and dust thermal balance. Mean particle mass and gas temperature constrain
+sound speed. Sound speed and `G` constrain collapse mass flow. The flow history
+constrains enclosed mass. That mass and the same shell angular-momentum history
+constrain centrifugal radius. Those shared causes are the bridge to disk
+surface density, thermal history, solids, and variable-cardinality bodies;
+they cannot be replaced by independent stellar or planetary knobs.
 
 ## Realization-coordinate law
 
@@ -99,7 +126,9 @@ proposal passes review, the transcript has no contingency append path and no
 realization identity can exist.
 Its proof must bind the same absolute floor, schema, checker version, dependency
 digest, and the exact joint-measure artifact. A proof from another floor,
-measure, version, or validity domain remains an open requirement.
+measure, version, or validity domain remains an open requirement. Gap Law,
+Chaos Protocol, Residual Law, and a unique residual slot if irreducible apply
+to this leaf as well as to the joint measure.
 
 ## Present receipt
 
@@ -108,10 +137,10 @@ three physical floor values, derives `eps_0`, enters Stage 1, and returns
 `stellar_birth.realization_measure`. It emits six transcript events: three
 floor records, one derived-value record, one Stage 1 entry, and one refusal.
 It emits no `[X]`, no `[W]` realization, and no snapshot. Repeated runs are
-byte-identical at `27,941` stdout bytes and SHA-256
-`382bb176b8fbb85afeae07f4200925f63c1c00cb1daadf7924d2bfb692a373af`.
-The current receipt is `civsim.planet.run.v6`; its transcript schema major is
-`4`.
+byte-identical at `274,807` stdout bytes and SHA-256
+`8c956d6860ad674ac1d70f1b0c22c11ebe0e30d25c1e0443201abbd6f7cc4f38`.
+The current receipt is `civsim.planet.run.v8`; its transcript schema major is
+`6`.
 
 The three-node graph now executes as a fixed-order conjunction over two opaque
 repository-owned proof capabilities. The production resolver currently
@@ -120,7 +149,12 @@ identities in canonical order. Tests prove the full four-state truth table:
 neither proof, either partial proof, and both proofs. No matching string,
 ledger tag, source citation, scalar, or caller boolean can construct a proof.
 Every open leaf retains a machine-readable obligation list, and both lists
-include `gap_law.chaos_protocol`.
+include `gap_law.chaos_protocol`. Only the joint-measure leaf carries the exact
+census analysis. The coordinate-law leaf has analysis count zero. Receipt and
+transcript call one prefix-aware serializer for the shared payload, so their
+two views cannot drift independently. Library callers can inspect every census
+gap through immutable typed views without parsing display text or acquiring a
+proof-construction surface.
 
 ## Retained mechanism boundary
 
@@ -140,23 +174,31 @@ remain explicit residual or refusal obligations.
 
 ## Build sequence
 
-1. Produce the machine-readable derive-first and Buckingham-Pi census for the
-   opaque joint measure without decomposing it into authored marginals.
-2. Close evidence custody only for candidates that survive derivation. Record
+1. Extend the partial census to complete stellar-birth support, including
+   one component-index registry, shared field domains, variable-cardinality
+   multiplicity, field and tensor carriers, spectral closure, fragmentation,
+   magnetic braking, shell and time histories, a persistent disk state, and every
+   dynamical regime. Do not decompose the joint measure into authored
+   marginals.
+2. Derive the species mass and state registry, coupled gas and dust thermal
+   balance, equation-of-state closure, collapse measure, mass-flow history,
+   angular-momentum transport, and centrifugal-radius distribution in that
+   order. Each rung consumes the correlated outputs below it.
+3. Close evidence custody only for candidates that survive derivation. Record
    support, normalization, conditioning, correlations, covariance families,
    uncertainty, and out-of-domain behavior. Custody does not admit them.
-3. Admit each irreducible survivor only with complete Gap Law including its
+4. Admit each irreducible survivor only with complete Gap Law including its
    typed Chaos Protocol branch, Residual Law, and unique residual-slot
    receipts, or retain the root refusal.
-4. Define and audit a versioned realization-coordinate law independently of
+5. Define and audit a versioned realization-coordinate law independently of
    callers, hidden seeds, observer state, record order, filesystem order, and
    transcript ordinals.
-5. Feed both verified proof capabilities into the executable evaluator.
+6. Feed both verified proof capabilities into the executable evaluator.
    Generate the first `[X]` only when both leaves prove closed.
-6. Create `[W]` realization identity from that recorded draw, then add SI-native
+7. Create `[W]` realization identity from that recorded draw, then add SI-native
    collapse, thermal, centrifugal-radius, disk, and embryo-system adapters
    behind a typed substrate facade with intervals and named residuals.
-7. Carry the same receipt through persistent elemental inventories, assembly,
+8. Carry the same receipt through persistent elemental inventories, assembly,
    orbits, moons, young thermal state, crust, mantle, geodynamics, atmosphere,
    hydrology, loads, flexure, and immutable snapshot transport.
 

@@ -9,9 +9,11 @@ refusal while the stellar-birth measure remains open.
 
 ## Governing invariant
 
-The sealed absolute physics floor is the sole value-bearing input. Provenance,
-tier, source custody, and accounting never admit a magnitude. Every later
-quantity must derive from admitted earlier bits, or its non-derived leaf must
+The sealed absolute physics floor is the sole source of physical causal
+values. The exact SI numbers in the representation receipt define an immutable
+coordinate transform; they are not caller inputs, ledger facts, or physical
+degrees of freedom. Provenance, tier, source custody, and accounting never
+admit a magnitude. Every later physical quantity must derive from admitted earlier bits, or its non-derived leaf must
 complete every required derive-first and floor-admission receipt after
 exhaustion. Otherwise it remains a named refusal. The runpath must admit alien
 physics and must not select the Sun, Earth, a familiar chemistry, a viewer
@@ -142,6 +144,44 @@ the causal bitstream.
     capabilities. It reports the exact unresolved leaf frontier, closes the
     root only when both capabilities exist, and exposes no string, citation,
     scalar, tag, or caller boolean as a closure path.
+19. **Dimensional derivation debt existed only in prose.** A checked exact
+    rational engine now computes rank, pivots, free columns, target-span
+    projections, and primitive integer null-space bases over the seven SI
+    coordinates. The stellar-birth census applies it per phenomenon so rank
+    from thermal variables cannot conceal a rotational or collapse gap. Every
+    returned null vector is rechecked against its typed dimension matrix.
+20. **A downstream analysis could name the floor without binding its complete
+    authority.** One independently pinned, length-prefixed v1 SHA-256 now
+    covers the representation schema and base order, ordered representation
+    fingerprints, ordered physical admissions, receipt-fingerprint schema and
+    pinned receipt digests, and ordered execution relations. The census records
+    that binding but receives no magnitude through it.
+21. **Receipt and transcript duplicated the open-frontier serializer.** One
+    prefix-aware formatter now writes both views. A direct test strips their
+    distinct prefixes and proves the complete frontier payloads match.
+22. **Exact dimensional edge cases could panic or refuse representable
+    rationals.** Formula powers now use checked multiplication before narrowing
+    to an `i8` exponent. Rational sign normalization reduces unsigned
+    magnitudes before conversion, handles zero over `i128::MIN`, and
+    cross-cancels division before constructing a reciprocal. The original
+    falsifiers now return the exact result or the typed overflow error.
+23. **Dimension reachability could be mistaken for a law-shaped witness.** An
+    attempt now reports `target_dimension_reachable`, never dimensional
+    soundness. Its nonzero dimensional support is serialized explicitly, so a
+    witness such as mean particle mass from `m_e` alone exposes that composition
+    remains physically unused and its species registry remains missing.
+24. **Refusal detail was typed internally but text-only to library callers.**
+    Immutable public views now expose variables, carriers, local matrices,
+    null spaces, attempts, nonzero support, missing dependencies, dropped
+    mechanisms, and coverage gaps. Constructors and proof seals remain private.
+    The views live in a separate requirement-analysis module instead of
+    expanding the receipt formatter.
+25. **Several future closure semantics were underspecified.** Spectral flux now
+    names its per-log-frequency density convention, enclosed-mass history names
+    the missing initial mass or lower integration boundary, attempts are
+    identity-sorted, duplicate-checked, and constrained to their enclosing
+    phenomenon, and the coordinate-law leaf now owes Residual Law and a unique
+    slot if irreducible.
 
 The resulting projected composite values are replayable from the transcript:
 
@@ -174,9 +214,9 @@ Two direct no-argument runs produced:
 - zero stderr bytes;
 - six transcript events;
 - no `[W]`, no `[X]`, and no snapshot;
-- byte-identical stdout of `27,941` bytes, SHA-256
-  `382bb176b8fbb85afeae07f4200925f63c1c00cb1daadf7924d2bfb692a373af`;
-- receipt `civsim.planet.run.v6` and transcript schema major `4`;
+- byte-identical stdout of `274,807` bytes, SHA-256
+  `8c956d6860ad674ac1d70f1b0c22c11ebe0e30d25c1e0443201abbd6f7cc4f38`;
+- receipt `civsim.planet.run.v8` and transcript schema major `6`;
 - refusal `stellar_birth.realization_measure` at Stage 1.
 
 The umbrella refusal has two unresolved leaves:
@@ -184,6 +224,11 @@ The umbrella refusal has two unresolved leaves:
 `stellar_birth.realization_coordinate_law`. The executable evaluator serializes
 those leaves in fixed canonical order. The repository resolver supplies neither
 opaque proof capability yet, so the root refusal is the correct output.
+Only the open joint-measure leaf carries one
+`exact_dimensional_census` analysis. It contains 31 typed, value-free
+coordinates and seven phenomenon-local matrices. Its status is `computed`,
+its `closure_effect` is `none`, and its `coverage_claim` is `false`. The open
+coordinate-law leaf carries analysis count zero.
 
 ## Verified reachability
 
@@ -199,15 +244,15 @@ civilization, authored world generation, and the old causal viewer remain in
 
 The units, ledger, physics, materials, planet substrate, and canonical planet
 targets pass their focused test suites. The complete Linux `check-pr` recipe
-passed with exit `0` in `867.6` seconds. It covered hook and gate canaries, all
-declarative PR gates, Stone 0, formatting, Clippy with warnings denied, the
-ten-package all-target suite, the expanded GPU no-float guard, available
-backend bit-parity tests, rustdoc, and doctests.
+for the v8 census slice passed with exit `0` in `760.5` seconds. It covered
+hook and gate canaries, all declarative PR gates, Stone 0, formatting, Clippy
+with warnings denied, the ten-package all-target suite, the expanded GPU
+no-float guard, available backend bit-parity tests, rustdoc, and doctests.
 
-Two post-gate direct Linux binary runs independently confirmed exit `2`, zero
-stderr bytes, `27,941` stdout bytes, byte equality, and SHA-256
-`382bb176b8fbb85afeae07f4200925f63c1c00cb1daadf7924d2bfb692a373af`.
-No earlier receipt or inventory pin is evidence for the v6 result.
+Two post-gate direct Linux binary runs confirm exit `2`, zero stderr bytes,
+`274,807` stdout bytes, byte equality, and SHA-256
+`8c956d6860ad674ac1d70f1b0c22c11ebe0e30d25c1e0443201abbd6f7cc4f38`.
+No earlier receipt or inventory pin is evidence for the v8 result.
 
 One blind-generalizer pass was run against frozen candidate and specification
 packets, as requested instead of the historical six-pass overnight loop:
@@ -222,7 +267,7 @@ packets, as requested instead of the historical six-pass overnight loop:
 - all three findings repaired in this worktree without selecting a desired
   physical outcome.
 
-The executable-leaf and Chaos Protocol slice received one additional
+The executable-leaf and Chaos Protocol slice received one earlier
 packet-only generalizer pass, not a six-pass loop. Its strongest-model
 input-bias smoke first returned `BLOCKED`: the packet treated the initial
 three-way chaos classification as exhaustive and tested false admission more
@@ -252,6 +297,20 @@ constructor may exist. This packet summarized structure rather than carrying
 the complete comment-stripped source, so it is evidence for the named
 generalization findings only, not a passed full code panel.
 
+The dimensional-census slice then received one sealed, comment-stripped blind
+pass, after a strongest-model prompt smoke returned `CLEAR` without a retry.
+The packet was 168,566 bytes at SHA-256
+`ebb8ce6ecc024f56f66a7771d39f0e659b17d3741e9f6376c7279095b638088e`.
+The pass found the dimensional-power overflow, signed-rational normalization,
+vacuous target-span witnesses, ambiguous spectral measure, and missing mass
+integration boundary. Independent derive-versus-admit, alien-feasibility,
+Terran/Solar, steering/observer, and exact-correctness lenses checked distinct
+failure modes rather than repeating the same generalizer. Source verification
+confirmed and repaired the live findings listed above. The exact-correctness
+lens independently reproduced all seven rank/nullity pairs and target
+projections and recomputed the authority digest
+`0a64c0513683f04461b11d3b6df9f18a4d283825300bae713b9a26d280c13367`.
+
 ## Remaining audit debt
 
 - Admission structures still carry human-readable receipt strings. The current
@@ -263,41 +322,51 @@ generalization findings only, not a passed full code panel.
   schema, checker, dependencies, validity domain, and joint measure, and return
   structured invalid reasons. Runtime type and presence cannot stand in for
   those checks.
-- Stage 1 leaf proofs remain absent. The next artifact must implement a
-  machine-readable dimensional rank and null-space census rather than
-  constructing either opaque proof from human-readable assertions.
+- Stage 1 leaf proofs remain absent. The partial v2 census does not yet cover
+  full spectral transport, field and tensor carriers, fragmentation, magnetic
+  braking and shell history, general variable-cardinality multiplicity, or the
+  required stochastic and chaotic regime measure.
+- Dimension-only projection proves that an output unit lies in an input span.
+  It cannot prove a physical law or select a dimensionless coefficient. Each
+  open attempt still needs mechanism ancestry, support, and uncertainty before
+  it can contribute to a joint measure.
 - Future contingency coordinates must not rely on a bounded integer domain
   without proving the physical support and mapping law.
 - Exact rational helpers need explicit resource and exponent domains before
   formulas from untrusted or expanding catalogs can reach them.
+- Variable-cardinality component fields still need one stable component-index
+  registry, shared shape/domain checks, topology-edge semantics, and a
+  multiplicity phenomenon. Scalar collapse summaries must become shell- and
+  time-indexed conserved histories before a disk state can be constructed.
+- Retained substrate adapters must replace caller embryo caps, old world seeds,
+  and binary component identities with derived resolution, named capacity
+  refusals, the verified coordinate law, and registry-driven topology.
 
 ## Audit-process limitation
 
-This was a direct live-source audit with independent value-flow,
-admit-the-alien, observer-reachability, and post-seal bypass lenses plus the one
-frozen-packet blind-generalizer pass recorded above. It deliberately was not
-the repository's standing six-pass panel workflow. The older harness attempts
-remained invalid because they lacked required controller artifacts or mutated
-the frozen candidate during verification. This record is evidence for the one
-identified pass and the named independent reviews only; it must not be cited
-as a passed six-pass standing panel.
+This was one frozen-packet blind-generalizer pass plus distinct live-source
+value-boundary, admit-the-alien, Terran/Solar, observer-reachability, and exact
+correctness roles. It was not six repetitions seeking the same result. Packet
+omissions still limit claims about code not present in the packet; live-source
+findings were checked against the current worktree before repair.
 
 ## Next derivation order
 
-1. Produce a machine-readable derive-first census for the joint stellar-birth
-   measure. Start from the admitted floor, enumerate dimensional bases and
-   Buckingham-Pi groups, prove what remains underdetermined, and preserve
-   correlations rather than authoring independent stellar knobs.
-2. For each irreducible survivor, complete source custody, uncertainty,
+1. Extend the partial machine-readable census to complete stellar-birth
+   support while preserving one correlation-carrying joint measure.
+2. Derive the species mass registry and coupled gas and dust thermal balance,
+   then derive equation-of-state closure, collapse flow, enclosed-mass history,
+   angular-momentum transport, and centrifugal radius from the shared state.
+3. For each irreducible survivor, complete source custody, uncertainty,
    support, normalization, conditioning, Gap Law including the typed Chaos
    Protocol branch, Residual Law, and unique residual-slot receipts. If any
    item is incomplete, keep the Stage 1 refusal.
-3. Define the realization-coordinate law independently of callers, hidden
+4. Define the realization-coordinate law independently of callers, hidden
    seeds, enumeration order, transcript ordinals, and observer state.
-4. Only after both leaves close, issue the first `[X]`, derive `[W]` identity,
+5. Only after both leaves close, issue the first `[X]`, derive `[W]` identity,
    and expose SI-native typed adapters for collapse, disk formation, and embryo
    systems.
-5. Carry the same bitstream and refusal discipline through assembly,
+6. Carry the same bitstream and refusal discipline through assembly,
    composition, orbits, moons, young thermal state, crust, mantle,
    geodynamics, atmosphere, hydrology, loads, flexure, and immutable snapshot
    transport.

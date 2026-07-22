@@ -6,9 +6,10 @@
 //! constant declarations against an independent registry, pins the complete
 //! derive-first receipts by digest, and admits only that exact floor.
 
+use crate::dimensional_analysis::SiDimensionColumn;
 use crate::fundamentals::{
     FundamentalRole, SiDimension, COMPOSITES, PHYSICAL_INVARIANTS, REPRESENTATION_DEFINITIONS,
-    SI_REPRESENTATION_SCHEMA_ID,
+    SI_BASE_DIMENSION_IDS, SI_REPRESENTATION_SCHEMA_ID,
 };
 #[cfg(test)]
 use civsim_ledger::ChaosRegimeReceipt;
@@ -229,6 +230,219 @@ const RECEIPT_FINGERPRINTS: [ReceiptFingerprint; 3] = [
     },
 ];
 
+/// Typed identity of the byte encoding used to bind the complete physical-floor
+/// authority. A different field set, field order, or encoding requires a new
+/// identity rather than silently changing the v1 digest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PhysicalFloorAuthoritySchemaId(&'static str);
+
+impl PhysicalFloorAuthoritySchemaId {
+    pub const V1: Self = Self("civsim.units.physical-floor-authority-binding.v1");
+
+    /// Stable schema spelling for transcripts and proof artifacts.
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl fmt::Display for PhysicalFloorAuthoritySchemaId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+/// Read-only binding of every independent declaration and receipt authority
+/// that defines the repository's physical floor.
+///
+/// Its fields are private and it has no caller-supplied constructor. Consumers
+/// can record the typed schema and digest, but cannot manufacture a replacement
+/// authority through this API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PhysicalFloorAuthorityBinding {
+    schema_id: PhysicalFloorAuthoritySchemaId,
+    digest: [u8; 32],
+}
+
+impl PhysicalFloorAuthorityBinding {
+    /// Verify the declarations and independent receipt pins before constructing
+    /// the sole repository-owned v1 authority binding.
+    pub fn sealed() -> Result<Self, AuditedCatalogError> {
+        verify_units_declarations()?;
+        verify_receipt_fingerprints(&physical_invariant_receipts())?;
+
+        let schema_id = PhysicalFloorAuthoritySchemaId::V1;
+        let digest = physical_floor_authority_digest(
+            schema_id,
+            SI_REPRESENTATION_SCHEMA_ID,
+            &SI_BASE_DIMENSION_IDS,
+            &REPRESENTATION_DEFINITION_FINGERPRINTS,
+            &PHYSICAL_INVARIANT_ADMISSIONS,
+            RECEIPT_FINGERPRINT_SCHEMA_ID,
+            &RECEIPT_FINGERPRINTS,
+            &EXECUTION_RELATION_FINGERPRINTS,
+        );
+        if digest != EXPECTED_PHYSICAL_FLOOR_AUTHORITY_DIGEST {
+            return Err(AuditedCatalogError::DefinitionMismatch(format!(
+                "physical-floor authority binding under schema '{}' expected {} but found {}",
+                schema_id,
+                hex(&EXPECTED_PHYSICAL_FLOOR_AUTHORITY_DIGEST),
+                hex(&digest)
+            )));
+        }
+
+        Ok(Self { schema_id, digest })
+    }
+
+    /// Typed identity of the digest encoding.
+    pub const fn schema_id(&self) -> PhysicalFloorAuthoritySchemaId {
+        self.schema_id
+    }
+
+    /// Raw SHA-256 digest for exact machine comparison.
+    pub const fn digest(&self) -> [u8; 32] {
+        self.digest
+    }
+
+    /// Lowercase hexadecimal SHA-256 digest for canonical text records.
+    pub fn digest_hex(&self) -> String {
+        hex(&self.digest)
+    }
+}
+
+/// Construct the verified, read-only physical-floor authority binding.
+pub fn sealed_physical_floor_authority_binding(
+) -> Result<PhysicalFloorAuthorityBinding, AuditedCatalogError> {
+    PhysicalFloorAuthorityBinding::sealed()
+}
+
+/// Exact ordered identities and SI dimensions of the admitted physical floor.
+///
+/// This projection exposes no magnitudes, sources, or caller lookup surface.
+/// Downstream dimensional proofs can therefore bind to the same verified
+/// authority without duplicating the private admission table.
+pub fn sealed_physical_floor_dimension_columns(
+) -> Result<Vec<SiDimensionColumn>, AuditedCatalogError> {
+    let _authority = sealed_physical_floor_authority_binding()?;
+    Ok(PHYSICAL_INVARIANT_ADMISSIONS
+        .iter()
+        .map(|admission| {
+            SiDimensionColumn::new(&fundamental_id(admission.symbol), admission.dimension)
+        })
+        .collect())
+}
+
+// This pin is deliberately independent of the declaration tables and digest
+// constructor above. It is updated only after reviewing a schema-versioned
+// authority change.
+const EXPECTED_PHYSICAL_FLOOR_AUTHORITY_DIGEST: [u8; 32] = [
+    0x0a, 0x64, 0xc0, 0x51, 0x36, 0x83, 0xf0, 0x44, 0x61, 0xb1, 0x1d, 0x3b, 0x6d, 0xf9, 0xf1, 0x8a,
+    0x4d, 0x28, 0x38, 0x25, 0x30, 0x0b, 0xae, 0x71, 0x3b, 0x9a, 0x26, 0xd2, 0x80, 0xc1, 0x33, 0x67,
+];
+
+struct LengthPrefixedSha256(Sha256);
+
+impl LengthPrefixedSha256 {
+    fn new() -> Self {
+        Self(Sha256::new())
+    }
+
+    fn bytes(&mut self, value: &[u8]) {
+        self.0.update((value.len() as u64).to_le_bytes());
+        self.0.update(value);
+    }
+
+    fn text(&mut self, value: &str) {
+        self.bytes(value.as_bytes());
+    }
+
+    fn count(&mut self, value: usize) {
+        self.bytes(&(value as u64).to_le_bytes());
+    }
+
+    fn dimension(&mut self, value: SiDimension) {
+        let exponents = value.exponents();
+        self.count(exponents.len());
+        for exponent in exponents {
+            self.bytes(&exponent.to_le_bytes());
+        }
+    }
+
+    fn finish(self) -> [u8; 32] {
+        self.0.finalize().into()
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn physical_floor_authority_digest(
+    schema_id: PhysicalFloorAuthoritySchemaId,
+    representation_schema_id: &str,
+    base_dimension_ids: &[&str],
+    representation_fingerprints: &[RepresentationDefinitionFingerprint],
+    physical_admissions: &[PhysicalInvariantAdmission],
+    receipt_fingerprint_schema_id: &str,
+    receipt_fingerprints: &[ReceiptFingerprint],
+    execution_relation_fingerprints: &[ExecutionRelationFingerprint],
+) -> [u8; 32] {
+    let mut encoder = LengthPrefixedSha256::new();
+    encoder.text(schema_id.as_str());
+
+    encoder.text("representation_schema");
+    encoder.text(representation_schema_id);
+    encoder.count(base_dimension_ids.len());
+    for dimension_id in base_dimension_ids {
+        encoder.text(dimension_id);
+    }
+
+    encoder.text("ordered_representation_fingerprints");
+    encoder.count(representation_fingerprints.len());
+    for fingerprint in representation_fingerprints {
+        encoder.text(fingerprint.symbol);
+        encoder.text(fingerprint.value);
+        encoder.text(fingerprint.unit);
+        encoder.dimension(fingerprint.dimension);
+        encoder.text(fingerprint.source_id);
+        encoder.text(fingerprint.source_sha256);
+        encoder.text(fingerprint.source_anchor);
+    }
+
+    encoder.text("ordered_physical_invariant_admissions");
+    encoder.count(physical_admissions.len());
+    for admission in physical_admissions {
+        encoder.text(admission.symbol);
+        encoder.text(admission.value);
+        encoder.text(admission.unit);
+        encoder.dimension(admission.dimension);
+        encoder.text(admission.source_id);
+        encoder.text(admission.source_sha256);
+        encoder.text(admission.source_anchor);
+        encoder.text(admission.uncertainty_kind);
+        encoder.text(admission.uncertainty_decimal);
+    }
+
+    encoder.text("receipt_fingerprint_authority");
+    encoder.text(receipt_fingerprint_schema_id);
+    encoder.count(receipt_fingerprints.len());
+    for fingerprint in receipt_fingerprints {
+        encoder.text(fingerprint.entry_id);
+        encoder.bytes(&fingerprint.sha256);
+    }
+
+    encoder.text("ordered_execution_relation_fingerprints");
+    encoder.count(execution_relation_fingerprints.len());
+    for fingerprint in execution_relation_fingerprints {
+        encoder.text(fingerprint.symbol);
+        encoder.text(fingerprint.formula);
+        encoder.count(fingerprint.inputs.len());
+        for input in fingerprint.inputs {
+            encoder.text(input);
+        }
+        encoder.text(fingerprint.unit);
+        encoder.dimension(fingerprint.dimension);
+    }
+
+    encoder.finish()
+}
+
 fn verify_units_declarations() -> Result<(), AuditedCatalogError> {
     if SI_REPRESENTATION_SCHEMA_ID != "civsim.units.si-representation.v1"
         || REPRESENTATION_DEFINITIONS.len() != REPRESENTATION_DEFINITION_FINGERPRINTS.len()
@@ -281,10 +495,13 @@ fn verify_units_declarations() -> Result<(), AuditedCatalogError> {
         }
     }
 
-    if PHYSICAL_INVARIANTS.len() != PHYSICAL_INVARIANT_ADMISSIONS.len() {
+    if PHYSICAL_FLOOR_LEN != PHYSICAL_INVARIANT_ADMISSIONS.len()
+        || PHYSICAL_INVARIANTS.len() != PHYSICAL_INVARIANT_ADMISSIONS.len()
+    {
         return Err(AuditedCatalogError::DefinitionMismatch(format!(
-            "units declares {} physical invariant candidates but the sealed admission registry contains {}",
+            "units declares {} physical invariant candidates, the public floor length is {}, and the sealed admission registry contains {}",
             PHYSICAL_INVARIANTS.len(),
+            PHYSICAL_FLOOR_LEN,
             PHYSICAL_INVARIANT_ADMISSIONS.len()
         )));
     }
@@ -588,6 +805,63 @@ impl std::error::Error for SealedFloorError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn current_floor_authority_matches_independent_binding_pin() {
+        let binding = sealed_physical_floor_authority_binding().unwrap();
+        assert_eq!(binding.schema_id(), PhysicalFloorAuthoritySchemaId::V1);
+        assert_eq!(binding.digest(), EXPECTED_PHYSICAL_FLOOR_AUTHORITY_DIGEST);
+        assert_eq!(binding.digest_hex(), hex(&binding.digest()));
+    }
+
+    #[test]
+    fn dimensional_projection_exposes_only_the_three_ordered_floor_coordinates() {
+        let columns = sealed_physical_floor_dimension_columns().unwrap();
+        assert_eq!(
+            columns
+                .iter()
+                .map(SiDimensionColumn::id)
+                .collect::<Vec<_>>(),
+            vec!["fundamental.alpha", "fundamental.G", "fundamental.m_e"]
+        );
+        assert_eq!(columns[0].dimension(), SiDimension::DIMENSIONLESS);
+        assert_eq!(
+            columns[1].dimension(),
+            SiDimension::new(3, -1, -2, 0, 0, 0, 0)
+        );
+        assert_eq!(
+            columns[2].dimension(),
+            SiDimension::new(0, 1, 0, 0, 0, 0, 0)
+        );
+    }
+
+    #[test]
+    fn copied_changed_authority_component_changes_digest() {
+        let original = physical_floor_authority_digest(
+            PhysicalFloorAuthoritySchemaId::V1,
+            SI_REPRESENTATION_SCHEMA_ID,
+            &SI_BASE_DIMENSION_IDS,
+            &REPRESENTATION_DEFINITION_FINGERPRINTS,
+            &PHYSICAL_INVARIANT_ADMISSIONS,
+            RECEIPT_FINGERPRINT_SCHEMA_ID,
+            &RECEIPT_FINGERPRINTS,
+            &EXECUTION_RELATION_FINGERPRINTS,
+        );
+        let mut changed_admissions = PHYSICAL_INVARIANT_ADMISSIONS;
+        changed_admissions[0].source_anchor = "copied changed source anchor";
+        let changed = physical_floor_authority_digest(
+            PhysicalFloorAuthoritySchemaId::V1,
+            SI_REPRESENTATION_SCHEMA_ID,
+            &SI_BASE_DIMENSION_IDS,
+            &REPRESENTATION_DEFINITION_FINGERPRINTS,
+            &changed_admissions,
+            RECEIPT_FINGERPRINT_SCHEMA_ID,
+            &RECEIPT_FINGERPRINTS,
+            &EXECUTION_RELATION_FINGERPRINTS,
+        );
+
+        assert_ne!(changed, original);
+    }
 
     #[test]
     fn receipt_constructor_matches_independent_pins() {

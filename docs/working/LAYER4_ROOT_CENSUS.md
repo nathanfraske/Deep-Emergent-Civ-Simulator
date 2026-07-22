@@ -5,8 +5,9 @@ Status: superseded by the canonical absolute-floor ruling of 2026-07-20.
 This file preserves earlier planetary dependency research only. It does not
 define a world-seed schema, canonical roots, draw inputs, or permission to bind
 an epoch, environment, composition, angular momentum, temperature, identity,
-or other per-world magnitude. On the active runpath, the sole value-bearing
-input is the sealed absolute physics floor. Every physical quantity discussed
+or other per-world magnitude. On the active runpath, the sole source of
+physical causal values is the sealed absolute physics floor. Every physical
+quantity discussed
 below must derive from that floor, complete the full Buckingham-Pi, Gap Law,
 Residual Law, unique-slot, evidence, and admit-the-alien admission contract, or
 remain a named refusal. A physical measure and its realization-coordinate law

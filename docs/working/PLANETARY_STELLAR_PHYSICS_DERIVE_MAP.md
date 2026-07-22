@@ -5,8 +5,9 @@ Status: superseded by the canonical absolute-floor ruling of 2026-07-20.
 The mechanisms and derivation leads below remain useful research evidence, but
 the earlier per-world initial-condition vector, authored seams, calibration
 language, familiar-system anchors, and caller-selected contingency do not. They
-cannot enter the active runner. The sole value-bearing input is the sealed
-absolute physics floor. A quantity must derive, pass the complete floor
+cannot enter the active runner. The sole source of physical causal values is
+the sealed absolute physics floor. A quantity must derive, pass the complete
+floor
 admission contract after derivation exhaustion, or refuse. Generated `[X]` and
 `[W]` state may appear only after an admitted physical measure and an approved
 realization-coordinate law exist. Earth, the Sun, local chemistry, a profile,

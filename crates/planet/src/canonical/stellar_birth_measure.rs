@@ -8,10 +8,12 @@
 
 use super::{
     floor_magnitudes::AuditedFloorView,
+    requirement_analysis::RequirementAnalysis,
     stellar_birth_artifacts::{
         resolve_repository_artifacts, RepositoryStellarBirthArtifacts,
         VerifiedJointPhysicalMeasure, VerifiedRealizationCoordinateLaw,
     },
+    stellar_birth_dimensions::stellar_birth_dimensional_census,
 };
 use std::fmt;
 
@@ -126,6 +128,8 @@ const COORDINATE_LAW_OBLIGATIONS: &[StellarBirthClosureObligation] = &[
     StellarBirthClosureObligation::ExactReplay,
     StellarBirthClosureObligation::GapLaw,
     StellarBirthClosureObligation::ChaosProtocol,
+    StellarBirthClosureObligation::ResidualLaw,
+    StellarBirthClosureObligation::UniqueResidualSlotIfIrreducible,
     StellarBirthClosureObligation::AbsoluteFloorBinding,
     StellarBirthClosureObligation::ArtifactSchemaVersion,
     StellarBirthClosureObligation::SemanticCheckerVersion,
@@ -134,18 +138,23 @@ const COORDINATE_LAW_OBLIGATIONS: &[StellarBirthClosureObligation] = &[
 ];
 
 /// One unresolved typed leaf and the clauses its future proof must satisfy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StellarBirthOpenRequirement {
     leaf: StellarBirthLeaf,
+    analyses: Vec<RequirementAnalysis>,
 }
 
 impl StellarBirthOpenRequirement {
-    pub(crate) const fn requirement_id(self) -> &'static str {
+    pub(crate) const fn requirement_id(&self) -> &'static str {
         self.leaf.id()
     }
 
-    pub(crate) const fn obligations(self) -> &'static [StellarBirthClosureObligation] {
+    pub(crate) const fn obligations(&self) -> &'static [StellarBirthClosureObligation] {
         self.leaf.obligations()
+    }
+
+    pub(crate) fn analyses(&self) -> &[RequirementAnalysis] {
+        &self.analyses
     }
 }
 
@@ -185,6 +194,7 @@ impl fmt::Display for StellarBirthMeasureRefusal {
 
 fn evaluate_artifacts(
     artifacts: RepositoryStellarBirthArtifacts,
+    joint_measure_analysis: Option<RequirementAnalysis>,
 ) -> Result<StellarBirthMeasureCapability, StellarBirthMeasureRefusal> {
     let mut frontier = Vec::new();
     for leaf in StellarBirthLeaf::ORDERED {
@@ -193,7 +203,12 @@ fn evaluate_artifacts(
             StellarBirthLeaf::RealizationCoordinateLaw => artifacts.coordinate_law.is_some(),
         };
         if !closed {
-            frontier.push(StellarBirthOpenRequirement { leaf });
+            let analyses = if leaf == StellarBirthLeaf::JointPhysicalMeasure {
+                joint_measure_analysis.clone().into_iter().collect()
+            } else {
+                Vec::new()
+            };
+            frontier.push(StellarBirthOpenRequirement { leaf, analyses });
         }
     }
 
@@ -215,7 +230,9 @@ fn evaluate_artifacts(
 pub(crate) fn require_birth_measure(
     floor: &AuditedFloorView<'_>,
 ) -> Result<StellarBirthMeasureCapability, StellarBirthMeasureRefusal> {
-    evaluate_artifacts(resolve_repository_artifacts(floor))
+    let census =
+        RequirementAnalysis::exact_dimensional_census(stellar_birth_dimensional_census(floor));
+    evaluate_artifacts(resolve_repository_artifacts(floor), Some(census))
 }
 
 #[cfg(test)]
@@ -256,17 +273,21 @@ mod tests {
 
     #[test]
     fn each_partial_proof_reports_only_the_other_leaf() {
-        let joint_only =
-            evaluate_artifacts(RepositoryStellarBirthArtifacts::test_fixture(true, false))
-                .unwrap_err();
+        let joint_only = evaluate_artifacts(
+            RepositoryStellarBirthArtifacts::test_fixture(true, false),
+            None,
+        )
+        .unwrap_err();
         assert_eq!(
             frontier_ids(&joint_only),
             vec!["stellar_birth.realization_coordinate_law"]
         );
 
-        let coordinate_only =
-            evaluate_artifacts(RepositoryStellarBirthArtifacts::test_fixture(false, true))
-                .unwrap_err();
+        let coordinate_only = evaluate_artifacts(
+            RepositoryStellarBirthArtifacts::test_fixture(false, true),
+            None,
+        )
+        .unwrap_err();
         assert_eq!(
             frontier_ids(&coordinate_only),
             vec!["stellar_birth.joint_physical_measure"]
@@ -275,28 +296,40 @@ mod tests {
 
     #[test]
     fn the_root_closes_only_from_both_verified_typed_leaf_proofs() {
-        assert!(
-            evaluate_artifacts(RepositoryStellarBirthArtifacts::test_fixture(false, false))
-                .is_err()
-        );
-        assert!(
-            evaluate_artifacts(RepositoryStellarBirthArtifacts::test_fixture(true, false)).is_err()
-        );
-        assert!(
-            evaluate_artifacts(RepositoryStellarBirthArtifacts::test_fixture(false, true)).is_err()
-        );
-        assert!(
-            evaluate_artifacts(RepositoryStellarBirthArtifacts::test_fixture(true, true)).is_ok()
-        );
+        assert!(evaluate_artifacts(
+            RepositoryStellarBirthArtifacts::test_fixture(false, false),
+            None,
+        )
+        .is_err());
+        assert!(evaluate_artifacts(
+            RepositoryStellarBirthArtifacts::test_fixture(true, false),
+            None,
+        )
+        .is_err());
+        assert!(evaluate_artifacts(
+            RepositoryStellarBirthArtifacts::test_fixture(false, true),
+            None,
+        )
+        .is_err());
+        assert!(evaluate_artifacts(
+            RepositoryStellarBirthArtifacts::test_fixture(true, true),
+            None,
+        )
+        .is_ok());
     }
 
     #[test]
     fn frontier_order_is_canonical_and_repeatable() {
-        let first = evaluate_artifacts(RepositoryStellarBirthArtifacts::test_fixture(false, false))
-            .unwrap_err();
-        let second =
-            evaluate_artifacts(RepositoryStellarBirthArtifacts::test_fixture(false, false))
-                .unwrap_err();
+        let first = evaluate_artifacts(
+            RepositoryStellarBirthArtifacts::test_fixture(false, false),
+            None,
+        )
+        .unwrap_err();
+        let second = evaluate_artifacts(
+            RepositoryStellarBirthArtifacts::test_fixture(false, false),
+            None,
+        )
+        .unwrap_err();
         assert_eq!(first, second);
         assert_eq!(frontier_ids(&first), frontier_ids(&second));
     }
@@ -312,6 +345,30 @@ mod tests {
             assert!(ids.contains(&"gap_law"));
             assert!(ids.contains(&"gap_law.chaos_protocol"));
         }
+        let coordinate_ids: Vec<_> = StellarBirthLeaf::RealizationCoordinateLaw
+            .obligations()
+            .iter()
+            .map(|obligation| obligation.id())
+            .collect();
+        assert!(coordinate_ids.contains(&"residual_law"));
+        assert!(coordinate_ids.contains(&"unique_residual_slot_if_irreducible"));
+    }
+
+    #[test]
+    fn production_attaches_one_non_admitting_census_only_to_the_joint_leaf() {
+        let floor = audited_floor();
+        let floor_view =
+            AuditedFloorView::from_floor(&floor).expect("the audited floor has typed magnitudes");
+        let refusal = require_birth_measure(&floor_view).unwrap_err();
+        let joint = &refusal.open_frontier()[0];
+        let coordinate = &refusal.open_frontier()[1];
+
+        assert_eq!(joint.analyses().len(), 1);
+        assert_eq!(joint.analyses()[0].kind_id(), "exact_dimensional_census");
+        assert_eq!(joint.analyses()[0].status_id(), "computed");
+        assert_eq!(joint.analyses()[0].closure_effect_id(), "none");
+        assert!(!joint.analyses()[0].coverage_claim());
+        assert!(coordinate.analyses().is_empty());
     }
 
     #[test]

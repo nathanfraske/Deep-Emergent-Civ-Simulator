@@ -273,8 +273,9 @@ The binary name is provisional; the ownership and dependency rule are the decisi
 ### Inputs and stage contract
 
 The binary has no profile selector, development fallback, implicit world,
-world-value manifest, realization name, or caller seed. Its only value-bearing
-input is a validated absolute floor. Identity `[W]`, contingency `[X]`, derived
+world-value manifest, realization name, or caller seed. Its only source of
+physical causal values is a validated absolute floor. Identity `[W]`,
+contingency `[X]`, derived
 quantities, written state, and termination are produced by the staged
 mechanisms. An unresolved derivation, floor admission, Gap Law verdict,
 Residual Law edge, or capability causes a structured refusal.

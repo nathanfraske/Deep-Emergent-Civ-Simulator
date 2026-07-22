@@ -3,7 +3,8 @@
 Status: active migration record for the canonical planet and stellar-system arc.
 
 This document preserves evidence and unresolved derivation obligations without granting admission. The
-sealed absolute physics floor is the only value-bearing input to the canonical runner. A citation, vendored
+sealed absolute physics floor is the only source of physical causal values in the canonical runner. Exact SI
+coordinate definitions remain noncausal representation metadata. A citation, vendored
 artifact, candidate status, old fixture, viewer choice, or historical owner ruling cannot authorize a
 magnitude.
 

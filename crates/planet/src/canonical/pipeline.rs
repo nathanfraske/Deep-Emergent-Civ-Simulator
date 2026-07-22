@@ -79,7 +79,11 @@ pub fn run_planet(floor: &AbsolutePhysicsFloor) -> PlanetRunOutcome {
                     .iter()
                     .map(|obligation| obligation.id())
                     .collect();
-                OpenRequirement::new(requirement.requirement_id(), &obligations)
+                OpenRequirement::with_analyses(
+                    requirement.requirement_id(),
+                    &obligations,
+                    requirement.analyses().to_vec(),
+                )
             })
             .collect();
         let refusal = Refusal::missing_stage_requirement_frontier(
@@ -192,6 +196,8 @@ mod tests {
                 .iter()
                 .any(|obligation| obligation == "gap_law.chaos_protocol")
         }));
+        assert_eq!(refusal.open_requirements()[0].analyses().len(), 1);
+        assert!(refusal.open_requirements()[1].analyses().is_empty());
         assert_eq!(outcome.receipt().stages()[0].status(), StageStatus::Refused);
         assert!(outcome.receipt().stages()[1..]
             .iter()
@@ -255,6 +261,24 @@ mod tests {
 
         assert_eq!(first.receipt(), second.receipt());
         assert_eq!(first.receipt().to_string(), second.receipt().to_string());
+    }
+
+    #[test]
+    fn receipt_and_transcript_share_one_open_requirement_wire_shape() {
+        let text = run_planet(&physical_floor()).receipt().to_string();
+        let receipt_prefix = "refusal.0000.open_requirement.";
+        let transcript_prefix = "event.0005.reason.0000.open_requirement.";
+        let receipt_payload = text
+            .lines()
+            .filter_map(|line| line.strip_prefix(receipt_prefix))
+            .collect::<Vec<_>>();
+        let transcript_payload = text
+            .lines()
+            .filter_map(|line| line.strip_prefix(transcript_prefix))
+            .collect::<Vec<_>>();
+
+        assert!(!receipt_payload.is_empty());
+        assert_eq!(receipt_payload, transcript_payload);
     }
 
     #[test]
