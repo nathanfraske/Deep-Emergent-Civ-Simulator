@@ -292,9 +292,9 @@ the causal bitstream.
     formula coordinates prove arithmetic, not physical ancestry.
 37. **Exact Q32.32 transcendental tables could drift behind deterministic
     tests.** Two independent scripts derive and bind Pi, half-Pi, log-two,
-    inverse-log-two, every CORDIC angle, inverse gain, order, and occurrence in
-    the two canonical CPU and GPU implementation files. That narrow table claim
-    is active and bound into the floor; whole-domain error, rails, iteration
+    inverse-log-two, every CORDIC angle, inverse gain, order, and production
+    occurrence in the two canonical CPU and GPU implementation files. That
+    narrow table claim is active and bound into the floor; whole-domain error, rails, iteration
     semantics, backend parity, and vendor execution remain separately blocked.
 38. **The SI table aggregate was named like an authority receipt.** It is now an
     `aggregate_digest_sha256` drift diagnostic. SI execution-table completeness,
@@ -348,6 +348,55 @@ the causal bitstream.
     mappings, prove native Windows and Linux receipt equality, and reject bare
     carriage returns. Binary research holdings remain under their exact-byte
     custody contracts rather than this repository-text rule.
+45. **The fixed-math occurrence claim omitted most CORDIC members.** Both
+    implementations counted only the scalar constants, so a copied CORDIC
+    angle could survive while both receipts agreed. Their CRLF self-tests also
+    searched raw checkout bytes with LF-only mutation anchors, and their checked
+    receipt comparisons accepted only an LF checkout. Receipt v3 covers all 32
+    angle members, mutates canonical source, and canonicalizes checked receipt
+    text while rejecting bare carriage returns.
+46. **The first v3 repair shared Rust lexical blind spots and stopped before the
+    floor consumer.** Both implementations accepted a whitespace-varied core
+    constructor, a hexadecimal GPU literal, a GPU literal after `"//"` inside a
+    string, and production code hidden behind commented `cfg(test)` text while
+    still agreeing on 77 occurrences. They could also reject matching text in
+    comments or strings. Separately, Python accepted a CRLF checked receipt but
+    Rust embedded and hashed the raw checkout bytes. The producer now uses a
+    Rust token stream; the watchdog independently masks non-code bytes and then
+    uses structural regular expressions plus a brace walk. Direct integer
+    literals normalize across binary, octal, decimal, hexadecimal, underscore,
+    suffix, and whitespace forms. Both exclude only complete test modules and
+    the same three exact non-Q32 GPU contexts, and both resume into later
+    production code. The reproduced bypasses are refusal canaries and non-code
+    lookalikes are acceptance canaries. Rust now canonicalizes the receipt to LF
+    before the physical-floor digest, rejects bare carriage returns, and proves
+    LF and CRLF produce one digest. No table bit or physical magnitude changed.
+47. **Token-aware scans still did not make the claimed production set exact.**
+    Both implementations initially accepted raw `r#from_bits`, unsuffixed GPU
+    copies, duplicated or removed non-Q32 exemptions, a `cfg(test)` marker
+    inside a macro token tree, and Unicode Pattern White Space. The repaired
+    pair requires ASCII source, normalizes raw identifiers, covers unsuffixed
+    and `i64` GPU literals, permits test exclusion only for a real root module
+    item, and requires one word-width plus two separately named quadrant roles.
+48. **Authority roles and exemption roles could still come from syntax that did
+    not own the live computation.** Raw line parsers accepted correct
+    declarations in comments while a differently written live declaration was
+    wrong. Macro inputs, tool-attribute arguments, dead `cfg` items, and moved
+    exemption statements exposed the same distinction. The final pair now
+    parses required roles from independent production-only views, keeps
+    selected literals inside attribute and macro token trees visible as
+    unbound occurrences, rejects every production Rust configuration mechanism
+    except root test modules, and compares every role by exact path, line,
+    value, and multiplicity. The three GPU exemptions are additionally bound to
+    complete declaration inventories inside `fixed_ln`, `fixed_sin`, and
+    `fixed_cos`. ASCII vertical-tab and form-feed whitespace share the same
+    lexical meaning in both implementations, and both exclude nested
+    conditionals inside an already excluded root test module. Thirty-six
+    canaries cover the reproduced cases. The checked receipt is SHA-256
+    `b1906c81dd72c793fa3948d4864cbf6c210bb8f2749ec83cc533f0e1664c84b7`,
+    and the resulting physical-floor authority digest is
+    `fa324850646f2bf2d0c4d30951ce68b1c1867662673676af1fec6bbb0e8d931e`.
+    No Q32.32 table bit or physical magnitude changed.
 
 The resulting projected composite values are replayable from the transcript:
 
@@ -381,7 +430,7 @@ Two direct no-argument runs produced:
 - six transcript events;
 - no `[W]`, no `[X]`, and no snapshot;
 - byte-identical stdout of `367,628` bytes, SHA-256
-  `579db1856ba0134a5f747a0ace6d116376161f1998706ba9c2ce6c89b15dae45`;
+  `b677189984cf34ec59d01f16d43d135420ef8b8b33c731ea814978d3666e4531`;
 - receipt `civsim.planet.run.v11` and transcript schema major `9`;
 - refusal `stellar_birth.realization_measure` at Stage 1.
 
@@ -436,7 +485,7 @@ one lightweight sentinel for each guarded consumer.
 
 Clean and hostile-environment direct binary runs confirm exit `2`, zero stderr
 bytes, `367,628` stdout bytes, byte equality, and SHA-256
-`579db1856ba0134a5f747a0ace6d116376161f1998706ba9c2ce6c89b15dae45`.
+`b677189984cf34ec59d01f16d43d135420ef8b8b33c731ea814978d3666e4531`.
 No earlier receipt or inventory pin is evidence for the v11 result.
 
 One bounded blind-generalizer pass over the species-analysis and observation

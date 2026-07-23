@@ -145,12 +145,37 @@ canonical planet source. This does not authorize the SI execution table or
 the table-wide scale-selection policy. Those broader claims remain blocked
 until each has its own independent inventory, ancestry, policy, and aggregate
 receipt checker. The deterministic CPU and GPU constant table is active only
-for exact derivation, order, occurrence coverage, and source binding within the
-two bound canonical CPU and GPU implementation files for Pi, half-Pi, log-two,
-inverse-log-two, the CORDIC angle table, and inverse gain. Its v2 receipt binds
-the canonical Git LF form of those text files. The two implementations
-independently map a CRLF checkout to that form and reject every bare carriage
-return, so an operating-system checkout transform cannot become authority.
+for exact derivation, order, source-level direct integer-literal occurrence
+coverage, and source binding within the two bound canonical CPU and GPU
+implementation files for Pi, half-Pi, log-two, inverse-log-two, the CORDIC
+angle table, and inverse gain. Its v3 receipt binds the ASCII canonical Git LF
+form of those text files. The two implementations independently map a CRLF
+checkout to that form, reject every bare carriage return, and reject non-ASCII
+source bytes, so checkout and Unicode-token transforms cannot become authority.
+
+The producer tokenizes Rust and the watchdog independently builds a masked
+source view. Only complete root-level `cfg(test)` modules are excluded. Every
+other `cfg` or `cfg_attr` attribute and every production `cfg!` invocation
+refuses, including raw-identifier forms. Comments, strings, characters,
+attribute arguments, macro token trees, and excluded test bodies are
+ineligible authority-role sites. Selected numeric literals inside production
+attribute arguments and macro token trees remain visible to the occurrence
+scan and therefore refuse as unbound. Required declarations are parsed only
+from eligible production syntax, and every selected value must agree by path,
+line, value, and multiplicity with the independently parsed role receipt.
+Binary, octal, decimal, hexadecimal, underscored, unsuffixed, `i64`-suffixed,
+raw-identifier, and ASCII-whitespace variants receive one integer meaning.
+
+GPU coverage excludes only three structurally sealed non-Q32 roles: the sole
+`let e` word-width declaration in `fixed_ln`, the ordered quadrant declarations
+in `fixed_sin`, and the ordered quadrant declarations in `fixed_cos`. Each
+function, declaration inventory, selector, and branch is checked independently;
+moving or duplicating the same statement does not preserve the exemption.
+Thirty-six mutation and acceptance canaries cover role substitution, lexical
+forms, conditional compilation, macro and attribute eligibility, exact
+exemption ownership, line endings, and non-code lookalikes. The checked JSON
+receipt and its Rust physical-floor consumer each map CRLF to canonical Git LF
+and reject bare carriage returns before hashing.
 The authority inventory's v3 meta-receipt applies the same text contract to
 the registry and every enrolled semantic-closure file. Its schema-first
 producer removes CRLF pairs directly; its profile-first watchdog walks bytes

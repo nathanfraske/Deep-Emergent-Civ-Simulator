@@ -64,7 +64,7 @@ REQUIRED_PROFILES: dict[str, tuple[str, str | None, str]] = {
 # substitution.
 REQUIRED_PROFILE_DIGESTS: dict[str, str] = {
     "core.deterministic-math-kernels": "95af1b4ff8ecfd58bb0e0ab9f1f146b329db8a9ded5c2002e8d4d324d3a119fb",
-    "core.deterministic-math-table": "2082968dcb55ee6abc1f8af83c4d1e7fb4955ca4fb44af7e36e2f7d5fefa745c",
+    "core.deterministic-math-table": "081f9af077c3ef40746cf6adb97a2d82b54325dfb36501eb88dd353f467e4a9b",
     "floor.catalog-admission": "1f04f54954ab30f9709553bc4922ec9a2b8759f8f4b72fb2d2db1d7cbcceb389",
     "floor.pi-budget": "3ed6c43390a43cf921e96c600525a89da95cb62c522306acc725af93bc55d2f1",
     "governance.authority-inventory": "c2a6095c66f8dc4d9b2384a3b46c5da06142b27fad99b10ce6fc34239f5c5100",

@@ -34,7 +34,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "authority",
         "scientific",
         "active",
-        "2082968dcb55ee6abc1f8af83c4d1e7fb4955ca4fb44af7e36e2f7d5fefa745c",
+        "081f9af077c3ef40746cf6adb97a2d82b54325dfb36501eb88dd353f467e4a9b",
     ),
     (
         "floor.catalog-admission",

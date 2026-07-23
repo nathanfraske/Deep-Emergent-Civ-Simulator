@@ -21,6 +21,7 @@ use civsim_ledger::{
     Tier,
 };
 use sha2::{Digest, Sha256};
+use std::borrow::Cow;
 use std::fmt;
 
 fn fundamental_id(symbol: &str) -> String {
@@ -307,6 +308,10 @@ impl PhysicalFloorAuthorityBinding {
         let admission_pair = verify_floor_catalog_admission_pair(&entries, &receipts)?;
         let pi_watchdog =
             verify_floor_pi_budgets(&receipts).map_err(AuditedCatalogError::Watchdog)?;
+        canonical_repository_text(
+            FIXED_MATH_TABLE_AUTHORITY_RECEIPT,
+            "fixed-math authority receipt",
+        )?;
 
         let schema_id = PhysicalFloorAuthoritySchemaId::V3;
         let digest = physical_floor_authority_digest(
@@ -376,8 +381,8 @@ pub fn sealed_physical_floor_dimension_columns(
 // constructor above. It is updated only after reviewing a schema-versioned
 // authority change.
 const EXPECTED_PHYSICAL_FLOOR_AUTHORITY_DIGEST: [u8; 32] = [
-    0xca, 0x7f, 0xd0, 0x45, 0xf1, 0x9f, 0xb4, 0x12, 0xcd, 0x1b, 0x63, 0xf9, 0xf1, 0xae, 0xfa, 0x91,
-    0x44, 0x54, 0x1e, 0x0c, 0xeb, 0x38, 0x4d, 0xe2, 0x27, 0x00, 0xd8, 0xe7, 0x10, 0xf7, 0x00, 0x88,
+    0xfa, 0x32, 0x48, 0x50, 0x64, 0x6f, 0x2b, 0xf2, 0xd0, 0xc4, 0xd3, 0x09, 0x51, 0xce, 0x68, 0xb1,
+    0xc1, 0x86, 0x76, 0x62, 0x67, 0x36, 0x76, 0xaf, 0x1f, 0xec, 0x6b, 0xbb, 0x0e, 0x8d, 0x93, 0x1e,
 ];
 
 struct LengthPrefixedSha256(Sha256);
@@ -413,6 +418,32 @@ impl LengthPrefixedSha256 {
     }
 }
 
+fn canonical_repository_text<'a>(
+    raw: &'a [u8],
+    label: &str,
+) -> Result<Cow<'a, [u8]>, AuditedCatalogError> {
+    if !raw.contains(&b'\r') {
+        return Ok(Cow::Borrowed(raw));
+    }
+    let mut canonical = Vec::with_capacity(raw.len());
+    let mut cursor = 0;
+    while cursor < raw.len() {
+        if raw[cursor] != b'\r' {
+            canonical.push(raw[cursor]);
+            cursor += 1;
+            continue;
+        }
+        if raw.get(cursor + 1) != Some(&b'\n') {
+            return Err(AuditedCatalogError::DefinitionMismatch(format!(
+                "{label} contains a carriage return not paired with line feed"
+            )));
+        }
+        canonical.push(b'\n');
+        cursor += 2;
+    }
+    Ok(Cow::Owned(canonical))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn physical_floor_authority_digest(
     schema_id: PhysicalFloorAuthoritySchemaId,
@@ -427,6 +458,11 @@ fn physical_floor_authority_digest(
     fixed_math_table_authority_receipt: &[u8],
     execution_relation_fingerprints: &[ExecutionRelationFingerprint],
 ) -> [u8; 32] {
+    let canonical_fixed_math_receipt = canonical_repository_text(
+        fixed_math_table_authority_receipt,
+        "fixed-math authority receipt",
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
     let mut encoder = LengthPrefixedSha256::new();
     encoder.text(schema_id.as_str());
 
@@ -480,7 +516,7 @@ fn physical_floor_authority_digest(
     encoder.bytes(&pi_watchdog_digest);
 
     encoder.text("exact_fixed_math_table_authority_receipt");
-    encoder.bytes(fixed_math_table_authority_receipt);
+    encoder.bytes(canonical_fixed_math_receipt.as_ref());
 
     encoder.text("ordered_execution_relation_fingerprints");
     encoder.count(execution_relation_fingerprints.len());
@@ -1167,6 +1203,47 @@ mod tests {
     }
 
     #[test]
+    fn fixed_math_receipt_checkout_endings_bind_one_floor_digest() {
+        let canonical = canonical_repository_text(
+            FIXED_MATH_TABLE_AUTHORITY_RECEIPT,
+            "fixed-math authority receipt",
+        )
+        .unwrap()
+        .into_owned();
+        let mut crlf = Vec::with_capacity(canonical.len() * 2);
+        for byte in &canonical {
+            if *byte == b'\n' {
+                crlf.extend_from_slice(b"\r\n");
+            } else {
+                crlf.push(*byte);
+            }
+        }
+        let digest_for = |receipt: &[u8]| {
+            physical_floor_authority_digest(
+                PhysicalFloorAuthoritySchemaId::V3,
+                SI_REPRESENTATION_SCHEMA_ID,
+                &SI_BASE_DIMENSION_IDS,
+                &REPRESENTATION_DEFINITION_FINGERPRINTS,
+                &PHYSICAL_INVARIANT_ADMISSIONS,
+                RECEIPT_FINGERPRINT_SCHEMA_ID,
+                &RECEIPT_FINGERPRINTS,
+                [0; 32],
+                [0; 32],
+                receipt,
+                &EXECUTION_RELATION_FINGERPRINTS,
+            )
+        };
+        assert_eq!(digest_for(&canonical), digest_for(&crlf));
+
+        let mut bare_carriage_return = canonical;
+        bare_carriage_return.push(b'\r');
+        assert!(matches!(
+            canonical_repository_text(&bare_carriage_return, "fixed-math authority receipt"),
+            Err(AuditedCatalogError::DefinitionMismatch(_))
+        ));
+    }
+
+    #[test]
     fn dimensional_projection_exposes_only_the_three_ordered_floor_coordinates() {
         let columns = sealed_physical_floor_dimension_columns().unwrap();
         assert_eq!(
@@ -1351,7 +1428,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_fixed_math_table_receipt_bytes_are_bound_into_floor_authority() {
+    fn exact_canonical_fixed_math_receipt_bytes_are_bound_into_floor_authority() {
         let watchdog = verify_floor_pi_budgets(&physical_invariant_receipts()).unwrap();
         let admission_pair = current_admission_pair_digest();
         let bound = physical_floor_authority_digest(

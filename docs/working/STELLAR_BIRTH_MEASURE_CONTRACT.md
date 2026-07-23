@@ -253,7 +253,7 @@ three physical floor values, derives `eps_0`, enters Stage 1, and returns
 floor records, one derived-value record, one Stage 1 entry, and one refusal.
 It emits no `[X]`, no `[W]` realization, and no snapshot. Repeated runs are
 byte-identical at `367,628` stdout bytes and SHA-256
-`579db1856ba0134a5f747a0ace6d116376161f1998706ba9c2ce6c89b15dae45`.
+`b677189984cf34ec59d01f16d43d135420ef8b8b33c731ea814978d3666e4531`.
 The current receipt is `civsim.planet.run.v11`; its transcript schema major is
 `9`.
 
