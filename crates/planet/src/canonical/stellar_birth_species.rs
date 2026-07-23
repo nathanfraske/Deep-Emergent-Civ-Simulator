@@ -20,6 +20,7 @@
 )]
 
 mod authority_analysis;
+mod physical_registry;
 mod support_packet;
 
 pub(super) use authority_analysis::{

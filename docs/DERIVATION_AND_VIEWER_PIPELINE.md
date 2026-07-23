@@ -87,7 +87,8 @@ flowchart TB
         CENSUS -. "Attached as non-admitting analysis" .-> CURRENT_REFUSAL
         SPECIES_ANALYSIS -. "Attached as non-admitting analysis" .-> CURRENT_REFUSAL
 
-        DESCRIPTOR["NEXT physical species mass-state authority<br/>Repository-owned proof DAG<br/>Mass, dimensions, state, sectors,<br/>validity, ancestry, and closure"]
+        PHYSICAL_REGISTRY["CURRENT conditional physical registry pair<br/>Bottom-up producer plus top-down watchdog<br/>Exact mass, dimensions, state, sectors,<br/>validity, ancestry, and complete closure<br/>Repository result: no admitted roots"]
+        ROOTS["NEXT admitted species derivation roots<br/>Repository-owned fields, operators, states,<br/>sectors, regimes, constraint laws,<br/>and mass or massless proofs"]
         REGISTRY["FUTURE realized species registry<br/>Complete lawful membership<br/>Familiarity-independent"]
         MECHANISMS["FUTURE admitted mechanism set<br/>Thermal, opacity, EOS, collapse,<br/>transport, spectra, topology,<br/>conservation, and validity laws"]
         JOINT["FUTURE correlation-preserving<br/>joint physical measure proof"]
@@ -107,10 +108,11 @@ flowchart TB
         DISK["Persistent star, disk,<br/>fragment, and embryo state"]
         SYSTEM["Completed Stage 1<br/>stellar-system state"]
 
-        SPECIES_PACKET -. "Structural envelope only" .-> DESCRIPTOR
-        AUDITED --> DESCRIPTOR
-        STRUCTURE --> DESCRIPTOR
-        DESCRIPTOR --> REGISTRY
+        SPECIES_PACKET -. "Future conditioned-support envelope" .-> SUPPORT
+        AUDITED --> PHYSICAL_REGISTRY
+        STRUCTURE --> PHYSICAL_REGISTRY
+        ROOTS --> PHYSICAL_REGISTRY
+        PHYSICAL_REGISTRY -. "Requires roots and separate authority receipt" .-> REGISTRY
         REGISTRY --> MECHANISMS
         AUDITED --> MECHANISMS
 
@@ -143,7 +145,7 @@ flowchart TB
         DISK --> SYSTEM
     end
 
-    AUTHORITY -. "Required for every future causal arrow" .-> DESCRIPTOR
+    AUTHORITY -. "Required for every future causal arrow" .-> ROOTS
     AUTHORITY -. "Required for every future causal arrow" .-> MECHANISMS
     LAW_REFUSAL --> CURRENT_REFUSAL
 

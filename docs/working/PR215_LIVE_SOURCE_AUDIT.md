@@ -1,7 +1,7 @@
 # PR #215 live-source audit
 
 Status: implementation audit for the canonical integration on PR #215 branch
-`claude/thermoelastic-rung3`, updated 2026-07-22.
+`claude/thermoelastic-rung3`, updated 2026-07-23.
 
 This record covers the integration worktree that normalizes the physical floor,
 separates SI representation from causal information, gives the open
@@ -616,6 +616,47 @@ is the byte-identical law identity in non-admitting refusal metadata. It grants
 no universal-property proof beyond the bounded exact tests and requires finite
 support-count and rational-resource domains before activation.
 
+## Conditional physical registry audit
+
+The physical species proof-graph slice received one frozen six-file audit
+packet, not repeated outcome-seeking runs. Its manifest SHA-256 is
+`0417df650ce9dbfcccbd85834c701d0525558329d6fbe39192a147db69432ea7`.
+The first strongest-model smoke blocked because the packet omitted identity,
+upstream-call, receipt-boundary, terminology, independence-scope, downstream,
+and ledger-taxonomy facts needed to judge the source. The corrected packet
+added those facts without changing the candidate; the second smoke returned
+`CLEAR`. One blind generalizer then supplied nine falsifiers. Every alleged
+source defect was checked against the live files before repair.
+
+Eight findings reproduced. The shared mass dimension used the length axis;
+derived and irreducible admission receipts were not required to be pairwise
+distinct; a caller could hide a dangling composite dependency outside its
+declared closure; watchdog graph and expression walks could recurse beyond
+their stated depth boundary; producer expression work depended on node storage
+order; producer exact arithmetic constructed avoidable oversized
+intermediates; one rational bit-length addition was unchecked; and verified
+members omitted their physical-content artifact. Repairs use the literal SI
+mass axis in both validators, canonical ledger enums, distinct complete receipt
+bindings, whole-rule dependency closure, explicit bounded stacks and
+topological worklists, cross-reduced rational operations, checked size
+arithmetic, bound checker identities, and physical-content bytes in each
+member. Focused canaries cover deep chains, reversed storage, cancellation,
+dangling dependencies, noncanonical provenance, and receipt collapse.
+
+The remaining alleged defect, a missing separate big-endian `u64` list count,
+was rejected as a packet-contract overstatement. The source schema defines
+lists as repeated typed TLV fields whose payload lengths and enclosing record
+length make the sequence self-delimiting; it does not promise a separate
+element-count word. Adding one would change canonical identities without
+closing a real ambiguity.
+
+The repaired pair gives no production authority clearance. Synthetic
+unfamiliar and massless graphs prove bounded validator agreement only. The
+repository supplies no admitted roots, returns
+`no_admitted_species_derivation_roots`, exposes no reducer, support, ledger,
+transcript, Stage 1, or viewer path, and leaves
+`planet.species-state-support` blocked.
+
 ## Remaining audit debt
 
 - Admission structures still carry human-readable receipt strings. The current
@@ -658,13 +699,14 @@ support-count and rational-resource domains before activation.
   collision, symmetry, topology-label, permutation, and capacity-refusal
   implementations plus a multiplicity phenomenon. Structural rule identifiers
   alone cannot validate a realized graph.
-- Species and index-domain schemas still need realized membership, physical
-  content identity, mass and dimension ancestry, state and sector proof,
-  authority and replay bindings, derived chart and time-reference handling,
-  convergence control, and typed capacity refusals. The private reducer now
-  checks structural support equality, exact unit normalization, collisions, and
-  weights, but its zero-sized seals are not evidence that an unfamiliar system
-  is physically admitted.
+- Species and index-domain schemas still need repository-owned admitted field,
+  operator, state, sector, validity, constraint-law, and mass-projection roots,
+  plus a production registry authority and replay binding. The conditional
+  physical pair now checks content identity, exact dimensions and mass,
+  dependency closure, and typed capacity refusals when such roots are supplied,
+  but synthetic agreement is not evidence that an unfamiliar system is
+  physically admitted. Derived chart and time-reference handling, convergence
+  control, conditioned support, and joint-measure applicability remain open.
 - Material histories still need derived position and velocity state, local
   frame semantics, multicenter binding, translation and rotation invariance,
   flux topology, and conservation before a shell reduction or disk state can
@@ -688,9 +730,11 @@ the repaired stellar-state packet.
 1. Extend the partial machine-readable census from its landed registry, domain,
    and carrier contracts to complete physical coverage while preserving one
    correlation-carrying joint measure.
-2. Derive and bind the complete species mass and state registry to the floor,
-   joint support, semantic checkers, and replay identity. Only then activate the
-   landed exact weighted reducer.
+2. Derive or fully admit the repository-owned field, operator, state, sector,
+   validity, constraint-law, and mass-projection roots consumed by the landed
+   physical registry pair. Bind the resulting complete registry to a separate
+   production authority and replay identity, then close conditioned joint
+   support. Only then activate the landed exact weighted reducer.
 3. Derive coupled gas and dust thermal balance with a proved residual bracket,
    then equation-of-state closure, collapse flow, material mass and position
    histories, local-frame angular-momentum transport, multicenter binding, and

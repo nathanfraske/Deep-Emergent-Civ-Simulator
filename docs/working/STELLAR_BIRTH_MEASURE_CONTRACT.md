@@ -4,7 +4,8 @@ Status: executable leaf-closure evaluator, replayable floor, partial exact
 dimensional census, modular value-free structure schema, open stellar-state
 and classification contracts, a private exact species-state reducer, a sealed
 non-admitting species derivation analysis, and a bounded structural species
-descriptor and conditioned-support packet pair
+descriptor and conditioned-support packet pair, plus a conditional physical
+species proof-graph pair
 implemented; both physical obligations remain unresolved and the canonical
 runner reports their exact frontier before refusing.
 
@@ -218,17 +219,29 @@ fixtures only. The authority row remains blocked, the production resolver
 returns `None`, and the packet adds no species, value, proof token, ledger
 event, or transcript field.
 
-The next bounded physical rung is
-`P-STELLAR-SPECIES-MASS-STATE-AUTHORITY`. It replaces opaque descriptor
-bindings with repository-owned typed derivation DAGs and independent physical
-validation. Direct floor-property attribution, elementary-excitation
-derivation, and composite closure are the only routes. The current floor
-cannot populate even an electron member: `m_e` is a mass coordinate, not proof
-of a degree of freedom, state, interaction sector, stable excitation, or
-complete registry. The present result must therefore be a structured
-`no_admitted_species_derivation_roots` refusal with no coverage claim and no
-authority effect. A cited mass table, familiar species enum, named stellar
-class, or empty registry cannot bypass that refusal.
+The conditional physical registry pair is private and landed. Its bottom-up
+producer and top-down watchdog separately validate admitted fields, operators,
+state coordinates, interaction sectors, validity regimes, stability and
+transition laws, exact rational mass expressions, proved massless laws, and
+direct floor-property, elementary-excitation, or composite-bound-state
+closure. Both bind the sealed floor, value-free structure schemas, checker
+identities, canonical provenance marks, complete receipt roles, exact
+seven-axis dimensions, resource ceilings, physical content, and the complete
+reachable registry. Their graph walks, rational decoders, budget accounting,
+and canonical encoders are independently implemented. Synthetic unfamiliar
+and lawful massless graphs can exercise agreement, but the result carries
+`authority_effect=none` and has no path to conditioned support or the reducer.
+
+The repository supplies no admitted derivation roots. Its exact result is
+therefore `no_admitted_species_derivation_roots`, with zero members, no
+coverage claim, and no authority effect. The next bounded physical rung is
+`P-STELLAR-SPECIES-DERIVATION-ROOTS`: derive or fully admit the field,
+operator, state, sector, validity, constraint-law, and mass-projection or
+massless-law artifacts consumed by the pair. The current floor cannot populate
+even an electron member: `m_e` is a mass coordinate, not proof of a degree of
+freedom, state, interaction sector, stable excitation, or complete registry.
+A cited mass table, familiar species enum, named stellar class, or empty
+registry cannot bypass that refusal.
 
 A future smart authority must bind content identity, exact mass and
 dimension ancestry, charge and physical state, active sectors and couplings,
@@ -326,11 +339,13 @@ other dropped mechanism remain explicit residual or refusal obligations.
    spectral closure, fragmentation, magnetic braking, multicenter reduction,
    a persistent disk state, and every dynamical regime. Do not decompose the
    joint measure into authored marginals.
-2. Complete the authority-bound species mass and state registry behind the
-   landed byte-neutral descriptor and conditioned-support packet. The packet
-   and structural exact reducer are landed, but lawful physical membership,
-   proof semantics, closure, and conditioned measure remain absent. Only after
-   those authorities bind may the reducer derive mean particle mass.
+2. Derive or fully admit the repository-owned field, operator, state, sector,
+   validity, constraint-law, and mass-projection roots consumed by the landed
+   conditional physical registry pair. The pair already checks proof semantics
+   and complete closure, but production has no roots and its agreement has no
+   authority effect. After a separate production registry authority binds,
+   close conditioned support behind the landed packet. Only then may the
+   structural reducer derive mean particle mass.
 3. Derive coupled gas and dust thermal balance, equation-of-state closure,
    collapse measure, mass-flow history, material mass and position histories,
    local-frame angular-momentum transport, and multicenter circularization law

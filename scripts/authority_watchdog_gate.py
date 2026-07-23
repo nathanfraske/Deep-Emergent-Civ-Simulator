@@ -72,7 +72,7 @@ REQUIRED_PROFILE_DIGESTS: dict[str, str] = {
     "governance.stone0-build-wiring": "69ffca7a6ad2d2654df9af89a6f50bddb7fb550d682aff2d85df90220bdaf92e",
     "planet.completed-snapshot": "dd72abfaa771ff707b884d66340830b4d3ba5378a36097dac3f13c11d94246ee",
     "planet.species-derivation-frontier": "7991ef98a413bd1ac4893bcc30b8cc2c9746a52b126d1a8864c5c6d1332f8d60",
-    "planet.species-state-support": "06cbf6f1cf65834dee7b2d66233d79aaa8f7524f4db86454d230233ffaef8016",
+    "planet.species-state-support": "2513182235eef6be7e340322dc465dc2570f9b295053ce355c4ba40623e21240",
     "planet.stage1-dimensional-census": "21140b26c937f9cca7a8066b98e9fa75e9366f483ca44ffd1cc5206315f2b5dc",
     "planet.stellar-birth-proof-tokens": "68f58f019ab4f620194133e673c64240d4ad066f97404698ba0bfbf8b96935d1",
     "units.certified-formula-projection": "c1317c9000d82dc8507537120ce3c44a4a87886839a56d880c2d347a22266ff4",
