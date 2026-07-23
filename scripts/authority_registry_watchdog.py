@@ -16,7 +16,8 @@ from typing import Any
 
 REPOSITORY = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_INVENTORY = REPOSITORY / "scripts" / "authority_watchdog.toml"
-OUTPUT_SCHEMA = "civsim.authority-inventory-agreement.v2"
+OUTPUT_SCHEMA = "civsim.authority-inventory-agreement.v3"
+TEXT_BYTE_RULE = "canonical-git-lf-with-crlf-checkout-equivalence"
 
 # Kept separate from authority_watchdog_gate.py on purpose. This validator
 # starts from a closed ordered profile and then checks each row against it.
@@ -33,7 +34,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "authority",
         "scientific",
         "active",
-        "8947c3986b87069734df003d7ae37ae2ddff86aae8b9aa6cded1da358ad3bf77",
+        "2082968dcb55ee6abc1f8af83c4d1e7fb4955ca4fb44af7e36e2f7d5fefa745c",
     ),
     (
         "floor.catalog-admission",
@@ -54,7 +55,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "authority",
         "governance",
         "active",
-        "8c803e63bc6e9205f9cc68981be0a5c5ab48e29e207e098dac0085bf54b5f503",
+        "c2a6095c66f8dc4d9b2384a3b46c5da06142b27fad99b10ce6fc34239f5c5100",
     ),
     (
         "governance.external-adverse-claim-release",
@@ -140,12 +141,12 @@ META_EXPECTATIONS = (
     ("producer_path", "scripts/authority_watchdog_gate.py"),
     (
         "producer_implementation",
-        "civsim.authority-inventory.schema-first-producer.v2",
+        "civsim.authority-inventory.schema-first-producer.v3",
     ),
     ("checker_path", "scripts/authority_registry_watchdog.py"),
     (
         "checker_implementation",
-        "civsim.authority-inventory.profile-first-watchdog.v2",
+        "civsim.authority-inventory.profile-first-watchdog.v3",
     ),
     ("receipt_schema", OUTPUT_SCHEMA),
 )
@@ -546,18 +547,40 @@ def _files_observed(
     }
     observed: list[dict[str, str]] = []
     for name in sorted(names):
-        content = _open_repository_file(
+        checkout = _open_repository_file(
             name, f"semantic closure path {name}", repository
         ).read_bytes()
+        content = _repository_lf_bytes(checkout, name)
         observed.append({"path": name, "sha256": hashlib.sha256(content).hexdigest()})
     return observed
+
+
+def _repository_lf_bytes(checkout: bytes, label: str) -> bytes:
+    """Independently decode CRLF checkout text into repository LF bytes."""
+
+    normalized = bytearray()
+    position = 0
+    while position < len(checkout):
+        value = checkout[position]
+        if value != 13:
+            normalized.append(value)
+            position += 1
+            continue
+        if position + 1 >= len(checkout) or checkout[position + 1] != 10:
+            raise RegistryWatchdogFailure(
+                f"{label} has a carriage return not paired with line feed"
+            )
+        normalized.append(10)
+        position += 2
+    return bytes(normalized)
 
 
 def issue_receipt(
     raw: bytes,
     repository: pathlib.Path = REPOSITORY,
 ) -> bytes:
-    document = decode_inventory(raw)
+    canonical_inventory = _repository_lf_bytes(raw, "authority inventory")
+    document = decode_inventory(canonical_inventory)
     inspect_inventory(document, repository)
     profiles: list[dict[str, str | None]] = []
     active = 0
@@ -588,8 +611,9 @@ def issue_receipt(
         "mechanism_count": len(document["mechanism"]),
         "profiles": profiles,
         "semantic_closure_files": _files_observed(document, repository),
-        "registry_sha256": hashlib.sha256(raw).hexdigest(),
+        "registry_sha256": hashlib.sha256(canonical_inventory).hexdigest(),
         "schema": OUTPUT_SCHEMA,
+        "source_text_contract": TEXT_BYTE_RULE,
     }
     return json.dumps(
         payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
@@ -776,6 +800,24 @@ def _check_closure_content_binding(
             raise AssertionError(
                 "watchdog accepted an omitted semantic closure orchestrator"
             )
+        missing.write_bytes(
+            _open_repository_file(orchestrator, orchestrator).read_bytes()
+        )
+
+        portable = sandbox / pathlib.PurePosixPath(adapter)
+        canonical = _repository_lf_bytes(portable.read_bytes(), adapter)
+        portable.write_bytes(canonical)
+        canonical_receipt = issue_receipt(raw, sandbox)
+        portable.write_bytes(canonical.replace(b"\n", b"\r\n"))
+        if issue_receipt(raw, sandbox) != canonical_receipt:
+            raise AssertionError("watchdog did not equate LF and CRLF closure text")
+        portable.write_bytes(canonical + b"\r")
+        try:
+            issue_receipt(raw, sandbox)
+        except RegistryWatchdogFailure:
+            pass
+        else:
+            raise AssertionError("watchdog accepted bare CR closure text")
 
 
 def self_test() -> None:
@@ -792,6 +834,16 @@ def self_test() -> None:
     _check_closure_content_binding(original, document)
 
     baseline = issue_receipt(original)
+    canonical_inventory = _repository_lf_bytes(original, "authority inventory")
+    crlf_inventory = canonical_inventory.replace(b"\n", b"\r\n")
+    if issue_receipt(crlf_inventory) != baseline:
+        raise AssertionError("watchdog did not equate LF and CRLF registry text")
+    try:
+        issue_receipt(canonical_inventory + b"\r")
+    except RegistryWatchdogFailure:
+        pass
+    else:
+        raise AssertionError("watchdog accepted bare CR registry text")
     changed_input = original + b"\n# registry watchdog input mutation canary\n"
     if issue_receipt(changed_input) == baseline:
         raise AssertionError("watchdog receipt ignored an exact input mutation")

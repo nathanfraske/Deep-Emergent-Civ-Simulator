@@ -23,7 +23,7 @@ GPU_PATH = ROOT / "crates" / "gpu" / "src" / "transcendental.rs"
 WATCHDOG_PATH = ROOT / "scripts" / "fixed_math_authority_watchdog.py"
 RECEIPT_PATH = ROOT / "crates" / "units" / "data" / "fixed_math_authority_receipt.json"
 
-SCHEMA = "civsim.core.fixed-math-authority-pair.v1"
+SCHEMA = "civsim.core.fixed-math-authority-pair.v2"
 CLAIM_ID = "core.deterministic-math-table"
 PRODUCER_IMPLEMENTATION = (
     "civsim.fixed-math.machin-atanh-interval-producer.v1"
@@ -33,6 +33,7 @@ WATCHDOG_IMPLEMENTATION = (
 )
 FRAC_BITS = 32
 CORDIC_ITERATIONS = 32
+SOURCE_TEXT_CONTRACT = "canonical-git-lf-with-crlf-checkout-equivalence"
 
 CANARIES = [
     "one-bit-constant-mutation",
@@ -44,6 +45,8 @@ CANARIES = [
     "schema-mutation",
     "receipt-byte-mutation",
     "derivation-formula-mutation",
+    "checkout-line-ending-canonicalization",
+    "bare-carriage-return-rejection",
 ]
 
 DERIVATIONS = [
@@ -81,6 +84,17 @@ class FixedMathAuthorityError(ValueError):
 
 Interval = tuple[Fraction, Fraction]
 Occurrence = dict[str, int | str]
+
+
+def _canonical_repository_text(raw: bytes, label: str) -> bytes:
+    """Return the canonical Git LF form while refusing ambiguous CR bytes."""
+
+    without_pairs = raw.replace(b"\r\n", b"")
+    if b"\r" in without_pairs:
+        raise FixedMathAuthorityError(
+            f"{label} contains a bare carriage return"
+        )
+    return raw.replace(b"\r\n", b"\n")
 
 
 def _line_number(raw: bytes, offset: int) -> int:
@@ -498,6 +512,8 @@ def _canonical_json(value: object) -> bytes:
 
 
 def build_receipt(core_raw: bytes, gpu_raw: bytes) -> bytes:
+    core_raw = _canonical_repository_text(core_raw, "core source")
+    gpu_raw = _canonical_repository_text(gpu_raw, "GPU source")
     ordered_bits = derive_ordered_bits()
     occurrences = parse_and_validate_sources(core_raw, gpu_raw, ordered_bits)
     receipt = {
@@ -510,6 +526,7 @@ def build_receipt(core_raw: bytes, gpu_raw: bytes) -> bytes:
         "producer_implementation": PRODUCER_IMPLEMENTATION,
         "proof_contract": "exact-rational-interval-round-half-even-q32.32",
         "schema": SCHEMA,
+        "source_text_contract": SOURCE_TEXT_CONTRACT,
         "source_digests": [
             {
                 "path": "crates/core/src/fixed.rs",
@@ -629,6 +646,20 @@ def self_test() -> None:
     gpu_raw = GPU_PATH.read_bytes()
     ordered_bits = derive_ordered_bits()
     baseline = build_receipt(core_raw, gpu_raw)
+    canonical_core = _canonical_repository_text(core_raw, "core source")
+    canonical_gpu = _canonical_repository_text(gpu_raw, "GPU source")
+    crlf_receipt = build_receipt(
+        canonical_core.replace(b"\n", b"\r\n"),
+        canonical_gpu.replace(b"\n", b"\r\n"),
+    )
+    if crlf_receipt != baseline:
+        raise AssertionError("CRLF checkout changed the canonical receipt")
+    try:
+        build_receipt(canonical_core + b"\r", canonical_gpu)
+    except FixedMathAuthorityError:
+        pass
+    else:
+        raise AssertionError("bare carriage-return mutation passed")
 
     pi_bits = next(
         int(row["bits"]) for row in ordered_bits if row["id"] == "pi"
@@ -760,7 +791,12 @@ def validate_checked_receipt(receipt: bytes) -> None:
             "checked-in fixed-math authority receipt is missing; "
             "run with --generate after reviewing both proofs"
         ) from error
-    require_exact_agreement(receipt + b"\n", checked)
+    try:
+        require_exact_agreement(receipt + b"\n", checked)
+    except FixedMathAuthorityError as error:
+        raise FixedMathAuthorityError(
+            "checked-in fixed-math authority receipt is stale"
+        ) from error
 
 
 def main(argv: Iterable[str] | None = None) -> int:

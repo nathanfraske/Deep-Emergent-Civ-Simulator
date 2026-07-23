@@ -27,10 +27,10 @@ producer_path = "scripts/fixed_math_authority_gate.py"
 producer_implementation = "civsim.fixed-math.machin-atanh-interval-producer.v1"
 checker_path = "scripts/fixed_math_authority_watchdog.py"
 checker_implementation = "civsim.fixed-math.split-identity-square-proof-watchdog.v1"
-receipt_schema = "civsim.core.fixed-math-authority-pair.v1"
+receipt_schema = "civsim.core.fixed-math-authority-pair.v2"
 shared_semantic_helpers = []
-shared_primitives = ["canonical CPU and GPU source bytes", "exact rational arithmetic", "round-half-even Q32.32", "SHA-256"]
-canaries = ["one-bit constant mutation", "atan member omission", "atan member reordering", "GPU mirror drift", "source digest mutation", "claim id mutation", "schema mutation", "receipt byte mutation", "derivation formula mutation"]
+shared_primitives = ["canonical LF form of CPU and GPU Git text", "exact rational arithmetic", "round-half-even Q32.32", "SHA-256"]
+canaries = ["one-bit constant mutation", "atan member omission", "atan member reordering", "GPU mirror drift", "source digest mutation", "claim id mutation", "schema mutation", "receipt byte mutation", "derivation formula mutation", "checkout line-ending canonicalization", "bare carriage-return rejection"]
 owner_boundary = "The pair proves the identity, order, exact derivation, occurrence coverage, and source binding of the constant table. It does not prove kernel approximation error, domain sufficiency, saturation rails, whole-domain CPU and GPU equivalence, or vendor execution."
 semantic_closure = ["scripts/fixed_math_authority_gate.py", "scripts/fixed_math_authority_watchdog.py", "crates/units/data/fixed_math_authority_receipt.json", "crates/core/src/fixed.rs", "crates/gpu/src/transcendental.rs"]
 
@@ -73,16 +73,16 @@ id = "governance.authority-inventory"
 kind = "authority"
 domain = "governance"
 status = "active"
-claim = "The closed authority inventory, every mechanism profile, and every status transition are accepted only when two independently coded validators emit the same receipt over the exact registry and referenced files."
+claim = "The closed authority inventory, every mechanism profile, and every status transition are accepted only when two independently coded validators emit the same receipt over canonical Git text for the registry and referenced files."
 producer_path = "scripts/authority_watchdog_gate.py"
-producer_implementation = "civsim.authority-inventory.schema-first-producer.v2"
+producer_implementation = "civsim.authority-inventory.schema-first-producer.v3"
 checker_path = "scripts/authority_registry_watchdog.py"
-checker_implementation = "civsim.authority-inventory.profile-first-watchdog.v2"
-receipt_schema = "civsim.authority-inventory-agreement.v2"
+checker_implementation = "civsim.authority-inventory.profile-first-watchdog.v3"
+receipt_schema = "civsim.authority-inventory-agreement.v3"
 shared_semantic_helpers = []
-shared_primitives = ["exact registry bytes", "Python standard-library TOML syntax parser", "UTF-8", "SHA-256", "canonical JSON receipt bytes", "filesystem file reads"]
-canaries = ["truncated inventory", "authority reclassification", "diagnostic authority mint", "registry input mutation", "receipt mutation", "missing referenced path", "same implementation identity", "claim broadening", "implementation substitution", "schema substitution", "canary substitution", "semantic closure adapter mutation", "semantic closure orchestrator mutation", "semantic closure omission"]
-owner_boundary = "The pair proves the reviewed closed inventory and structural profiles against exact repository bytes. Source review and the owner remain responsible for discovering an authority-bearing mechanism that was never enrolled."
+shared_primitives = ["canonical Git LF text bytes", "Python standard-library TOML syntax parser", "UTF-8", "SHA-256", "canonical JSON receipt bytes", "filesystem file reads"]
+canaries = ["truncated inventory", "authority reclassification", "diagnostic authority mint", "registry input mutation", "receipt mutation", "missing referenced path", "same implementation identity", "claim broadening", "implementation substitution", "schema substitution", "canary substitution", "semantic closure adapter mutation", "semantic closure orchestrator mutation", "semantic closure omission", "checkout line-ending equivalence", "bare carriage-return rejection"]
+owner_boundary = "The pair proves the reviewed closed inventory and structural profiles against canonical repository text bytes. Source review and the owner remain responsible for discovering an authority-bearing mechanism that was never enrolled."
 semantic_closure = ["scripts/authority_watchdog_gate.py", "scripts/authority_registry_watchdog.py", "scripts/authority_watchdog.toml", "scripts/gates.toml", "scripts/gate_runner.py", "crates/stone0/src/lib.rs", "docs/working/INDEPENDENT_AUTHORITY_RULE.md"]
 
 [[mechanism]]

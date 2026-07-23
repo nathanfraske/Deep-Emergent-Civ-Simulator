@@ -17,7 +17,7 @@ CORE_PATH = ROOT / "crates" / "core" / "src" / "fixed.rs"
 GPU_PATH = ROOT / "crates" / "gpu" / "src" / "transcendental.rs"
 RECEIPT_PATH = ROOT / "crates" / "units" / "data" / "fixed_math_authority_receipt.json"
 
-SCHEMA = "civsim.core.fixed-math-authority-pair.v1"
+SCHEMA = "civsim.core.fixed-math-authority-pair.v2"
 CLAIM_ID = "core.deterministic-math-table"
 PRODUCER_IMPLEMENTATION = (
     "civsim.fixed-math.machin-atanh-interval-producer.v1"
@@ -27,6 +27,7 @@ WATCHDOG_IMPLEMENTATION = (
 )
 FRAC_BITS = 32
 CORDIC_ITERATIONS = 32
+SOURCE_TEXT_CONTRACT = "canonical-git-lf-with-crlf-checkout-equivalence"
 
 CANARIES = [
     "one-bit-constant-mutation",
@@ -38,6 +39,8 @@ CANARIES = [
     "schema-mutation",
     "receipt-byte-mutation",
     "derivation-formula-mutation",
+    "checkout-line-ending-canonicalization",
+    "bare-carriage-return-rejection",
 ]
 
 DERIVATIONS = [
@@ -75,6 +78,26 @@ class FixedMathWatchdogError(ValueError):
 
 Bound = tuple[Fraction, Fraction]
 Occurrence = dict[str, int | str]
+
+
+def _repository_lf_bytes(raw: bytes, label: str) -> bytes:
+    """Independently reconstruct Git's canonical LF text representation."""
+
+    canonical = bytearray()
+    cursor = 0
+    while cursor < len(raw):
+        value = raw[cursor]
+        if value != 13:
+            canonical.append(value)
+            cursor += 1
+            continue
+        if cursor + 1 >= len(raw) or raw[cursor + 1] != 10:
+            raise FixedMathWatchdogError(
+                f"{label} contains a non-CRLF carriage return"
+            )
+        canonical.append(10)
+        cursor += 2
+    return bytes(canonical)
 
 
 def _sum_bounds(left: Bound, right: Bound) -> Bound:
@@ -634,6 +657,8 @@ def _encode_json(value: object) -> bytes:
 
 
 def build_receipt(core_raw: bytes, gpu_raw: bytes) -> bytes:
+    core_raw = _repository_lf_bytes(core_raw, "core source")
+    gpu_raw = _repository_lf_bytes(gpu_raw, "GPU source")
     derived = derive_ordered_bits()
     occurrences = inspect_sources(core_raw, gpu_raw, derived)
     return _encode_json(
@@ -647,6 +672,7 @@ def build_receipt(core_raw: bytes, gpu_raw: bytes) -> bytes:
             "producer_implementation": PRODUCER_IMPLEMENTATION,
             "proof_contract": "exact-rational-interval-round-half-even-q32.32",
             "schema": SCHEMA,
+            "source_text_contract": SOURCE_TEXT_CONTRACT,
             "source_digests": [
                 {
                     "path": "crates/core/src/fixed.rs",
@@ -706,6 +732,20 @@ def self_test() -> None:
     gpu_raw = GPU_PATH.read_bytes()
     derived = derive_ordered_bits()
     baseline = build_receipt(core_raw, gpu_raw)
+    canonical_core = _repository_lf_bytes(core_raw, "core source")
+    canonical_gpu = _repository_lf_bytes(gpu_raw, "GPU source")
+    alternate_checkout = build_receipt(
+        canonical_core.replace(b"\n", b"\r\n"),
+        canonical_gpu.replace(b"\n", b"\r\n"),
+    )
+    if alternate_checkout != baseline:
+        raise AssertionError("watchdog CRLF checkout changed the receipt")
+    try:
+        build_receipt(canonical_core, canonical_gpu + b"\r")
+    except FixedMathWatchdogError:
+        pass
+    else:
+        raise AssertionError("watchdog accepted a bare carriage return")
     value_by_id = {str(row["id"]): int(row["bits"]) for row in derived}
 
     pi = value_by_id["pi"]

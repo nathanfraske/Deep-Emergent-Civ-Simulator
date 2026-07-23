@@ -19,7 +19,8 @@ from typing import Any
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 REGISTRY = ROOT / "scripts" / "authority_watchdog.toml"
 CROSS_CHECKER = ROOT / "scripts" / "authority_registry_watchdog.py"
-RECEIPT_SCHEMA = "civsim.authority-inventory-agreement.v2"
+RECEIPT_SCHEMA = "civsim.authority-inventory-agreement.v3"
+SOURCE_TEXT_CONTRACT = "canonical-git-lf-with-crlf-checkout-equivalence"
 
 # This map is an independent, reviewed completeness pin. A registry edit cannot
 # add, remove, promote, demote, or relabel a mechanism without changing this
@@ -63,10 +64,10 @@ REQUIRED_PROFILES: dict[str, tuple[str, str | None, str]] = {
 # substitution.
 REQUIRED_PROFILE_DIGESTS: dict[str, str] = {
     "core.deterministic-math-kernels": "95af1b4ff8ecfd58bb0e0ab9f1f146b329db8a9ded5c2002e8d4d324d3a119fb",
-    "core.deterministic-math-table": "8947c3986b87069734df003d7ae37ae2ddff86aae8b9aa6cded1da358ad3bf77",
+    "core.deterministic-math-table": "2082968dcb55ee6abc1f8af83c4d1e7fb4955ca4fb44af7e36e2f7d5fefa745c",
     "floor.catalog-admission": "1f04f54954ab30f9709553bc4922ec9a2b8759f8f4b72fb2d2db1d7cbcceb389",
     "floor.pi-budget": "3ed6c43390a43cf921e96c600525a89da95cb62c522306acc725af93bc55d2f1",
-    "governance.authority-inventory": "8c803e63bc6e9205f9cc68981be0a5c5ab48e29e207e098dac0085bf54b5f503",
+    "governance.authority-inventory": "c2a6095c66f8dc4d9b2384a3b46c5da06142b27fad99b10ce6fc34239f5c5100",
     "governance.external-adverse-claim-release": "a8a74e0c6032ee15d125b7c2e00e4accf77de2c9ac7f9e675f5848f80f38295d",
     "governance.stone0-build-wiring": "69ffca7a6ad2d2654df9af89a6f50bddb7fb550d682aff2d85df90220bdaf92e",
     "planet.completed-snapshot": "dd72abfaa771ff707b884d66340830b4d3ba5378a36097dac3f13c11d94246ee",
@@ -87,9 +88,9 @@ REQUIRED_COUNTS = {
 }
 META_PAIR = {
     "producer_path": "scripts/authority_watchdog_gate.py",
-    "producer_implementation": "civsim.authority-inventory.schema-first-producer.v2",
+    "producer_implementation": "civsim.authority-inventory.schema-first-producer.v3",
     "checker_path": "scripts/authority_registry_watchdog.py",
-    "checker_implementation": "civsim.authority-inventory.profile-first-watchdog.v2",
+    "checker_implementation": "civsim.authority-inventory.profile-first-watchdog.v3",
     "receipt_schema": RECEIPT_SCHEMA,
 }
 
@@ -483,14 +484,27 @@ def _semantic_closure_files(
     result: list[dict[str, str]] = []
     for relative in sorted(relative_paths):
         path = _repo_file(root, relative, f"receipt path {relative}")
+        content = _canonical_repository_text(path.read_bytes(), relative)
         result.append(
-            {"path": relative, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+            {"path": relative, "sha256": hashlib.sha256(content).hexdigest()}
         )
     return result
 
 
+def _canonical_repository_text(raw: bytes, label: str) -> bytes:
+    """Map a repository text checkout to Git LF bytes and reject bare CR."""
+
+    without_pairs = raw.replace(b"\r\n", b"")
+    if b"\r" in without_pairs:
+        raise AuthorityInventoryError(
+            f"{label} contains a bare carriage return outside the text contract"
+        )
+    return raw.replace(b"\r\n", b"\n")
+
+
 def build_receipt(raw: bytes, root: pathlib.Path = ROOT) -> bytes:
-    data = parse_registry(raw)
+    canonical_registry = _canonical_repository_text(raw, "authority registry")
+    data = parse_registry(canonical_registry)
     validate_inventory(data, root)
     profiles = [
         {
@@ -519,8 +533,9 @@ def build_receipt(raw: bytes, root: pathlib.Path = ROOT) -> bytes:
         "mechanism_count": len(data["mechanism"]),
         "profiles": profiles,
         "semantic_closure_files": _semantic_closure_files(data, root),
-        "registry_sha256": hashlib.sha256(raw).hexdigest(),
+        "registry_sha256": hashlib.sha256(canonical_registry).hexdigest(),
         "schema": RECEIPT_SCHEMA,
+        "source_text_contract": SOURCE_TEXT_CONTRACT,
     }
     return json.dumps(
         receipt, ensure_ascii=True, separators=(",", ":"), sort_keys=True
@@ -763,6 +778,24 @@ def _exercise_semantic_closure_hashes(raw: bytes, data: dict[str, Any]) -> None:
             pass
         else:
             raise AssertionError("semantic closure accepted an omitted adapter file")
+        omitted.write_bytes(_repo_file(ROOT, adapter, adapter).read_bytes())
+
+        portable = temporary_root.joinpath(*orchestrator.split("/"))
+        canonical = _canonical_repository_text(
+            portable.read_bytes(), "semantic closure portability canary"
+        )
+        portable.write_bytes(canonical)
+        canonical_receipt = build_receipt(raw, temporary_root)
+        portable.write_bytes(canonical.replace(b"\n", b"\r\n"))
+        if build_receipt(raw, temporary_root) != canonical_receipt:
+            raise AssertionError("CRLF closure checkout changed the canonical receipt")
+        portable.write_bytes(canonical + b"\r")
+        try:
+            build_receipt(raw, temporary_root)
+        except AuthorityInventoryError:
+            pass
+        else:
+            raise AssertionError("semantic closure accepted a bare carriage return")
 
 
 def self_test() -> None:
@@ -778,6 +811,16 @@ def self_test() -> None:
         raise AssertionError(f"self-test mutation passed: {name}")
 
     baseline_receipt = build_receipt(raw)
+    canonical_registry = _canonical_repository_text(raw, "authority registry")
+    crlf_registry = canonical_registry.replace(b"\n", b"\r\n")
+    if build_receipt(crlf_registry) != baseline_receipt:
+        raise AssertionError("CRLF registry checkout changed the canonical receipt")
+    try:
+        build_receipt(canonical_registry + b"\r")
+    except AuthorityInventoryError:
+        pass
+    else:
+        raise AssertionError("registry accepted a bare carriage return")
     input_mutation = raw + b"\n# authority inventory input mutation canary\n"
     mutated_input_receipt = build_receipt(input_mutation)
     if mutated_input_receipt == baseline_receipt:

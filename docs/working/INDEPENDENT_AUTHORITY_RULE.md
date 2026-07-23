@@ -147,7 +147,17 @@ until each has its own independent inventory, ancestry, policy, and aggregate
 receipt checker. The deterministic CPU and GPU constant table is active only
 for exact derivation, order, occurrence coverage, and source binding within the
 two bound canonical CPU and GPU implementation files for Pi, half-Pi, log-two,
-inverse-log-two, the CORDIC angle table, and inverse gain.
+inverse-log-two, the CORDIC angle table, and inverse gain. Its v2 receipt binds
+the canonical Git LF form of those text files. The two implementations
+independently map a CRLF checkout to that form and reject every bare carriage
+return, so an operating-system checkout transform cannot become authority.
+The authority inventory's v3 meta-receipt applies the same text contract to
+the registry and every enrolled semantic-closure file. Its schema-first
+producer removes CRLF pairs directly; its profile-first watchdog walks bytes
+and accepts a carriage return only when the next byte is a line feed. Both
+reject bare carriage returns and prove native Windows and Linux receipt-byte
+equality. Exact-byte research holdings remain outside this repository-text
+contract and retain their declared binary custody receipts.
 Whole-domain kernel error, domain edges, rails, iteration semantics, CPU and GPU
 equivalence, and vendor execution remain one separately blocked claim. The
 floor catalog is active through a separate parser that binds

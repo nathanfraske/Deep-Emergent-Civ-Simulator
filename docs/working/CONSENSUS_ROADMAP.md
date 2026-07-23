@@ -42,8 +42,8 @@ observer independence bind the full runpath.
 ## Recent landings
 
 - 2026-07-23  Portable per-gate execution locks prevent cross-process cache stampedes, while one marker-backed build anchor runs Stone 0 per canonical Cargo graph and an independent pair checks its exact wiring -> `scripts/gate_runner.py`, `crates/stone0-build`, `scripts/stone0_build_wiring_gate.py`
-- 2026-07-23  A closed authority inventory, diverse meta-pair, exact Stone 0 bootstrap profiles, and direct fallback execution require independent cross-checkers for every active authority-bearing mechanical claim -> `docs/working/INDEPENDENT_AUTHORITY_RULE.md`
-- 2026-07-23  Exact formula projection is resource-bounded and independently interval-certified; fixed CPU/GPU table constants and external adverse-claim release governance have separate active pairs, while broader scientific claims remain blocked -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
+- 2026-07-23  A closed authority inventory, diverse canonical-text meta-pair, exact Stone 0 bootstrap profiles, and direct fallback execution require independent cross-checkers for every active authority-bearing mechanical claim -> `docs/working/INDEPENDENT_AUTHORITY_RULE.md`
+- 2026-07-23  Exact formula projection is resource-bounded and independently interval-certified; the fixed CPU/GPU table pair binds canonical Git LF text across checkouts, and adverse-claim release has a separate active pair -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
 - 2026-07-23  Cached invariant and factored dynamic certificates preserve retained stellar and disk Q32.32 bits while removing a multi-tens-of-minutes giant-test regression -> `crates/planet-substrate/src/astro.rs`
 - 2026-07-22  Content-bound gate receipts, bounded parallel checks, and one globally capped native-WSL target path accelerate local verification without changing physical authority -> `TODOS.md` P-VERIFICATION-OPERATIONS
 - 2026-07-22  Observer-only scene DTOs expose transcript order, exact noncausal SI representation integers, stage reachability, refusal leaves, and open analyses while marking value payload accounting opaque at the viewer boundary -> `crates/viewer/src/scene.rs`
@@ -74,7 +74,7 @@ observer independence bind the full runpath.
 - 2026-07-21  Physical folds across physics and materials require the verified execution capability; representation-only conversions use the noncausal representation view -> `crates/units/src/constants.rs`
 - 2026-07-21  One frozen-packet blind-generalizer pass found and closed physical API reachability, shared receipt authority, and order-insensitive declaration checks -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
 - 2026-07-22  One bounded species and observation blind pass found and closed public outcome forgeability; no other live defect was found -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
-- 2026-07-22  Direct canonical stdout is pinned at 367,628 bytes and SHA-256 `53936f040ae40169654620d577e4e10b6be23ad0ab09bae2ab5981f4f44bd1d1` -> `docs/working/STELLAR_BIRTH_MEASURE_CONTRACT.md`
+- 2026-07-23  Direct canonical stdout is pinned at 367,628 bytes and SHA-256 `579db1856ba0134a5f747a0ace6d116376161f1998706ba9c2ce6c89b15dae45` after the v2 authority-receipt binding -> `docs/working/STELLAR_BIRTH_MEASURE_CONTRACT.md`
 - 2026-07-22  Focused species authority, observer, structure, census, CLI, and boundary checks pass for the v11 slice; complete Linux `check-pr` parity passes in 793.6 seconds -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
 - 2026-07-22  Visualization review keeps causal artifacts, materialization, observer models, and camera-driven rendering in four one-way planes; the first useful view is the live provenance and refusal frontier -> `TODOS.md` P-VISUALIZATION-REPRESENTATION
 - 2026-07-20  Active physics is abiotic-only; organism laws and data survive through parked compatibility facades -> `crates/physics/src/lib.rs`, `parked/crates/physics/`

@@ -331,6 +331,23 @@ the causal bitstream.
     on the exact build-only topology, marker ordering, consumer sentinels, and
     absence from runtime and aggregate package surfaces. This changes
     verification ownership only and cannot enter simulation state.
+43. **The fixed-math receipt bound one Windows checkout representation.** The
+    checked receipt hashed CRLF worktree bytes, while Git and CI materialized
+    the declared canonical LF text. Both mathematical implementations agreed,
+    but the stored receipt correctly refused the different digest and Stone 0
+    blocked canonical and parked CI. Receipt v2 now binds canonical Git LF
+    bytes. The producer and watchdog use separately implemented CRLF mappings,
+    prove LF and CRLF checkout equivalence, and reject bare carriage returns.
+    The changed receipt is included in the reviewed physical-floor authority
+    digest; no mathematical table bit or physical magnitude changed.
+44. **The authority-inventory receipt repeated the checkout-byte weakness.**
+    It did not break CI because no checked receipt pinned the meta-pair output,
+    but its semantic-closure hashes could differ between stale CRLF and fresh
+    LF checkouts. Receipt v3 now binds canonical Git LF text for the registry
+    and every enrolled closure member. The two validators use distinct byte
+    mappings, prove native Windows and Linux receipt equality, and reject bare
+    carriage returns. Binary research holdings remain under their exact-byte
+    custody contracts rather than this repository-text rule.
 
 The resulting projected composite values are replayable from the transcript:
 
@@ -364,7 +381,7 @@ Two direct no-argument runs produced:
 - six transcript events;
 - no `[W]`, no `[X]`, and no snapshot;
 - byte-identical stdout of `367,628` bytes, SHA-256
-  `53936f040ae40169654620d577e4e10b6be23ad0ab09bae2ab5981f4f44bd1d1`;
+  `579db1856ba0134a5f747a0ace6d116376161f1998706ba9c2ce6c89b15dae45`;
 - receipt `civsim.planet.run.v11` and transcript schema major `9`;
 - refusal `stellar_birth.realization_measure` at Stage 1.
 
@@ -419,7 +436,7 @@ one lightweight sentinel for each guarded consumer.
 
 Clean and hostile-environment direct binary runs confirm exit `2`, zero stderr
 bytes, `367,628` stdout bytes, byte equality, and SHA-256
-`53936f040ae40169654620d577e4e10b6be23ad0ab09bae2ab5981f4f44bd1d1`.
+`579db1856ba0134a5f747a0ace6d116376161f1998706ba9c2ce6c89b15dae45`.
 No earlier receipt or inventory pin is evidence for the v11 result.
 
 One bounded blind-generalizer pass over the species-analysis and observation
