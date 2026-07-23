@@ -16,7 +16,7 @@ observer independence bind the full runpath.
 ## Active arcs
 
 - 2026-07-21  PR #215 is the draft integration base -> branch `claude/thermoelastic-rung3`, `HANDOFFS.md`
-- 2026-07-22  Derive the authority-bound species and state registry, then thermal residual closure and the remaining open stellar-birth chain before closing the joint measure and realization-coordinate law -> `docs/working/STELLAR_BIRTH_MEASURE_CONTRACT.md`
+- 2026-07-23  Derive repository-owned species mass, state, sector, validity, dependency, and complete closure proofs behind the landed structural packet, then thermal residual closure and the remaining stellar-birth chain -> `TODOS.md` P-STELLAR-SPECIES-MASS-STATE-AUTHORITY
 - 2026-07-21  Stage 1 SI-native adapters are blocked until both stellar-birth measure leaves close -> `TODOS.md` P-STAGE1-ADAPTERS
 - 2026-07-21  Canonical GPU use remains blocked on typed adapters and exact CPU/GPU Q32.32 parity for every enabled backend -> `TODOS.md` P-GPU-BIT-PARITY
 - 2026-07-20  Stage 1 star, collapse, disk, and embryo-system realization -> `TODOS.md` P-STAR-DISK-SYSTEM
@@ -41,6 +41,7 @@ observer independence bind the full runpath.
 
 ## Recent landings
 
+- 2026-07-23  Independent bounded structural validators agree on canonical species descriptors and explicit positive or proved-zero conditioned support without minting physical authority or changing run bytes -> `crates/planet/src/canonical/stellar_birth_species/support_packet/`
 - 2026-07-23  Portable per-gate execution locks prevent cross-process cache stampedes, while one marker-backed build anchor runs Stone 0 per canonical Cargo graph and an independent pair checks its exact wiring -> `scripts/gate_runner.py`, `crates/stone0-build`, `scripts/stone0_build_wiring_gate.py`
 - 2026-07-23  A closed authority inventory, diverse canonical-text meta-pair, exact Stone 0 bootstrap profiles, and direct fallback execution require independent cross-checkers for every active authority-bearing mechanical claim -> `docs/working/INDEPENDENT_AUTHORITY_RULE.md`
 - 2026-07-23  Exact formula projection is resource-bounded and independently interval-certified; the fixed CPU/GPU table pair binds canonical Git LF text across checkouts, and adverse-claim release has a separate active pair -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`

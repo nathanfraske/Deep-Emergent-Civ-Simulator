@@ -90,7 +90,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "authority",
         "scientific",
         "blocked",
-        "f91597a9c743f37199e4c375e550fee7f4367c4b980f4e476ad55f11447672ac",
+        "06cbf6f1cf65834dee7b2d66233d79aaa8f7524f4db86454d230233ffaef8016",
     ),
     (
         "planet.stage1-dimensional-census",

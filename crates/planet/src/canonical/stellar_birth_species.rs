@@ -20,6 +20,7 @@
 )]
 
 mod authority_analysis;
+mod support_packet;
 
 pub(super) use authority_analysis::{
     analyze_repository_species_state_support, write_species_derivation_analysis,

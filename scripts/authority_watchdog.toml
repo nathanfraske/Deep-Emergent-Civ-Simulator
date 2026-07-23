@@ -158,9 +158,9 @@ claim = "A species-state support registry is complete, physically admitted, norm
 producer_path = "crates/planet/src/canonical/stellar_birth_species.rs"
 refusal_path = "crates/planet/src/canonical/stellar_birth_measure.rs"
 activation_guard = "The support verifier is unreachable from production and the joint-measure leaf remains open."
-open_cross_checker_requirements = ["independent identity encoding", "independent full-registry coverage", "independent simplex and weighted-mean check", "state applicability proof"]
+open_cross_checker_requirements = ["independent physical ancestry interpretation", "independent complete reachable-member closure", "independent conditioned-measure authority", "independent state and sector applicability proof"]
 owner_boundary = "The owner reviews physical species membership, state coverage, and admitted evidence ancestry."
-semantic_closure = ["crates/planet/src/canonical/stellar_birth_species.rs", "crates/planet/src/canonical/stellar_birth_measure.rs", "crates/planet/src/canonical/stellar_birth_structure/mod.rs", "crates/planet/src/canonical/stellar_birth_structure/species_registry.rs", "crates/planet/src/canonical/stellar_birth_structure/stellar_state.rs"]
+semantic_closure = ["crates/planet/src/canonical/stellar_birth_species.rs", "crates/planet/src/canonical/stellar_birth_species/support_packet/mod.rs", "crates/planet/src/canonical/stellar_birth_species/support_packet/model.rs", "crates/planet/src/canonical/stellar_birth_species/support_packet/producer.rs", "crates/planet/src/canonical/stellar_birth_species/support_packet/watchdog.rs", "crates/planet/src/canonical/stellar_birth_species/support_packet/tests.rs", "crates/planet/src/canonical/stellar_birth_measure.rs", "crates/planet/src/canonical/stellar_birth_structure/mod.rs", "crates/planet/src/canonical/stellar_birth_structure/species_registry.rs", "crates/planet/src/canonical/stellar_birth_structure/stellar_state.rs", "crates/units/src/digest.rs", "crates/units/src/lib.rs"]
 
 [[mechanism]]
 id = "planet.stage1-dimensional-census"

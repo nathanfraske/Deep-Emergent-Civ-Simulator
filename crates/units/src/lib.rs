@@ -46,6 +46,7 @@ pub use authority_watchdog::AuthorityWatchdogError;
 mod certified_projection;
 pub mod compute;
 pub mod constants;
+pub mod digest;
 pub mod dimensional_analysis;
 mod floor_admission_watchdog;
 pub mod fundamentals;

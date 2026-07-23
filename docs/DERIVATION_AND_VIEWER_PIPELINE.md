@@ -1,10 +1,11 @@
 # Canonical derivation and observer-only viewer pipeline
 
 Status: explanatory architecture map for draft PR #215. Nodes marked
-`CURRENT` describe implemented behavior. Nodes marked `FUTURE` remain blocked
-until their named authorities exist. This page explains dependency direction;
-it is not a physical-admission artifact. The executable receipts, semantic
-checkers, and sealed capabilities remain authoritative.
+`CURRENT` describe implemented behavior. `NEXT` marks the scoped bounded rung,
+and nodes marked `FUTURE` remain blocked until their named authorities exist.
+This page explains dependency direction; it is not a physical-admission
+artifact. The executable receipts, semantic checkers, and sealed capabilities
+remain authoritative.
 
 ```mermaid
 flowchart TB
@@ -71,6 +72,7 @@ flowchart TB
         STRUCTURE["Value-free stellar structure v2<br/>Open components, species, coordinates,<br/>dimensions, sectors, regimes,<br/>histories, and classifications"]
         CENSUS["Exact dimensional census v4<br/>Non-admitting diagnostic<br/>closure_effect = none<br/>coverage_claim = false"]
         SPECIES_ANALYSIS["Species derivation analysis v1<br/>m_e is a mass-coordinate anchor only<br/>Zero members, zero support,<br/>no value, no residual slot"]
+        SPECIES_PACKET["CURRENT bounded structural packet pair<br/>Canonical descriptors plus conditioned support<br/>Independent algorithms agree on bytes only<br/>No physical member or authority"]
         CURRENT_PROOFS["CURRENT production resolver<br/>Joint physical measure = None<br/>Coordinate law = None"]
         CURRENT_REFUSAL["CURRENT Stage 1 refusal<br/>stellar_birth.realization_measure<br/>Both open leaves remain visible"]
 
@@ -79,12 +81,13 @@ flowchart TB
         AUDITED -. "Binds analysis" .-> CENSUS
         STRUCTURE -. "Binds analysis" .-> SPECIES_ANALYSIS
         AUDITED -. "Binds exact m_e anchor" .-> SPECIES_ANALYSIS
+        STRUCTURE -. "Constrains packet schemas" .-> SPECIES_PACKET
 
         CURRENT_PROOFS --> CURRENT_REFUSAL
         CENSUS -. "Attached as non-admitting analysis" .-> CURRENT_REFUSAL
         SPECIES_ANALYSIS -. "Attached as non-admitting analysis" .-> CURRENT_REFUSAL
 
-        DESCRIPTOR["FUTURE complete species-state<br/>descriptor and semantic checker<br/>Identity, mass, charge, state, sector,<br/>validity, ancestry, and resource bounds"]
+        DESCRIPTOR["NEXT physical species mass-state authority<br/>Repository-owned proof DAG<br/>Mass, dimensions, state, sectors,<br/>validity, ancestry, and closure"]
         REGISTRY["FUTURE realized species registry<br/>Complete lawful membership<br/>Familiarity-independent"]
         MECHANISMS["FUTURE admitted mechanism set<br/>Thermal, opacity, EOS, collapse,<br/>transport, spectra, topology,<br/>conservation, and validity laws"]
         JOINT["FUTURE correlation-preserving<br/>joint physical measure proof"]
@@ -104,6 +107,7 @@ flowchart TB
         DISK["Persistent star, disk,<br/>fragment, and embryo state"]
         SYSTEM["Completed Stage 1<br/>stellar-system state"]
 
+        SPECIES_PACKET -. "Structural envelope only" .-> DESCRIPTOR
         AUDITED --> DESCRIPTOR
         STRUCTURE --> DESCRIPTOR
         DESCRIPTOR --> REGISTRY

@@ -2,8 +2,9 @@
 
 Status: executable leaf-closure evaluator, replayable floor, partial exact
 dimensional census, modular value-free structure schema, open stellar-state
-and classification contracts, a private exact species-state reducer, and a
-sealed non-admitting species derivation analysis
+and classification contracts, a private exact species-state reducer, a sealed
+non-admitting species derivation analysis, and a bounded structural species
+descriptor and conditioned-support packet pair
 implemented; both physical obligations remain unresolved and the canonical
 runner reports their exact frontier before refusing.
 
@@ -128,11 +129,14 @@ use ordinals only for serialization, and turn engine limits into typed named
 refusals. A private structural verifier now implements canonical species
 identity ordering, collision and duplicate refusal, exact support equality,
 positive number fractions, nonnegative rest mass, and exact unit-simplex
-checking. It has no realized membership, content encoder, physical proof
-binding, production authority, reference or convergence controller, topology
-validator, capacity check, or typed capacity refusal. The current executable
-behavior still validates and bitstreams only the obligation schema, then
-refuses at the two absent Stage 1 proof leaves.
+checking. A separate private structural packet pair checks content identities,
+descriptor ancestry bindings, positive-or-proved-zero support coverage, exact
+normalization, replay bindings, and finite member, rational, operation,
+intermediate, and byte limits. It has no realized membership, physical proof
+interpreter, production authority, reference or convergence controller, or
+topology validator. The current executable behavior still validates and
+bitstreams only the obligation schema, then refuses at the two absent Stage 1
+proof leaves.
 
 The census is deliberately non-admitting. Its wire status is `computed`, its
 `closure_effect` is `none`, and its global `coverage_claim` is `false`. The
@@ -197,16 +201,34 @@ closure, so Gap Law, Chaos Protocol, Residual Law, and the unique residual slot
 remain not reached or not claimed. This analysis has `closure_effect=none` and
 `coverage_claim=false`.
 
-The next byte-neutral rung is a private species descriptor plus a separate
-conditioned-support packet. It will bind physical content, mass and dimension
-ancestry, state, sector, validity, dependencies, joint conditioning, floor,
-schema, checker, replay, and finite exact-arithmetic limits. Every realized
-registry member must carry either a positive weight or a proved exact-zero
-disposition; omission, implicit renormalization, and capacity truncation
-refuse. Independent producer and watchdog validators will exercise synthetic
-unfamiliar and massless packets, but the authority row and production resolver
-remain blocked until lawful membership and support exist. This rung adds no
-species, value, proof token, ledger event, or transcript field.
+The byte-neutral structural packet is private and landed. It separates a
+complete descriptor packet from conditioned support, uses content-derived
+identity, and binds physical content, mass and dimension ancestry, state,
+sector, validity, dependencies, joint conditioning, floor, schema, checker,
+replay, and finite exact-arithmetic limits. Every descriptor has exactly one
+positive or proved-exact-zero disposition. Omission, implicit renormalization,
+noncanonical order, digest collision, and capacity excess refuse. The producer
+uses an adjacent-order scan, merge coverage, left-fold rational sum, and
+sequential framing. The watchdog uses ordered maps and sets, set equality, a
+balanced rational sum, and independently assembled field blocks. Their
+agreement proves that two algorithms accept the same bounded canonical bytes.
+It does not prove that any descriptor, ancestry binding, zero proof, or support
+measure is physically true. Tests use unfamiliar and massless synthetic
+fixtures only. The authority row remains blocked, the production resolver
+returns `None`, and the packet adds no species, value, proof token, ledger
+event, or transcript field.
+
+The next bounded physical rung is
+`P-STELLAR-SPECIES-MASS-STATE-AUTHORITY`. It replaces opaque descriptor
+bindings with repository-owned typed derivation DAGs and independent physical
+validation. Direct floor-property attribution, elementary-excitation
+derivation, and composite closure are the only routes. The current floor
+cannot populate even an electron member: `m_e` is a mass coordinate, not proof
+of a degree of freedom, state, interaction sector, stable excitation, or
+complete registry. The present result must therefore be a structured
+`no_admitted_species_derivation_roots` refusal with no coverage claim and no
+authority effect. A cited mass table, familiar species enum, named stellar
+class, or empty registry cannot bypass that refusal.
 
 A future smart authority must bind content identity, exact mass and
 dimension ancestry, charge and physical state, active sectors and couplings,
@@ -304,12 +326,11 @@ other dropped mechanism remain explicit residual or refusal obligations.
    spectral closure, fragmentation, magnetic braking, multicenter reduction,
    a persistent disk state, and every dynamical regime. Do not decompose the
    joint measure into authored marginals.
-2. Land the byte-neutral species descriptor and conditioned-support packet with
-   independent validators and finite resource refusals, then complete the
-   authority-bound species mass and state registry. The structural exact
-   reducer is landed, but lawful content identity, physical proof, complete
-   support measure, floor, checker, and replay bindings remain absent. Only
-   after those bind may it derive mean particle mass.
+2. Complete the authority-bound species mass and state registry behind the
+   landed byte-neutral descriptor and conditioned-support packet. The packet
+   and structural exact reducer are landed, but lawful physical membership,
+   proof semantics, closure, and conditioned measure remain absent. Only after
+   those authorities bind may the reducer derive mean particle mass.
 3. Derive coupled gas and dust thermal balance, equation-of-state closure,
    collapse measure, mass-flow history, material mass and position histories,
    local-frame angular-momentum transport, and multicenter circularization law
