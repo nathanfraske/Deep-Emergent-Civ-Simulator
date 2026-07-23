@@ -19,7 +19,7 @@ The lists below are GENERATED from `crates/physics/data/*.toml`, `crates/physics
 
 ## Deriving substrates (check here BEFORE authoring: what the world derives, and where)
 
-The 106 deriving subsystems below live outside the absolute floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
+The 112 deriving subsystems below live outside the absolute floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
 
 ### `crates/core/src/fixed.rs`
 
@@ -119,6 +119,12 @@ The 106 deriving subsystems below live outside the absolute floor. Each produces
 - the axisymmetric moment operator's coefficient <- the Poisson ratio and the Kelvin functions at the first zero crossing (`crates/physics/src/moment_equivalence.rs:1804`)
 - the axisymmetric curvature <- the point load, the rigidity and the moment operator's coefficient (`crates/physics/src/moment_equivalence.rs:1821`)
 - the axisymmetric driving curvature at the first zero crossing <- the point load, the rigidity and the Poisson ratio (`crates/physics/src/moment_equivalence.rs:1839`)
+### `crates/physics/src/opacity.rs`
+
+- an opaque certified electron-scattering coefficient factor <- the sealed e, epsilon_0, m_e, c, and N_A execution coordinates and the Thomson formula (`crates/physics/src/opacity.rs:52`)
+- an opaque certified squared free-free coefficient factor <- the sealed e, epsilon_0, m_e, h, c, k_B, and N_A execution coordinates and the Kramers formula (`crates/physics/src/opacity.rs:83`)
+- an opaque certified squared H-minus bound-free coefficient factor <- the sealed h, m_e, k_B, and N_A execution coordinates and the bound-free formula (`crates/physics/src/opacity.rs:118`)
+- an opaque certified Rayleigh-grain coefficient factor <- the sealed h, c, and k_B representation coordinates and the Rayleigh formula (`crates/physics/src/opacity.rs:143`)
 ### `crates/physics/src/petrology.rs`
 
 - an assemblage's mean atomic mass <- its own molar amounts + the registry compositions + the periodic masses (`crates/physics/src/petrology.rs:490`)
@@ -137,13 +143,15 @@ The 106 deriving subsystems below live outside the absolute floor. Each produces
 - the high-temperature specific heat <- mean atomic mass (Dulong-Petit) (`crates/physics/src/young_thermal.rs:301`)
 ### `crates/planet-substrate/src/astro.rs`
 
-- the protostellar disk birth accretion rate Mdot_0 <- the inside-out collapse rate m0*c_s^3/G over the cloud-core temperature, the disk-gas mean molecular weight, and the declared collapse model (`crates/planet-substrate/src/astro.rs:860`)
-- the protostellar disk birth radius R_1 <- the centrifugal radius j^2/(G M_star) of the collapsing core's specific angular momentum over the enclosed stellar mass (`crates/planet-substrate/src/astro.rs:943`)
-- the molecular cloud-core gas temperature T_core <- the Goldsmith thermal balance of cosmic-ray heating against gas-dust coupling and molecular line cooling, over the ionization rate, density, dust temperature, line-cooling fit, and the CMB floor (`crates/planet-substrate/src/astro.rs:1068`)
-- the coupled cloud-core gas and dust temperatures <- the Goldsmith gas-plus-dust thermal balance over the ionization rate, density, radiation-field chi, line-cooling fit, and CMB floor (`crates/planet-substrate/src/astro.rs:1188`)
-- the visual extinction A_V to a cloud-core center <- the core's hydrogen column density over the cited gas-to-extinction ratio (Bohlin 1978 / Guver-Ozel 2009) (`crates/planet-substrate/src/astro.rs:1313`)
-- the windless Herbig-regime EUV model-over-blackbody departure grid <- the BSTAR2006 emergent NLTE SEDs (svo_tlusty_bstar2006) integrated over the Lyman continuum against the same-Teff blackbody photon rate, 16 points at ONE coordinate slice (solar Z, log g 4.0) over Teff 15000 to 30000 K, log-space interpolated in Teff and applicable only at that slice (`crates/planet-substrate/src/astro.rs:2646`)
-- the stellar rotation period at a target age Omega_star(t) <- the gyrochronological spin-down P_ref*(t/t_ref)^n aged forward from a reference epoch, over the cited braking exponent, valid only after the disk-release onset (`crates/planet-substrate/src/astro.rs:3050`)
+- the stellar surface flux terminal integer <- the certified luminosity-radius geometry factor and the star's dynamic luminosity and radius ratios (`crates/planet-substrate/src/astro.rs:221`)
+- the one-AU one-solar-mass reference orbital period <- the sealed gravitational constant and the exact astronomical-unit and solar-mass reference coordinates (`crates/planet-substrate/src/astro.rs:525`)
+- the protostellar disk birth accretion rate Mdot_0 <- the inside-out collapse rate m0*c_s^3/G over the cloud-core temperature, the disk-gas mean molecular weight, and the declared collapse model (`crates/planet-substrate/src/astro.rs:988`)
+- the protostellar disk birth radius R_1 <- the centrifugal radius j^2/(G M_star) of the collapsing core's specific angular momentum over the enclosed stellar mass (`crates/planet-substrate/src/astro.rs:1071`)
+- the molecular cloud-core gas temperature T_core <- the Goldsmith thermal balance of cosmic-ray heating against gas-dust coupling and molecular line cooling, over the ionization rate, density, dust temperature, line-cooling fit, and the CMB floor (`crates/planet-substrate/src/astro.rs:1196`)
+- the coupled cloud-core gas and dust temperatures <- the Goldsmith gas-plus-dust thermal balance over the ionization rate, density, radiation-field chi, line-cooling fit, and CMB floor (`crates/planet-substrate/src/astro.rs:1316`)
+- the visual extinction A_V to a cloud-core center <- the core's hydrogen column density over the cited gas-to-extinction ratio (Bohlin 1978 / Guver-Ozel 2009) (`crates/planet-substrate/src/astro.rs:1441`)
+- the windless Herbig-regime EUV model-over-blackbody departure grid <- the BSTAR2006 emergent NLTE SEDs (svo_tlusty_bstar2006) integrated over the Lyman continuum against the same-Teff blackbody photon rate, 16 points at ONE coordinate slice (solar Z, log g 4.0) over Teff 15000 to 30000 K, log-space interpolated in Teff and applicable only at that slice (`crates/planet-substrate/src/astro.rs:2774`)
+- the stellar rotation period at a target age Omega_star(t) <- the gyrochronological spin-down P_ref*(t/t_ref)^n aged forward from a reference epoch, over the cited braking exponent, valid only after the disk-release onset (`crates/planet-substrate/src/astro.rs:3178`)
 ### `crates/planet-substrate/src/deeptime.rs`
 
 - the deep-time Nusselt prefactor <- the convection-scaling band at the model's own internal-heating fraction (`crates/planet-substrate/src/deeptime.rs:1540`)

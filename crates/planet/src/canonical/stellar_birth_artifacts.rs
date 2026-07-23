@@ -8,8 +8,6 @@
 //! and unique-slot receipts. The coordinate-law proof has a separate authority
 //! because an admitted measure cannot choose its own realization.
 
-use super::floor_magnitudes::AuditedFloorView;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct VerifiedJointPhysicalMeasure {
     _seal: ArtifactSeal,
@@ -30,13 +28,13 @@ pub(super) struct RepositoryStellarBirthArtifacts {
     pub(super) coordinate_law: Option<VerifiedRealizationCoordinateLaw>,
 }
 
-/// Resolve Stage 1 proof artifacts after the absolute floor has been audited.
+/// Return the Stage 1 proof artifacts registered with repository authority.
 ///
-/// Both proofs are absent today. Returning typed absence keeps the evaluator
-/// executable without laundering closure through strings or booleans.
-pub(super) const fn resolve_repository_artifacts(
-    _floor: &AuditedFloorView<'_>,
-) -> RepositoryStellarBirthArtifacts {
+/// Both proofs are absent today. This function intentionally accepts no floor:
+/// auditing the floor does not imply either proof exists. Returning typed
+/// absence keeps the evaluator executable without laundering closure through
+/// an unused argument, strings, or booleans.
+pub(super) const fn repository_stellar_birth_artifacts() -> RepositoryStellarBirthArtifacts {
     RepositoryStellarBirthArtifacts {
         joint_measure: None,
         coordinate_law: None,

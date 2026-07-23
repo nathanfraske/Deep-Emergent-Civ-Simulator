@@ -70,17 +70,12 @@
 //! `Fixed`, formed by [`civsim_core::Fixed::powf`], the pinned transcendental. The effective temperature reuses the
 //! proven wide path of [`crate::astro`]: the absolute surface flux `F = L/(4*pi*R^2)` (whose `L ~ 3.8e26 W` and
 //! `R^2 ~ 4.8e17 m^2` overflow Q32.32 while the ~6.3e7 W/m^2 result fits) runs in exact rational arithmetic
-//! (`civsim_units::bignum::BigRat`) with pi from Machin's formula, rounding once, and the fourth root reuses
+//! under the whole-formula interval certificate around Machin's formula for pi, rounding once, and the fourth root reuses
 //! [`civsim_physics::laws::radiative_equilibrium`] (two nested integer square roots, so the unrepresentable `T^4`
 //! never forms). No floating point reaches canonical state.
 
+use crate::astro::certified_stellar_surface_flux_bits;
 use civsim_core::Fixed;
-use civsim_units::bignum::{BigRat, BigUint};
-use civsim_units::compute;
-
-// The cited reference anchors and the pi precision are reused from the sibling stellar-source kernel, so this
-// front-end and the disk it feeds share one Sun-anchored scale rather than re-authoring the solar values.
-use crate::astro::{FLUX_PI_DIGITS, SOLAR_LUMINOSITY_W, SOLAR_RADIUS_M};
 
 /// The main-sequence star the front-end derives: the two dimensionless structure ratios the disk and any later
 /// consumer read, plus the effective temperature in kelvin. `luminosity_ratio` is `L/L_sun` and `radius_ratio` is
@@ -94,16 +89,6 @@ pub struct MainSequenceStar {
     pub radius_ratio: Fixed,
     /// `T_eff` in kelvin, the effective temperature derived from the luminosity and radius through Stefan-Boltzmann.
     pub effective_temperature_k: Fixed,
-}
-
-/// A non-negative `Fixed` (its bits over `2^FRAC_BITS`) as an exact rational, so an order-one `Fixed` ratio
-/// multiplies into a wide-magnitude anchor without leaving exact arithmetic. The caller passes a non-negative
-/// value (a luminosity or radius ratio is non-negative). Mirrors the private helper in [`crate::astro`].
-fn nonneg_fixed_to_bigrat(value: Fixed) -> BigRat {
-    let bits = value.to_bits();
-    let num = BigUint::from_u64(bits.max(0) as u64);
-    let den = BigUint::from_u64(1).shl_bits(Fixed::FRAC_BITS);
-    BigRat::new(false, num, den)
 }
 
 /// The main-sequence LUMINOSITY ratio `L/L_sun`, DERIVED from the star's mass and metallicity through the
@@ -243,15 +228,8 @@ fn effective_temperature_from_ratios(
     radius_ratio: Fixed,
     t_max: Fixed,
 ) -> Option<Fixed> {
-    let l_sun = BigRat::from_decimal_str(SOLAR_LUMINOSITY_W).ok()?;
-    let r_sun = BigRat::from_decimal_str(SOLAR_RADIUS_M).ok()?;
-    let four_pi = BigRat::from_i64(4).mul(&compute::pi(FLUX_PI_DIGITS));
     let sigma = civsim_units::constants::derived_stefan_boltzmann();
-    let luminosity = l_sun.mul(&nonneg_fixed_to_bigrat(luminosity_ratio));
-    let r_star = r_sun.mul(&nonneg_fixed_to_bigrat(radius_ratio));
-    let r2 = r_star.mul(&r_star);
-    let denom = four_pi.mul(&r2);
-    let surface_flux_bits = luminosity.div(&denom).round_to_scale(Fixed::FRAC_BITS)?;
+    let surface_flux_bits = certified_stellar_surface_flux_bits(luminosity_ratio, radius_ratio)?;
     // The Sun-grade path: when the absolute surface flux fits Q32.32, round it and invert directly (byte-identical
     // to the pre-fix form for every star that used to resolve).
     if let Some(surface_flux) = Fixed::from_bits_i128(surface_flux_bits) {
@@ -265,9 +243,7 @@ fn effective_temperature_from_ratios(
     // The massive-star path: the absolute surface flux overflowed, so scale the Sun's effective temperature by the
     // representable flux ratio's fourth root, never forming the wide flux. F_sun = L_sun/(4*pi*R_sun^2) IS
     // representable (~6.3e7 W/m^2), so T_sun derives; F/F_sun = luminosity_ratio/radius_ratio^2.
-    let solar_flux_bits = l_sun
-        .div(&four_pi.mul(&r_sun.mul(&r_sun)))
-        .round_to_scale(Fixed::FRAC_BITS)?;
+    let solar_flux_bits = certified_stellar_surface_flux_bits(Fixed::ONE, Fixed::ONE)?;
     let solar_flux = Fixed::from_bits_i128(solar_flux_bits)?;
     let t_sun = civsim_physics::laws::radiative_equilibrium(solar_flux, Fixed::ONE, sigma, t_max);
     let flux_ratio = luminosity_ratio.checked_div(radius_ratio.checked_mul(radius_ratio)?)?;

@@ -1,0 +1,53 @@
+# Copyright 2026 Nathan M. Fraske
+# Licensed under the Apache License, Version 2.0; see LICENSE.
+
+name: vendor GPU evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      vendor:
+        description: "Runner vendor label"
+        required: true
+        type: choice
+        options:
+          - amd
+          - intel
+      suite:
+        description: "Hardware evidence suite"
+        required: true
+        default: "vulkan-stage0"
+        type: choice
+        options:
+          - vulkan-stage0
+
+jobs:
+  vulkan-stage0:
+    name: ${{ inputs.vendor }} Vulkan Q32.32 evidence
+    runs-on: [self-hosted, linux, x64, gpu, vulkan, "${{ inputs.vendor }}"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned Rust toolchain
+        run: rustup show
+      - name: Install Just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: Cache vendor GPU artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: sparse-cubecl-vulkan-${{ inputs.vendor }}
+          cache-directories: ~/.cache/tracel
+      - name: Cross-check Q32.32 on vendor Vulkan hardware
+        env:
+          CIVSIM_EXPECTED_GPU_VENDOR: ${{ inputs.vendor }}
+          CIVSIM_REQUIRE_HARDWARE_GPU: "1"
+        run: just test-gpu-vulkan-sparse 2>&1 | tee vendor-gpu-evidence.log
+      - name: Retain selected-adapter and parity evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulkan-stage0-${{ inputs.vendor }}-${{ github.run_id }}
+          path: vendor-gpu-evidence.log
+          if-no-files-found: error
+          retention-days: 30

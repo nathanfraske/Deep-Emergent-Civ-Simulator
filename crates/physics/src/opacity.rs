@@ -32,10 +32,135 @@ use civsim_core::Fixed;
 use civsim_units::bignum::{BigRat, BigUint};
 use civsim_units::compute;
 use civsim_units::constants::{self, SiExecutionMagnitudes};
+use std::sync::OnceLock;
 
-/// The decimal digits of pi the opacity computation carries, far above the ~10 significant figures a Q32.32
-/// result holds, so the pi truncation never reaches the result's low bit. An engine-accuracy bound.
-const OPACITY_PI_DIGITS: u32 = 40;
+const ELECTRON_SCATTERING_COEFFICIENT_FORMULA: &str =
+    "5000 * N_A * e^4 / (6 * pi * eps_0^2 * m_e^2 * c^4)";
+const ELECTRON_SCATTERING_DYNAMIC_FORMULA: &str = "(1 + X) / M_H";
+const KRAMERS_FREE_FREE_SQUARED_COEFFICIENT_FORMULA: &str =
+    "1e20 * e^12 * h^4 * N_A^4 / (13824 * pi^5 * eps_0^6 * m_e^3 * c^2 * k_B^7)";
+const KRAMERS_FREE_FREE_SQUARED_DYNAMIC_FORMULA: &str =
+    "phi^2 * ((1 + X) * Z)^2 * rho^2 * g^2 / T^7";
+const H_MINUS_BOUND_FREE_SQUARED_COEFFICIENT_FORMULA: &str =
+    "h^6 * N_A^2 / (12800 * 1e36 * pi^3 * m_e^3 * k_B^5)";
+const H_MINUS_BOUND_FREE_SQUARED_DYNAMIC_FORMULA: &str =
+    "exp_chi^2 * one_minus^2 * sigma^2 * X^2 * P_e^2 / (M_H^2 * T^5)";
+const RAYLEIGH_GRAIN_COEFFICIENT_FORMULA: &str = "36 * pi * k_B / (100 * h * c)";
+const RAYLEIGH_GRAIN_DYNAMIC_FORMULA: &str =
+    "x * T * n * k / (rho * ((n^2 - k^2 + 2)^2 + 4 * n^2 * k^2))";
+
+// @derives: an opaque certified electron-scattering coefficient factor <- the sealed e, epsilon_0, m_e, c, and N_A execution coordinates and the Thomson formula
+fn electron_scattering_coefficient(
+    execution: &SiExecutionMagnitudes,
+) -> Option<compute::CertifiedPositiveFormulaFactor> {
+    static COEFFICIENT: OnceLock<Option<compute::CertifiedPositiveFormulaFactor>> = OnceLock::new();
+    *COEFFICIENT.get_or_init(|| {
+        let e = execution.get("e")?;
+        let eps_0 = execution.get("eps_0")?;
+        let m_e = execution.get("m_e")?;
+        let c = execution.get("c")?;
+        let n_a = execution.get("N_A")?;
+        let inputs = [
+            compute::CertifiedFormulaInput::scaled(e.symbol(), e.bits(), e.scale_bits()),
+            compute::CertifiedFormulaInput::scaled(
+                eps_0.symbol(),
+                eps_0.bits(),
+                eps_0.scale_bits(),
+            ),
+            compute::CertifiedFormulaInput::scaled(m_e.symbol(), m_e.bits(), m_e.scale_bits()),
+            compute::CertifiedFormulaInput::scaled(c.symbol(), c.bits(), c.scale_bits()),
+            compute::CertifiedFormulaInput::scaled(n_a.symbol(), n_a.bits(), n_a.scale_bits()),
+        ];
+        compute::certify_positive_formula_factor(
+            ELECTRON_SCATTERING_COEFFICIENT_FORMULA,
+            &inputs,
+            Fixed::FRAC_BITS,
+        )
+        .ok()
+    })
+}
+
+// @derives: an opaque certified squared free-free coefficient factor <- the sealed e, epsilon_0, m_e, h, c, k_B, and N_A execution coordinates and the Kramers formula
+fn kramers_free_free_squared_coefficient(
+    execution: &SiExecutionMagnitudes,
+) -> Option<compute::CertifiedPositiveFormulaFactor> {
+    static COEFFICIENT: OnceLock<Option<compute::CertifiedPositiveFormulaFactor>> = OnceLock::new();
+    *COEFFICIENT.get_or_init(|| {
+        let e = execution.get("e")?;
+        let eps_0 = execution.get("eps_0")?;
+        let m_e = execution.get("m_e")?;
+        let h = execution.get("h")?;
+        let c = execution.get("c")?;
+        let k_b = execution.get("k_B")?;
+        let n_a = execution.get("N_A")?;
+        let inputs = [
+            compute::CertifiedFormulaInput::scaled(e.symbol(), e.bits(), e.scale_bits()),
+            compute::CertifiedFormulaInput::scaled(
+                eps_0.symbol(),
+                eps_0.bits(),
+                eps_0.scale_bits(),
+            ),
+            compute::CertifiedFormulaInput::scaled(m_e.symbol(), m_e.bits(), m_e.scale_bits()),
+            compute::CertifiedFormulaInput::scaled(h.symbol(), h.bits(), h.scale_bits()),
+            compute::CertifiedFormulaInput::scaled(c.symbol(), c.bits(), c.scale_bits()),
+            compute::CertifiedFormulaInput::scaled(k_b.symbol(), k_b.bits(), k_b.scale_bits()),
+            compute::CertifiedFormulaInput::scaled(n_a.symbol(), n_a.bits(), n_a.scale_bits()),
+        ];
+        compute::certify_positive_formula_factor(
+            KRAMERS_FREE_FREE_SQUARED_COEFFICIENT_FORMULA,
+            &inputs,
+            Fixed::FRAC_BITS,
+        )
+        .ok()
+    })
+}
+
+// @derives: an opaque certified squared H-minus bound-free coefficient factor <- the sealed h, m_e, k_B, and N_A execution coordinates and the bound-free formula
+fn h_minus_bound_free_squared_coefficient(
+    execution: &SiExecutionMagnitudes,
+) -> Option<compute::CertifiedPositiveFormulaFactor> {
+    static COEFFICIENT: OnceLock<Option<compute::CertifiedPositiveFormulaFactor>> = OnceLock::new();
+    *COEFFICIENT.get_or_init(|| {
+        let h = execution.get("h")?;
+        let m_e = execution.get("m_e")?;
+        let k_b = execution.get("k_B")?;
+        let n_a = execution.get("N_A")?;
+        let inputs = [
+            compute::CertifiedFormulaInput::scaled(h.symbol(), h.bits(), h.scale_bits()),
+            compute::CertifiedFormulaInput::scaled(m_e.symbol(), m_e.bits(), m_e.scale_bits()),
+            compute::CertifiedFormulaInput::scaled(k_b.symbol(), k_b.bits(), k_b.scale_bits()),
+            compute::CertifiedFormulaInput::scaled(n_a.symbol(), n_a.bits(), n_a.scale_bits()),
+        ];
+        compute::certify_positive_formula_factor(
+            H_MINUS_BOUND_FREE_SQUARED_COEFFICIENT_FORMULA,
+            &inputs,
+            Fixed::FRAC_BITS,
+        )
+        .ok()
+    })
+}
+
+// @derives: an opaque certified Rayleigh-grain coefficient factor <- the sealed h, c, and k_B representation coordinates and the Rayleigh formula
+fn rayleigh_grain_coefficient() -> Option<compute::CertifiedPositiveFormulaFactor> {
+    static COEFFICIENT: OnceLock<Option<compute::CertifiedPositiveFormulaFactor>> = OnceLock::new();
+    *COEFFICIENT.get_or_init(|| {
+        let representation = constants::si_representation_magnitudes().ok()?;
+        let h = representation.get("h")?;
+        let c = representation.get("c")?;
+        let k_b = representation.get("k_B")?;
+        let inputs = [
+            compute::CertifiedFormulaInput::scaled(h.symbol(), h.bits(), h.scale_bits()),
+            compute::CertifiedFormulaInput::scaled(c.symbol(), c.bits(), c.scale_bits()),
+            compute::CertifiedFormulaInput::scaled(k_b.symbol(), k_b.bits(), k_b.scale_bits()),
+        ];
+        compute::certify_positive_formula_factor(
+            RAYLEIGH_GRAIN_COEFFICIENT_FORMULA,
+            &inputs,
+            Fixed::FRAC_BITS,
+        )
+        .ok()
+    })
+}
 
 /// A non-negative `Fixed` as an exact rational (its bits over `2^FRAC_BITS`), so an order-one `Fixed` argument
 /// enters the wide-magnitude `BigRat` computation without leaving exact arithmetic. The callers pass non-negative
@@ -47,13 +172,6 @@ fn nonneg_fixed_to_bigrat(value: Fixed) -> BigRat {
         BigUint::from_u64(bits),
         BigUint::from_u64(1).shl_bits(Fixed::FRAC_BITS),
     )
-}
-
-/// One sealed SI execution value as an exact rational. This resolves both
-/// representation definitions and derived values such as `eps_0`; no consumer
-/// reads a drift-oracle decimal or binds a replacement magnitude.
-fn execution_bigrat(execution: &SiExecutionMagnitudes, symbol: &str) -> Option<BigRat> {
-    Some(execution.get(symbol)?.exact_rational())
 }
 
 /// One noncausal SI representation value as an exact rational.
@@ -91,41 +209,35 @@ pub fn electron_scattering_opacity(
     hydrogen_mass_fraction: Fixed,
     table: &PeriodicTable,
 ) -> Option<Fixed> {
-    let e = execution_bigrat(execution, "e")?;
-    let eps_0 = execution_bigrat(execution, "eps_0")?;
-    let m_e = execution_bigrat(execution, "m_e")?;
-    let c = execution_bigrat(execution, "c")?;
-    let n_a = execution_bigrat(execution, "N_A")?;
-    let pi = compute::pi(OPACITY_PI_DIGITS);
-
-    // The classical electron radius r_e = e^2 / (4*pi*eps_0*m_e*c^2), then the Thomson cross section
-    // sigma_T = (8*pi/3) * r_e^2 (SI, m^2).
-    let e2 = e.mul(&e);
-    let four_pi_eps0 = BigRat::from_i64(4).mul(&pi).mul(&eps_0);
-    let m_e_c2 = m_e.mul(&c).mul(&c);
-    let r_e = e2.div(&four_pi_eps0.mul(&m_e_c2));
-    let r_e2 = r_e.mul(&r_e);
-    let sigma_t = BigRat::from_i64(8)
-        .mul(&pi)
-        .div(&BigRat::from_i64(3))
-        .mul(&r_e2); // m^2
-
-    // The mass per hydrogen m_H = M_H / N_A (kg): the periodic-table hydrogen molar mass (g/mol) to kg/mol, over
-    // Avogadro. This reads the same molar-mass kernel the materials substrate uses, never an authored m_H.
+    let coefficient = electron_scattering_coefficient(execution)?;
     let m_h_g_per_mol = table.molar_mass_of(&[("H", 1)]).ok()?;
-    let m_h_kg = nonneg_fixed_to_bigrat(m_h_g_per_mol)
-        .div(&BigRat::from_i64(1000))
-        .div(&n_a);
+    let inputs = [
+        compute::CertifiedFormulaInput::scaled(
+            "X",
+            i128::from(hydrogen_mass_fraction.to_bits().max(0)),
+            Fixed::FRAC_BITS,
+        ),
+        compute::CertifiedFormulaInput::scaled(
+            "M_H",
+            i128::from(m_h_g_per_mol.to_bits().max(0)),
+            Fixed::FRAC_BITS,
+        ),
+    ];
 
-    // kappa_es = sigma_T * (1 + X) / (2 * m_H) [m^2/kg], then * 10 to cm^2/g (1 m^2/kg = 10 cm^2/g).
-    let one_plus_x = BigRat::from_i64(1).add(&nonneg_fixed_to_bigrat(hydrogen_mass_fraction));
-    let kappa_m2_per_kg = sigma_t
-        .mul(&one_plus_x)
-        .div(&BigRat::from_i64(2).mul(&m_h_kg));
-    let kappa_cm2_per_g = kappa_m2_per_kg.mul(&BigRat::from_i64(10));
-
-    let bits = kappa_cm2_per_g.round_to_scale(Fixed::FRAC_BITS)?;
-    Fixed::from_bits_i128(bits)
+    // Substitution reduces the law to one floor-only invariant coefficient and
+    // `(1+X)/M_H`. The coefficient rounding cell is propagated through both
+    // independent dynamic evaluators before the terminal Q32.32 bit is admitted.
+    let projection = compute::certify_positive_factored_formula_at_scale(
+        coefficient,
+        ELECTRON_SCATTERING_DYNAMIC_FORMULA,
+        &inputs,
+        Fixed::FRAC_BITS,
+    )
+    .ok()?;
+    if projection.scale_bits() != Fixed::FRAC_BITS {
+        return None;
+    }
+    Fixed::from_bits_i128(projection.bits())
 }
 
 /// `ln` of the Thomson cross section in cm^2, from the fundamentals in the log domain: `sigma_T ~6.65e-25 cm^2`
@@ -306,65 +418,64 @@ pub fn kramers_free_free_opacity(
     charge_weighted_abundance: Fixed,
     gaunt_factor: Fixed,
 ) -> Option<Fixed> {
-    let e = execution_bigrat(execution, "e")?;
-    let eps_0 = execution_bigrat(execution, "eps_0")?;
-    let m_e = execution_bigrat(execution, "m_e")?;
-    let h = execution_bigrat(execution, "h")?;
-    let c = execution_bigrat(execution, "c")?;
-    let k_b = execution_bigrat(execution, "k_B")?;
-    let n_a = execution_bigrat(execution, "N_A")?;
-    let pi = compute::pi(OPACITY_PI_DIGITS);
+    if temperature_k <= Fixed::ZERO {
+        return None;
+    }
+    if density_g_per_cm3 <= Fixed::ZERO
+        || charge_weighted_abundance <= Fixed::ZERO
+        || gaunt_factor <= Fixed::ZERO
+    {
+        return Some(Fixed::ZERO);
+    }
+    let coefficient = kramers_free_free_squared_coefficient(execution)?;
+    let phi = rosseland_mean(free_free_shape)?;
+    let inputs = [
+        compute::CertifiedFormulaInput::scaled(
+            "phi",
+            i128::from(phi.to_bits().max(0)),
+            Fixed::FRAC_BITS,
+        ),
+        compute::CertifiedFormulaInput::scaled(
+            "X",
+            i128::from(hydrogen_mass_fraction.to_bits().max(0)),
+            Fixed::FRAC_BITS,
+        ),
+        compute::CertifiedFormulaInput::scaled(
+            "Z",
+            i128::from(charge_weighted_abundance.to_bits().max(0)),
+            Fixed::FRAC_BITS,
+        ),
+        compute::CertifiedFormulaInput::scaled(
+            "rho",
+            i128::from(density_g_per_cm3.to_bits().max(0)),
+            Fixed::FRAC_BITS,
+        ),
+        compute::CertifiedFormulaInput::scaled(
+            "g",
+            i128::from(gaunt_factor.to_bits().max(0)),
+            Fixed::FRAC_BITS,
+        ),
+        compute::CertifiedFormulaInput::scaled(
+            "T",
+            i128::from(temperature_k.to_bits().max(0)),
+            Fixed::FRAC_BITS,
+        ),
+    ];
 
-    // The Coulomb-squared charge alpha_c = e^2/(4*pi*eps_0) (the SI stand-in for the Gaussian e^2), and the atomic
-    // mass unit m_u = 1/(1000 N_A) kg (1 g/mol over Avogadro).
-    let alpha_c = e.mul(&e).div(&BigRat::from_i64(4).mul(&pi).mul(&eps_0));
-    let m_u = BigRat::from_i64(1).div(&BigRat::from_i64(1000).mul(&n_a));
-
-    // RAT: the pure-rational part of the cgs prefactor, 10^4 * (4 alpha_c^3/(3 m_e h c)) * (h^3/k_B^3)/(2 m_u^2).
-    // SQ: the part under the single square root, 2*pi/(3 k_B m_e). So pref_cgs = RAT * sqrt(SQ).
-    let alpha_c3 = alpha_c.mul(&alpha_c).mul(&alpha_c);
-    let brems = BigRat::from_i64(4)
-        .mul(&alpha_c3)
-        .div(&BigRat::from_i64(3).mul(&m_e).mul(&h).mul(&c));
-    let h3 = h.mul(&h).mul(&h);
-    let kb3 = k_b.mul(&k_b).mul(&k_b);
-    let temp_prefactor = h3.div(&kb3).div(&BigRat::from_i64(2).mul(&m_u).mul(&m_u));
-    let rat = BigRat::from_i64(10000).mul(&brems).mul(&temp_prefactor);
-    let sq = BigRat::from_i64(2)
-        .mul(&pi)
-        .div(&BigRat::from_i64(3).mul(&k_b).mul(&m_e));
-
-    // Phi, the Rosseland mean of the free-free spectral shape, DERIVED by the shared kernel (never a cited C_ff).
-    let phi = nonneg_fixed_to_bigrat(rosseland_mean(free_free_shape)?);
-
-    // The composition and state factors, all caller-supplied (admit-the-alien): comp = (1+X) * <Z^2/A>.
-    let comp = BigRat::from_i64(1)
-        .add(&nonneg_fixed_to_bigrat(hydrogen_mass_fraction))
-        .mul(&nonneg_fixed_to_bigrat(charge_weighted_abundance));
-    let rho = nonneg_fixed_to_bigrat(density_g_per_cm3);
-    let g = nonneg_fixed_to_bigrat(gaunt_factor);
-    let t = nonneg_fixed_to_bigrat(temperature_k);
-
-    // kappa_ff^2 = RAT^2 * SQ * Phi^2 * comp^2 * rho^2 * g^2 * T^-7 (the squaring removes both sqrt(SQ) and the
-    // T^(-1/2), leaving a clean rational), then a single Fixed::sqrt. T^7 = T^4 * T^2 * T. The whole product is
-    // formed together so the small ~kappa_ff^2 never forms the overflowing A_ff^2 alone.
-    let t2 = t.mul(&t);
-    let t7 = t2.mul(&t2).mul(&t2).mul(&t);
-    let kappa_squared = rat
-        .mul(&rat)
-        .mul(&sq)
-        .mul(&phi)
-        .mul(&phi)
-        .mul(&comp)
-        .mul(&comp)
-        .mul(&rho)
-        .mul(&rho)
-        .mul(&g)
-        .mul(&g)
-        .div(&t7);
-
-    let bits = kappa_squared.round_to_scale(Fixed::FRAC_BITS)?;
-    Some(Fixed::from_bits_i128(bits)?.sqrt())
+    // Squaring removes the two half powers. Exact substitution of alpha_c and m_u then reduces the complete
+    // rational fold to the certified formula above; only the pre-existing terminal Fixed square root follows it.
+    let projection = compute::certify_positive_factored_formula_at_scale(
+        coefficient,
+        KRAMERS_FREE_FREE_SQUARED_DYNAMIC_FORMULA,
+        &inputs,
+        Fixed::FRAC_BITS,
+    )
+    .ok()?;
+    if projection.scale_bits() != Fixed::FRAC_BITS {
+        return None;
+    }
+    let squared = Fixed::from_bits_i128(projection.bits())?;
+    Some(squared.sqrt())
 }
 
 /// The frequency-INDEPENDENT free-free (bremsstrahlung) opacity prefactor `A_ff` (cgs), so the monochromatic
@@ -731,13 +842,14 @@ pub fn h_minus_bound_free_opacity(
     if x <= Fixed::ZERO || temperature_k <= Fixed::ZERO {
         return None;
     }
-    let h = execution_bigrat(execution, "h")?;
-    let c = execution_bigrat(execution, "c")?;
-    let k_b = execution_bigrat(execution, "k_B")?;
-    let m_e = execution_bigrat(execution, "m_e")?;
-    let e = execution_bigrat(execution, "e")?;
-    let n_a = execution_bigrat(execution, "N_A")?;
-    let pi = compute::pi(OPACITY_PI_DIGITS);
+    let h_value = execution.get("h")?;
+    let c_value = execution.get("c")?;
+    let k_b_value = execution.get("k_B")?;
+    let e_value = execution.get("e")?;
+    let h = h_value.exact_rational();
+    let c = c_value.exact_rational();
+    let k_b = k_b_value.exact_rational();
+    let e = e_value.exact_rational();
 
     // The wavelength fold lambda = (h c/k)/(x T) [micron]: h c/k in SI is m*K, *1e6 -> micron*K.
     let alpha_um_k = h.mul(&c).div(&k_b).mul(&BigRat::from_i64(1_000_000));
@@ -759,43 +871,63 @@ pub fn h_minus_bound_free_opacity(
         .checked_div(temperature_k)?
         .exp();
 
-    // kappa^2 = C^2 * T^-5 * exp_chi^2 * (1-e^-x)^2 * (sigma*1e-18)^2 * (X/m_H)^2 * P_e^2 (cgs), then Fixed::sqrt.
-    // C^2 = (1/16)(h_cgs^2/(2pi m_e_cgs))^3 k_cgs^-5 (the John 0.74989 squared); cgs = SI * (1e7 for h,k erg;
-    // 1e3 for m_e g). The two half-integer powers square away.
-    let h_cgs = h.mul(&BigRat::from_i64(10_000_000));
-    let m_e_cgs = m_e.mul(&BigRat::from_i64(1000));
-    let k_cgs = k_b.mul(&BigRat::from_i64(10_000_000));
-    let base = h_cgs
-        .mul(&h_cgs)
-        .div(&BigRat::from_i64(2).mul(&pi).mul(&m_e_cgs));
-    let base3 = base.mul(&base).mul(&base);
-    let k_cgs5 = k_cgs.mul(&k_cgs).mul(&k_cgs).mul(&k_cgs).mul(&k_cgs);
-    let c_squared = base3.div(&BigRat::from_i64(16).mul(&k_cgs5));
+    if hydrogen_mass_fraction <= Fixed::ZERO || electron_pressure_dyn_cm2 <= Fixed::ZERO {
+        return Some(Fixed::ZERO);
+    }
+    let m_h_g_per_mol = table.molar_mass_of(&[("H", 1)]).ok()?;
+    let coefficient = h_minus_bound_free_squared_coefficient(execution)?;
+    let inputs = [
+        compute::CertifiedFormulaInput::scaled(
+            "exp_chi",
+            i128::from(exp_chi.to_bits().max(0)),
+            Fixed::FRAC_BITS,
+        ),
+        compute::CertifiedFormulaInput::scaled(
+            "one_minus",
+            i128::from(one_minus_e.to_bits().max(0)),
+            Fixed::FRAC_BITS,
+        ),
+        compute::CertifiedFormulaInput::scaled(
+            "sigma",
+            i128::from(sigma.to_bits().max(0)),
+            Fixed::FRAC_BITS,
+        ),
+        compute::CertifiedFormulaInput::scaled(
+            "X",
+            i128::from(hydrogen_mass_fraction.to_bits().max(0)),
+            Fixed::FRAC_BITS,
+        ),
+        compute::CertifiedFormulaInput::scaled(
+            "P_e",
+            i128::from(electron_pressure_dyn_cm2.to_bits().max(0)),
+            Fixed::FRAC_BITS,
+        ),
+        compute::CertifiedFormulaInput::scaled(
+            "M_H",
+            i128::from(m_h_g_per_mol.to_bits().max(0)),
+            Fixed::FRAC_BITS,
+        ),
+        compute::CertifiedFormulaInput::scaled(
+            "T",
+            i128::from(temperature_k.to_bits().max(0)),
+            Fixed::FRAC_BITS,
+        ),
+    ];
 
-    let m_h_cgs = nonneg_fixed_to_bigrat(table.molar_mass_of(&[("H", 1)]).ok()?).div(&n_a); // g
-    let x_over_mh = nonneg_fixed_to_bigrat(hydrogen_mass_fraction).div(&m_h_cgs);
-    let p_e = nonneg_fixed_to_bigrat(electron_pressure_dyn_cm2);
-    let sigma_br = nonneg_fixed_to_bigrat(sigma);
-    let exp_chi_br = nonneg_fixed_to_bigrat(exp_chi);
-    let one_minus_br = nonneg_fixed_to_bigrat(one_minus_e);
-    let inv_1e18 = BigRat::from_i64(1).div(&BigRat::from_i64(1_000_000_000_000_000_000));
-    let t5 = t_br.mul(&t_br).mul(&t_br).mul(&t_br).mul(&t_br);
-
-    let kappa_squared = c_squared
-        .mul(&exp_chi_br)
-        .mul(&exp_chi_br)
-        .mul(&one_minus_br)
-        .mul(&one_minus_br)
-        .mul(&sigma_br)
-        .mul(&sigma_br)
-        .mul(&inv_1e18)
-        .mul(&inv_1e18) // (1e-18)^2 = 1e-36
-        .mul(&x_over_mh)
-        .mul(&x_over_mh)
-        .mul(&p_e)
-        .mul(&p_e)
-        .div(&t5);
-    Some(Fixed::from_bits_i128(kappa_squared.round_to_scale(Fixed::FRAC_BITS)?)?.sqrt())
+    // Squaring removes the half powers. The cgs conversions reduce exactly to h^6/(12800 pi^3 m_e^3 k_B^5);
+    // the cross-section 1e-18 factor and m_H = M_H/N_A remain explicit in the complete terminal formula.
+    let projection = compute::certify_positive_factored_formula_at_scale(
+        coefficient,
+        H_MINUS_BOUND_FREE_SQUARED_DYNAMIC_FORMULA,
+        &inputs,
+        Fixed::FRAC_BITS,
+    )
+    .ok()?;
+    if projection.scale_bits() != Fixed::FRAC_BITS {
+        return None;
+    }
+    let squared = Fixed::from_bits_i128(projection.bits())?;
+    Some(squared.sqrt())
 }
 
 /// The John 1988 (A&A 193, 189, eq. 6) H- FREE-FREE absorption-coefficient fit, REGION 1 (`lambda >= 0.3645
@@ -1122,10 +1254,13 @@ pub fn rayleigh_grain_opacity(
     if x <= Fixed::ZERO || temperature_k <= Fixed::ZERO || bulk_density_g_cm3 <= Fixed::ZERO {
         return None;
     }
-    let h = representation_bigrat("h")?;
-    let c = representation_bigrat("c")?;
-    let k_b = representation_bigrat("k_B")?;
-    let pi = compute::pi(OPACITY_PI_DIGITS);
+    let representation = constants::si_representation_magnitudes().ok()?;
+    let h_value = representation.get("h")?;
+    let c_value = representation.get("c")?;
+    let k_b_value = representation.get("k_B")?;
+    let h = h_value.exact_rational();
+    let c = c_value.exact_rational();
+    let k_b = k_b_value.exact_rational();
 
     // lambda = (h c/k)/(x T) [micron], as Fixed for the table interpolation and BigRat for the opacity.
     let alpha_um_k = h.mul(&c).div(&k_b).mul(&BigRat::from_i64(1_000_000));
@@ -1134,25 +1269,51 @@ pub fn rayleigh_grain_opacity(
     let lambda_fixed = Fixed::from_bits_i128(lambda_br.round_to_scale(Fixed::FRAC_BITS)?)?;
     let (n, k) = species.interpolate(lambda_fixed)?;
 
-    // Im[(m^2-1)/(m^2+2)] = 6nk/((n^2-k^2+2)^2 + 4n^2k^2), in BigRat (a metal's 4n^2k^2 overflows Fixed; the
-    // n^2-k^2+2 term goes negative for a metal but squares positive).
-    let n_br = nonneg_fixed_to_bigrat(n);
-    let k_br = nonneg_fixed_to_bigrat(k);
-    let n2 = n_br.mul(&n_br);
-    let k2 = k_br.mul(&k_br);
-    let num = BigRat::from_i64(6).mul(&n_br).mul(&k_br);
-    let a = n2.sub(&k2).add(&BigRat::from_i64(2));
-    let denom = a.mul(&a).add(&BigRat::from_i64(4).mul(&n2).mul(&k2));
-    let im = num.div(&denom);
+    if k <= Fixed::ZERO {
+        return Some(Fixed::ZERO);
+    }
+    let coefficient = rayleigh_grain_coefficient()?;
+    let inputs = [
+        compute::CertifiedFormulaInput::scaled(
+            "x",
+            i128::from(x.to_bits().max(0)),
+            Fixed::FRAC_BITS,
+        ),
+        compute::CertifiedFormulaInput::scaled(
+            "T",
+            i128::from(temperature_k.to_bits().max(0)),
+            Fixed::FRAC_BITS,
+        ),
+        compute::CertifiedFormulaInput::scaled(
+            "rho",
+            i128::from(bulk_density_g_cm3.to_bits().max(0)),
+            Fixed::FRAC_BITS,
+        ),
+        compute::CertifiedFormulaInput::scaled(
+            "n",
+            i128::from(n.to_bits().max(0)),
+            Fixed::FRAC_BITS,
+        ),
+        compute::CertifiedFormulaInput::scaled(
+            "k",
+            i128::from(k.to_bits().max(0)),
+            Fixed::FRAC_BITS,
+        ),
+    ];
 
-    // kappa_nu = (6*pi/(rho * lambda_cm)) * Im, lambda_cm = lambda_um * 1e-4.
-    let lambda_cm = lambda_br.div(&BigRat::from_i64(10000));
-    let rho = nonneg_fixed_to_bigrat(bulk_density_g_cm3);
-    let kappa = BigRat::from_i64(6)
-        .mul(&pi)
-        .div(&rho.mul(&lambda_cm))
-        .mul(&im);
-    Fixed::from_bits_i128(kappa.round_to_scale(Fixed::FRAC_BITS)?)
+    // lambda_cm = 100 h c/(k_B x T). Substitution with the analytic imaginary-index ratio yields the complete
+    // terminal expression, including all interpolation outputs at their exact engine scale.
+    let projection = compute::certify_positive_factored_formula_at_scale(
+        coefficient,
+        RAYLEIGH_GRAIN_DYNAMIC_FORMULA,
+        &inputs,
+        Fixed::FRAC_BITS,
+    )
+    .ok()?;
+    if projection.scale_bits() != Fixed::FRAC_BITS {
+        return None;
+    }
+    Fixed::from_bits_i128(projection.bits())
 }
 
 /// The fractional-bit scale of the Mie kernel's internal complex arithmetic. A working value is a plain
@@ -1980,6 +2141,54 @@ mod tests {
 
     fn table() -> PeriodicTable {
         PeriodicTable::standard().expect("the periodic table loads")
+    }
+
+    #[test]
+    fn certified_pi_formulas_preserve_the_known_q32_outputs() {
+        let table = table();
+        let optical = optics();
+        let silicate = optical.species("astronomical_silicate").unwrap();
+        assert_eq!(
+            electron_scattering_opacity(Fixed::from_ratio(75, 100), &table)
+                .unwrap()
+                .to_bits(),
+            1_493_621_215
+        );
+        assert_eq!(
+            kramers_free_free_opacity(
+                Fixed::from_ratio(1, 1_000_000),
+                Fixed::from_int(10_000),
+                Fixed::from_ratio(7, 10),
+                Fixed::ONE,
+                Fixed::ONE,
+            )
+            .unwrap()
+            .to_bits(),
+            2_751_411_922_597
+        );
+        assert_eq!(
+            h_minus_bound_free_opacity(
+                Fixed::from_ratio(2817, 1000),
+                Fixed::from_int(6000),
+                Fixed::from_ratio(7, 10),
+                Fixed::from_int(10),
+                &table,
+            )
+            .unwrap()
+            .to_bits(),
+            779_624_304
+        );
+        assert_eq!(
+            rayleigh_grain_opacity(
+                Fixed::from_ratio(2398, 1000),
+                Fixed::from_int(600),
+                Fixed::from_ratio(349, 100),
+                silicate,
+            )
+            .unwrap()
+            .to_bits(),
+            11_483_109_372_153
+        );
     }
 
     #[test]

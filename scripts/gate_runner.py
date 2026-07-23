@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import contextlib
 import copy
 import dataclasses
 import enum
+import errno
 import glob
 import hashlib
 import json
@@ -41,6 +43,7 @@ CACHE_POLICIES = {"content-hash", "never"}
 CACHE_RECEIPT_SCHEMA = 1
 CACHE_MAX_RECEIPTS_PER_GATE = 4
 CACHE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
+EXECUTION_LOCK_GRACE_SECONDS = 30
 CACHE_ENVIRONMENT_KEYS = (
     "CARGO",
     "CARGO_BUILD_RUSTC",
@@ -70,6 +73,10 @@ class InventoryError(ValueError):
     """The declarative inventory is absent, malformed, or ambiguous."""
 
 
+class ExecutionLockError(RuntimeError):
+    """A gate execution lock could not be established safely."""
+
+
 @dataclasses.dataclass(frozen=True)
 class Gate:
     gate_id: str
@@ -85,6 +92,155 @@ class Gate:
     no_cache_reason: str | None
     inputs: tuple[str, ...]
     path_triggers: tuple[str, ...]
+
+
+# Bootstrap pins for gates whose removal would otherwise disable the checker
+# that validates the inventory itself. Stone 0 independently pins the
+# authority-watchdog block before it invokes this runner.
+MANDATORY_AUTHORITY_GATES: tuple[Gate, ...] = (
+    Gate(
+        gate_id="canonical.authority-watchdog",
+        order=65,
+        description="Require independent pairs for active authority-bearing mechanical claims.",
+        tiers=("canonical", "doctor", "pr", "full", "nightly", "stop"),
+        phase="provenance",
+        command=("{python}", "scripts/authority_watchdog_gate.py"),
+        self_test=("{python}", "scripts/authority_watchdog_gate.py", "--self-test"),
+        no_self_test_reason=None,
+        timeout_seconds=120,
+        cache="content-hash",
+        no_cache_reason=None,
+        inputs=(
+            "scripts/gates.toml",
+            "scripts/gate_runner.py",
+            "scripts/authority_watchdog_gate.py",
+            "scripts/authority_registry_watchdog.py",
+            "scripts/authority_watchdog.toml",
+            "scripts/external_claim_gate.py",
+            "scripts/external_claim_watchdog.py",
+            "scripts/fixed_math_authority_gate.py",
+            "scripts/fixed_math_authority_watchdog.py",
+            "scripts/stone0_build_wiring_gate.py",
+            "scripts/stone0_build_wiring_watchdog.py",
+            "sources/external_claims.toml",
+            "sources/external_claim_approvers",
+            "sources/external_claim_revocations.toml",
+            "docs/working/INDEPENDENT_AUTHORITY_RULE.md",
+            "docs/working/EXTERNAL_ADVERSE_CLAIM_RULE.md",
+            "crates",
+        ),
+        path_triggers=(
+            "scripts/gates.toml",
+            "scripts/gate_runner.py",
+            "scripts/authority_watchdog_gate.py",
+            "scripts/authority_registry_watchdog.py",
+            "scripts/authority_watchdog.toml",
+            "scripts/external_claim_gate.py",
+            "scripts/external_claim_watchdog.py",
+            "scripts/fixed_math_authority_gate.py",
+            "scripts/fixed_math_authority_watchdog.py",
+            "scripts/stone0_build_wiring_gate.py",
+            "scripts/stone0_build_wiring_watchdog.py",
+            "sources/external_claims.toml",
+            "sources/external_claim_approvers",
+            "sources/external_claim_revocations.toml",
+            "docs/working/INDEPENDENT_AUTHORITY_RULE.md",
+            "docs/working/EXTERNAL_ADVERSE_CLAIM_RULE.md",
+            "crates/**",
+        ),
+    ),
+    Gate(
+        gate_id="canonical.stone0-build-wiring",
+        order=66,
+        description="Require one fail-closed Stone 0 build-graph owner with independent topology agreement.",
+        tiers=("canonical", "doctor", "pr", "full", "nightly", "stop"),
+        phase="provenance",
+        command=("{python}", "scripts/stone0_build_wiring_gate.py"),
+        self_test=("{python}", "scripts/stone0_build_wiring_gate.py", "--self-test"),
+        no_self_test_reason=None,
+        timeout_seconds=120,
+        cache="content-hash",
+        no_cache_reason=None,
+        inputs=(
+            "scripts/stone0_build_wiring_gate.py",
+            "scripts/stone0_build_wiring_watchdog.py",
+            "Cargo.toml",
+            "justfile",
+            "crates/stone0-build",
+            "crates/stone0",
+            "crates/planet/Cargo.toml",
+            "crates/planet/build.rs",
+            "crates/planet-substrate/Cargo.toml",
+            "crates/planet-substrate/build.rs",
+        ),
+        path_triggers=(
+            "scripts/stone0_build_wiring_gate.py",
+            "scripts/stone0_build_wiring_watchdog.py",
+            "Cargo.toml",
+            "justfile",
+            "crates/stone0-build/**",
+            "crates/stone0/**",
+            "crates/planet/Cargo.toml",
+            "crates/planet/build.rs",
+            "crates/planet-substrate/Cargo.toml",
+            "crates/planet-substrate/build.rs",
+        ),
+    ),
+    Gate(
+        gate_id="canonical.fixed-math-authority",
+        order=67,
+        description="Independently derive and bind every CPU and GPU Q32.32 transcendental-table constant.",
+        tiers=("canonical", "doctor", "pr", "full", "nightly", "stop"),
+        phase="provenance",
+        command=("{python}", "scripts/fixed_math_authority_gate.py"),
+        self_test=("{python}", "scripts/fixed_math_authority_gate.py", "--self-test"),
+        no_self_test_reason=None,
+        timeout_seconds=180,
+        cache="content-hash",
+        no_cache_reason=None,
+        inputs=(
+            "scripts/fixed_math_authority_gate.py",
+            "scripts/fixed_math_authority_watchdog.py",
+            "crates/units/data/fixed_math_authority_receipt.json",
+            "crates/core/src/fixed.rs",
+            "crates/gpu/src/transcendental.rs",
+        ),
+        path_triggers=(
+            "scripts/fixed_math_authority_gate.py",
+            "scripts/fixed_math_authority_watchdog.py",
+            "crates/units/data/fixed_math_authority_receipt.json",
+            "crates/core/src/fixed.rs",
+            "crates/gpu/src/transcendental.rs",
+        ),
+    ),
+    Gate(
+        gate_id="canonical.external-claim-governance",
+        order=68,
+        description="Require five independent lineages, exact scope, owner signature, and an independent watchdog before external adverse claims or contact.",
+        tiers=("canonical", "doctor", "pr", "full", "nightly", "stop"),
+        phase="provenance",
+        command=("{python}", "scripts/external_claim_gate.py"),
+        self_test=("{python}", "scripts/external_claim_gate.py", "--self-test"),
+        no_self_test_reason=None,
+        timeout_seconds=120,
+        cache="content-hash",
+        no_cache_reason=None,
+        inputs=(
+            "scripts/external_claim_gate.py",
+            "scripts/external_claim_watchdog.py",
+            "sources",
+            "crates/physics/data",
+            "docs/working",
+        ),
+        path_triggers=(
+            "scripts/external_claim_gate.py",
+            "scripts/external_claim_watchdog.py",
+            "sources/**",
+            "crates/physics/data/**",
+            "docs/working/**",
+        ),
+    ),
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -165,7 +321,32 @@ def _validate_array_command(command: tuple[str, ...], label: str) -> None:
         )
 
 
-def parse_inventory(data: Mapping[str, Any], source: Path) -> Inventory:
+def _validate_mandatory_authority_gates(gates: Sequence[Gate]) -> None:
+    by_id = {gate.gate_id: gate for gate in gates}
+    for expected in MANDATORY_AUTHORITY_GATES:
+        found = by_id.get(expected.gate_id)
+        if found is None:
+            raise InventoryError(
+                f"mandatory authority gate {expected.gate_id!r} is missing"
+            )
+        if found != expected:
+            changed = [
+                field.name
+                for field in dataclasses.fields(Gate)
+                if getattr(found, field.name) != getattr(expected, field.name)
+            ]
+            raise InventoryError(
+                f"mandatory authority gate {expected.gate_id!r} differs in "
+                + ", ".join(changed)
+            )
+
+
+def parse_inventory(
+    data: Mapping[str, Any],
+    source: Path,
+    *,
+    enforce_mandatory: bool = True,
+) -> Inventory:
     meta = data.get("inventory")
     if not isinstance(meta, dict):
         raise InventoryError("inventory metadata table is missing")
@@ -310,6 +491,9 @@ def parse_inventory(data: Mapping[str, Any], source: Path) -> Inventory:
                 f"gate phase drift in tier {tier!r}; required order is "
                 + " -> ".join(PHASE_SEQUENCE)
             )
+
+    if enforce_mandatory:
+        _validate_mandatory_authority_gates(gates)
 
     return Inventory(
         source=source,
@@ -538,6 +722,149 @@ def _cache_receipt_path(cache_dir: Path, gate: Gate, cache_key: str) -> Path:
     return cache_dir / gate.gate_id / f"{cache_key}.json"
 
 
+def _safe_gate_cache_directory(cache_dir: Path, gate: Gate) -> Path:
+    """Create the per-gate cache directory without accepting linked state."""
+
+    gate_dir = cache_dir / gate.gate_id
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if (
+            cache_dir.is_symlink()
+            or _is_reparse_point(cache_dir)
+            or not cache_dir.is_dir()
+        ):
+            raise ExecutionLockError("gate cache root is not a plain directory")
+        gate_dir.mkdir(exist_ok=True, mode=0o700)
+        if (
+            gate_dir.is_symlink()
+            or _is_reparse_point(gate_dir)
+            or not gate_dir.is_dir()
+        ):
+            raise ExecutionLockError("per-gate cache is not a plain directory")
+    except OSError as error:
+        raise ExecutionLockError(
+            f"could not prepare gate execution state: {error}"
+        ) from error
+    return gate_dir
+
+
+def _open_execution_lock(gate_dir: Path) -> tuple[int, Path]:
+    lock_path = gate_dir / ".execution.lock"
+    try:
+        if lock_path.exists() and (
+            lock_path.is_symlink() or _is_reparse_point(lock_path)
+        ):
+            raise ExecutionLockError("gate execution lock is a link or reparse point")
+        flags = os.O_RDWR | os.O_CREAT
+        flags |= getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOINHERIT", 0)
+        flags |= getattr(os, "O_BINARY", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(lock_path, flags, 0o600)
+    except OSError as error:
+        raise ExecutionLockError(
+            f"could not open gate execution lock: {error}"
+        ) from error
+
+    try:
+        path_metadata = lock_path.lstat()
+        descriptor_metadata = os.fstat(descriptor)
+        if (
+            stat.S_ISLNK(path_metadata.st_mode)
+            or _is_reparse_point(lock_path)
+            or not stat.S_ISREG(descriptor_metadata.st_mode)
+            or (
+                path_metadata.st_ino
+                and descriptor_metadata.st_ino
+                and (
+                    path_metadata.st_dev != descriptor_metadata.st_dev
+                    or path_metadata.st_ino != descriptor_metadata.st_ino
+                )
+            )
+        ):
+            raise ExecutionLockError("gate execution lock is not a plain file")
+    except (OSError, ExecutionLockError):
+        os.close(descriptor)
+        raise
+    return descriptor, lock_path
+
+
+def _try_acquire_execution_lock(descriptor: int) -> bool:
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    if os.name == "nt":
+        import msvcrt
+
+        try:
+            msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+        except OSError as error:
+            if error.errno in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                return False
+            raise
+        return True
+
+    import fcntl
+
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as error:
+        if error.errno in (errno.EACCES, errno.EAGAIN):
+            return False
+        raise
+    return True
+
+
+def _release_execution_lock(descriptor: int) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(descriptor, fcntl.LOCK_UN)
+
+
+@contextlib.contextmanager
+def _gate_execution_lock(
+    cache_dir: Path,
+    gate: Gate,
+    *,
+    timeout_seconds: int,
+) -> Iterable[None]:
+    """Serialize one gate across runners, then release it on every exit path."""
+
+    gate_dir = _safe_gate_cache_directory(cache_dir, gate)
+    descriptor, lock_path = _open_execution_lock(gate_dir)
+    acquired = False
+    deadline = time.monotonic() + timeout_seconds
+    try:
+        while not acquired:
+            try:
+                acquired = _try_acquire_execution_lock(descriptor)
+            except OSError as error:
+                raise ExecutionLockError(
+                    f"could not acquire gate execution lock: {error}"
+                ) from error
+            if acquired:
+                break
+            if time.monotonic() >= deadline:
+                raise ExecutionLockError(
+                    f"timed out after {timeout_seconds} seconds waiting for "
+                    f"{lock_path.name}"
+                )
+            time.sleep(0.05)
+        yield
+    finally:
+        if acquired:
+            try:
+                _release_execution_lock(descriptor)
+            except OSError:
+                pass
+        os.close(descriptor)
+
+
 def _cache_hit(
     cache_dir: Path,
     gate: Gate,
@@ -647,7 +974,33 @@ def execute_gate(
     cache_dir: Path | None = None,
     read_cache: bool = False,
     write_cache: bool = False,
+    _execution_lock_held: bool = False,
 ) -> GateOutcome:
+    if not dry_run and not _execution_lock_held:
+        selected_cache_dir = cache_dir or _default_cache_directory(ROOT)
+        try:
+            with _gate_execution_lock(
+                selected_cache_dir,
+                gate,
+                timeout_seconds=gate.timeout_seconds + EXECUTION_LOCK_GRACE_SECONDS,
+            ):
+                return execute_gate(
+                    gate,
+                    command,
+                    dry_run=False,
+                    manifest_path=manifest_path,
+                    cache_dir=selected_cache_dir,
+                    read_cache=read_cache,
+                    write_cache=write_cache,
+                    _execution_lock_held=True,
+                )
+        except ExecutionLockError as error:
+            print(
+                f"[FAIL] {gate.gate_id}: execution lock unavailable: {error}",
+                file=sys.stderr,
+            )
+            return GateOutcome.OperationalFailure
+
     argv = _expand_command(command)
     if manifest_path is None:
         digest, file_count = input_hash(gate, ROOT)
@@ -944,7 +1297,7 @@ def _parallel_gate_process(
             text=True,
             encoding="utf-8",
             errors="strict",
-            timeout=gate.timeout_seconds + 30,
+            timeout=(2 * gate.timeout_seconds) + (2 * EXECUTION_LOCK_GRACE_SECONDS),
             check=False,
         )
     except (OSError, subprocess.SubprocessError, UnicodeError) as error:
@@ -1030,7 +1383,11 @@ def command_self_tests(inventory: Inventory, args: argparse.Namespace) -> int:
 
 def _expect_invalid(data: Mapping[str, Any], needle: str) -> None:
     try:
-        parse_inventory(data, Path("synthetic-gates.toml"))
+        parse_inventory(
+            data,
+            Path("synthetic-gates.toml"),
+            enforce_mandatory=False,
+        )
     except InventoryError as error:
         if needle not in str(error):
             raise AssertionError(
@@ -1058,7 +1415,11 @@ def internal_self_test(inventory: Inventory) -> int:
         "inventory": {"schema": 1, "tiers": ["canonical"]},
         "gate": [gate],
     }
-    parse_inventory(copy.deepcopy(base), Path("synthetic-gates.toml"))
+    parse_inventory(
+        copy.deepcopy(base),
+        Path("synthetic-gates.toml"),
+        enforce_mandatory=False,
+    )
 
     missing = copy.deepcopy(base)
     del missing["gate"][0]["command"]
@@ -1085,6 +1446,48 @@ def internal_self_test(inventory: Inventory) -> int:
     shell_eval["gate"][0]["command"] = ["bash", "-lc", "python script.py"]
     _expect_invalid(shell_eval, "shell evaluation flag")
 
+    _validate_mandatory_authority_gates(inventory.gates)
+    for expected in MANDATORY_AUTHORITY_GATES:
+        without = tuple(
+            gate for gate in inventory.gates if gate.gate_id != expected.gate_id
+        )
+        try:
+            _validate_mandatory_authority_gates(without)
+        except InventoryError as error:
+            if "is missing" not in str(error):
+                raise AssertionError(f"unexpected mandatory removal result: {error}") from error
+        else:
+            raise AssertionError("mandatory gate removal passed")
+        for field_name, replacement in (
+            ("gate_id", expected.gate_id + ".substituted"),
+            ("order", expected.order + 1),
+            ("description", expected.description + " substituted"),
+            ("tiers", expected.tiers[:-1]),
+            ("phase", "post"),
+            ("command", expected.command + ("--substituted",)),
+            ("self_test", expected.self_test[:-1] if expected.self_test else None),
+            ("no_self_test_reason", "substituted"),
+            ("timeout_seconds", expected.timeout_seconds + 1),
+            ("cache", "never"),
+            ("no_cache_reason", "substituted"),
+            ("inputs", expected.inputs[:-1]),
+            ("path_triggers", expected.path_triggers[:-1]),
+        ):
+            mutated = tuple(
+                dataclasses.replace(gate, **{field_name: replacement})
+                if gate.gate_id == expected.gate_id
+                else gate
+                for gate in inventory.gates
+            )
+            try:
+                _validate_mandatory_authority_gates(mutated)
+            except InventoryError:
+                pass
+            else:
+                raise AssertionError(
+                    f"mandatory {expected.gate_id} {field_name} mutation passed"
+                )
+
     boundary = next(
         gate for gate in inventory.gates if gate.gate_id == "canonical.planet-boundary"
     )
@@ -1105,7 +1508,7 @@ def internal_self_test(inventory: Inventory) -> int:
 
     print(
         "gate runner self-test: PASS "
-        "(missing, duplicate, order drift, shell string, and boundary hashing canaries fired)"
+        "(parser, mandatory authority profile, and boundary hashing canaries fired)"
     )
     return 0
 

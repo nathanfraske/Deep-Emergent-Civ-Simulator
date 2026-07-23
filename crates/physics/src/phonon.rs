@@ -20,8 +20,9 @@ use civsim_core::Fixed;
 use civsim_units::bignum::BigRat;
 use civsim_units::compute;
 use civsim_units::constants;
+use std::sync::OnceLock;
 
-const PHONON_PI_DIGITS: u32 = 40;
+const OMEGA_TO_SQUARED_FORMULA: &str = "5 * N_A / (2 * pi^2 * c^2)";
 
 /// One sealed SI execution value as an exact `BigRat`.
 fn fundamental_bigrat(symbol: &str) -> Option<BigRat> {
@@ -38,14 +39,20 @@ fn fundamental_bigrat(symbol: &str) -> Option<BigRat> {
 /// `N_A` and `c`, lands `~1.696e6`. `None` if a fundamental fails to resolve or the value leaves the representable
 /// range.
 fn omega_to_squared_constant() -> Option<Fixed> {
-    let n_a = fundamental_bigrat("N_A")?;
-    let c_cgs = fundamental_bigrat("c")?.mul(&BigRat::from_i64(100)); // m/s -> cm/s
-    let pi = compute::pi(PHONON_PI_DIGITS);
-    let two_pi_c = BigRat::from_i64(2).mul(&pi).mul(&c_cgs);
-    let c2 = BigRat::from_i64(100_000)
-        .mul(&n_a)
-        .div(&two_pi_c.mul(&two_pi_c));
-    Fixed::from_bits_i128(c2.round_to_scale(Fixed::FRAC_BITS)?)
+    static OMEGA_TO_SQUARED: OnceLock<Option<Fixed>> = OnceLock::new();
+    *OMEGA_TO_SQUARED.get_or_init(|| {
+        let representation = constants::si_representation_magnitudes().ok()?;
+        let n_a = representation.get("N_A")?;
+        let c = representation.get("c")?;
+        let inputs = [
+            compute::CertifiedFormulaInput::scaled(n_a.symbol(), n_a.bits(), n_a.scale_bits()),
+            compute::CertifiedFormulaInput::scaled(c.symbol(), c.bits(), c.scale_bits()),
+        ];
+        let projection =
+            compute::certify_formula_at_scale(OMEGA_TO_SQUARED_FORMULA, &inputs, Fixed::FRAC_BITS)
+                .ok()?;
+        Fixed::from_bits_i128(projection.bits())
+    })
 }
 
 /// The transverse-optical mode wavenumber `omega_TO` (cm^-1) of a bond, from its stretching force constant `k`
@@ -285,6 +292,15 @@ mod tests {
 
     fn close(a: f64, b: f64, tol: f64) -> bool {
         (a - b).abs() < tol
+    }
+
+    #[test]
+    fn certified_pi_formula_preserves_the_known_q32_output() {
+        assert_eq!(
+            omega_to_squared_constant().unwrap().to_bits(),
+            7_289_699_417_741_576,
+            "the whole-expression certificate preserves the established Q32.32 fold"
+        );
     }
 
     #[test]

@@ -42,10 +42,33 @@ def valid_data() -> dict[str, object]:
     return {"inventory": {"schema": 1, "tiers": ["pr"]}, "gate": [gate]}
 
 
+def mandatory_gate_blocks() -> str:
+    manifest = (ROOT / "scripts" / "gates.toml").read_text(encoding="utf-8")
+    selected = []
+    for raw in manifest.split("[[gate]]")[1:]:
+        block = "[[gate]]" + raw
+        if any(
+            f'id = "{gate.gate_id}"' in block
+            for gate in gate_runner.MANDATORY_AUTHORITY_GATES
+        ):
+            selected.append(block.rstrip())
+    if len(selected) != len(gate_runner.MANDATORY_AUTHORITY_GATES):
+        raise AssertionError("production manifest is missing a mandatory authority block")
+    return "\n\n".join(selected) + "\n"
+
+
 class InventoryValidationTests(unittest.TestCase):
     def assert_invalid(self, data: dict[str, object], message: str) -> None:
         with self.assertRaisesRegex(gate_runner.InventoryError, message):
-            gate_runner.parse_inventory(data, Path("synthetic-gates.toml"))
+            gate_runner.parse_inventory(
+                data, Path("synthetic-gates.toml"), enforce_mandatory=False
+            )
+
+    def test_strict_mode_requires_the_mandatory_authority_gates(self) -> None:
+        with self.assertRaisesRegex(
+            gate_runner.InventoryError, "mandatory authority gate"
+        ):
+            gate_runner.parse_inventory(valid_data(), Path("synthetic-gates.toml"))
 
     def test_current_inventory_is_complete(self) -> None:
         inventory = gate_runner.load_inventory()
@@ -120,7 +143,9 @@ class InputClosureTests(unittest.TestCase):
         (scripts / "check.py").write_text("print(1)\n", encoding="utf-8")
         (scripts / "gate_runner.py").write_text("runner-A\n", encoding="utf-8")
         (scripts / "gates.toml").write_text("inventory-A\n", encoding="utf-8")
-        inventory = gate_runner.parse_inventory(valid_data(), scripts / "gates.toml")
+        inventory = gate_runner.parse_inventory(
+            valid_data(), scripts / "gates.toml", enforce_mandatory=False
+        )
         return temporary, root, inventory.gates[0]
 
     def test_runner_and_same_size_content_are_hashed_from_bytes(self) -> None:
@@ -205,6 +230,32 @@ class InputClosureTests(unittest.TestCase):
         self.assertIs(invalid_utf8, gate_runner.GateOutcome.OperationalFailure)
         self.assertIn("not valid UTF-8", output.getvalue())
 
+    def test_execution_lock_rejects_linked_cache_state(self) -> None:
+        temporary, root, gate = self.make_root()
+        self.addCleanup(temporary.cleanup)
+        manifest = root / "scripts" / "gates.toml"
+        external_cache = root / "external-cache"
+        external_cache.mkdir()
+        linked_cache = root / "linked-cache"
+        try:
+            linked_cache.symlink_to(external_cache, target_is_directory=True)
+        except (OSError, NotImplementedError) as error:
+            self.skipTest(f"directory links unavailable: {error}")
+
+        output = io.StringIO()
+        with mock.patch.object(gate_runner, "ROOT", root), contextlib.redirect_stdout(
+            output
+        ), contextlib.redirect_stderr(output):
+            outcome = gate_runner.execute_gate(
+                gate,
+                gate.command,
+                dry_run=False,
+                manifest_path=manifest,
+                cache_dir=linked_cache,
+            )
+        self.assertIs(outcome, gate_runner.GateOutcome.OperationalFailure)
+        self.assertIn("execution lock unavailable", output.getvalue())
+
     def test_execute_gate_distinguishes_policy_and_operational_failures(self) -> None:
         temporary, root, gate = self.make_root()
         self.addCleanup(temporary.cleanup)
@@ -277,7 +328,7 @@ class InputClosureTests(unittest.TestCase):
 
     def test_only_policy_failure_emits_the_stone0_protocol_marker(self) -> None:
         inventory = gate_runner.parse_inventory(
-            valid_data(), Path("synthetic-gates.toml")
+            valid_data(), Path("synthetic-gates.toml"), enforce_mandatory=False
         )
         args = types.SimpleNamespace(
             tier="pr",
@@ -520,6 +571,125 @@ class ClientParityTests(unittest.TestCase):
             )
         return bash
 
+    def test_cross_process_lock_collapses_identical_content_runs(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gate-lock-test-") as temporary:
+            root = Path(temporary)
+            scripts = root / "scripts"
+            scripts.mkdir()
+            shutil.copy2(ROOT / "scripts" / "gate_runner.py", scripts / "gate_runner.py")
+            (scripts / "slow.py").write_text(
+                "from pathlib import Path\n"
+                "import os\n"
+                "import time\n"
+                "runs = Path('runs')\n"
+                "runs.mkdir(exist_ok=True)\n"
+                "(runs / str(os.getpid())).write_text('ran', encoding='utf-8')\n"
+                "time.sleep(0.5)\n",
+                encoding="utf-8",
+            )
+            synthetic_manifest = """[inventory]
+schema = 1
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop", "legacy", "synthetic"]
+
+[[gate]]
+id = "test.once"
+order = 1
+description = "cross-process execution-lock canary"
+tiers = ["synthetic"]
+phase = "provenance"
+command = ["{python}", "scripts/slow.py"]
+self_test = ["{python}", "scripts/slow.py"]
+timeout_seconds = 10
+cache = "content-hash"
+inputs = ["scripts/slow.py"]
+path_triggers = ["scripts/slow.py"]
+"""
+            manifest = scripts / "gates.toml"
+            manifest.write_text(
+                synthetic_manifest + "\n" + mandatory_gate_blocks(),
+                encoding="utf-8",
+            )
+            environment = os.environ.copy()
+            environment["CIVSIM_GATE_CACHE_DIR"] = str(root / "cache")
+            command = [
+                sys.executable,
+                str(scripts / "gate_runner.py"),
+                "--manifest",
+                str(manifest),
+                "run",
+                "--id",
+                "test.once",
+                "--jobs",
+                "1",
+            ]
+            workers = [
+                subprocess.Popen(
+                    command,
+                    cwd=root,
+                    env=environment,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                for _ in range(2)
+            ]
+            results = [worker.communicate(timeout=20) for worker in workers]
+            for worker, (stdout, stderr) in zip(workers, results, strict=True):
+                self.assertEqual(worker.returncode, 0, stdout + stderr)
+            output = "\n".join(stdout for stdout, _ in results)
+            self.assertEqual(len(list((root / "runs").iterdir())), 1)
+            self.assertEqual(output.count("[PASS] test.once"), 1)
+            self.assertEqual(output.count("[CACHED] test.once"), 1)
+
+            shutil.rmtree(root / "runs")
+            (scripts / "slow.py").write_text(
+                "from pathlib import Path\n"
+                "import os\n"
+                "import time\n"
+                "runs = Path('runs')\n"
+                "active = Path('active')\n"
+                "runs.mkdir(exist_ok=True)\n"
+                "active.mkdir(exist_ok=True)\n"
+                "pid = str(os.getpid())\n"
+                "(runs / pid).write_text('ran', encoding='utf-8')\n"
+                "marker = active / pid\n"
+                "marker.write_text('active', encoding='utf-8')\n"
+                "if len(list(active.iterdir())) > 1:\n"
+                "    Path('overlap').write_text('detected', encoding='utf-8')\n"
+                "time.sleep(0.5)\n"
+                "marker.unlink()\n",
+                encoding="utf-8",
+            )
+            manifest.write_text(
+                synthetic_manifest.replace(
+                    'cache = "content-hash"',
+                    'cache = "never"\nno_cache_reason = "serialization canary"',
+                    1,
+                )
+                + "\n"
+                + mandatory_gate_blocks(),
+                encoding="utf-8",
+            )
+            workers = [
+                subprocess.Popen(
+                    command,
+                    cwd=root,
+                    env=environment,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                for _ in range(2)
+            ]
+            results = [worker.communicate(timeout=20) for worker in workers]
+            for worker, (stdout, stderr) in zip(workers, results, strict=True):
+                self.assertEqual(worker.returncode, 0, stdout + stderr)
+            output = "\n".join(stdout for stdout, _ in results)
+            self.assertEqual(len(list((root / "runs").iterdir())), 2)
+            self.assertFalse((root / "overlap").exists())
+            self.assertEqual(output.count("[PASS] test.once"), 2)
+            self.assertNotIn("[CACHED] test.once", output)
+
     def test_parallel_workers_overlap_with_phase_barriers_and_authority_order(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gate-parallel-test-") as temporary:
             root = Path(temporary)
@@ -551,16 +721,15 @@ class ClientParityTests(unittest.TestCase):
                 "print('post')\n",
                 encoding="utf-8",
             )
-            (scripts / "gates.toml").write_text(
-                """[inventory]
+            synthetic_manifest = """[inventory]
 schema = 1
-tiers = ["pr"]
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop", "synthetic"]
 
 [[gate]]
 id = "test.pre"
 order = 5
 description = "pre"
-tiers = ["pr"]
+tiers = ["synthetic"]
 phase = "pre"
 command = ["{python}", "scripts/pre.py"]
 self_test = ["{python}", "scripts/pre.py"]
@@ -574,7 +743,7 @@ path_triggers = ["scripts/pre.py"]
 id = "test.first"
 order = 10
 description = "first"
-tiers = ["pr"]
+tiers = ["synthetic"]
 phase = "provenance"
 command = ["{python}", "scripts/first.py"]
 self_test = ["{python}", "scripts/first.py"]
@@ -588,7 +757,7 @@ path_triggers = ["scripts/first.py"]
 id = "test.second"
 order = 20
 description = "second"
-tiers = ["pr"]
+tiers = ["synthetic"]
 phase = "provenance"
 command = ["{python}", "scripts/second.py"]
 self_test = ["{python}", "scripts/second.py"]
@@ -602,7 +771,7 @@ path_triggers = ["scripts/second.py"]
 id = "test.post"
 order = 30
 description = "post"
-tiers = ["pr"]
+tiers = ["synthetic"]
 phase = "post"
 command = ["{python}", "scripts/post.py"]
 self_test = ["{python}", "scripts/post.py"]
@@ -611,7 +780,9 @@ cache = "never"
 no_cache_reason = "phase canary"
 inputs = ["scripts/post.py"]
 path_triggers = ["scripts/post.py"]
-""",
+"""
+            (scripts / "gates.toml").write_text(
+                synthetic_manifest + "\n" + mandatory_gate_blocks(),
                 encoding="utf-8",
             )
             result = subprocess.run(
@@ -620,7 +791,7 @@ path_triggers = ["scripts/post.py"]
                     str(scripts / "gate_runner.py"),
                     "run",
                     "--tier",
-                    "pr",
+                    "synthetic",
                     "--jobs",
                     "2",
                     "--no-cache",

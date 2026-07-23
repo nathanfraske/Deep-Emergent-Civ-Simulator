@@ -7,7 +7,7 @@
 # Linux is the reference development environment. On Windows, use `scripts/dev.ps1` so recipes run
 # inside WSL with the same Bash, Python, Rust, and GNU-tool assumptions as Linux.
 
-canonical_packages := "-p civsim-core -p civsim-ledger -p civsim-units -p civsim-physics -p civsim-materials -p civsim-world -p civsim-planet -p civsim-viewer -p civsim-gpu -p civsim-stone0"
+canonical_packages := "-p civsim-core -p civsim-ledger -p civsim-units -p civsim-physics -p civsim-materials -p civsim-world -p civsim-planet-substrate -p civsim-planet -p civsim-viewer -p civsim-gpu -p civsim-stone0"
 parked_target := env_var_or_default("CIVSIM_PARKED_TARGET_DIR", "target/parked")
 cargo_dev := "bash scripts/cargo_dev.sh"
 
@@ -123,9 +123,25 @@ doctor:
 test:
     {{cargo_dev}} test {{canonical_packages}} --all-targets
 
+# Run the device-free independent CPU codegen evidence outside the routine PR lane.
+test-gpu-cpu-sparse:
+    {{cargo_dev}} test -p civsim-gpu --features cpu-backend --test cpu_backend_gate
+
+# Run the Vulkan/SPIR-V arithmetic evidence on an available Vulkan adapter.
+test-gpu-vulkan-sparse:
+    CIVSIM_GPU_WGPU=1 {{cargo_dev}} test -p civsim-gpu --features vulkan-backend --test cross_backend stage0_arithmetic_agrees_on_wgpu_spirv_backend -- --nocapture
+
+# Compare CUDA and CPU codegen on a CUDA host. This is intentionally a sparse hardware gate.
+test-gpu-cuda-cpu-cross:
+    CIVSIM_GPU=1 {{cargo_dev}} test -p civsim-gpu --features cpu-backend --test cross_backend stage0_arithmetic_agrees_across_cuda_and_cpu_backends
+
 # Compile and test the complete parked workspace, including biology and civilization.
 test-legacy:
     {{cargo_dev}} test --manifest-path parked/Cargo.toml --target-dir "{{parked_target}}" --all-targets
+
+# Run routine parked tests without compiling the optional CubeCL/LLVM diagnostic crate.
+test-legacy-routine:
+    {{cargo_dev}} test --manifest-path parked/Cargo.toml --target-dir "{{parked_target}}" --workspace --exclude civsim-gpu-legacy --all-targets
 
 # Run retired calibration, profile, and quarantine ratchets against parked work only.
 audit-parked:

@@ -23,12 +23,62 @@
 
 # The CI workflow (the Stone 0 job and every other gate lives here).
 /.github/workflows/ci.yml    @nathanfraske
+/scripts/gates.toml          @nathanfraske
+/scripts/gate_runner.py      @nathanfraske
+/justfile                    @nathanfraske
 
 # This ownership file itself.
 /.github/CODEOWNERS          @nathanfraske
 
 # The tombstone list (a widened or gutted list would silently disarm the retroactive catch).
 /scripts/stone0_tombstones.txt       @nathanfraske
+
+# Independent authority rule, inventory, and enforcement gate.
+/scripts/authority_watchdog.toml     @nathanfraske
+/scripts/authority_watchdog_gate.py  @nathanfraske
+/scripts/authority_registry_watchdog.py  @nathanfraske
+/docs/working/INDEPENDENT_AUTHORITY_RULE.md  @nathanfraske
+/crates/units/src/authority_watchdog.rs      @nathanfraske
+/crates/units/src/floor_admission_watchdog.rs @nathanfraske
+/crates/units/src/certified_projection/**    @nathanfraske
+/crates/units/src/constants.rs               @nathanfraske
+/crates/units/src/compute.rs                 @nathanfraske
+/crates/units/src/bignum.rs                  @nathanfraske
+/crates/units/src/dimensional_analysis.rs    @nathanfraske
+/crates/units/src/fundamentals.rs            @nathanfraske
+/crates/units/src/lib.rs                     @nathanfraske
+/crates/units/src/physics_floor.rs           @nathanfraske
+/crates/units/src/plan.rs                    @nathanfraske
+/crates/units/src/tier2.rs                   @nathanfraske
+/crates/ledger/src/admission.rs              @nathanfraske
+/crates/core/src/fixed.rs                    @nathanfraske
+/crates/core/src/lib.rs                      @nathanfraske
+/crates/core/tests/transcendentals.rs        @nathanfraske
+/crates/gpu/src/lib.rs                       @nathanfraske
+/crates/gpu/src/prim.rs                      @nathanfraske
+/crates/gpu/src/transcendental.rs            @nathanfraske
+/crates/gpu/tests/transcendental_gate.rs     @nathanfraske
+/scripts/fixed_math_authority_gate.py         @nathanfraske
+/scripts/fixed_math_authority_watchdog.py     @nathanfraske
+/crates/units/data/fixed_math_authority_receipt.json  @nathanfraske
+/crates/planet/src/canonical/**              @nathanfraske
+/crates/planet/src/canonical/stellar_birth_species/authority_analysis/**  @nathanfraske
+
+# External adverse claim register, release keys, rule, and independent pair.
+/sources/external_claims.toml               @nathanfraske
+/sources/external_claim_approvers           @nathanfraske
+/sources/external_claim_revocations.toml    @nathanfraske
+/scripts/external_claim_gate.py             @nathanfraske
+/scripts/external_claim_watchdog.py         @nathanfraske
+/docs/working/EXTERNAL_ADVERSE_CLAIM_RULE.md  @nathanfraske
+
+# Sparse backend evidence workflows and the exact hardware-selection implementation.
+/.github/workflows/backend-evidence.yml     @nathanfraske
+/.github/workflows/vendor-gpu-evidence.yml  @nathanfraske
+/crates/gpu/Cargo.toml                      @nathanfraske
+/crates/gpu/src/stage0.rs                   @nathanfraske
+/crates/gpu/tests/cpu_backend_gate.rs       @nathanfraske
+/crates/gpu/tests/cross_backend.rs          @nathanfraske
 
 # The design of record.
 /docs/working/Q1_STONE0_PROVENANCE_GATE_DESIGN.md   @nathanfraske

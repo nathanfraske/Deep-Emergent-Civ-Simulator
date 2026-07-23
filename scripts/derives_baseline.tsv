@@ -902,7 +902,6 @@ crates/physics/src/opacity.rs	fixed_to_wfixed	grandfathered	predates the derives
 crates/physics/src/opacity.rs	free_free_prefactor	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/opacity.rs	free_free_prefactor_ionized	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/opacity.rs	free_free_shape	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/opacity.rs	execution_bigrat	accessor	reads one symbol from an already sealed physical execution capability
 crates/physics/src/opacity.rs	grain_qabs	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/opacity.rs	grain_rosseland_opacity	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/opacity.rs	grain_rosseland_opacity_spectral	grandfathered	predates the derives-coverage gate; unclassified
@@ -1172,7 +1171,6 @@ crates/physics/src/convection_scaling.rs	citation	accessor	reads one row's cited
 crates/physics/src/convection_scaling.rs	one_of	helper	returns the single element of an iterator or the reason there is not exactly one; the guard against a silent first-match
 crates/physics/src/thermoelastic_anchors.rs	caveats	accessor	returns the riders a scope verdict already carries, either way; a caveat never blocks and nothing is computed here
 crates/physics/src/thermoelastic_anchors.rs	in_scope	predicate	answers whether a scope verdict convicted the row; a question about the DATA's own declared reach, deriving no world quantity
-crates/planet-substrate/src/absolute_floor.rs	gravitational_constant_bigrat	accessor	reads G only after constructing and verifying the repository-owned absolute floor
 crates/planet-substrate/src/absolute_floor.rs	ln_gravitational_constant	accessor	reads the logarithm of G through the sealed execution capability
 crates/planet-substrate/src/astro.rs	accretion_clock_hindcasts	grandfathered	predates the derives-coverage gate; unclassified
 crates/planet-substrate/src/astro.rs	activity_luminosity_fraction	grandfathered	predates the derives-coverage gate; unclassified
@@ -1402,7 +1400,6 @@ crates/planet-substrate/src/stellar.rs	effective_temperature	grandfathered	preda
 crates/planet-substrate/src/stellar.rs	effective_temperature_from_ratios	grandfathered	predates the derives-coverage gate; unclassified
 crates/planet-substrate/src/stellar.rs	luminosity_ratio	grandfathered	predates the derives-coverage gate; unclassified
 crates/planet-substrate/src/stellar.rs	main_sequence_star	grandfathered	predates the derives-coverage gate; unclassified
-crates/planet-substrate/src/stellar.rs	nonneg_fixed_to_bigrat	grandfathered	predates the derives-coverage gate; unclassified
 crates/planet-substrate/src/stellar.rs	radius_ratio	grandfathered	predates the derives-coverage gate; unclassified
 crates/planet-substrate/src/stellar_evolution.rs	core_growth_rate_msun_per_myr	grandfathered	predates the derives-coverage gate; unclassified
 crates/planet-substrate/src/stellar_evolution.rs	default_hydrogen_energy_yield_1e14	grandfathered	predates the derives-coverage gate; unclassified

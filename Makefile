@@ -1,6 +1,6 @@
 # Thin development aliases. The Just recipes and scripts remain the command source of truth.
 
-.PHONY: help hooks-install hooks-check doctor gates-list gates-run gates-self-tests run run-derived readiness run-dawn-legacy run-living-legacy view view-gpu view-living-legacy view-living-gpu-legacy ledger-inventory ledger-inventory-check verify check-fast check check-pr check-full check-nightly check-legacy ci ci-local ci-list ci-legacy ci-list-legacy test test-legacy audit-parked fmt fmt-check fmt-legacy fmt-check-legacy lint lint-legacy pins-dawn-legacy stop-gate cache-info gc gc-dry trim-wsl
+.PHONY: help hooks-install hooks-check doctor gates-list gates-run gates-self-tests run run-derived readiness run-dawn-legacy run-living-legacy view view-gpu view-living-legacy view-living-gpu-legacy ledger-inventory ledger-inventory-check verify check-fast check check-pr check-full check-nightly check-legacy ci ci-local ci-list ci-legacy ci-list-legacy test test-gpu-cpu-sparse test-gpu-vulkan-sparse test-gpu-cuda-cpu-cross test-legacy test-legacy-routine audit-parked fmt fmt-check fmt-legacy fmt-check-legacy lint lint-legacy pins-dawn-legacy stop-gate cache-info gc gc-dry trim-wsl
 
 GATE_TIER ?= pr
 
@@ -25,7 +25,11 @@ CI_LIST_CMD := $(DEV) ci-list
 CI_LEGACY_CMD := $(DEV) ci-legacy
 CI_LIST_LEGACY_CMD := $(DEV) ci-list-legacy
 TEST_CMD := $(DEV) test
+TEST_GPU_CPU_SPARSE_CMD := $(DEV) test-gpu-cpu-sparse
+TEST_GPU_VULKAN_SPARSE_CMD := $(DEV) test-gpu-vulkan-sparse
+TEST_GPU_CUDA_CPU_CROSS_CMD := $(DEV) test-gpu-cuda-cpu-cross
 TEST_LEGACY_CMD := $(DEV) test-legacy
+TEST_LEGACY_ROUTINE_CMD := $(DEV) test-legacy-routine
 AUDIT_PARKED_CMD := $(DEV) audit-parked
 FMT_CMD := $(DEV) fmt
 FMT_CHECK_CMD := $(DEV) fmt-check
@@ -70,7 +74,11 @@ CI_LIST_CMD := just ci-list
 CI_LEGACY_CMD := just ci-legacy
 CI_LIST_LEGACY_CMD := just ci-list-legacy
 TEST_CMD := just test
+TEST_GPU_CPU_SPARSE_CMD := just test-gpu-cpu-sparse
+TEST_GPU_VULKAN_SPARSE_CMD := just test-gpu-vulkan-sparse
+TEST_GPU_CUDA_CPU_CROSS_CMD := just test-gpu-cuda-cpu-cross
 TEST_LEGACY_CMD := just test-legacy
+TEST_LEGACY_ROUTINE_CMD := just test-legacy-routine
 AUDIT_PARKED_CMD := just audit-parked
 FMT_CMD := just fmt
 FMT_CHECK_CMD := just fmt-check
@@ -128,7 +136,11 @@ help:
 	  'make ci-legacy        parked and legacy aggregate checks' \
 	  'make ci-list-legacy   display the parked aggregate recipe' \
 	  'make test             canonical abiotic workspace tests' \
+	  'make test-gpu-cpu-sparse independent CubeCL CPU evidence (sparse)' \
+	  'make test-gpu-vulkan-sparse Vulkan Q32.32 evidence on hardware' \
+	  'make test-gpu-cuda-cpu-cross CUDA versus CPU codegen evidence' \
 	  'make test-legacy      parked workspace tests' \
+	  'make test-legacy-routine parked tests without CubeCL/LLVM' \
 	  'make audit-parked     retired calibration/profile/quarantine checks' \
 	  'make fmt              format the canonical workspace' \
 	  'make fmt-check        check canonical formatting' \
@@ -233,8 +245,20 @@ ci-list-legacy:
 test:
 	@$(TEST_CMD)
 
+test-gpu-cpu-sparse:
+	@$(TEST_GPU_CPU_SPARSE_CMD)
+
+test-gpu-vulkan-sparse:
+	@$(TEST_GPU_VULKAN_SPARSE_CMD)
+
+test-gpu-cuda-cpu-cross:
+	@$(TEST_GPU_CUDA_CPU_CROSS_CMD)
+
 test-legacy:
 	@$(TEST_LEGACY_CMD)
+
+test-legacy-routine:
+	@$(TEST_LEGACY_ROUTINE_CMD)
 
 audit-parked:
 	@$(AUDIT_PARKED_CMD)

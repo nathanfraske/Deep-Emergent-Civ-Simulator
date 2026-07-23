@@ -6,16 +6,19 @@
 //! constant declarations against an independent registry, pins the complete
 //! derive-first receipts by digest, and admits only that exact floor.
 
+use crate::authority_watchdog::{verify_floor_pi_budgets, AuthorityWatchdogError};
 use crate::dimensional_analysis::SiDimensionColumn;
+use crate::floor_admission_watchdog::{
+    verify_floor_catalog_admission_bytes, FloorAdmissionWatchdogReceipt, CHECKER_IMPLEMENTATION_ID,
+};
 use crate::fundamentals::{
     FundamentalRole, SiDimension, COMPOSITES, PHYSICAL_INVARIANTS, REPRESENTATION_DEFINITIONS,
     SI_BASE_DIMENSION_IDS, SI_REPRESENTATION_SCHEMA_ID,
 };
-#[cfg(test)]
-use civsim_ledger::ChaosRegimeReceipt;
 use civsim_ledger::{
-    AbsolutePhysicsFloor, ChaosProtocolReceipt, DerivationExhaustionReceipt, Entry,
-    FloorAdmissionError, GapLawReceipt, Ledger, LedgerError, Provenance, ResidualLawReceipt, Tier,
+    AbsolutePhysicsFloor, ChaosProtocolReceipt, ChaosRegimeReceipt, DerivationExhaustionReceipt,
+    Entry, FloorAdmissionError, GapLawReceipt, Ledger, LedgerError, Provenance, ResidualLawReceipt,
+    Tier,
 };
 use sha2::{Digest, Sha256};
 use std::fmt;
@@ -30,6 +33,8 @@ pub const PHYSICAL_FLOOR_LEN: usize = 3;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PhysicalInvariantAdmission {
     symbol: &'static str,
+    tier: Tier,
+    provenance: Provenance,
     value: &'static str,
     unit: &'static str,
     dimension: SiDimension,
@@ -160,6 +165,8 @@ const EXECUTION_RELATION_FINGERPRINTS: [ExecutionRelationFingerprint; 4] = [
 const PHYSICAL_INVARIANT_ADMISSIONS: [PhysicalInvariantAdmission; 3] = [
     PhysicalInvariantAdmission {
         symbol: "alpha",
+        tier: Tier::Universal,
+        provenance: Provenance::Measured,
         value: "7.2973525693e-3",
         unit: "1",
         dimension: SiDimension::DIMENSIONLESS,
@@ -171,6 +178,8 @@ const PHYSICAL_INVARIANT_ADMISSIONS: [PhysicalInvariantAdmission; 3] = [
     },
     PhysicalInvariantAdmission {
         symbol: "G",
+        tier: Tier::Universal,
+        provenance: Provenance::Measured,
         value: "6.67430e-11",
         unit: "m^3/(kg*s^2)",
         dimension: SiDimension::new(3, -1, -2, 0, 0, 0, 0),
@@ -182,6 +191,8 @@ const PHYSICAL_INVARIANT_ADMISSIONS: [PhysicalInvariantAdmission; 3] = [
     },
     PhysicalInvariantAdmission {
         symbol: "m_e",
+        tier: Tier::Universal,
+        provenance: Provenance::Measured,
         value: "9.1093837015e-31",
         unit: "kg",
         dimension: SiDimension::new(0, 1, 0, 0, 0, 0, 0),
@@ -230,14 +241,35 @@ const RECEIPT_FINGERPRINTS: [ReceiptFingerprint; 3] = [
     },
 ];
 
+const FLOOR_ADMISSION_INPUT_SCHEMA_ID: &str = "civsim.units.floor-catalog-admission-input.v1";
+const FLOOR_ADMISSION_PAIR_SCHEMA_ID: &str = "civsim.units.floor-catalog-admission-pair.v1";
+const FLOOR_ADMISSION_CLAIM_ID: &str = "floor.catalog-admission";
+const FLOOR_ADMISSION_PRODUCER_IMPLEMENTATION_ID: &str = "civsim.ledger.generic-floor-admission.v1";
+
+// This receipt covers the exact Q32.32 constant table and its CPU/GPU source
+// occurrences. It does not certify whole-domain kernel behavior.
+const FIXED_MATH_TABLE_AUTHORITY_RECEIPT: &[u8] =
+    include_bytes!("../data/fixed_math_authority_receipt.json");
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FloorCatalogAdmissionPairReceipt {
+    digest: [u8; 32],
+}
+
+impl FloorCatalogAdmissionPairReceipt {
+    const fn digest(&self) -> [u8; 32] {
+        self.digest
+    }
+}
+
 /// Typed identity of the byte encoding used to bind the complete physical-floor
 /// authority. A different field set, field order, or encoding requires a new
-/// identity rather than silently changing the v1 digest.
+/// identity rather than silently changing the v3 digest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PhysicalFloorAuthoritySchemaId(&'static str);
 
 impl PhysicalFloorAuthoritySchemaId {
-    pub const V1: Self = Self("civsim.units.physical-floor-authority-binding.v1");
+    pub const V3: Self = Self("civsim.units.physical-floor-authority-binding.v3");
 
     /// Stable schema spelling for transcripts and proof artifacts.
     pub const fn as_str(self) -> &'static str {
@@ -265,12 +297,18 @@ pub struct PhysicalFloorAuthorityBinding {
 
 impl PhysicalFloorAuthorityBinding {
     /// Verify the declarations and independent receipt pins before constructing
-    /// the sole repository-owned v1 authority binding.
+    /// the sole repository-owned v3 authority binding.
     pub fn sealed() -> Result<Self, AuditedCatalogError> {
         verify_units_declarations()?;
-        verify_receipt_fingerprints(&physical_invariant_receipts())?;
+        let receipts = physical_invariant_receipts();
+        verify_receipt_fingerprints(&receipts)?;
+        let catalog = audited_substrate_ledger()?;
+        let entries = catalog.entries().cloned().collect::<Vec<_>>();
+        let admission_pair = verify_floor_catalog_admission_pair(&entries, &receipts)?;
+        let pi_watchdog =
+            verify_floor_pi_budgets(&receipts).map_err(AuditedCatalogError::Watchdog)?;
 
-        let schema_id = PhysicalFloorAuthoritySchemaId::V1;
+        let schema_id = PhysicalFloorAuthoritySchemaId::V3;
         let digest = physical_floor_authority_digest(
             schema_id,
             SI_REPRESENTATION_SCHEMA_ID,
@@ -279,6 +317,9 @@ impl PhysicalFloorAuthorityBinding {
             &PHYSICAL_INVARIANT_ADMISSIONS,
             RECEIPT_FINGERPRINT_SCHEMA_ID,
             &RECEIPT_FINGERPRINTS,
+            admission_pair.digest(),
+            pi_watchdog.digest(),
+            FIXED_MATH_TABLE_AUTHORITY_RECEIPT,
             &EXECUTION_RELATION_FINGERPRINTS,
         );
         if digest != EXPECTED_PHYSICAL_FLOOR_AUTHORITY_DIGEST {
@@ -335,8 +376,8 @@ pub fn sealed_physical_floor_dimension_columns(
 // constructor above. It is updated only after reviewing a schema-versioned
 // authority change.
 const EXPECTED_PHYSICAL_FLOOR_AUTHORITY_DIGEST: [u8; 32] = [
-    0x0a, 0x64, 0xc0, 0x51, 0x36, 0x83, 0xf0, 0x44, 0x61, 0xb1, 0x1d, 0x3b, 0x6d, 0xf9, 0xf1, 0x8a,
-    0x4d, 0x28, 0x38, 0x25, 0x30, 0x0b, 0xae, 0x71, 0x3b, 0x9a, 0x26, 0xd2, 0x80, 0xc1, 0x33, 0x67,
+    0x8c, 0x43, 0xa0, 0x1c, 0xe1, 0x2d, 0xc5, 0x44, 0x9d, 0x10, 0x76, 0xda, 0x79, 0xdd, 0xee, 0x79,
+    0x1f, 0x89, 0x2e, 0xae, 0x1a, 0x08, 0xd2, 0xfd, 0xd4, 0x3b, 0x07, 0x65, 0x3d, 0xe3, 0x05, 0xcf,
 ];
 
 struct LengthPrefixedSha256(Sha256);
@@ -381,6 +422,9 @@ fn physical_floor_authority_digest(
     physical_admissions: &[PhysicalInvariantAdmission],
     receipt_fingerprint_schema_id: &str,
     receipt_fingerprints: &[ReceiptFingerprint],
+    floor_admission_pair_digest: [u8; 32],
+    pi_watchdog_digest: [u8; 32],
+    fixed_math_table_authority_receipt: &[u8],
     execution_relation_fingerprints: &[ExecutionRelationFingerprint],
 ) -> [u8; 32] {
     let mut encoder = LengthPrefixedSha256::new();
@@ -409,6 +453,8 @@ fn physical_floor_authority_digest(
     encoder.count(physical_admissions.len());
     for admission in physical_admissions {
         encoder.text(admission.symbol);
+        encoder.text(admission.tier.id());
+        encoder.text(admission.provenance.tag());
         encoder.text(admission.value);
         encoder.text(admission.unit);
         encoder.dimension(admission.dimension);
@@ -427,6 +473,15 @@ fn physical_floor_authority_digest(
         encoder.bytes(&fingerprint.sha256);
     }
 
+    encoder.text("independent_floor_catalog_admission_pair");
+    encoder.bytes(&floor_admission_pair_digest);
+
+    encoder.text("independent_pi_watchdog");
+    encoder.bytes(&pi_watchdog_digest);
+
+    encoder.text("exact_fixed_math_table_authority_receipt");
+    encoder.bytes(fixed_math_table_authority_receipt);
+
     encoder.text("ordered_execution_relation_fingerprints");
     encoder.count(execution_relation_fingerprints.len());
     for fingerprint in execution_relation_fingerprints {
@@ -441,6 +496,279 @@ fn physical_floor_authority_digest(
     }
 
     encoder.finish()
+}
+
+struct CanonicalByteWriter {
+    bytes: Vec<u8>,
+}
+
+impl CanonicalByteWriter {
+    fn new() -> Self {
+        Self { bytes: Vec::new() }
+    }
+
+    fn count(&mut self, value: usize) {
+        self.bytes.extend_from_slice(&(value as u64).to_le_bytes());
+    }
+
+    fn text(&mut self, value: &str) {
+        self.count(value.len());
+        self.bytes.extend_from_slice(value.as_bytes());
+    }
+
+    fn finish(self) -> Vec<u8> {
+        self.bytes
+    }
+}
+
+fn floor_catalog_admission_bytes(
+    entries: &[Entry],
+    receipts: &[DerivationExhaustionReceipt],
+) -> Vec<u8> {
+    let mut writer = CanonicalByteWriter::new();
+    writer.text(FLOOR_ADMISSION_INPUT_SCHEMA_ID);
+    writer.count(entries.len());
+    for entry in entries {
+        writer.text(&entry.id);
+        writer.text(entry.tier.id());
+        writer.text(entry.provenance.tag());
+        writer.count(entry.inputs.len());
+        for input in &entry.inputs {
+            writer.text(input);
+        }
+    }
+
+    writer.count(receipts.len());
+    for receipt in receipts {
+        writer.text(&receipt.entry_id);
+        writer.text(&receipt.phenomenon);
+        writer.count(receipt.derivation_attempts.len());
+        for attempt in &receipt.derivation_attempts {
+            writer.text(attempt);
+        }
+        writer.text(&receipt.residual_slot);
+        writer.count(receipt.buckingham_pi_groups);
+        writer.text(&receipt.gap_law.reference_validity);
+        writer.text(&receipt.gap_law.gap_dispatch);
+        writer.text(&receipt.gap_law.smooth_systematics);
+        writer.text(&receipt.gap_law.scale_free_limit);
+        match &receipt.gap_law.chaos_protocol {
+            ChaosProtocolReceipt::NotApplicable { basis } => {
+                writer.text("not_applicable");
+                writer.text(basis);
+            }
+            ChaosProtocolReceipt::Dynamical {
+                classification,
+                regime_partition,
+                transition_law,
+                regimes,
+            } => {
+                writer.text("dynamical");
+                writer.text(classification);
+                writer.text(regime_partition);
+                writer.text(transition_law);
+                writer.count(regimes.len());
+                for regime in regimes {
+                    match regime {
+                        ChaosRegimeReceipt::ResolvedTrajectory {
+                            validity_domain,
+                            resolution_bound,
+                            evolution_postcondition,
+                            exact_replay,
+                        } => {
+                            writer.text("resolved_trajectory");
+                            writer.text(validity_domain);
+                            writer.text(resolution_bound);
+                            writer.text(evolution_postcondition);
+                            writer.text(exact_replay);
+                        }
+                        ChaosRegimeReceipt::SubresolutionMeasure {
+                            validity_domain,
+                            stationary_measure,
+                            conservation_projection,
+                            stability_postcondition,
+                            coordinate_discipline,
+                            exact_replay,
+                        } => {
+                            writer.text("subresolution_measure");
+                            writer.text(validity_domain);
+                            writer.text(stationary_measure);
+                            writer.text(conservation_projection);
+                            writer.text(stability_postcondition);
+                            writer.text(coordinate_discipline);
+                            writer.text(exact_replay);
+                        }
+                    }
+                }
+            }
+        }
+        writer.text(&receipt.residual_law.conservation);
+        writer.text(&receipt.residual_law.disequilibrium);
+        writer.text(&receipt.residual_law.fluctuation_dissipation);
+        writer.text(&receipt.residual_law.dimensional_analysis);
+    }
+    writer.finish()
+}
+
+fn producer_accepts_floor_claim(
+    entries: &[Entry],
+    receipts: &[DerivationExhaustionReceipt],
+) -> bool {
+    let Ok(ledger) = Ledger::build(entries.iter().cloned()) else {
+        return false;
+    };
+    AbsolutePhysicsFloor::admit(ledger, receipts.iter().cloned()).is_ok()
+}
+
+fn producer_result_digest(
+    input_digest: [u8; 32],
+    entry_count: usize,
+    receipt_count: usize,
+) -> [u8; 32] {
+    let mut result = Sha256::new();
+    result.update(FLOOR_ADMISSION_PRODUCER_IMPLEMENTATION_ID.as_bytes());
+    result.update(input_digest);
+    result.update((entry_count as u64).to_le_bytes());
+    result.update((receipt_count as u64).to_le_bytes());
+    result.update(b"admitted");
+    result.finalize().into()
+}
+
+fn record_floor_admission_canary(
+    digest: &mut LengthPrefixedSha256,
+    id: &str,
+    entries: &[Entry],
+    receipts: &[DerivationExhaustionReceipt],
+    expected_producer_acceptance: bool,
+) -> Result<(), AuditedCatalogError> {
+    let bytes = floor_catalog_admission_bytes(entries, receipts);
+    let producer_accepted = producer_accepts_floor_claim(entries, receipts);
+    let checker_accepted = verify_floor_catalog_admission_bytes(&bytes).is_ok();
+    if producer_accepted != expected_producer_acceptance || checker_accepted {
+        return Err(AuditedCatalogError::DefinitionMismatch(format!(
+            "floor-admission mutation canary '{id}' expected producer={expected_producer_acceptance}, checker=false but observed producer={producer_accepted}, checker={checker_accepted}"
+        )));
+    }
+    digest.text(id);
+    digest.text(if producer_accepted {
+        "producer.accepted"
+    } else {
+        "producer.refused"
+    });
+    digest.text("checker.refused");
+    Ok(())
+}
+
+fn floor_admission_canary_digest(
+    entries: &[Entry],
+    receipts: &[DerivationExhaustionReceipt],
+) -> Result<[u8; 32], AuditedCatalogError> {
+    if entries.is_empty() || receipts.is_empty() {
+        return Err(AuditedCatalogError::DefinitionMismatch(
+            "floor-admission canaries require a nonempty canonical claim".into(),
+        ));
+    }
+    let mut digest = LengthPrefixedSha256::new();
+    digest.text("civsim.units.floor-catalog-admission-canaries.v1");
+
+    let mut changed_tier = entries.to_vec();
+    changed_tier[0].tier = Tier::Reference;
+    record_floor_admission_canary(&mut digest, "changed_tier", &changed_tier, receipts, true)?;
+
+    let mut changed_provenance = entries.to_vec();
+    changed_provenance[0].provenance = Provenance::Estimator;
+    record_floor_admission_canary(
+        &mut digest,
+        "changed_provenance",
+        &changed_provenance,
+        receipts,
+        false,
+    )?;
+
+    let mut changed_member = entries.to_vec();
+    let old_id = changed_member[0].id.clone();
+    changed_member[0].id.push_str(".mutated");
+    let mut changed_member_receipts = receipts.to_vec();
+    for receipt in &mut changed_member_receipts {
+        if receipt.entry_id == old_id {
+            receipt.entry_id = changed_member[0].id.clone();
+        }
+    }
+    record_floor_admission_canary(
+        &mut digest,
+        "changed_catalog_member",
+        &changed_member,
+        &changed_member_receipts,
+        true,
+    )?;
+
+    let mut missing_receipt_semantics = receipts.to_vec();
+    missing_receipt_semantics[0].gap_law.reference_validity = "   ".into();
+    record_floor_admission_canary(
+        &mut digest,
+        "missing_receipt_semantics",
+        entries,
+        &missing_receipt_semantics,
+        false,
+    )?;
+
+    let mut changed_receipt_authority = receipts.to_vec();
+    changed_receipt_authority[0].derivation_attempts[0]
+        .push_str(" copied authority-changing suffix");
+    record_floor_admission_canary(
+        &mut digest,
+        "changed_receipt_authority",
+        entries,
+        &changed_receipt_authority,
+        true,
+    )?;
+
+    Ok(digest.finish())
+}
+
+fn verify_floor_catalog_admission_pair(
+    entries: &[Entry],
+    receipts: &[DerivationExhaustionReceipt],
+) -> Result<FloorCatalogAdmissionPairReceipt, AuditedCatalogError> {
+    let ledger = Ledger::build(entries.iter().cloned()).map_err(AuditedCatalogError::Ledger)?;
+    let floor = AbsolutePhysicsFloor::admit(ledger, receipts.iter().cloned()).map_err(|error| {
+        AuditedCatalogError::DefinitionMismatch(format!(
+            "floor-admission producer refused canonical input: {error}"
+        ))
+    })?;
+    let bytes = floor_catalog_admission_bytes(entries, receipts);
+    let input_digest: [u8; 32] = Sha256::digest(&bytes).into();
+    let producer_result = producer_result_digest(input_digest, floor.len(), receipts.len());
+    let checker: FloorAdmissionWatchdogReceipt = verify_floor_catalog_admission_bytes(&bytes)
+        .map_err(|error| {
+            AuditedCatalogError::DefinitionMismatch(format!(
+                "independent floor-admission checker refused canonical input: {error}"
+            ))
+        })?;
+    if checker.input_digest() != input_digest
+        || checker.entry_count() != floor.len()
+        || checker.receipt_count() != receipts.len()
+    {
+        return Err(AuditedCatalogError::DefinitionMismatch(
+            "floor-admission producer and checker did not agree on the exact input or row counts"
+                .into(),
+        ));
+    }
+    let canary_digest = floor_admission_canary_digest(entries, receipts)?;
+
+    let mut pair = LengthPrefixedSha256::new();
+    pair.text(FLOOR_ADMISSION_PAIR_SCHEMA_ID);
+    pair.text(FLOOR_ADMISSION_CLAIM_ID);
+    pair.text(FLOOR_ADMISSION_PRODUCER_IMPLEMENTATION_ID);
+    pair.text(CHECKER_IMPLEMENTATION_ID);
+    pair.bytes(&input_digest);
+    pair.bytes(&producer_result);
+    pair.bytes(&checker.result_digest());
+    pair.bytes(&canary_digest);
+    pair.text("agreement.admitted");
+    Ok(FloorCatalogAdmissionPairReceipt {
+        digest: pair.finish(),
+    })
 }
 
 fn verify_units_declarations() -> Result<(), AuditedCatalogError> {
@@ -555,7 +883,7 @@ fn common_residual_law(dimensional_analysis: &str) -> ResidualLawReceipt {
     }
 }
 
-fn physical_invariant_receipts() -> Vec<DerivationExhaustionReceipt> {
+pub(crate) fn physical_invariant_receipts() -> Vec<DerivationExhaustionReceipt> {
     vec![
         DerivationExhaustionReceipt {
             entry_id: fundamental_id("alpha"),
@@ -694,8 +1022,8 @@ pub fn audited_substrate_ledger() -> Result<Ledger, AuditedCatalogError> {
         .into_iter()
         .map(|constant| Entry {
             id: fundamental_id(constant.symbol),
-            tier: Tier::Universal,
-            provenance: Provenance::Measured,
+            tier: constant.tier,
+            provenance: constant.provenance,
             inputs: Vec::new(),
         });
     Ledger::build(invariants).map_err(AuditedCatalogError::Ledger)
@@ -754,14 +1082,24 @@ pub fn verify_absolute_physics_floor(
             )));
         }
     }
+    let receipts = floor
+        .entries()
+        .filter_map(|entry| floor.receipt(&entry.id).cloned())
+        .collect::<Vec<_>>();
+    let entries = floor.entries().cloned().collect::<Vec<_>>();
+    verify_floor_catalog_admission_pair(&entries, &receipts)?;
+    verify_floor_pi_budgets(&receipts).map_err(AuditedCatalogError::Watchdog)?;
     Ok(())
 }
 
 /// Construct the sole repository-owned absolute physical floor.
 pub fn sealed_absolute_physics_floor() -> Result<AbsolutePhysicsFloor, SealedFloorError> {
+    let _authority =
+        sealed_physical_floor_authority_binding().map_err(SealedFloorError::Catalog)?;
     let catalog = audited_substrate_ledger().map_err(SealedFloorError::Catalog)?;
     let receipts = physical_invariant_receipts();
     verify_receipt_fingerprints(&receipts).map_err(SealedFloorError::Catalog)?;
+    verify_floor_pi_budgets(&receipts).map_err(SealedFloorError::Watchdog)?;
     let floor =
         AbsolutePhysicsFloor::admit(catalog, receipts).map_err(SealedFloorError::Admission)?;
     verify_absolute_physics_floor(&floor).map_err(SealedFloorError::Catalog)?;
@@ -773,6 +1111,7 @@ pub enum AuditedCatalogError {
     DefinitionMismatch(String),
     FloorMismatch(String),
     Ledger(LedgerError),
+    Watchdog(AuthorityWatchdogError),
 }
 
 impl fmt::Display for AuditedCatalogError {
@@ -781,6 +1120,7 @@ impl fmt::Display for AuditedCatalogError {
             Self::DefinitionMismatch(detail) => write!(f, "sealed catalog mismatch: {detail}"),
             Self::FloorMismatch(detail) => write!(f, "absolute-floor seal mismatch: {detail}"),
             Self::Ledger(error) => write!(f, "invalid catalog graph: {error}"),
+            Self::Watchdog(error) => write!(f, "independent authority watchdog refused: {error}"),
         }
     }
 }
@@ -791,6 +1131,7 @@ impl std::error::Error for AuditedCatalogError {}
 pub enum SealedFloorError {
     Catalog(AuditedCatalogError),
     Admission(FloorAdmissionError),
+    Watchdog(AuthorityWatchdogError),
 }
 
 impl fmt::Display for SealedFloorError {
@@ -798,6 +1139,7 @@ impl fmt::Display for SealedFloorError {
         match self {
             Self::Catalog(error) => write!(f, "cannot build sealed catalog: {error}"),
             Self::Admission(error) => write!(f, "cannot admit sealed physical floor: {error}"),
+            Self::Watchdog(error) => write!(f, "independent authority watchdog refused: {error}"),
         }
     }
 }
@@ -808,10 +1150,18 @@ impl std::error::Error for SealedFloorError {}
 mod tests {
     use super::*;
 
+    fn current_admission_pair_digest() -> [u8; 32] {
+        let ledger = audited_substrate_ledger().unwrap();
+        let entries = ledger.entries().cloned().collect::<Vec<_>>();
+        verify_floor_catalog_admission_pair(&entries, &physical_invariant_receipts())
+            .unwrap()
+            .digest()
+    }
+
     #[test]
     fn current_floor_authority_matches_independent_binding_pin() {
         let binding = sealed_physical_floor_authority_binding().unwrap();
-        assert_eq!(binding.schema_id(), PhysicalFloorAuthoritySchemaId::V1);
+        assert_eq!(binding.schema_id(), PhysicalFloorAuthoritySchemaId::V3);
         assert_eq!(binding.digest(), EXPECTED_PHYSICAL_FLOOR_AUTHORITY_DIGEST);
         assert_eq!(binding.digest_hex(), hex(&binding.digest()));
     }
@@ -840,29 +1190,201 @@ mod tests {
     #[test]
     fn copied_changed_authority_component_changes_digest() {
         let original = physical_floor_authority_digest(
-            PhysicalFloorAuthoritySchemaId::V1,
+            PhysicalFloorAuthoritySchemaId::V3,
             SI_REPRESENTATION_SCHEMA_ID,
             &SI_BASE_DIMENSION_IDS,
             &REPRESENTATION_DEFINITION_FINGERPRINTS,
             &PHYSICAL_INVARIANT_ADMISSIONS,
             RECEIPT_FINGERPRINT_SCHEMA_ID,
             &RECEIPT_FINGERPRINTS,
+            [0; 32],
+            [0; 32],
+            FIXED_MATH_TABLE_AUTHORITY_RECEIPT,
             &EXECUTION_RELATION_FINGERPRINTS,
         );
         let mut changed_admissions = PHYSICAL_INVARIANT_ADMISSIONS;
         changed_admissions[0].source_anchor = "copied changed source anchor";
         let changed = physical_floor_authority_digest(
-            PhysicalFloorAuthoritySchemaId::V1,
+            PhysicalFloorAuthoritySchemaId::V3,
             SI_REPRESENTATION_SCHEMA_ID,
             &SI_BASE_DIMENSION_IDS,
             &REPRESENTATION_DEFINITION_FINGERPRINTS,
             &changed_admissions,
             RECEIPT_FINGERPRINT_SCHEMA_ID,
             &RECEIPT_FINGERPRINTS,
+            [0; 32],
+            [0; 32],
+            FIXED_MATH_TABLE_AUTHORITY_RECEIPT,
             &EXECUTION_RELATION_FINGERPRINTS,
         );
 
         assert_ne!(changed, original);
+    }
+
+    #[test]
+    fn tier_and_provenance_are_bound_into_physical_authority_digest() {
+        let baseline = physical_floor_authority_digest(
+            PhysicalFloorAuthoritySchemaId::V3,
+            SI_REPRESENTATION_SCHEMA_ID,
+            &SI_BASE_DIMENSION_IDS,
+            &REPRESENTATION_DEFINITION_FINGERPRINTS,
+            &PHYSICAL_INVARIANT_ADMISSIONS,
+            RECEIPT_FINGERPRINT_SCHEMA_ID,
+            &RECEIPT_FINGERPRINTS,
+            [0; 32],
+            [0; 32],
+            FIXED_MATH_TABLE_AUTHORITY_RECEIPT,
+            &EXECUTION_RELATION_FINGERPRINTS,
+        );
+        let mut changed_tier = PHYSICAL_INVARIANT_ADMISSIONS;
+        changed_tier[0].tier = Tier::Reference;
+        let tier_digest = physical_floor_authority_digest(
+            PhysicalFloorAuthoritySchemaId::V3,
+            SI_REPRESENTATION_SCHEMA_ID,
+            &SI_BASE_DIMENSION_IDS,
+            &REPRESENTATION_DEFINITION_FINGERPRINTS,
+            &changed_tier,
+            RECEIPT_FINGERPRINT_SCHEMA_ID,
+            &RECEIPT_FINGERPRINTS,
+            [0; 32],
+            [0; 32],
+            FIXED_MATH_TABLE_AUTHORITY_RECEIPT,
+            &EXECUTION_RELATION_FINGERPRINTS,
+        );
+        let mut changed_provenance = PHYSICAL_INVARIANT_ADMISSIONS;
+        changed_provenance[0].provenance = Provenance::Estimator;
+        let provenance_digest = physical_floor_authority_digest(
+            PhysicalFloorAuthoritySchemaId::V3,
+            SI_REPRESENTATION_SCHEMA_ID,
+            &SI_BASE_DIMENSION_IDS,
+            &REPRESENTATION_DEFINITION_FINGERPRINTS,
+            &changed_provenance,
+            RECEIPT_FINGERPRINT_SCHEMA_ID,
+            &RECEIPT_FINGERPRINTS,
+            [0; 32],
+            [0; 32],
+            FIXED_MATH_TABLE_AUTHORITY_RECEIPT,
+            &EXECUTION_RELATION_FINGERPRINTS,
+        );
+
+        assert_ne!(tier_digest, baseline);
+        assert_ne!(provenance_digest, baseline);
+    }
+
+    #[test]
+    fn floor_catalog_admission_pair_is_bound_into_floor_authority() {
+        let watchdog = verify_floor_pi_budgets(&physical_invariant_receipts()).unwrap();
+        let admission_pair = current_admission_pair_digest();
+        let bound = physical_floor_authority_digest(
+            PhysicalFloorAuthoritySchemaId::V3,
+            SI_REPRESENTATION_SCHEMA_ID,
+            &SI_BASE_DIMENSION_IDS,
+            &REPRESENTATION_DEFINITION_FINGERPRINTS,
+            &PHYSICAL_INVARIANT_ADMISSIONS,
+            RECEIPT_FINGERPRINT_SCHEMA_ID,
+            &RECEIPT_FINGERPRINTS,
+            admission_pair,
+            watchdog.digest(),
+            FIXED_MATH_TABLE_AUTHORITY_RECEIPT,
+            &EXECUTION_RELATION_FINGERPRINTS,
+        );
+        let unbound = physical_floor_authority_digest(
+            PhysicalFloorAuthoritySchemaId::V3,
+            SI_REPRESENTATION_SCHEMA_ID,
+            &SI_BASE_DIMENSION_IDS,
+            &REPRESENTATION_DEFINITION_FINGERPRINTS,
+            &PHYSICAL_INVARIANT_ADMISSIONS,
+            RECEIPT_FINGERPRINT_SCHEMA_ID,
+            &RECEIPT_FINGERPRINTS,
+            [0; 32],
+            watchdog.digest(),
+            FIXED_MATH_TABLE_AUTHORITY_RECEIPT,
+            &EXECUTION_RELATION_FINGERPRINTS,
+        );
+
+        assert_eq!(bound, EXPECTED_PHYSICAL_FLOOR_AUTHORITY_DIGEST);
+        assert_ne!(bound, unbound);
+    }
+
+    #[test]
+    fn floor_catalog_admission_pair_exercises_mutation_canaries() {
+        let ledger = audited_substrate_ledger().unwrap();
+        let entries = ledger.entries().cloned().collect::<Vec<_>>();
+        let receipts = physical_invariant_receipts();
+        let digest = floor_admission_canary_digest(&entries, &receipts).unwrap();
+
+        assert_ne!(digest, [0; 32]);
+    }
+
+    #[test]
+    fn independent_pi_watchdog_is_bound_into_floor_authority() {
+        let watchdog = verify_floor_pi_budgets(&physical_invariant_receipts()).unwrap();
+        let admission_pair = current_admission_pair_digest();
+        let bound = physical_floor_authority_digest(
+            PhysicalFloorAuthoritySchemaId::V3,
+            SI_REPRESENTATION_SCHEMA_ID,
+            &SI_BASE_DIMENSION_IDS,
+            &REPRESENTATION_DEFINITION_FINGERPRINTS,
+            &PHYSICAL_INVARIANT_ADMISSIONS,
+            RECEIPT_FINGERPRINT_SCHEMA_ID,
+            &RECEIPT_FINGERPRINTS,
+            admission_pair,
+            watchdog.digest(),
+            FIXED_MATH_TABLE_AUTHORITY_RECEIPT,
+            &EXECUTION_RELATION_FINGERPRINTS,
+        );
+        let unbound = physical_floor_authority_digest(
+            PhysicalFloorAuthoritySchemaId::V3,
+            SI_REPRESENTATION_SCHEMA_ID,
+            &SI_BASE_DIMENSION_IDS,
+            &REPRESENTATION_DEFINITION_FINGERPRINTS,
+            &PHYSICAL_INVARIANT_ADMISSIONS,
+            RECEIPT_FINGERPRINT_SCHEMA_ID,
+            &RECEIPT_FINGERPRINTS,
+            admission_pair,
+            [0; 32],
+            FIXED_MATH_TABLE_AUTHORITY_RECEIPT,
+            &EXECUTION_RELATION_FINGERPRINTS,
+        );
+        assert_eq!(bound, EXPECTED_PHYSICAL_FLOOR_AUTHORITY_DIGEST);
+        assert_ne!(bound, unbound);
+    }
+
+    #[test]
+    fn exact_fixed_math_table_receipt_bytes_are_bound_into_floor_authority() {
+        let watchdog = verify_floor_pi_budgets(&physical_invariant_receipts()).unwrap();
+        let admission_pair = current_admission_pair_digest();
+        let bound = physical_floor_authority_digest(
+            PhysicalFloorAuthoritySchemaId::V3,
+            SI_REPRESENTATION_SCHEMA_ID,
+            &SI_BASE_DIMENSION_IDS,
+            &REPRESENTATION_DEFINITION_FINGERPRINTS,
+            &PHYSICAL_INVARIANT_ADMISSIONS,
+            RECEIPT_FINGERPRINT_SCHEMA_ID,
+            &RECEIPT_FINGERPRINTS,
+            admission_pair,
+            watchdog.digest(),
+            FIXED_MATH_TABLE_AUTHORITY_RECEIPT,
+            &EXECUTION_RELATION_FINGERPRINTS,
+        );
+        let mut changed_receipt = FIXED_MATH_TABLE_AUTHORITY_RECEIPT.to_vec();
+        changed_receipt[0] ^= 1;
+        let changed = physical_floor_authority_digest(
+            PhysicalFloorAuthoritySchemaId::V3,
+            SI_REPRESENTATION_SCHEMA_ID,
+            &SI_BASE_DIMENSION_IDS,
+            &REPRESENTATION_DEFINITION_FINGERPRINTS,
+            &PHYSICAL_INVARIANT_ADMISSIONS,
+            RECEIPT_FINGERPRINT_SCHEMA_ID,
+            &RECEIPT_FINGERPRINTS,
+            admission_pair,
+            watchdog.digest(),
+            &changed_receipt,
+            &EXECUTION_RELATION_FINGERPRINTS,
+        );
+
+        assert_eq!(bound, EXPECTED_PHYSICAL_FLOOR_AUTHORITY_DIGEST);
+        assert_ne!(bound, changed);
     }
 
     #[test]

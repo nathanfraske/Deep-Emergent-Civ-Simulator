@@ -1,6 +1,8 @@
 //! Non-admitting authority analysis for the open species-state derivation.
 
+mod producer;
 mod view;
+mod watchdog;
 mod wire;
 
 pub use view::{SpeciesDerivationAnalysisView, SpeciesDerivationAttemptView};
@@ -15,27 +17,19 @@ use crate::canonical::{
 use civsim_units::physics_floor::sealed_physical_floor_authority_binding;
 use std::fmt;
 
+use producer::produce_frontier;
+use watchdog::validate_analysis;
+
 use super::COMPLETE_SPECIES_STATE_MEAN_PARTICLE_MASS_LAW_ID;
 
 pub(in crate::canonical) const SPECIES_DERIVATION_ANALYSIS_SCHEMA_ID: &str =
     "civsim.planet.stellar-birth-species-derivation-analysis.v1";
 pub(in crate::canonical) const SPECIES_DERIVATION_ANALYSIS_CHECKER_ID: &str =
-    "civsim.planet.stellar-birth-species-derivation-checker.v1";
+    "civsim.planet.stellar-birth-species-derivation-watchdog.v2";
 
 const FLOOR_ANCHOR_ID: &str = "fundamental.m_e";
 const FLOOR_ANCHOR_SYMBOL: &str = "m_e";
 const FLOOR_ANCHOR_ROLE: &str = "mass_coordinate_anchor_only";
-
-const OPEN_PROOF_IDS: [&str; 8] = [
-    "canonical_species_state_descriptor_checker_unavailable",
-    "charge_state_sector_validity_proof_unavailable",
-    "conditioned_zero_or_sparse_support_semantics_unavailable",
-    "finite_exact_resource_domain_unavailable",
-    "integer_projection_schema_unavailable",
-    "joint_measure_support_binding_unavailable",
-    "physical_species_membership_derivation_unavailable",
-    "rest_mass_dimension_and_ancestry_proof_unavailable",
-];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum AnalysisProgress {
@@ -187,52 +181,10 @@ impl fmt::Display for AnalysisBuildError {
     }
 }
 
-fn strings(values: &[&str]) -> Vec<String> {
-    values.iter().map(|value| (*value).to_owned()).collect()
-}
-
-fn expected_attempts() -> Vec<SpeciesDerivationAttempt> {
-    vec![
-        SpeciesDerivationAttempt {
-            id: "stellar_birth.species_derivation.complete_registry",
-            status: AnalysisProgress::BlockedOpenProofs,
-            input_ids: strings(&["fundamental.alpha", "fundamental.G", "fundamental.m_e"]),
-            open_proof_ids: strings(&[
-                "canonical_species_state_descriptor_checker_unavailable",
-                "charge_state_sector_validity_proof_unavailable",
-                "physical_species_membership_derivation_unavailable",
-                "rest_mass_dimension_and_ancestry_proof_unavailable",
-            ]),
-        },
-        SpeciesDerivationAttempt {
-            id: "stellar_birth.species_derivation.complete_conditioned_support",
-            status: AnalysisProgress::BlockedOpenProofs,
-            input_ids: strings(&[
-                "stellar_birth.composition.species_number_fraction_field",
-                "stellar_birth.species_state_registry",
-            ]),
-            open_proof_ids: strings(&[
-                "conditioned_zero_or_sparse_support_semantics_unavailable",
-                "finite_exact_resource_domain_unavailable",
-                "joint_measure_support_binding_unavailable",
-            ]),
-        },
-        SpeciesDerivationAttempt {
-            id: "stellar_birth.species_derivation.exact_mean_mass_projection",
-            status: AnalysisProgress::BlockedOpenProofs,
-            input_ids: strings(&["stellar_birth.conditioned_species_state_support"]),
-            open_proof_ids: strings(&[
-                "finite_exact_resource_domain_unavailable",
-                "integer_projection_schema_unavailable",
-                "joint_measure_support_binding_unavailable",
-            ]),
-        },
-    ]
-}
-
 fn build_analysis(
     authority: SpeciesDerivationAnalysisAuthority,
 ) -> Result<SpeciesDerivationAnalysis, AnalysisBuildError> {
+    let frontier = produce_frontier();
     let analysis = SpeciesDerivationAnalysis {
         floor_binding_schema_id: authority.floor_binding_schema_id,
         floor_binding_sha256: authority.floor_binding_sha256,
@@ -256,94 +208,21 @@ fn build_analysis(
             .schema_id,
         reducer_law_id: COMPLETE_SPECIES_STATE_MEAN_PARTICLE_MASS_LAW_ID,
         floor_mass_anchor: authority.floor_mass_anchor,
-        attempts: expected_attempts(),
-        open_proof_ids: strings(&OPEN_PROOF_IDS),
-        candidate_member_count: 0,
-        verified_support_member_count: 0,
-        value_payload_present: false,
-        residual_slot_claim: false,
-        derive_first_status: AnalysisProgress::OpenDependencies,
-        buckingham_pi_status: AnalysisProgress::DimensionOnlyRelationNotPhysicalClosure,
-        gap_law_status: AnalysisProgress::NotReached,
-        chaos_protocol_status: AnalysisProgress::NotReached,
-        residual_law_status: AnalysisProgress::NotReached,
-        unique_residual_slot_status: AnalysisProgress::NotClaimed,
+        attempts: frontier.attempts,
+        open_proof_ids: frontier.open_proof_ids,
+        candidate_member_count: frontier.candidate_member_count,
+        verified_support_member_count: frontier.verified_support_member_count,
+        value_payload_present: frontier.value_payload_present,
+        residual_slot_claim: frontier.residual_slot_claim,
+        derive_first_status: frontier.derive_first_status,
+        buckingham_pi_status: frontier.buckingham_pi_status,
+        gap_law_status: frontier.gap_law_status,
+        chaos_protocol_status: frontier.chaos_protocol_status,
+        residual_law_status: frontier.residual_law_status,
+        unique_residual_slot_status: frontier.unique_residual_slot_status,
     };
     validate_analysis(&analysis)?;
     Ok(analysis)
-}
-
-fn validate_analysis(analysis: &SpeciesDerivationAnalysis) -> Result<(), AnalysisBuildError> {
-    let binding = sealed_physical_floor_authority_binding()
-        .map_err(|error| AnalysisBuildError::FloorAuthority(error.to_string()))?;
-    let structure = stellar_birth_structure_schema()?;
-    let floor = crate::canonical::sealed_absolute_physics_floor()
-        .map_err(|error| AnalysisBuildError::FloorAuthority(error.to_string()))?;
-    let floor_view = AuditedFloorView::from_floor(&floor)
-        .map_err(|error| AnalysisBuildError::FloorAuthority(error.to_string()))?;
-    let expected_mass_anchor = floor_view.magnitudes.electron_mass;
-    let expected_schema_ids = (
-        structure.schema_id,
-        structure.species_registry.schema_id,
-        structure.stellar_state.schema_id,
-        structure.stellar_state.state_coordinate_registry.schema_id,
-        structure
-            .stellar_state
-            .interaction_sector_registry
-            .schema_id,
-        structure.stellar_state.physical_regime_registry.schema_id,
-    );
-    let found_schema_ids = (
-        analysis.structure_schema_id,
-        analysis.species_registry_schema_id,
-        analysis.stellar_state_schema_id,
-        analysis.state_coordinate_registry_schema_id,
-        analysis.interaction_sector_registry_schema_id,
-        analysis.physical_regime_registry_schema_id,
-    );
-    if found_schema_ids != expected_schema_ids {
-        return Err(AnalysisBuildError::InternalInvariant(
-            "schema binding differs from the canonical structure".to_owned(),
-        ));
-    }
-    if analysis.floor_binding_schema_id != binding.schema_id().as_str()
-        || analysis.floor_binding_sha256 != binding.digest_hex()
-    {
-        return Err(AnalysisBuildError::InternalInvariant(
-            "physical-floor binding differs from the sealed authority".to_owned(),
-        ));
-    }
-    if analysis.reducer_law_id != COMPLETE_SPECIES_STATE_MEAN_PARTICLE_MASS_LAW_ID
-        || analysis.floor_mass_anchor.id != FLOOR_ANCHOR_ID
-        || analysis.floor_mass_anchor.symbol != FLOOR_ANCHOR_SYMBOL
-        || analysis.floor_mass_anchor.bits != expected_mass_anchor.bits()
-        || analysis.floor_mass_anchor.scale_bits != expected_mass_anchor.scale_bits()
-        || analysis.floor_mass_anchor.role != FLOOR_ANCHOR_ROLE
-        || analysis.floor_mass_anchor.membership_authority
-    {
-        return Err(AnalysisBuildError::InternalInvariant(
-            "floor mass anchor gained species membership authority or changed identity".to_owned(),
-        ));
-    }
-    if analysis.attempts != expected_attempts()
-        || analysis.open_proof_ids != strings(&OPEN_PROOF_IDS)
-        || analysis.candidate_member_count != 0
-        || analysis.verified_support_member_count != 0
-        || analysis.value_payload_present
-        || analysis.residual_slot_claim
-        || analysis.derive_first_status != AnalysisProgress::OpenDependencies
-        || analysis.buckingham_pi_status
-            != AnalysisProgress::DimensionOnlyRelationNotPhysicalClosure
-        || analysis.gap_law_status != AnalysisProgress::NotReached
-        || analysis.chaos_protocol_status != AnalysisProgress::NotReached
-        || analysis.residual_law_status != AnalysisProgress::NotReached
-        || analysis.unique_residual_slot_status != AnalysisProgress::NotClaimed
-    {
-        return Err(AnalysisBuildError::InternalInvariant(
-            "non-admitting derivation frontier changed".to_owned(),
-        ));
-    }
-    Ok(())
 }
 
 pub(in crate::canonical) fn analyze_repository_species_state_support(
@@ -420,7 +299,22 @@ mod tests {
         assert_eq!(view.gap_law_status_id(), Some("not_reached"));
         assert_eq!(view.chaos_protocol_status_id(), Some("not_reached"));
         assert_eq!(view.attempts().len(), 3);
-        assert_eq!(view.open_proof_ids(), strings(&OPEN_PROOF_IDS));
+        assert_eq!(
+            view.open_proof_ids(),
+            [
+                "canonical_species_state_descriptor_checker_unavailable",
+                "charge_state_sector_validity_proof_unavailable",
+                "conditioned_zero_or_sparse_support_semantics_unavailable",
+                "finite_exact_resource_domain_unavailable",
+                "integer_projection_schema_unavailable",
+                "joint_measure_support_binding_unavailable",
+                "physical_species_membership_derivation_unavailable",
+                "rest_mass_dimension_and_ancestry_proof_unavailable",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -447,6 +341,15 @@ mod tests {
         };
         analysis.floor_mass_anchor.bits += 1;
 
+        assert!(validate_analysis(&analysis).is_err());
+    }
+
+    #[test]
+    fn a_frontier_mutation_fails_the_independent_seal() {
+        let SpeciesDerivationAnalysisArtifact::Computed(mut analysis) = analysis() else {
+            panic!("the production analysis should compute");
+        };
+        analysis.attempts[0].id = "producer-selected-replacement";
         assert!(validate_analysis(&analysis).is_err());
     }
 }

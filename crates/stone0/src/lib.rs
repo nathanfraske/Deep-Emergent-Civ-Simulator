@@ -16,11 +16,12 @@
 //!
 //! Stone 0 is the meta-gate that makes the no-fabricated-values discipline un-bypassable at the local
 //! inner loop (design `docs/working/Q1_STONE0_PROVENANCE_GATE_DESIGN.md`). This crate is the gate's
-//! library and its `stone0-gate` binary. INCREMENT 4 IS DONE and the gate fires at BUILD time:
-//! `crates/planet/build.rs` calls `run(Mode::Local)` and panics on a positive detection, so the scan runs
-//! on every unqualified canonical `cargo build`, `check`, `test`, and `clippy`, and on package-scoped
-//! commands that compile `civsim-planet`. The parked compatibility runner retains the same guard in
-//! `parked/crates/sim/build.rs`. The binary remains the direct entry point for `--ci` and `--self-test`.
+//! library and its `stone0-gate` binary. INCREMENT 4 IS DONE and the gate fires at BUILD time.
+//! `crates/stone0-build` is the single shared build-graph owner for the canonical planet and
+//! planet-substrate consumers. It calls `run(Mode::Local)` and panics on a positive detection, so one
+//! scan guards each canonical Cargo graph instead of one scan per consumer. The parked compatibility
+//! runner retains the same guard in `parked/crates/sim/build.rs`. The binary remains the direct entry
+//! point for `--ci` and `--self-test`.
 //!
 //! Said plainly because the previous wording claimed the opposite ("NOT yet wired into any build script"),
 //! which would send a developer whose build is blocked here to rule this gate out as the cause when it is
@@ -53,6 +54,7 @@
 #![forbid(unsafe_code)]
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -148,12 +150,68 @@ pub const OVERRIDE_INSTRUCTIONS: &str = "This value has no provenance. To overri
 /// The bootstrap pointer into the declarative gate authority.
 ///
 /// Gate membership, order, arguments, timeouts, inputs, path triggers, cache policy, and self-test
-/// metadata live in `scripts/gates.toml`. Stone 0 owns only this runner pointer, which prevents a
-/// second Rust command list from drifting away from Stop, Just, CI, and developer entrypoints.
+/// metadata live in `scripts/gates.toml`. Stone 0 owns this runner pointer and an exact bootstrap pin
+/// for the authority-watchdog block. The narrow duplication prevents deleting or weakening the gate
+/// that validates the inventory from also deleting its own execution.
 const PROVENANCE_RUNNER: (&str, &[&str]) = (
     "scripts/gate_runner.py",
     &["run", "--tier", "canonical", "--phase", "provenance"],
 );
+const MANDATORY_AUTHORITY_COMMANDS: [(&str, &[&str]); 4] = [
+    ("scripts/authority_watchdog_gate.py", &[]),
+    ("scripts/stone0_build_wiring_gate.py", &[]),
+    ("scripts/fixed_math_authority_gate.py", &[]),
+    ("scripts/external_claim_gate.py", &[]),
+];
+const GATE_MANIFEST_PATH: &str = "scripts/gates.toml";
+const MANDATORY_AUTHORITY_GATE_BLOCK: &str = r#"[[gate]]
+id = "canonical.authority-watchdog"
+order = 65
+description = "Require independent pairs for active authority-bearing mechanical claims."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/authority_watchdog_gate.py"]
+self_test = ["{python}", "scripts/authority_watchdog_gate.py", "--self-test"]
+timeout_seconds = 120
+cache = "content-hash"
+inputs = [
+  "scripts/gates.toml",
+  "scripts/gate_runner.py",
+  "scripts/authority_watchdog_gate.py",
+  "scripts/authority_registry_watchdog.py",
+  "scripts/authority_watchdog.toml",
+  "scripts/external_claim_gate.py",
+  "scripts/external_claim_watchdog.py",
+  "scripts/fixed_math_authority_gate.py",
+  "scripts/fixed_math_authority_watchdog.py",
+  "scripts/stone0_build_wiring_gate.py",
+  "scripts/stone0_build_wiring_watchdog.py",
+  "sources/external_claims.toml",
+  "sources/external_claim_approvers",
+  "sources/external_claim_revocations.toml",
+  "docs/working/INDEPENDENT_AUTHORITY_RULE.md",
+  "docs/working/EXTERNAL_ADVERSE_CLAIM_RULE.md",
+  "crates",
+]
+path_triggers = [
+  "scripts/gates.toml",
+  "scripts/gate_runner.py",
+  "scripts/authority_watchdog_gate.py",
+  "scripts/authority_registry_watchdog.py",
+  "scripts/authority_watchdog.toml",
+  "scripts/external_claim_gate.py",
+  "scripts/external_claim_watchdog.py",
+  "scripts/fixed_math_authority_gate.py",
+  "scripts/fixed_math_authority_watchdog.py",
+  "scripts/stone0_build_wiring_gate.py",
+  "scripts/stone0_build_wiring_watchdog.py",
+  "sources/external_claims.toml",
+  "sources/external_claim_approvers",
+  "sources/external_claim_revocations.toml",
+  "docs/working/INDEPENDENT_AUTHORITY_RULE.md",
+  "docs/working/EXTERNAL_ADVERSE_CLAIM_RULE.md",
+  "crates/**",
+]"#;
 const POLICY_DETECTION_MARKER: &str = "civsim.gate-runner.policy-detection.v1";
 
 /// Which run this is. `Local` runs every check including the live-password and canary scans against the
@@ -527,19 +585,72 @@ fn has_policy_detection_protocol(exit_code: Option<i32>, stdout: &str, stderr: &
             .any(|line| line.trim() == POLICY_DETECTION_MARKER)
 }
 
-fn provenance_scan(root: &Path) -> ProvenanceOutcome {
+fn validate_mandatory_authority_gate_manifest(raw: &str) -> Result<(), String> {
+    let normalized = raw.replace("\r\n", "\n");
+    let blocks: Vec<String> = normalized
+        .split("[[gate]]")
+        .skip(1)
+        .map(|body| format!("[[gate]]{body}"))
+        .filter(|block| block.contains("\nid = \"canonical.authority-watchdog\"\n"))
+        .collect();
+    if blocks.len() != 1 {
+        return Err(format!(
+            "{GATE_MANIFEST_PATH} must contain exactly one canonical.authority-watchdog block; found {}",
+            blocks.len()
+        ));
+    }
+    if blocks[0].trim() != MANDATORY_AUTHORITY_GATE_BLOCK.trim() {
+        return Err(format!(
+            "{GATE_MANIFEST_PATH} canonical.authority-watchdog block differs from the independent Stone 0 bootstrap pin"
+        ));
+    }
+    Ok(())
+}
+
+fn verify_mandatory_authority_gate(root: &Path) -> Result<(), String> {
+    let path = root.join(GATE_MANIFEST_PATH);
+    let raw = fs::read_to_string(&path)
+        .map_err(|error| format!("could not read {} ({error})", path.display()))?;
+    validate_mandatory_authority_gate_manifest(&raw)
+}
+
+fn provenance_scan_with(
+    root: &Path,
+    mut execute: impl FnMut(&Path, &str, &[&str]) -> ScriptResult,
+) -> ProvenanceOutcome {
     let mut detections = Vec::new();
     let mut operational = Vec::new();
+    if let Err(error) = verify_mandatory_authority_gate(root) {
+        operational.push(error);
+        return ProvenanceOutcome {
+            detections,
+            operational,
+        };
+    }
     let (script, args) = PROVENANCE_RUNNER;
-    match run_python_gate(root, script, args) {
+    match execute(root, script, args) {
         ScriptResult::Clean => {}
         ScriptResult::Detected(r) => detections.push(r),
         ScriptResult::Operational(w) => operational.push(w),
+    }
+    // Execute every authority bootstrap directly as a second path. The
+    // declarative runner cannot suppress these calls by returning success or
+    // omitting a manifest entry.
+    for (authority_script, authority_args) in MANDATORY_AUTHORITY_COMMANDS {
+        match execute(root, authority_script, authority_args) {
+            ScriptResult::Clean => {}
+            ScriptResult::Detected(r) => detections.push(r),
+            ScriptResult::Operational(w) => operational.push(w),
+        }
     }
     ProvenanceOutcome {
         detections,
         operational,
     }
+}
+
+fn provenance_scan(root: &Path) -> ProvenanceOutcome {
+    provenance_scan_with(root, run_python_gate)
 }
 
 // ----------------------------------------------------------------------------------------------------
@@ -1025,6 +1136,152 @@ fn self_test() -> i32 {
         "wrong exit code cannot claim policy detection",
         !has_policy_detection_protocol(Some(2), POLICY_DETECTION_MARKER, ""),
     );
+    check(
+        "mandatory authority commands retain the independent direct path",
+        MANDATORY_AUTHORITY_COMMANDS
+            == [
+                ("scripts/authority_watchdog_gate.py", &[] as &[&str]),
+                ("scripts/stone0_build_wiring_gate.py", &[] as &[&str]),
+                ("scripts/fixed_math_authority_gate.py", &[] as &[&str]),
+                ("scripts/external_claim_gate.py", &[] as &[&str]),
+            ],
+    );
+
+    let exact_gate = format!("{MANDATORY_AUTHORITY_GATE_BLOCK}\n");
+    check(
+        "mandatory authority gate exact block accepted",
+        validate_mandatory_authority_gate_manifest(&exact_gate).is_ok(),
+    );
+    for (label, old, replacement) in [
+        (
+            "mandatory authority id mutation caught",
+            "id = \"canonical.authority-watchdog\"",
+            "id = \"canonical.authority-watchdog-weakened\"",
+        ),
+        (
+            "mandatory authority order mutation caught",
+            "order = 65",
+            "order = 64",
+        ),
+        (
+            "mandatory authority description mutation caught",
+            "description = \"Require independent pairs for active authority-bearing mechanical claims.\"",
+            "description = \"Weakened authority claim.\"",
+        ),
+        (
+            "mandatory authority tiers mutation caught",
+            "tiers = [\"canonical\", \"doctor\", \"pr\", \"full\", \"nightly\", \"stop\"]",
+            "tiers = [\"canonical\", \"doctor\", \"pr\", \"full\", \"nightly\"]",
+        ),
+        (
+            "mandatory authority phase mutation caught",
+            "phase = \"provenance\"",
+            "phase = \"post\"",
+        ),
+        (
+            "mandatory authority command mutation caught",
+            "command = [\"{python}\", \"scripts/authority_watchdog_gate.py\"]",
+            "command = [\"{python}\", \"scripts/authority_watchdog_gate.py\", \"--weakened\"]",
+        ),
+        (
+            "mandatory authority self-test mutation caught",
+            "self_test = [\"{python}\", \"scripts/authority_watchdog_gate.py\", \"--self-test\"]",
+            "self_test = [\"{python}\", \"scripts/authority_watchdog_gate.py\"]",
+        ),
+        (
+            "mandatory authority timeout mutation caught",
+            "timeout_seconds = 120",
+            "timeout_seconds = 1",
+        ),
+        (
+            "mandatory authority cache mutation caught",
+            "cache = \"content-hash\"",
+            "cache = \"never\"",
+        ),
+        (
+            "mandatory authority no-cache metadata mutation caught",
+            "cache = \"content-hash\"",
+            "cache = \"content-hash\"\nno_cache_reason = \"bypass\"",
+        ),
+        (
+            "mandatory authority input mutation caught",
+            "  \"scripts/gate_runner.py\",",
+            "  \"scripts/gate_runner-weakened.py\",",
+        ),
+        (
+            "mandatory authority path-trigger mutation caught",
+            "  \"crates/**\",",
+            "  \"crates/units/**\",",
+        ),
+    ] {
+        let changed = exact_gate.replacen(old, replacement, 1);
+        check(
+            label,
+            changed != exact_gate
+                && validate_mandatory_authority_gate_manifest(&changed).is_err(),
+        );
+    }
+    check(
+        "mandatory authority removal caught",
+        validate_mandatory_authority_gate_manifest("").is_err(),
+    );
+    let duplicate_gate = format!("{exact_gate}{exact_gate}");
+    check(
+        "mandatory authority duplicate caught",
+        validate_mandatory_authority_gate_manifest(&duplicate_gate).is_err(),
+    );
+
+    let integration_root = std::env::temp_dir().join(format!(
+        "civsim-stone0-authority-self-test-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&integration_root);
+    let integration = (|| -> Result<(Vec<String>, ProvenanceOutcome), String> {
+        fs::create_dir_all(integration_root.join("scripts"))
+            .map_err(|error| format!("could not create integration fixture: {error}"))?;
+        fs::write(
+            integration_root.join(GATE_MANIFEST_PATH),
+            MANDATORY_AUTHORITY_GATE_BLOCK,
+        )
+        .map_err(|error| format!("could not write integration fixture: {error}"))?;
+        let mut observed = Vec::new();
+        let outcome = provenance_scan_with(&integration_root, |_root, script, args| {
+            let mut command = vec![script.to_owned()];
+            command.extend(args.iter().map(|argument| (*argument).to_owned()));
+            observed.push(command.join(" "));
+            if script == "scripts/fixed_math_authority_gate.py" {
+                ScriptResult::Operational("synthetic direct authority failure".to_owned())
+            } else {
+                ScriptResult::Clean
+            }
+        });
+        Ok((observed, outcome))
+    })();
+    let _ = fs::remove_dir_all(&integration_root);
+    match integration {
+        Ok((observed, outcome)) => {
+            check(
+                "provenance scan executes the runner and every direct authority command",
+                observed
+                    == [
+                        "scripts/gate_runner.py run --tier canonical --phase provenance",
+                        "scripts/authority_watchdog_gate.py",
+                        "scripts/stone0_build_wiring_gate.py",
+                        "scripts/fixed_math_authority_gate.py",
+                        "scripts/external_claim_gate.py",
+                    ],
+            );
+            check(
+                "direct authority operational failure propagates closed",
+                outcome.detections.is_empty()
+                    && outcome.operational == ["synthetic direct authority failure".to_owned()],
+            );
+        }
+        Err(error) => check(
+            &format!("direct authority integration fixture failed: {error}"),
+            false,
+        ),
+    }
 
     // password laundering: literal and base64 detection.
     let pw = "correct horse";

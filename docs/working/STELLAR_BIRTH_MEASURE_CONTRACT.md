@@ -42,14 +42,16 @@ self-authorized by its declaration table. The ordered authority lives in
 carries source, uncertainty, projection, and full derivation-exhaustion
 evidence. Independent fingerprints seal the representation definitions,
 execution relations, physical admissions, and the complete ordered receipt
-content. One sealed physical-floor authority binding covers those ordered
-registries and receipt pins under
-`civsim.units.physical-floor-authority-binding.v1`. Derived values replay from
+content. An independent parser and graph walk checks the same canonical
+catalog and receipt bytes without calling the producer admission path. One
+sealed physical-floor authority binding covers both results, every admission's
+tier and provenance, the ordered registries, and receipt pins under
+`civsim.units.physical-floor-authority-binding.v3`. Derived values replay from
 exact projected ancestry published in transcript schema major 9, with typed SI
-dimensions and exact-symbol ancestry checked from the formula. Physical helper APIs require the same sealed
-execution capability and cannot bind or mutate its values. This closes the
-representation and API reachability seams; it does not close either
-stellar-birth leaf.
+dimensions and exact-symbol ancestry checked from the formula. Physical helper
+APIs require the same sealed execution capability and cannot bind or mutate its
+values. This closes the representation and API reachability seams; it does not
+close either stellar-birth leaf.
 
 ## Joint physical measure
 
@@ -195,6 +197,17 @@ closure, so Gap Law, Chaos Protocol, Residual Law, and the unique residual slot
 remain not reached or not claimed. This analysis has `closure_effect=none` and
 `coverage_claim=false`.
 
+The next byte-neutral rung is a private species descriptor plus a separate
+conditioned-support packet. It will bind physical content, mass and dimension
+ancestry, state, sector, validity, dependencies, joint conditioning, floor,
+schema, checker, replay, and finite exact-arithmetic limits. Every realized
+registry member must carry either a positive weight or a proved exact-zero
+disposition; omission, implicit renormalization, and capacity truncation
+refuse. Independent producer and watchdog validators will exercise synthetic
+unfamiliar and massless packets, but the authority row and production resolver
+remain blocked until lawful membership and support exist. This rung adds no
+species, value, proof token, ledger event, or transcript field.
+
 A future smart authority must bind content identity, exact mass and
 dimension ancestry, charge and physical state, active sectors and couplings,
 validity domain, dependency graph, complete joint support measure,
@@ -239,8 +252,8 @@ three physical floor values, derives `eps_0`, enters Stage 1, and returns
 `stellar_birth.realization_measure`. It emits six transcript events: three
 floor records, one derived-value record, one Stage 1 entry, and one refusal.
 It emits no `[X]`, no `[W]` realization, and no snapshot. Repeated runs are
-byte-identical at `367,626` stdout bytes and SHA-256
-`ecb2ea0c0aeffe5b487f84d5de1a61d9797fa2e6d6ee6a26b08df980b9ddf392`.
+byte-identical at `367,628` stdout bytes and SHA-256
+`53936f040ae40169654620d577e4e10b6be23ad0ab09bae2ab5981f4f44bd1d1`.
 The current receipt is `civsim.planet.run.v11`; its transcript schema major is
 `9`.
 
@@ -291,8 +304,10 @@ other dropped mechanism remain explicit residual or refusal obligations.
    spectral closure, fragmentation, magnetic braking, multicenter reduction,
    a persistent disk state, and every dynamical regime. Do not decompose the
    joint measure into authored marginals.
-2. Complete the authority-bound species mass and state registry. The structural
-   exact reducer is landed, but its content identity, physical proof, complete
+2. Land the byte-neutral species descriptor and conditioned-support packet with
+   independent validators and finite resource refusals, then complete the
+   authority-bound species mass and state registry. The structural exact
+   reducer is landed, but lawful content identity, physical proof, complete
    support measure, floor, checker, and replay bindings remain absent. Only
    after those bind may it derive mean particle mass.
 3. Derive coupled gas and dust thermal balance, equation-of-state closure,

@@ -42,7 +42,7 @@ Akiyama, T., Ohta, H., Takahashi, R., Waseda, Y. & Yagi, J., 1992, Measurement a
 
 ### `bstar2006_lanz_hubeny`
 
-Lanz, T. and Hubeny, I., 2007, A Grid of NLTE Line-Blanketed Model Atmospheres of Early B-Type Stars (BSTAR2006), ApJS 169, 83-104, DOI 10.1086/511270 (verified at the primary: doi.org/10.1086/511270 resolves to this title at IOP; the earlier 10.1086/511268 was WRONG, it resolves to an unrelated silicate-obscuration paper). arXiv astro-ph/0611891.
+Lanz, T. and Hubeny, I., 2007, A Grid of NLTE Line-Blanketed Model Atmospheres of Early B-Type Stars (BSTAR2006), ApJS 169, 83-104, DOI 10.1086/511270 (verified at the primary: doi.org/10.1086/511270 resolves to this title at IOP; the repository's earlier 10.1086/511268 fetch seed resolves to a different paper). arXiv astro-ph/0611891.
 
 - sha256: `e5435bab670315a6611c2e7b252de9b8c6f88f12ce8a26d1c1c28906c0e24e10`
 - archived: https://web.archive.org/web/20260719182515/https://arxiv.org/pdf/astro-ph/0611891

@@ -25,15 +25,10 @@ use crate::fundamentals::{
 use crate::physics_floor::{sealed_absolute_physics_floor, verify_absolute_physics_floor};
 use civsim_core::Fixed;
 use civsim_ledger::AbsolutePhysicsFloor;
+use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::fmt;
 use std::sync::OnceLock;
-
-// Repository representation policy, never a world input. The typed universal
-// view keeps at least this many binary digits while preserving Q32.32 whenever
-// the magnitude fits in an i128 at that scale.
-const FLOOR_SIGNIFICAND_BITS: i64 = 30;
-const MAX_I128_MAGNITUDE_LOG2: i64 = 126;
 
 /// One repository-computed constant magnitude. Its fields are sealed so a
 /// caller cannot construct or bind an arbitrary value.
@@ -42,6 +37,7 @@ pub struct ScaledConstant {
     symbol: &'static str,
     bits: i128,
     scale_bits: u32,
+    projection_receipt_sha256: [u8; 32],
 }
 
 impl ScaledConstant {
@@ -58,6 +54,11 @@ impl ScaledConstant {
     /// Number of fractional binary places in the mantissa.
     pub const fn scale_bits(self) -> u32 {
         self.scale_bits
+    }
+
+    /// Claim-scoped producer and watchdog agreement receipt.
+    pub const fn projection_receipt_sha256(self) -> [u8; 32] {
+        self.projection_receipt_sha256
     }
 
     /// Exact rational represented by the published scaled integer.
@@ -87,7 +88,9 @@ pub struct SiRepresentationMagnitudes {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct RepresentationSeal;
+struct RepresentationSeal {
+    aggregate_digest_sha256: [u8; 32],
+}
 
 impl SiRepresentationMagnitudes {
     pub const fn len(&self) -> usize {
@@ -96,6 +99,13 @@ impl SiRepresentationMagnitudes {
 
     pub const fn is_empty(&self) -> bool {
         false
+    }
+
+    /// Deterministic aggregate digest over the current representation-only
+    /// projection table. This is a drift diagnostic, not an independent table
+    /// completeness or admission authority.
+    pub const fn aggregate_digest_sha256(&self) -> [u8; 32] {
+        self.seal.aggregate_digest_sha256
     }
 
     pub fn get(&self, symbol: &str) -> Option<ScaledConstant> {
@@ -118,43 +128,25 @@ impl SiRepresentationMagnitudes {
     /// Exact SI-coordinate conversion `N_A * 10^-21` used to express an
     /// atomic number density per cubic nanometre.
     pub fn avogadro_per_nm3_fold(&self) -> Option<Fixed> {
-        let value = self
-            .avogadro
-            .exact_rational()
-            .mul(&decimal_rational("1e-21")?);
-        fixed_from_rational(&value)
+        certified_fixed_formula("N_A / 10^21", &[self.avogadro])
     }
 
     /// `hbar * 10^15 / (2*pi*k_B)` in femtosecond-kelvin units.
     pub fn scattering_time_fold_fs_k(&self) -> Option<Fixed> {
-        let two_pi = BigRat::from_i64(2).mul(&crate::compute::pi(80));
-        let value = self
-            .planck
-            .exact_rational()
-            .div(&two_pi)
-            .mul(&decimal_rational("1e15")?)
-            .div(&two_pi)
-            .div(&self.boltzmann.exact_rational());
-        fixed_from_rational(&value)
+        certified_fixed_formula(
+            "h * 10^15 / ((2 * pi)^2 * k_B)",
+            &[self.planck, self.boltzmann],
+        )
     }
 
     /// Exact representation conversion from eV/angstrom^3 to GPa.
     pub fn gpa_per_ev_per_angstrom_cubed(&self) -> Option<Fixed> {
-        let value = self
-            .elementary_charge
-            .exact_rational()
-            .mul(&decimal_rational("1e21")?);
-        fixed_from_rational(&value)
+        certified_fixed_formula("e * 10^21", &[self.elementary_charge])
     }
 
     /// Exact representation conversion from eV per particle to kJ/mol.
     pub fn ev_to_kj_per_mol(&self) -> Option<Fixed> {
-        let value = self
-            .elementary_charge
-            .exact_rational()
-            .mul(&self.avogadro.exact_rational())
-            .mul(&decimal_rational("1e-3")?);
-        fixed_from_rational(&value)
+        certified_fixed_formula("e * N_A / 10^3", &[self.elementary_charge, self.avogadro])
     }
 }
 
@@ -185,7 +177,9 @@ pub struct SiExecutionMagnitudes {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ExecutionSeal;
+struct ExecutionSeal {
+    aggregate_digest_sha256: [u8; 32],
+}
 
 impl SiExecutionMagnitudes {
     /// Number of fixed identities in this execution view.
@@ -196,6 +190,13 @@ impl SiExecutionMagnitudes {
     /// The closed table is never empty.
     pub const fn is_empty(&self) -> bool {
         false
+    }
+
+    /// Deterministic aggregate digest over the current floor-gated execution
+    /// table. This is a drift diagnostic, not an independent table
+    /// completeness, ancestry, scale, or admission authority.
+    pub const fn aggregate_digest_sha256(&self) -> [u8; 32] {
+        self.seal.aggregate_digest_sha256
     }
 
     /// Resolve a stable symbol without exposing a value-binding constructor.
@@ -221,7 +222,7 @@ impl SiExecutionMagnitudes {
     }
 
     /// Representation-only subset carried by this verified execution view.
-    pub const fn representation(&self) -> SiRepresentationMagnitudes {
+    pub fn representation(&self) -> SiRepresentationMagnitudes {
         SiRepresentationMagnitudes {
             caesium_hyperfine_frequency: self.caesium_hyperfine_frequency,
             speed_of_light: self.speed_of_light,
@@ -233,7 +234,23 @@ impl SiExecutionMagnitudes {
             stefan_boltzmann: self.stefan_boltzmann,
             gas_constant: self.gas_constant,
             atomic_volume_conversion: self.atomic_volume_conversion,
-            seal: RepresentationSeal,
+            seal: RepresentationSeal {
+                aggregate_digest_sha256: projection_table_digest(
+                    "civsim.units.si-representation-projection.v1",
+                    &[
+                        self.caesium_hyperfine_frequency,
+                        self.speed_of_light,
+                        self.boltzmann,
+                        self.planck,
+                        self.elementary_charge,
+                        self.avogadro,
+                        self.luminous_efficacy,
+                        self.stefan_boltzmann,
+                        self.gas_constant,
+                        self.atomic_volume_conversion,
+                    ],
+                ),
+            },
         }
     }
 
@@ -257,10 +274,10 @@ impl SiExecutionMagnitudes {
 
     /// `e^2 * 10^12 / m_e`, mapping `/nm^3 * fs` to Drude S/m.
     pub fn drude_conductivity_fold(&self) -> Option<Fixed> {
-        let e = self.elementary_charge.exact_rational();
-        let m_e = self.electron_mass.exact_rational();
-        let value = e.mul(&e).mul(&decimal_rational("1e12")?).div(&m_e);
-        fixed_from_rational(&value)
+        certified_fixed_formula(
+            "e^2 * 10^12 / m_e",
+            &[self.elementary_charge, self.electron_mass],
+        )
     }
 
     /// `hbar * sqrt(10^27 / (eps_0*m_e))` in eV nm^(3/2).
@@ -269,63 +286,40 @@ impl SiExecutionMagnitudes {
     /// joule-to-electron-volt conversion. The squared fold is formed exactly
     /// before its one fixed-point square root, avoiding tiny intermediates.
     pub fn plasma_energy_fold_ev_nm_three_halves(&self) -> Option<Fixed> {
-        let h = self.planck.exact_rational();
-        let hbar = h.div(&BigRat::from_i64(2).mul(&crate::compute::pi(80)));
-        let squared = hbar.mul(&hbar).mul(&decimal_rational("1e27")?).div(
-            &self
-                .vacuum_permittivity
-                .exact_rational()
-                .mul(&self.electron_mass.exact_rational()),
-        );
-        let squared = fixed_from_rational(&squared)?;
+        let squared = certified_fixed_formula(
+            "(h / (2 * pi))^2 * 10^27 / (eps_0 * m_e)",
+            &[self.planck, self.vacuum_permittivity, self.electron_mass],
+        )?;
         (squared > Fixed::ZERO).then(|| squared.sqrt())
     }
 
     /// `e^2 / (4*pi*eps_0)` at one angstrom, expressed in eV angstrom.
     pub fn coulomb_energy_ev_angstrom(&self) -> Option<Fixed> {
-        let denominator = BigRat::from_i64(4)
-            .mul(&crate::compute::pi(80))
-            .mul(&self.vacuum_permittivity.exact_rational());
-        let value = self
-            .elementary_charge
-            .exact_rational()
-            .div(&denominator)
-            .mul(&decimal_rational("1e10")?);
-        fixed_from_rational(&value)
+        certified_fixed_formula(
+            "e * 10^10 / (4 * pi * eps_0)",
+            &[self.elementary_charge, self.vacuum_permittivity],
+        )
     }
 
     /// Bohr radius `4*pi*eps_0*hbar^2/(m_e*e^2)` in angstroms.
     pub fn bohr_radius_angstrom(&self) -> Option<Fixed> {
-        let e = self.elementary_charge.exact_rational();
-        let hbar = self
-            .planck
-            .exact_rational()
-            .div(&BigRat::from_i64(2).mul(&crate::compute::pi(80)));
-        let numerator = BigRat::from_i64(4)
-            .mul(&crate::compute::pi(80))
-            .mul(&self.vacuum_permittivity.exact_rational())
-            .mul(&hbar)
-            .mul(&hbar)
-            .mul(&decimal_rational("1e10")?);
-        let denominator = self.electron_mass.exact_rational().mul(&e).mul(&e);
-        fixed_from_rational(&numerator.div(&denominator))
+        certified_fixed_formula(
+            "4 * pi * eps_0 * (h / (2 * pi))^2 * 10^10 / (m_e * e^2)",
+            &[
+                self.vacuum_permittivity,
+                self.planck,
+                self.electron_mass,
+                self.elementary_charge,
+            ],
+        )
     }
 
     /// Harrison's `hbar^2/m_e` prefactor in eV angstrom squared.
     pub fn harrison_prefactor_ev_angstrom2(&self) -> Option<Fixed> {
-        let hbar = self
-            .planck
-            .exact_rational()
-            .div(&BigRat::from_i64(2).mul(&crate::compute::pi(80)));
-        let denominator = self
-            .electron_mass
-            .exact_rational()
-            .mul(&self.elementary_charge.exact_rational());
-        let value = hbar
-            .mul(&hbar)
-            .mul(&decimal_rational("1e20")?)
-            .div(&denominator);
-        fixed_from_rational(&value)
+        certified_fixed_formula(
+            "(h / (2 * pi))^2 * 10^20 / (m_e * e)",
+            &[self.planck, self.electron_mass, self.elementary_charge],
+        )
     }
 
     /// Exact representation conversion from eV/angstrom^3 to GPa.
@@ -339,13 +333,22 @@ impl SiExecutionMagnitudes {
     }
 }
 
-fn decimal_rational(value: &str) -> Option<BigRat> {
-    BigRat::from_decimal_str(value).ok()
-}
-
-fn fixed_from_rational(value: &BigRat) -> Option<Fixed> {
-    let bits = value.round_to_scale(Fixed::FRAC_BITS)?;
-    Some(Fixed::from_bits(i64::try_from(bits).ok()?))
+fn certified_fixed_formula(formula: &str, values: &[ScaledConstant]) -> Option<Fixed> {
+    let inputs = values
+        .iter()
+        .map(|value| {
+            crate::certified_projection::ProjectionInput::new(
+                value.symbol(),
+                value.bits(),
+                value.scale_bits(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let certificate =
+        crate::certified_projection::certify_at_scale(formula, &inputs, Fixed::FRAC_BITS).ok()?;
+    Some(Fixed::from_bits(
+        i64::try_from(certificate.producer_bits).ok()?,
+    ))
 }
 
 /// Compute the noncausal SI representation view.
@@ -354,6 +357,15 @@ fn fixed_from_rational(value: &BigRat) -> Option<Fixed> {
 /// representation magnitudes are evaluated from named exact definitions.
 pub fn si_representation_magnitudes() -> Result<SiRepresentationMagnitudes, ConstantProjectionError>
 {
+    static REPRESENTATION: OnceLock<Result<SiRepresentationMagnitudes, ConstantProjectionError>> =
+        OnceLock::new();
+    REPRESENTATION
+        .get_or_init(compute_si_representation_magnitudes)
+        .clone()
+}
+
+fn compute_si_representation_magnitudes(
+) -> Result<SiRepresentationMagnitudes, ConstantProjectionError> {
     let caesium_hyperfine_frequency = project_fundamental(&CAESIUM_HYPERFINE_FREQUENCY)?;
     let speed_of_light = project_fundamental(&SPEED_OF_LIGHT)?;
     let boltzmann = project_fundamental(&BOLTZMANN)?;
@@ -371,6 +383,18 @@ pub fn si_representation_magnitudes() -> Result<SiRepresentationMagnitudes, Cons
         luminous_efficacy,
     ];
 
+    let values = [
+        caesium_hyperfine_frequency,
+        speed_of_light,
+        boltzmann,
+        planck,
+        elementary_charge,
+        avogadro,
+        luminous_efficacy,
+        project_composite(&STEFAN_BOLTZMANN, &definitions)?,
+        project_composite(&GAS_CONSTANT, &definitions)?,
+        project_composite(&ATOMIC_VOLUME_CONVERSION, &definitions)?,
+    ];
     Ok(SiRepresentationMagnitudes {
         caesium_hyperfine_frequency,
         speed_of_light,
@@ -379,10 +403,15 @@ pub fn si_representation_magnitudes() -> Result<SiRepresentationMagnitudes, Cons
         elementary_charge,
         avogadro,
         luminous_efficacy,
-        stefan_boltzmann: project_composite(&STEFAN_BOLTZMANN, &definitions)?,
-        gas_constant: project_composite(&GAS_CONSTANT, &definitions)?,
-        atomic_volume_conversion: project_composite(&ATOMIC_VOLUME_CONVERSION, &definitions)?,
-        seal: RepresentationSeal,
+        stefan_boltzmann: values[7],
+        gas_constant: values[8],
+        atomic_volume_conversion: values[9],
+        seal: RepresentationSeal {
+            aggregate_digest_sha256: projection_table_digest(
+                "civsim.units.si-representation-projection.v1",
+                &values,
+            ),
+        },
     })
 }
 
@@ -410,6 +439,23 @@ pub fn si_execution_magnitudes(
         electron_mass,
     ];
 
+    let vacuum_permittivity = project_composite(&VACUUM_PERMITTIVITY, &fundamentals)?;
+    let values = [
+        representation.caesium_hyperfine_frequency,
+        representation.speed_of_light,
+        representation.boltzmann,
+        representation.planck,
+        representation.elementary_charge,
+        representation.avogadro,
+        representation.luminous_efficacy,
+        fine_structure,
+        gravitational_constant,
+        electron_mass,
+        vacuum_permittivity,
+        representation.stefan_boltzmann,
+        representation.gas_constant,
+        representation.atomic_volume_conversion,
+    ];
     Ok(SiExecutionMagnitudes {
         caesium_hyperfine_frequency: representation.caesium_hyperfine_frequency,
         speed_of_light: representation.speed_of_light,
@@ -421,11 +467,16 @@ pub fn si_execution_magnitudes(
         fine_structure,
         gravitational_constant,
         electron_mass,
-        vacuum_permittivity: project_composite(&VACUUM_PERMITTIVITY, &fundamentals)?,
+        vacuum_permittivity,
         stefan_boltzmann: representation.stefan_boltzmann,
         gas_constant: representation.gas_constant,
         atomic_volume_conversion: representation.atomic_volume_conversion,
-        seal: ExecutionSeal,
+        seal: ExecutionSeal {
+            aggregate_digest_sha256: projection_table_digest(
+                "civsim.units.si-execution-projection.v1",
+                &values,
+            ),
+        },
     })
 }
 
@@ -433,9 +484,15 @@ pub fn si_execution_magnitudes(
 /// This convenience path accepts no identity or magnitude from its caller.
 pub fn canonical_si_execution_magnitudes() -> Result<SiExecutionMagnitudes, ConstantProjectionError>
 {
-    let floor = sealed_absolute_physics_floor()
-        .map_err(|error| ConstantProjectionError::UnauditedFloor(error.to_string()))?;
-    si_execution_magnitudes(&floor)
+    static EXECUTION: OnceLock<Result<SiExecutionMagnitudes, ConstantProjectionError>> =
+        OnceLock::new();
+    EXECUTION
+        .get_or_init(|| {
+            let floor = sealed_absolute_physics_floor()
+                .map_err(|error| ConstantProjectionError::UnauditedFloor(error.to_string()))?;
+            si_execution_magnitudes(&floor)
+        })
+        .clone()
 }
 
 fn representation_scale_at_least(
@@ -443,12 +500,12 @@ fn representation_scale_at_least(
     minimum_scale: i64,
 ) -> Result<u32, ConstantProjectionError> {
     let magnitude_log2 = value.floor_log2();
-    let significant_scale = FLOOR_SIGNIFICAND_BITS.saturating_sub(magnitude_log2);
+    let significant_scale = i64::from(Fixed::FRAC_BITS).saturating_sub(magnitude_log2);
     let scale = i64::from(Fixed::FRAC_BITS)
         .max(significant_scale)
         .max(minimum_scale)
         .max(0);
-    let maximum_scale = MAX_I128_MAGNITUDE_LOG2.saturating_sub(magnitude_log2);
+    let maximum_scale = (i64::from(i128::BITS) - 2).saturating_sub(magnitude_log2);
     if scale > maximum_scale {
         return Err(ConstantProjectionError::RepresentationOverflow {
             magnitude_log2,
@@ -466,32 +523,45 @@ fn representation_scale(value: &BigRat) -> Result<u32, ConstantProjectionError> 
 }
 
 fn project_fundamental(constant: &Fundamental) -> Result<ScaledConstant, ConstantProjectionError> {
-    let value = BigRat::from_decimal_str(constant.value).map_err(|detail| {
-        ConstantProjectionError::InvalidMagnitude {
-            symbol: constant.symbol,
-            detail,
-        }
-    })?;
+    let value =
+        crate::certified_projection::certified_decimal(constant.value).map_err(|detail| {
+            ConstantProjectionError::InvalidMagnitude {
+                symbol: constant.symbol,
+                detail,
+            }
+        })?;
     // Preserve at least the decimal source's last printed place. This derives
     // extra representation bits from the source coordinate itself, so a small
     // root such as m_e is never coarsened beyond its published precision merely
     // because the generic significand floor was lower.
-    let source_ulp = BigRat::decimal_ulp(constant.value).map_err(|detail| {
-        ConstantProjectionError::InvalidMagnitude {
-            symbol: constant.symbol,
-            detail,
-        }
-    })?;
+    let source_ulp =
+        crate::certified_projection::certified_decimal_ulp(constant.value).map_err(|detail| {
+            ConstantProjectionError::InvalidMagnitude {
+                symbol: constant.symbol,
+                detail,
+            }
+        })?;
     let source_scale = 0_i64.max(-source_ulp.floor_log2());
     let scale_bits = representation_scale_at_least(&value, source_scale)?;
-    let bits =
-        value
-            .round_to_scale(scale_bits)
-            .ok_or(ConstantProjectionError::ProjectionOverflow {
+    let certificate =
+        crate::certified_projection::certify_at_scale(constant.value, &[], scale_bits).map_err(
+            |detail| ConstantProjectionError::InvalidMagnitude {
                 symbol: constant.symbol,
-                scale_bits,
-            })?;
-    projected(constant.symbol, bits, scale_bits)
+                detail,
+            },
+        )?;
+    if certificate.magnitude_log2 != value.floor_log2() {
+        return Err(ConstantProjectionError::InvalidMagnitude {
+            symbol: constant.symbol,
+            detail: "certified decimal magnitude bracket differs from scale derivation".to_owned(),
+        });
+    }
+    projected(
+        constant.symbol,
+        certificate.producer_bits,
+        scale_bits,
+        certificate.receipt_sha256,
+    )
 }
 
 fn project_composite(
@@ -499,46 +569,59 @@ fn project_composite(
     fundamentals: &[ScaledConstant],
 ) -> Result<ScaledConstant, ConstantProjectionError> {
     validate_composite_contract(constant)?;
-    // Solve representation scale and transcendental working precision from the
-    // derived value itself. The stored reference decimal is deliberately absent
-    // from this path: it remains an off-path drift oracle, never a value input.
-    let mut magnitude_log2 = 0_i64;
+    // Solve representation scale from the certified whole-expression interval.
+    // The stored reference decimal is deliberately absent from this path: it
+    // remains an off-path drift oracle, never a value input.
     let mut scale_bits = Fixed::FRAC_BITS;
     for _ in 0..4 {
-        let working_digits = crate::compute::working_digits_for_scale(scale_bits, magnitude_log2);
-        let value = evaluate_projected_composite(constant, fundamentals, working_digits)?;
-        let next_magnitude_log2 = value.floor_log2();
-        let next_scale_bits = representation_scale(&value)?;
-        if next_magnitude_log2 == magnitude_log2 && next_scale_bits == scale_bits {
-            let bits = value.round_to_scale(scale_bits).ok_or(
-                ConstantProjectionError::ProjectionOverflow {
-                    symbol: constant.symbol,
-                    scale_bits,
-                },
-            )?;
-
-            // A second, finer transcendental evaluation must produce the same
-            // published bits. This is a validator only; it cannot choose a value.
-            let verification_digits = working_digits.saturating_add(20);
-            let verification =
-                evaluate_projected_composite(constant, fundamentals, verification_digits)?;
-            let verification_bits = verification.round_to_scale(scale_bits).ok_or(
-                ConstantProjectionError::ProjectionOverflow {
-                    symbol: constant.symbol,
-                    scale_bits,
-                },
-            )?;
-            if verification_bits != bits {
-                return Err(ConstantProjectionError::UnstableProjection {
-                    symbol: constant.symbol,
-                    scale_bits,
-                    working_digits,
-                    verification_digits,
-                });
-            }
-            return projected(constant.symbol, bits, scale_bits);
+        let inputs = constant
+            .fundamentals
+            .iter()
+            .map(|symbol| {
+                fundamentals
+                    .iter()
+                    .find(|value| value.symbol() == *symbol)
+                    .copied()
+                    .ok_or(ConstantProjectionError::InvalidMagnitude {
+                        symbol: constant.symbol,
+                        detail: format!("missing projected floor symbol '{symbol}'"),
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let projection_inputs = inputs
+            .iter()
+            .map(|value| {
+                crate::certified_projection::ProjectionInput::new(
+                    value.symbol(),
+                    value.bits(),
+                    value.scale_bits(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let certificate = crate::certified_projection::certify_at_scale(
+            constant.formula,
+            &projection_inputs,
+            scale_bits,
+        )
+        .map_err(|detail| ConstantProjectionError::InvalidMagnitude {
+            symbol: constant.symbol,
+            detail,
+        })?;
+        if !crate::certified_projection::interval_has_stable_magnitude(&certificate) {
+            return Err(ConstantProjectionError::InvalidMagnitude {
+                symbol: constant.symbol,
+                detail: "certified interval does not select one magnitude bracket".to_owned(),
+            });
         }
-        magnitude_log2 = next_magnitude_log2;
+        let next_scale_bits = representation_scale(&certificate.lower)?;
+        if next_scale_bits == scale_bits {
+            return projected(
+                constant.symbol,
+                certificate.producer_bits,
+                scale_bits,
+                certificate.receipt_sha256,
+            );
+        }
         scale_bits = next_scale_bits;
     }
 
@@ -599,45 +682,11 @@ fn validate_composite_contract(constant: &Composite) -> Result<(), ConstantProje
     Ok(())
 }
 
-fn evaluate_projected_composite(
-    constant: &Composite,
-    fundamentals: &[ScaledConstant],
-    working_digits: u32,
-) -> Result<BigRat, ConstantProjectionError> {
-    let resolve = |name: &str| -> Result<BigRat, String> {
-        if name == "pi" {
-            return Ok(crate::compute::pi(working_digits));
-        }
-        if !constant.fundamentals.contains(&name) {
-            return Err(format!(
-                "composite '{}' reads undeclared floor symbol '{name}'",
-                constant.symbol
-            ));
-        }
-        fundamentals
-            .iter()
-            .find(|value| value.symbol == name)
-            .copied()
-            .map(ScaledConstant::exact_rational)
-            .ok_or_else(|| {
-                format!(
-                    "composite '{}' names missing projected floor symbol '{name}'",
-                    constant.symbol
-                )
-            })
-    };
-    crate::compute::evaluate_formula(constant.formula, &resolve).map_err(|detail| {
-        ConstantProjectionError::InvalidMagnitude {
-            symbol: constant.symbol,
-            detail,
-        }
-    })
-}
-
 fn projected(
     symbol: &'static str,
     bits: i128,
     scale_bits: u32,
+    projection_receipt_sha256: [u8; 32],
 ) -> Result<ScaledConstant, ConstantProjectionError> {
     if bits == 0 {
         return Err(ConstantProjectionError::ZeroAfterProjection { symbol });
@@ -646,13 +695,30 @@ fn projected(
         symbol,
         bits,
         scale_bits,
+        projection_receipt_sha256,
     })
+}
+
+fn projection_table_digest(schema: &str, values: &[ScaledConstant]) -> [u8; 32] {
+    let mut hash = Sha256::new();
+    hash.update((schema.len() as u64).to_le_bytes());
+    hash.update(schema.as_bytes());
+    hash.update((values.len() as u64).to_le_bytes());
+    for value in values {
+        hash.update((value.symbol.len() as u64).to_le_bytes());
+        hash.update(value.symbol.as_bytes());
+        hash.update(value.bits.to_le_bytes());
+        hash.update(value.scale_bits.to_le_bytes());
+        hash.update(value.projection_receipt_sha256);
+    }
+    hash.finalize().into()
 }
 
 /// Why the fixed repository constant table could not be projected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConstantProjectionError {
     UnauditedFloor(String),
+    RepresentationPolicy(String),
     InvalidMagnitude {
         symbol: &'static str,
         detail: String,
@@ -684,6 +750,9 @@ impl fmt::Display for ConstantProjectionError {
         match self {
             Self::UnauditedFloor(detail) => {
                 write!(f, "physical magnitudes require the sealed absolute floor: {detail}")
+            }
+            Self::RepresentationPolicy(detail) => {
+                write!(f, "SI representation policy is not independently sealed: {detail}")
             }
             Self::InvalidMagnitude { symbol, detail } => {
                 write!(f, "invalid magnitude for {symbol}: {detail}")
@@ -812,6 +881,16 @@ mod tests {
             magnitudes.atomic_volume_conversion,
         ];
         assert!(values.into_iter().all(|value| value.bits() != 0));
+        assert!(values
+            .into_iter()
+            .all(|value| value.projection_receipt_sha256() != [0; 32]));
+        assert_ne!(magnitudes.aggregate_digest_sha256(), [0; 32]);
+        assert_eq!(
+            magnitudes.aggregate_digest_sha256(),
+            canonical_si_execution_magnitudes()
+                .unwrap()
+                .aggregate_digest_sha256()
+        );
         assert!(magnitudes.planck.scale_bits() > Fixed::FRAC_BITS);
         assert!(magnitudes.electron_mass.scale_bits() > Fixed::FRAC_BITS);
     }

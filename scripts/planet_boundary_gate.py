@@ -101,6 +101,21 @@ RAW_PLANET_MODULES = (
     "stellar_evolution",
 )
 SUBSTRATE_ADAPTER_MODULES = ("absolute_floor",)
+PARKED_ACTIVE_PATH_BRIDGES = frozenset(
+    {
+        (
+            "parked/crates/sim/src/lib.rs",
+            f"crates/planet-substrate/src/{module}.rs",
+        )
+        for module in (*SUBSTRATE_ADAPTER_MODULES, *RAW_PLANET_MODULES)
+    }
+    | {
+        (
+            "parked/crates/gpu/src/lib.rs",
+            "crates/gpu/src/prim.rs",
+        )
+    }
+)
 PLANET_FORBIDDEN_PACKAGES = frozenset(
     {
         "civsim-bio",
@@ -182,6 +197,16 @@ PLANET_FRONT_DOOR_SOURCE_RULES = (
     (
         "raw external substrate import",
         re.compile(r"\bcivsim_(?:physics|materials|world)\s*::"),
+    ),
+    (
+        "raw arithmetic projection ingress",
+        re.compile(
+            r"\bcivsim_units\s*::\s*compute\b|"
+            r"\b(?:CertifiedFormulaInput|CertifiedFormulaProjection|"
+            r"CertifiedPositiveFormulaFactor|certify_formula_at_scale|"
+            r"certify_positive_formula_factor|"
+            r"certify_positive_factored_formula_at_scale)\b"
+        ),
     ),
     (
         "raw Ledger pipeline input",
@@ -608,6 +633,10 @@ VIEWER_SOURCE_RULES = (
 )
 
 _RAW_STRING_START = re.compile(r'(?:b|c)?r(#{0,255})"')
+_PATH_ATTRIBUTE_HEAD = re.compile(r"#\s*\[\s*path\s*=")
+_PATH_ATTRIBUTE = re.compile(
+    r'#\s*\[\s*path\s*=\s*"(?P<path>[^"\r\n]+)"\s*\]', re.MULTILINE
+)
 
 
 class MetadataError(RuntimeError):
@@ -686,6 +715,85 @@ def _display_path(path: pathlib.Path, workspace_root: pathlib.Path) -> str:
         ).as_posix()
     except ValueError:
         return path.resolve(strict=False).as_posix()
+
+
+def _path_attribute_bridge_violations(workspace_root: pathlib.Path) -> list[str]:
+    """Inventory Rust ``#[path]`` edges that cross the parked boundary.
+
+    Cargo metadata cannot see a source file imported with ``#[path]``. Reverse
+    bridges from parked compatibility crates into active source are therefore
+    explicit, exact repository debt. Any new edge, changed target, active-to-
+    parked edge, escape from the workspace, or unparsable path attribute fails
+    closed.
+    """
+
+    violations: list[str] = []
+    parked_root = workspace_root / "parked"
+    active_root = workspace_root / "crates"
+    observed: set[tuple[str, str]] = set()
+
+    scan_roots = ((parked_root, True), (active_root, False))
+    for scan_root, source_is_parked in scan_roots:
+        if not scan_root.is_dir():
+            continue
+        for source in sorted(scan_root.rglob("*.rs")):
+            try:
+                text = _without_rust_comments(source.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError) as error:
+                violations.append(
+                    f"cannot inspect Rust path attributes in "
+                    f"{_display_path(source, workspace_root)}: {error}"
+                )
+                continue
+            heads = list(_PATH_ATTRIBUTE_HEAD.finditer(text))
+            matches = list(_PATH_ATTRIBUTE.finditer(text))
+            if len(heads) != len(matches):
+                violations.append(
+                    "unparsable Rust #[path] attribute in "
+                    f"{_display_path(source, workspace_root)}"
+                )
+                continue
+            for match in matches:
+                target = (source.parent / match.group("path")).resolve(strict=False)
+                source_display = _display_path(source, workspace_root)
+                target_display = _display_path(target, workspace_root)
+                if not _is_under(target, workspace_root):
+                    violations.append(
+                        f"Rust #[path] escapes workspace: {source_display} -> {target_display}"
+                    )
+                    continue
+                if not target.is_file():
+                    violations.append(
+                        "Rust #[path] target is missing: "
+                        f"{source_display} -> {target_display}"
+                    )
+                    continue
+                target_is_parked = _is_under(target, parked_root)
+                if source_is_parked and not target_is_parked:
+                    edge = (source_display, target_display)
+                    observed.add(edge)
+                    if edge not in PARKED_ACTIVE_PATH_BRIDGES:
+                        violations.append(
+                            "unregistered parked-to-active Rust #[path] bridge: "
+                            f"{source_display} -> {target_display}"
+                        )
+                elif not source_is_parked and target_is_parked:
+                    violations.append(
+                        "active-to-parked Rust #[path] bridge is forbidden: "
+                        f"{source_display} -> {target_display}"
+                    )
+
+    expected_for_present_sources = {
+        edge
+        for edge in PARKED_ACTIVE_PATH_BRIDGES
+        if (workspace_root / pathlib.PurePosixPath(edge[0])).is_file()
+    }
+    for source_display, target_display in sorted(expected_for_present_sources - observed):
+        violations.append(
+            "registered parked-to-active Rust #[path] bridge is missing or retargeted: "
+            f"{source_display} -> {target_display}"
+        )
+    return sorted(set(violations))
 
 
 def _named_workspace_member(
@@ -1496,6 +1604,13 @@ def check_manifest(manifest_path: pathlib.Path, *, locked: bool = True) -> list[
                 rules=VIEWER_SOURCE_RULES,
             )
         )
+    raw_workspace_root = metadata.get("workspace_root")
+    if isinstance(raw_workspace_root, str):
+        violations.extend(
+            _path_attribute_bridge_violations(pathlib.Path(raw_workspace_root))
+        )
+    else:
+        violations.append("cargo metadata has no workspace root for Rust #[path] audit")
     return sorted(set(violations))
 
 
@@ -1891,6 +2006,7 @@ pub fn calibrate_stage() {}
 fn run_planet(spec: &PlanetRunSpec, raw: &Ledger) {}
 fn probe(world_ledger: &Ledger, floor: &AbsolutePhysicsFloor) {
     let _: f64 = 0.0;
+    let _ = civsim_units::compute::certify_formula_at_scale("1", &[], 32);
     let _ = load_world_ledger("world.toml");
     let _ = WorldProfile::from_path("profile.toml");
     let _ = WorldManifest::load("manifest.toml");
@@ -2172,6 +2288,54 @@ fn probe() {
                 + ", ".join(missing_viewer_rules)
             )
 
+        path_bridge_root = fixture_root / "path-attribute-bridges"
+        _write(
+            path_bridge_root / "crates" / "active" / "src" / "shared.rs",
+            "pub fn active_fixture() {}\n",
+        )
+        _write(
+            path_bridge_root / "parked" / "bridge" / "src" / "lib.rs",
+            '#[path = "../../../crates/active/src/shared.rs"]\nmod shared;\n',
+        )
+        path_bridge_violations = _path_attribute_bridge_violations(path_bridge_root)
+        if not any(
+            "unregistered parked-to-active Rust #[path] bridge" in violation
+            for violation in path_bridge_violations
+        ):
+            failures.append(
+                "parked-to-active #[path] fixture was not convicted: "
+                + "; ".join(path_bridge_violations)
+            )
+        _write(
+            path_bridge_root / "crates" / "active" / "src" / "reverse.rs",
+            '#[path = "../../../parked/bridge/src/lib.rs"]\nmod parked;\n',
+        )
+        reverse_bridge_violations = _path_attribute_bridge_violations(path_bridge_root)
+        if not any(
+            "active-to-parked Rust #[path] bridge is forbidden" in violation
+            for violation in reverse_bridge_violations
+        ):
+            failures.append(
+                "active-to-parked #[path] fixture was not convicted: "
+                + "; ".join(reverse_bridge_violations)
+            )
+        missing_bridge_root = fixture_root / "missing-path-attribute-target"
+        _write(
+            missing_bridge_root / "parked" / "crates" / "gpu" / "src" / "lib.rs",
+            '#[path = "../../../../crates/gpu/src/prim.rs"]\nmod prim;\n',
+        )
+        missing_bridge_violations = _path_attribute_bridge_violations(
+            missing_bridge_root
+        )
+        if not any(
+            "Rust #[path] target is missing" in violation
+            for violation in missing_bridge_violations
+        ):
+            failures.append(
+                "missing #[path] target fixture was not convicted: "
+                + "; ".join(missing_bridge_violations)
+            )
+
     if failures:
         print("planet boundary gate self-test: FAIL")
         for failure in failures:
@@ -2181,7 +2345,8 @@ fn probe() {
         "planet boundary gate self-test: PASS "
         "(ledger value authority, private active-candidate substrate, typed-adapter-only canonical "
         "front door, integer-only canonical arithmetic, generic floor lookup rejection, viewer "
-        "dependency, immutable-observation source, and alien-default canaries exercised)"
+        "dependency, immutable-observation source, explicit parked path bridges, and alien-default "
+        "canaries exercised)"
     )
     return 0
 

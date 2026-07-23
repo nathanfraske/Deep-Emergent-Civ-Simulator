@@ -15,9 +15,17 @@ version.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[features]
+# CUDA is the canonical production backend and remains part of every ordinary
+# build. The independent CPU and Vulkan code generators are evidence backends:
+# CI enables them only in their sparse scheduled or hardware-specific lanes.
+default = []
+cpu-backend = ["cubecl/cpu"]
+vulkan-backend = ["cubecl/vulkan"]
+
 [dependencies]
 civsim-core = { path = "../core" }
-cubecl = { version = "0.10", features = ["cuda", "cpu", "vulkan"] }
+cubecl = { version = "0.10", features = ["cuda"] }
 
 [lints.clippy]
 # R-CANON-WALK is scoped to the canonical tick-state crates (core, sim, world);

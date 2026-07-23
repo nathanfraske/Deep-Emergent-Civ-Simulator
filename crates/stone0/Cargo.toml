@@ -2,7 +2,7 @@
 # Licensed under the Apache License, Version 2.0; see LICENSE.
 [package]
 name = "civsim-stone0"
-description = "Q1 Stone 0: the local-firing provenance gate. A dependency-free enforcement gate that runs the canonical Python gates as a violation predicate, checks a human-password override against the local secrets directory, and scans the tracked tree for laundered credentials, retired tombstone phrases, and a baked-in override. Fails OPEN on an unavailable interpreter or repository service and CLOSED on a positive detection. Wired into the canonical planet build and the parked compatibility runner."
+description = "Q1 Stone 0: a dependency-free local provenance gate that runs canonical Python checks, validates the scoped owner override, and scans for laundered credentials and retired phrases. Canonical authority failures fail closed; repository-service failures remain visible warnings. One shared build anchor guards the canonical planet graph, while the parked compatibility runner invokes the gate directly."
 authors.workspace = true
 license.workspace = true
 edition.workspace = true

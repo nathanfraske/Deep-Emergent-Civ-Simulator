@@ -4,7 +4,7 @@
 # Biology, civilization, compose, scenarios, their mixed foundation, and the old
 # causal runner live only in the nested parked workspace.
 [workspace]
-members = ["crates/core", "crates/ledger", "crates/physics", "crates/units", "crates/materials", "crates/planet-substrate", "crates/planet", "crates/world", "crates/viewer", "crates/gpu", "crates/stone0"]
+members = ["crates/core", "crates/ledger", "crates/physics", "crates/units", "crates/materials", "crates/planet-substrate", "crates/planet", "crates/world", "crates/viewer", "crates/gpu", "crates/stone0", "crates/stone0-build"]
 exclude = ["parked"]
 # crates/gpu carries the heavy CubeCL dependency and needs a CUDA device at run time, so it is kept
 # out of the default set: a plain `cargo build`/`cargo test` stays lean and CUDA-free, and the GPU

@@ -354,7 +354,7 @@ version = "0.1.0"
 dependencies = [
  "civsim-core",
  "civsim-ledger",
- "civsim-stone0",
+ "civsim-stone0-build",
  "civsim-units",
 ]
 
@@ -365,7 +365,7 @@ dependencies = [
  "civsim-core",
  "civsim-materials",
  "civsim-physics",
- "civsim-stone0",
+ "civsim-stone0-build",
  "civsim-units",
  "civsim-world",
 ]
@@ -373,6 +373,13 @@ dependencies = [
 [[package]]
 name = "civsim-stone0"
 version = "0.1.0"
+
+[[package]]
+name = "civsim-stone0-build"
+version = "0.1.0"
+dependencies = [
+ "civsim-stone0",
+]
 
 [[package]]
 name = "civsim-units"

@@ -167,7 +167,7 @@ id = "conductivity.kappa_298.fayalite"
 quantity = "3.161 W/(m*K) at 300 K, band 0.045"
 primary = ["mixing_henke2016"]
 single_witness_reason = "ONE WITNESS, same provenance and same limit as forsterite: one needle-probe determination via Henke et al. 2016, with no second independent determination vendored."
-anchor = "Henke et al. 2016 Table 2, row 'fayalite Fe2SiO4, A 203.78, rho 4.66, K 3.161', note (a) = Horai and Simmons 1969. SECONDARY: the same paper's equation (8) at x = 1 gives K(Fa100) = 5.3548 - 5.7704 + 3.6216 = 3.2060, from the independent Horai and Baldridge (1972) data. Band 0.045 is the gap. A DEFECT IN THE SOURCE ROW, recorded rather than smoothed: the density 4.66 g/cm3 in that same table sits well above the accepted fayalite density near 4.39, so that column is wrong there; only the conductivity is read from this row."
+anchor = "Henke et al. 2016 Table 2, row 'fayalite Fe2SiO4, A 203.78, rho 4.66, K 3.161', note (a) = Horai and Simmons 1969. SECONDARY: the same paper's equation (8) at x = 1 gives K(Fa100) = 5.3548 - 5.7704 + 3.6216 = 3.2060, from the independent Horai and Baldridge (1972) data. Band 0.045 is the gap. The density printed in that row differs from the comparison value used elsewhere. Only conductivity is consumed, and the neutral density question is registered in sources/external_claims.toml without an external correctness conclusion."
 channel = "T"
 scope = "ambient pure end-member Fe2SiO4"
 

@@ -12,20 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Local-firing Stone 0 guard for the canonical planet front door.
+//! Link the canonical planet front door to the shared Stone 0 build guard.
 //!
-//! An unqualified canonical Cargo command compiles `civsim-planet`, so this build
-//! script makes the repository's authoritative provenance suite part of that
-//! path. It emits no configuration or generated simulation input.
+//! The common build dependency runs the repository-wide guard once per Cargo
+//! build graph. This consumer sentinel makes removal of that dependency a
+//! compile failure and emits no simulation input.
 
 fn main() {
-    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    civsim_stone0::emit_cargo_rerun_inputs(&repo_root);
-
-    let code = civsim_stone0::run(civsim_stone0::Mode::Local);
-    if code != 0 {
-        panic!(
-            "Stone 0 blocked the canonical planet build. Resolve the reported provenance finding, or obtain the current one-command owner override out of band. Never write that override into the repository."
-        );
-    }
+    civsim_stone0_build::assert_guard_linked();
 }

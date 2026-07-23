@@ -73,7 +73,11 @@ the causal bitstream.
    The gas constant and Stefan-Boltzmann projections were influenced by
    parallel reference decimals. Composite evaluation now consumes only the
    exact rational values represented by the published projected inputs. A
-   higher working precision must produce the same output bits.
+   recursive-descent producer and an independently written shunting-yard
+   watchdog enclose the whole formula with exact rational intervals. They emit
+   only when both Machin-series paths select one magnitude bracket and the same
+   round-half-even integer. A finer approximation agreeing by coincidence is
+   no longer treated as a proof of correct rounding.
 3. **A measured source decimal was being represented too coarsely.** Floor
    projection now preserves at least the source decimal's last stated place.
    Each `[M]` transcript record carries the source identifier, SHA-256,
@@ -203,9 +207,12 @@ the causal bitstream.
     pin.** The value-opaque singleton checked independent value and receipt
     registries, but a coordinated edit to both static tables could project
     without proving the final binding. `verify_absolute_physics_floor` now
-    requires `civsim.units.physical-floor-authority-binding.v1` before comparing
-    or exposing execution magnitudes. The capability remains private and does
-    not accept caller values.
+    requires `civsim.units.physical-floor-authority-binding.v3` before comparing
+    or exposing execution magnitudes. The v3 seal binds tier and provenance for
+    every physical admission, the independent
+    `civsim.units.floor-catalog-admission-pair.v1` receipt, and the paired exact
+    fixed-math table receipt. The capability remains private and does not accept
+    caller values.
 28. **Build-gate authority failures could be overrideable or skipped.** Stone 0
     now treats a missing runner, unavailable interpreter, runner crash,
     unrecognized exit, caller-selected override trust path, and every unmarked
@@ -258,6 +265,72 @@ the causal bitstream.
     constructors or physical bindings, its resolver returns `None`, and no
     production caller exists. The repair is therefore byte-neutral and does not
     claim a derived species registry or close Stage 1.
+33. **The floor's declared Pi budgets were sealed but not independently
+    proved.** The existing exact-rational RREF producer now agrees with a
+    separately implemented fraction-free integer checker. Their receipt binds
+    the ordered matrices, phenomenon membership, residual slots, declared
+    budgets, ranks, nullity, bases, algorithm identities, and mutation
+    canaries. The physical-floor v3 authority binding includes that agreement.
+34. **Mechanical checkers could still define the claims they checked.** A
+    closed authority inventory now distinguishes active paired authority,
+    blocked authority, and non-authoritative diagnostics. A schema-first
+    producer and profile-first watchdog independently pin every complete row
+    and its semantic closure. Stone 0 pins the exact gate blocks and also runs
+    the authority inventory, build-wiring, fixed-math, and external-claim gates
+    directly, so the declarative runner cannot suppress its own cross-checkers.
+35. **Formula precision knobs and final-value spot checks did not certify the
+    selected integer.** Recursive-descent and shunting-yard implementations now
+    evaluate one resource-bounded exact interval claim and emit only when both
+    select the same round-half-even terminal integer. Opaque invariant factors
+    carry their own receipt and two independent outer bindings to the terminal
+    projection. Byte, token, nesting, decimal, exponent, coordinate, and
+    intermediate-rational limits refuse oversized formulas before expansion.
+36. **Canonical path scans could miss source included through `#[path]`.** The
+    planet boundary gate now resolves explicit path bridges, scans their source,
+    and exercises nested, parked, and hostile path canaries. It also rejects
+    raw arithmetic projection APIs in canonical planet source because exact
+    formula coordinates prove arithmetic, not physical ancestry.
+37. **Exact Q32.32 transcendental tables could drift behind deterministic
+    tests.** Two independent scripts derive and bind Pi, half-Pi, log-two,
+    inverse-log-two, every CORDIC angle, inverse gain, order, and occurrence in
+    the two canonical CPU and GPU implementation files. That narrow table claim
+    is active and bound into the floor; whole-domain error, rails, iteration
+    semantics, backend parity, and vendor execution remain separately blocked.
+38. **The SI table aggregate was named like an authority receipt.** It is now an
+    `aggregate_digest_sha256` drift diagnostic. SI execution-table completeness,
+    ancestry, and scale policy remain blocked until their own independent
+    inventories and aggregate receipt checkers exist.
+39. **An adverse external claim or author contact had no fail-closed release
+    boundary.** The new governance pair requires exact text and destination,
+    five independently connected evidence lineages beyond the subject, a
+    private dossier digest, an unrevoked human signature, scope and expiry, and
+    independent implementation agreement. No release row exists, so the
+    repository currently authorizes no adverse publication or contact.
+40. **Certified formula proofs were repeated inside iterative retained stellar
+    and disk tests.** The invariant Pi-bearing coefficients are now certified
+    once and consumed through factored terminal receipts; the fully invariant
+    Kepler reference period is cached after its certified derivation. Direct
+    whole-formula confirmation preserves every prior Q32.32 bit. The 28 giant
+    tests fell from a stopped run with one tail past 25 minutes to 272 seconds;
+    two older integration tests still exceed 60 seconds and remain profiling
+    debt rather than authority shortcuts.
+41. **Concurrent gate runners could stampede one uncached verdict.** Two Cargo
+    build processes could compute the same pre-run snapshot, miss the same
+    receipt, and launch duplicate canonical work. One duplicated planet-boundary
+    worker exhausted its supervisor budget during a fast check. Every live gate
+    now takes one portable, bounded, fail-closed process lock. Content-hash
+    followers recompute the snapshot and may consume the leader's receipt only
+    under that lock; uncached gates serialize and still rerun. Independent
+    two-process canaries prove both behaviors, and hostile link state refuses.
+42. **Two guarded Cargo packages each owned a repository-wide Stone 0 run.**
+    `planet` and `planet-substrate` could therefore duplicate the complete
+    provenance suite in one Cargo graph. The new build-only
+    `civsim-stone0-build` anchor owns the run and writes a compile-time marker
+    only after success; both packages depend on that marker rather than calling
+    the gate. A manifest parser and a separately implemented raw scanner agree
+    on the exact build-only topology, marker ordering, consumer sentinels, and
+    absence from runtime and aggregate package surfaces. This changes
+    verification ownership only and cannot enter simulation state.
 
 The resulting projected composite values are replayable from the transcript:
 
@@ -290,8 +363,8 @@ Two direct no-argument runs produced:
 - zero stderr bytes;
 - six transcript events;
 - no `[W]`, no `[X]`, and no snapshot;
-- byte-identical stdout of `367,626` bytes, SHA-256
-  `ecb2ea0c0aeffe5b487f84d5de1a61d9797fa2e6d6ee6a26b08df980b9ddf392`;
+- byte-identical stdout of `367,628` bytes, SHA-256
+  `53936f040ae40169654620d577e4e10b6be23ad0ab09bae2ab5981f4f44bd1d1`;
 - receipt `civsim.planet.run.v11` and transcript schema major `9`;
 - refusal `stellar_birth.realization_measure` at Stage 1.
 
@@ -334,15 +407,19 @@ Focused warnings-denied Clippy, 71 planet library tests, eight CLI tests, three
 viewer tests, and doctests cover the typed views, duplicated refusal wire,
 deterministic output, canonical versions, input refusal, observer projection,
 and the non-admitting species frontier. Formatting, diff hygiene, and the
-strengthened planet boundary self-test are clean. The complete Linux
-`check-pr` parity recipe passes in 793.6 seconds, including hooks and canaries,
-every declarative gate, ledger regeneration, the ten-package all-target suite,
-deterministic GPU integer and no-float checks, available-backend parity,
-warnings-denied Clippy, Rustdoc, and doctests.
+strengthened planet boundary self-test are clean. After the independent
+authority, fixed-math, external-claim, process-lock, and Stone 0 wiring repairs,
+the complete Linux `check-pr` parity recipe passes in 1,178.5 seconds under
+concurrent external routing load. It includes hooks and canaries, all 29
+declarative gates, ledger regeneration, the all-target suite, deterministic GPU
+integer and no-float checks, available-backend parity, warnings-denied Clippy,
+Rustdoc, and doctests. A warm `check-fast` passes in 78.3 seconds. A fresh
+isolated Cargo target proves exactly one shared Stone 0 anchor invocation and
+one lightweight sentinel for each guarded consumer.
 
 Clean and hostile-environment direct binary runs confirm exit `2`, zero stderr
-bytes, `367,626` stdout bytes, byte equality, and SHA-256
-`ecb2ea0c0aeffe5b487f84d5de1a61d9797fa2e6d6ee6a26b08df980b9ddf392`.
+bytes, `367,628` stdout bytes, byte equality, and SHA-256
+`53936f040ae40169654620d577e4e10b6be23ad0ab09bae2ab5981f4f44bd1d1`.
 No earlier receipt or inventory pin is evidence for the v11 result.
 
 One bounded blind-generalizer pass over the species-analysis and observation

@@ -1,0 +1,245 @@
+[inventory]
+schema = 3
+closed_world = true
+rule = "docs/working/INDEPENDENT_AUTHORITY_RULE.md"
+description = "Closed inventory of authority-bearing mechanisms and explicitly non-authoritative diagnostics."
+
+[[mechanism]]
+id = "core.deterministic-math-kernels"
+kind = "authority"
+domain = "scientific"
+status = "blocked"
+claim = "The CPU fixed-point math implementation and its GPU transcendental copy implement one complete deterministic Q32.32 function table with identical coefficients, domains, rails, rounding, and output bits."
+producer_path = "crates/core/src/fixed.rs"
+refusal_path = "crates/gpu/src/transcendental.rs"
+activation_guard = "The constant table now has an independent exact receipt, but sampled bit-identity tests do not prove approximation error, domain edges, saturation rails, iteration semantics, or whole-domain CPU and GPU output identity."
+open_cross_checker_requirements = ["independent certified approximation bound for every kernel and declared domain", "independent derivation and verification of every iteration count, domain edge, saturation rail, and rounding rule", "whole-domain proof or exhaustive partition receipt over every Q32.32 input and output contract", "CPU and GPU implementation digests plus vendor execution evidence bound to the same receipt", "mutation canaries for domain, rail, iteration, rounding, adapter, and backend implementation drift"]
+owner_boundary = "The pair may prove deterministic equivalence and approximation bounds over the declared table. The owner reviews whether each mathematical approximation and domain is physically sufficient for its consumers."
+semantic_closure = ["crates/core/src/fixed.rs", "crates/core/src/lib.rs", "crates/core/tests/transcendentals.rs", "crates/gpu/src/transcendental.rs", "crates/gpu/src/prim.rs", "crates/gpu/src/stage0.rs", "crates/gpu/src/lib.rs", "crates/gpu/tests/transcendental_gate.rs", "scripts/fixed_math_authority_gate.py", "scripts/fixed_math_authority_watchdog.py", "crates/units/data/fixed_math_authority_receipt.json"]
+
+[[mechanism]]
+id = "core.deterministic-math-table"
+kind = "authority"
+domain = "scientific"
+status = "active"
+claim = "Every occurrence in the two bound canonical implementation files of the Q32.32 Pi, half-Pi, natural-log-two, inverse-log-two, 32-member CORDIC angle, and CORDIC inverse-gain constants equals the independently derived exact-rational interval result in one ordered CPU and GPU source receipt."
+producer_path = "scripts/fixed_math_authority_gate.py"
+producer_implementation = "civsim.fixed-math.machin-atanh-interval-producer.v1"
+checker_path = "scripts/fixed_math_authority_watchdog.py"
+checker_implementation = "civsim.fixed-math.split-identity-square-proof-watchdog.v1"
+receipt_schema = "civsim.core.fixed-math-authority-pair.v1"
+shared_semantic_helpers = []
+shared_primitives = ["canonical CPU and GPU source bytes", "exact rational arithmetic", "round-half-even Q32.32", "SHA-256"]
+canaries = ["one-bit constant mutation", "atan member omission", "atan member reordering", "GPU mirror drift", "source digest mutation", "claim id mutation", "schema mutation", "receipt byte mutation", "derivation formula mutation"]
+owner_boundary = "The pair proves the identity, order, exact derivation, occurrence coverage, and source binding of the constant table. It does not prove kernel approximation error, domain sufficiency, saturation rails, whole-domain CPU and GPU equivalence, or vendor execution."
+semantic_closure = ["scripts/fixed_math_authority_gate.py", "scripts/fixed_math_authority_watchdog.py", "crates/units/data/fixed_math_authority_receipt.json", "crates/core/src/fixed.rs", "crates/gpu/src/transcendental.rs"]
+
+[[mechanism]]
+id = "floor.catalog-admission"
+kind = "authority"
+domain = "scientific"
+status = "active"
+claim = "Only the exact repository-owned ordered floor catalog, tier/provenance classifications, and complete exhaustion-receipt bytes can authorize physical-floor magnitudes."
+producer_path = "crates/ledger/src/admission.rs"
+producer_implementation = "civsim.ledger.generic-floor-admission.v1"
+checker_path = "crates/units/src/floor_admission_watchdog.rs"
+checker_implementation = "civsim.units.floor-catalog-admission-watchdog.v1"
+receipt_schema = "civsim.units.floor-catalog-admission-pair.v1"
+shared_semantic_helpers = []
+shared_primitives = ["canonical length-prefixed input bytes", "UTF-8", "SHA-256"]
+canaries = ["changed tier", "changed provenance", "changed catalog member", "missing receipt semantics", "changed nonempty receipt authority"]
+owner_boundary = "The pair proves exact repository membership, classification, receipt structure, and byte identity. Scientific sufficiency of derive-first exhaustion, Gap Law, Chaos Protocol, and Residual Law evidence remains owner-reviewed."
+semantic_closure = ["crates/ledger/src/admission.rs", "crates/units/src/floor_admission_watchdog.rs", "crates/units/src/physics_floor.rs"]
+
+[[mechanism]]
+id = "floor.pi-budget"
+kind = "authority"
+domain = "scientific"
+status = "active"
+claim = "Each floor phenomenon's declared Buckingham Pi budget equals the exact nullity of its ordered SI variable matrix."
+producer_path = "crates/units/src/dimensional_analysis.rs"
+producer_implementation = "civsim.units.exact-rational-rref.v1"
+checker_path = "crates/units/src/authority_watchdog.rs"
+checker_implementation = "civsim.units.fraction-free-rank.v1"
+receipt_schema = "civsim.units.pi-budget-watchdog.v1"
+shared_semantic_helpers = []
+shared_primitives = ["ordered SI matrix bytes", "checked i128 arithmetic", "SHA-256"]
+canaries = ["changed dimension exponent", "raised budget", "omitted variable", "duplicate variable", "reordered variables", "changed phenomenon", "duplicate residual slot"]
+owner_boundary = "Buckingham Pi proves nullity over the declared variables, not completeness or physical relevance of that variable set."
+semantic_closure = ["crates/units/src/dimensional_analysis.rs", "crates/units/src/authority_watchdog.rs", "crates/units/src/physics_floor.rs"]
+
+[[mechanism]]
+id = "governance.authority-inventory"
+kind = "authority"
+domain = "governance"
+status = "active"
+claim = "The closed authority inventory, every mechanism profile, and every status transition are accepted only when two independently coded validators emit the same receipt over the exact registry and referenced files."
+producer_path = "scripts/authority_watchdog_gate.py"
+producer_implementation = "civsim.authority-inventory.schema-first-producer.v2"
+checker_path = "scripts/authority_registry_watchdog.py"
+checker_implementation = "civsim.authority-inventory.profile-first-watchdog.v2"
+receipt_schema = "civsim.authority-inventory-agreement.v2"
+shared_semantic_helpers = []
+shared_primitives = ["exact registry bytes", "Python standard-library TOML syntax parser", "UTF-8", "SHA-256", "canonical JSON receipt bytes", "filesystem file reads"]
+canaries = ["truncated inventory", "authority reclassification", "diagnostic authority mint", "registry input mutation", "receipt mutation", "missing referenced path", "same implementation identity", "claim broadening", "implementation substitution", "schema substitution", "canary substitution", "semantic closure adapter mutation", "semantic closure orchestrator mutation", "semantic closure omission"]
+owner_boundary = "The pair proves the reviewed closed inventory and structural profiles against exact repository bytes. Source review and the owner remain responsible for discovering an authority-bearing mechanism that was never enrolled."
+semantic_closure = ["scripts/authority_watchdog_gate.py", "scripts/authority_registry_watchdog.py", "scripts/authority_watchdog.toml", "scripts/gates.toml", "scripts/gate_runner.py", "crates/stone0/src/lib.rs", "docs/working/INDEPENDENT_AUTHORITY_RULE.md"]
+
+[[mechanism]]
+id = "governance.external-adverse-claim-release"
+kind = "authority"
+domain = "governance"
+status = "active"
+claim = "External adverse publication or author contact is released only for exact scoped bytes after five independent evidence components and a human signature."
+producer_path = "scripts/external_claim_gate.py"
+producer_implementation = "civsim.external-claim.union-find-producer.v1"
+checker_path = "scripts/external_claim_watchdog.py"
+checker_implementation = "civsim.external-claim.graph-traversal-watchdog.v1"
+receipt_schema = "civsim.external-adverse-claim-gate.v1"
+shared_semantic_helpers = []
+shared_primitives = ["canonical TOML input", "canonical JSON receipt bytes", "SHA-256", "OpenSSH signature verification"]
+canaries = ["shared dataset lineage", "subject-lineage alias", "one-byte text change", "destination substitution", "action substitution", "revoked approval", "unknown signer", "single-witness bypass"]
+owner_boundary = "The mechanical pair verifies declared ancestry and exact authorization bytes; the owner judges scientific independence and whether any claim is warranted."
+semantic_closure = ["scripts/external_claim_gate.py", "scripts/external_claim_watchdog.py", "sources/external_claims.toml", "sources/external_claim_approvers", "sources/external_claim_revocations.toml", "docs/working/EXTERNAL_ADVERSE_CLAIM_RULE.md", "scripts/gates.toml"]
+
+[[mechanism]]
+id = "governance.stone0-build-wiring"
+kind = "authority"
+domain = "governance"
+status = "active"
+claim = "Every guarded canonical Cargo graph executes one shared fail-closed Stone 0 build owner before either planet consumer can compile."
+producer_path = "scripts/stone0_build_wiring_gate.py"
+producer_implementation = "civsim.stone0.toml-graph-producer.v1"
+checker_path = "scripts/stone0_build_wiring_watchdog.py"
+checker_implementation = "civsim.stone0.section-scan-watchdog.v1"
+receipt_schema = "civsim.stone0.build-wiring-pair.v1"
+shared_semantic_helpers = []
+shared_primitives = ["canonical repository file bytes", "Cargo manifest syntax", "UTF-8", "SHA-256", "canonical JSON receipt bytes"]
+canaries = ["workspace member substitution", "anchor dependency substitution", "guard-result bypass", "marker environment substitution", "consumer sentinel substitution", "receipt disagreement"]
+owner_boundary = "The pair proves the reviewed Cargo topology and generated-marker order. Cargo remains responsible for build-unit scheduling and freshness, while the owner reviews changes to the bootstrap files."
+semantic_closure = ["scripts/stone0_build_wiring_gate.py", "scripts/stone0_build_wiring_watchdog.py", "scripts/gates.toml", "scripts/gate_runner.py", "Cargo.toml", "justfile", "crates/stone0-build/Cargo.toml", "crates/stone0-build/build.rs", "crates/stone0-build/src/lib.rs", "crates/stone0/src/lib.rs", "crates/planet/Cargo.toml", "crates/planet/build.rs", "crates/planet-substrate/Cargo.toml", "crates/planet-substrate/build.rs"]
+
+[[mechanism]]
+id = "planet.completed-snapshot"
+kind = "authority"
+domain = "scientific"
+status = "blocked"
+claim = "A completed immutable snapshot is authorized only by independent replay agreement over a fully closed seven-stage transcript."
+producer_path = "crates/planet/src/canonical/receipt.rs"
+refusal_path = "crates/planet/src/canonical/snapshot.rs"
+activation_guard = "PlanetSnapshot::from_complete returns None for the current refusal and no production completion path is reachable."
+open_cross_checker_requirements = ["independent declarative transcript replay", "stage artifact digest coverage", "completion mutation canaries"]
+owner_boundary = "The owner reviews whether the seven-stage completion obligations cover every causal artifact required for observation."
+semantic_closure = ["crates/planet/src/canonical/receipt.rs", "crates/planet/src/canonical/snapshot.rs", "crates/planet/src/canonical/transcript.rs", "crates/planet/src/canonical/pipeline.rs", "crates/planet/src/canonical/observation.rs", "crates/planet/src/canonical/stage.rs"]
+
+[[mechanism]]
+id = "planet.species-derivation-frontier"
+kind = "diagnostic"
+status = "diagnostic"
+observation = "Two separately coded traversals report the current open species proof frontier, but both consume repository-authored frontier material and therefore provide a checked diagnostic rather than independent scientific authority."
+authority_effect = "none"
+diagnostic_producer_path = "crates/planet/src/canonical/stellar_birth_species/authority_analysis/producer.rs"
+diagnostic_producer_implementation = "civsim.planet.stellar-birth-species-frontier-producer.v1"
+diagnostic_checker_path = "crates/planet/src/canonical/stellar_birth_species/authority_analysis/watchdog.rs"
+diagnostic_checker_implementation = "civsim.planet.stellar-birth-species-derivation-watchdog.v2"
+diagnostic_schema = "civsim.planet.stellar-birth-species-derivation-analysis.v1"
+shared_material = ["audited floor view", "canonical structure schema", "ordered proof identifiers", "repository-authored open frontier"]
+canaries = ["changed floor anchor", "changed derivation attempt", "changed open proof", "changed non-admitting status"]
+non_authority_guard = "The analysis carries closure_effect=none, coverage_claim=false, zero members, zero value payloads, and no residual slot; its agreement cannot mint a proof token or close Stage 1."
+owner_boundary = "The diagnostic reports a refusal frontier only. Physical species membership and completeness require a future authority pair over independently derived inputs."
+semantic_closure = ["crates/planet/src/canonical/stellar_birth_species/authority_analysis/producer.rs", "crates/planet/src/canonical/stellar_birth_species/authority_analysis/watchdog.rs", "crates/planet/src/canonical/stellar_birth_species/authority_analysis/mod.rs", "crates/planet/src/canonical/stellar_birth_species/authority_analysis/wire.rs", "crates/planet/src/canonical/stellar_birth_species.rs", "crates/planet/src/canonical/stellar_birth_measure.rs", "crates/planet/src/canonical/stellar_birth_artifacts.rs", "crates/planet/src/canonical/stellar_birth_structure/mod.rs"]
+
+[[mechanism]]
+id = "planet.species-state-support"
+kind = "authority"
+domain = "scientific"
+status = "blocked"
+claim = "A species-state support registry is complete, physically admitted, normalized, and valid for the selected stellar state."
+producer_path = "crates/planet/src/canonical/stellar_birth_species.rs"
+refusal_path = "crates/planet/src/canonical/stellar_birth_measure.rs"
+activation_guard = "The support verifier is unreachable from production and the joint-measure leaf remains open."
+open_cross_checker_requirements = ["independent identity encoding", "independent full-registry coverage", "independent simplex and weighted-mean check", "state applicability proof"]
+owner_boundary = "The owner reviews physical species membership, state coverage, and admitted evidence ancestry."
+semantic_closure = ["crates/planet/src/canonical/stellar_birth_species.rs", "crates/planet/src/canonical/stellar_birth_measure.rs", "crates/planet/src/canonical/stellar_birth_structure/mod.rs", "crates/planet/src/canonical/stellar_birth_structure/species_registry.rs", "crates/planet/src/canonical/stellar_birth_structure/stellar_state.rs"]
+
+[[mechanism]]
+id = "planet.stage1-dimensional-census"
+kind = "authority"
+domain = "scientific"
+status = "blocked"
+claim = "The Stage 1 dimensional census reports correct ranks and complete phenomenon coverage without claiming physical closure."
+producer_path = "crates/planet/src/canonical/stellar_birth_dimensions.rs"
+refusal_path = "crates/planet/src/canonical/stellar_birth_measure.rs"
+activation_guard = "The census carries closure_effect=none and coverage_claim=false and cannot mint a Stage 1 proof."
+open_cross_checker_requirements = ["independent exact rank and nullity", "separate phenomenon coverage authority", "coverage mutation canaries"]
+owner_boundary = "The owner reviews whether the census variable and phenomenon universe is complete."
+semantic_closure = ["crates/planet/src/canonical/stellar_birth_dimensions.rs", "crates/planet/src/canonical/stellar_birth_measure.rs", "crates/planet/src/canonical/requirement_analysis.rs", "crates/planet/src/canonical/stellar_birth_structure/mod.rs"]
+
+[[mechanism]]
+id = "planet.stellar-birth-proof-tokens"
+kind = "authority"
+domain = "scientific"
+status = "blocked"
+claim = "Joint-measure and realization-coordinate proof tokens exist only when each scoped producer and cross-checker agree."
+producer_path = "crates/planet/src/canonical/stellar_birth_artifacts.rs"
+refusal_path = "crates/planet/src/canonical/stellar_birth_measure.rs"
+activation_guard = "Both opaque production proof tokens are absent and the evaluator returns the exact two-leaf refusal frontier."
+open_cross_checker_requirements = ["joint-measure checker receipt", "coordinate-law checker receipt", "input-scoped token minting"]
+owner_boundary = "The owner reviews measure support, coordinate neutrality, and the absence of authored realization targets."
+semantic_closure = ["crates/planet/src/canonical/stellar_birth_artifacts.rs", "crates/planet/src/canonical/stellar_birth_measure.rs", "crates/planet/src/canonical/star_disk_system.rs", "crates/planet/src/canonical/pipeline.rs", "crates/planet/src/canonical/requirement_analysis.rs"]
+
+[[mechanism]]
+id = "units.certified-formula-projection"
+kind = "authority"
+domain = "scientific"
+status = "active"
+claim = "For one resource-bounded canonical formula, exact ordered point or closed-interval coordinates, and one bounded target binary scale, two independent interval evaluators authorize only one round-half-even integer; an opaque normalized invariant factor may affect production only when its entire certified cell selects that same terminal integer and two independent outer-binding implementations agree."
+producer_path = "crates/units/src/certified_projection/producer.rs"
+producer_implementation = "civsim.units.recursive-descent-alternating-interval.v2; civsim.units.factored-binding-stream.v1"
+checker_path = "crates/units/src/certified_projection/watchdog.rs"
+checker_implementation = "civsim.units.shunting-yard-consecutive-interval.v2; civsim.units.factored-binding-frame.v1"
+receipt_schema = "civsim.units.certified-formula-projection.v3; civsim.units.certified-factored-formula-projection.v2"
+shared_semantic_helpers = []
+shared_primitives = ["canonical formula and point-or-interval input bytes", "closed representation-resource envelope", "exact BigRat arithmetic", "round-half-even", "SHA-256"]
+canaries = ["formula substitution", "input-bit substitution", "input-interval substitution", "target-scale substitution", "signed-exponent substitution", "endpoint substitution", "result substitution", "outer-binding field substitution", "rounding midpoint", "cancellation", "reciprocal", "pi fifth power", "coefficient-cell boundary", "zero-crossing denominator", "oversized formula", "oversized decimal", "oversized coordinate exponent", "oversized power exponent", "oversized intermediate", "grouping-depth overflow", "unary-depth overflow", "opaque-factor formatting"]
+owner_boundary = "The pair proves one arithmetic projection over supplied exact coordinates and can prove a terminal result for every value in a certified factor cell. It does not admit those coordinates, expose the normalized factor as a physical output, prove a formula is physically correct, select a table-wide representation policy, or prove a table is complete. The planet boundary gate forbids the raw arithmetic API in canonical planet source."
+semantic_closure = ["crates/units/src/certified_projection/producer.rs", "crates/units/src/certified_projection/watchdog.rs", "crates/units/src/certified_projection/mod.rs", "crates/units/src/bignum.rs", "crates/units/src/compute.rs"]
+
+[[mechanism]]
+id = "units.si-execution-table"
+kind = "authority"
+domain = "scientific"
+status = "blocked"
+claim = "The complete sealed-floor SI execution table contains exactly the authorized identities, floor ancestry, formulas, scales, integer projections, and aggregate receipt needed by canonical consumers."
+producer_path = "crates/units/src/constants.rs"
+refusal_path = "crates/units/src/constants.rs"
+activation_guard = "Per-formula certificates exist, but no independent inventory authority pins complete row coverage, formula-to-symbol mapping, floor ancestry, scale selection, and aggregate table receipt semantics."
+open_cross_checker_requirements = ["independent closed identity and formula inventory", "independent sealed-floor ancestry verification for every physical row", "independent per-row scale and integer projection replay", "aggregate receipt binding row order, identity, formula, input ancestry, scale, projection receipt, and implementation identities", "missing-row, extra-row, formula-swap, ancestry-swap, scale-swap, and aggregate-reordering canaries"]
+owner_boundary = "The pair may prove table membership and projection ancestry. The owner reviews whether the identity set and formulas are the physically sufficient SI interface for canonical consumers."
+semantic_closure = ["crates/units/src/constants.rs", "crates/units/src/fundamentals.rs", "crates/units/src/physics_floor.rs", "crates/units/src/compute.rs", "crates/units/src/certified_projection/mod.rs", "crates/units/src/certified_projection/producer.rs", "crates/units/src/certified_projection/watchdog.rs", "crates/units/src/bignum.rs", "crates/units/src/lib.rs"]
+
+[[mechanism]]
+id = "units.si-representation-policy"
+kind = "authority"
+domain = "scientific"
+status = "blocked"
+claim = "SI execution scale selection and every transcendental projection are authorized only by a whole-expression exact interval that selects one magnitude bracket and one round-half-even integer."
+producer_path = "crates/units/src/constants.rs"
+refusal_path = "crates/units/src/constants.rs"
+activation_guard = "The formula pair certifies a caller-selected target scale, while the magnitude-to-scale policy and source-decimal precision rule are selected in the same implementation that consumes them."
+open_cross_checker_requirements = ["independent derivation of the magnitude bracket from certified interval endpoints", "independent source-decimal resolution and headroom policy", "proof that selected scales cover the complete i128 domain without overflow or silent coarsening", "policy receipt bound separately from every formula projection receipt", "boundary canaries at magnitude, source-ULP, i128-capacity, and minimum-scale transitions"]
+owner_boundary = "This policy governs deterministic engine representation only. It cannot admit a physical value or turn SI coordinates into causal law authority."
+semantic_closure = ["crates/units/src/constants.rs", "crates/units/src/fundamentals.rs", "crates/units/src/bignum.rs", "crates/units/src/certified_projection/mod.rs", "crates/units/src/certified_projection/producer.rs", "crates/units/src/certified_projection/watchdog.rs", "crates/units/src/compute.rs"]
+
+[[mechanism]]
+id = "units.wide-integer-arithmetic"
+kind = "authority"
+domain = "scientific"
+status = "blocked"
+claim = "Wide fixed-point arithmetic and rounding agree with an arbitrary-precision rational oracle over the complete declared contract."
+producer_path = "crates/units/src/tier2.rs"
+refusal_path = "crates/units/src/tier2.rs"
+activation_guard = "Algorithm-diverse tests exist, but no scoped production receipt binds the exercised operation, domain, implementation identities, oracle result, and canaries."
+open_cross_checker_requirements = ["claim-scoped production receipt", "complete scale and overflow domain", "independent arbitrary-precision oracle", "live-operation mutation canaries"]
+owner_boundary = "The arithmetic pair can prove behavior over a declared contract. It cannot prove the physical relevance of a formula or expand its tested domain."
+semantic_closure = ["crates/units/src/tier2.rs", "crates/units/src/plan.rs"]

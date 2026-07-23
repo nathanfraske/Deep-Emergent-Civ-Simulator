@@ -46,7 +46,11 @@ param(
         "ci-legacy",
         "ci-list-legacy",
         "test",
+        "test-gpu-cpu-sparse",
+        "test-gpu-vulkan-sparse",
+        "test-gpu-cuda-cpu-cross",
         "test-legacy",
+        "test-legacy-routine",
         "audit-parked",
         "fmt",
         "fmt-check",
@@ -152,7 +156,11 @@ just doctor
     "ci-legacy"        = "just ci-legacy"
     "ci-list-legacy"   = "just ci-list-legacy"
     "test"             = "just test"
+    "test-gpu-cpu-sparse" = "just test-gpu-cpu-sparse"
+    "test-gpu-vulkan-sparse" = "just test-gpu-vulkan-sparse"
+    "test-gpu-cuda-cpu-cross" = "just test-gpu-cuda-cpu-cross"
     "test-legacy"      = "just test-legacy"
+    "test-legacy-routine" = "just test-legacy-routine"
     "audit-parked"     = "just audit-parked"
     "fmt"              = "just fmt"
     "fmt-check"        = "just fmt-check"

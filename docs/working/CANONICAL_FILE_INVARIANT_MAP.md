@@ -370,7 +370,7 @@ event and record models, validation and closure, and deterministic wire writers
 under a parent facade. Writer modules should follow semantic record groups,
 rather than one helper per field. The pure-move acceptance is unusually strict:
 schema id `civsim.planet.transcript.v9`, event order, escaping, receipt text,
-367,626-byte direct CLI output, and its pinned SHA-256 all remain exact.
+367,628-byte direct CLI output, and its pinned SHA-256 all remain exact.
 
 The complete canonical stellar slice has 8 direct CLI tests in
 `crates/planet/tests/canonical_cli.rs`. Those tests pin refusal exit status,

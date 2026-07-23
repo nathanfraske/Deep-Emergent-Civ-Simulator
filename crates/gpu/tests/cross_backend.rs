@@ -33,13 +33,21 @@
 //! so a hardware Vulkan device would carry them. The transcendental cross-backend thus awaits either a
 //! cubecl-cpu optimizer fix or a hardware Vulkan ICD; this gate covers the load-bearing arithmetic.
 
+#[cfg(any(feature = "cpu-backend", feature = "vulkan-backend"))]
 use civsim_core::Fixed;
-use civsim_gpu::{cpu_client, cuda_client, gpu_div, gpu_mul, wgpu_client};
+#[cfg(feature = "vulkan-backend")]
+use civsim_gpu::wgpu_client_with_adapter_receipt;
+#[cfg(feature = "cpu-backend")]
+use civsim_gpu::{cpu_client, cuda_client};
+#[cfg(any(feature = "cpu-backend", feature = "vulkan-backend"))]
+use civsim_gpu::{gpu_div, gpu_mul};
 
+#[cfg(feature = "cpu-backend")]
 fn gpu_enabled() -> bool {
     std::env::var("CIVSIM_GPU").is_ok()
 }
 
+#[cfg(any(feature = "cpu-backend", feature = "vulkan-backend"))]
 fn corners() -> Vec<i64> {
     vec![
         0,
@@ -63,6 +71,7 @@ fn corners() -> Vec<i64> {
 
 /// Corner pairs plus a modest deterministic sweep (kept small: the CPU backend JIT-compiles and runs
 /// on the host, so it is far slower than CUDA).
+#[cfg(any(feature = "cpu-backend", feature = "vulkan-backend"))]
 fn cases(seed: u64, sweep: usize) -> (Vec<i64>, Vec<i64>) {
     let cs = corners();
     let mut a = Vec::new();
@@ -88,6 +97,7 @@ fn cases(seed: u64, sweep: usize) -> (Vec<i64>, Vec<i64>) {
 }
 
 #[test]
+#[cfg(feature = "cpu-backend")]
 fn stage0_arithmetic_agrees_across_cuda_and_cpu_backends() {
     if !gpu_enabled() {
         eprintln!("civsim-gpu: skipping cross-backend gate (set CIVSIM_GPU=1 to run)");
@@ -151,11 +161,13 @@ fn stage0_arithmetic_agrees_across_cuda_and_cpu_backends() {
 
 /// Opt-in for the wgpu/SPIR-V gate. Unlike the CUDA gate it needs no CUDA device, but it needs a
 /// Vulkan adapter (lavapipe suffices), so it is off by default and enabled with `CIVSIM_GPU_WGPU=1`.
+#[cfg(feature = "vulkan-backend")]
 fn wgpu_enabled() -> bool {
     std::env::var("CIVSIM_GPU_WGPU").is_ok()
 }
 
 #[test]
+#[cfg(feature = "vulkan-backend")]
 fn stage0_arithmetic_agrees_on_wgpu_spirv_backend() {
     if !wgpu_enabled() {
         eprintln!(
@@ -163,7 +175,21 @@ fn stage0_arithmetic_agrees_on_wgpu_spirv_backend() {
         );
         return;
     }
-    let wgpu = wgpu_client();
+    let (wgpu, adapter) = wgpu_client_with_adapter_receipt();
+    println!("{}", adapter.canonical_text());
+    assert_eq!(adapter.backend, "Vulkan", "evidence must use Vulkan");
+    if std::env::var("CIVSIM_REQUIRE_HARDWARE_GPU").is_ok() {
+        assert!(
+            !adapter.is_software_adapter(),
+            "hardware evidence may not use a software adapter: {adapter:?}"
+        );
+    }
+    if let Ok(expected_vendor) = std::env::var("CIVSIM_EXPECTED_GPU_VENDOR") {
+        assert!(
+            adapter.matches_vendor(&expected_vendor),
+            "selected adapter does not match vendor {expected_vendor}: {adapter:?}"
+        );
+    }
 
     // Multiply: a third independent codegen path (SPIR-V) must match the oracle bit-for-bit.
     let (a, b) = cases(0x1234_5678_9ABC_DEF1, 5_000);

@@ -110,6 +110,94 @@ inputs = ["scripts/sources_gate.py", "scripts/sources_baseline.tsv", "sources", 
 path_triggers = ["scripts/sources_gate.py", "scripts/sources_baseline.tsv", "sources/**", "docs/SOURCES.md", "crates/physics/data/**"]
 
 [[gate]]
+id = "canonical.authority-watchdog"
+order = 65
+description = "Require independent pairs for active authority-bearing mechanical claims."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/authority_watchdog_gate.py"]
+self_test = ["{python}", "scripts/authority_watchdog_gate.py", "--self-test"]
+timeout_seconds = 120
+cache = "content-hash"
+inputs = [
+  "scripts/gates.toml",
+  "scripts/gate_runner.py",
+  "scripts/authority_watchdog_gate.py",
+  "scripts/authority_registry_watchdog.py",
+  "scripts/authority_watchdog.toml",
+  "scripts/external_claim_gate.py",
+  "scripts/external_claim_watchdog.py",
+  "scripts/fixed_math_authority_gate.py",
+  "scripts/fixed_math_authority_watchdog.py",
+  "scripts/stone0_build_wiring_gate.py",
+  "scripts/stone0_build_wiring_watchdog.py",
+  "sources/external_claims.toml",
+  "sources/external_claim_approvers",
+  "sources/external_claim_revocations.toml",
+  "docs/working/INDEPENDENT_AUTHORITY_RULE.md",
+  "docs/working/EXTERNAL_ADVERSE_CLAIM_RULE.md",
+  "crates",
+]
+path_triggers = [
+  "scripts/gates.toml",
+  "scripts/gate_runner.py",
+  "scripts/authority_watchdog_gate.py",
+  "scripts/authority_registry_watchdog.py",
+  "scripts/authority_watchdog.toml",
+  "scripts/external_claim_gate.py",
+  "scripts/external_claim_watchdog.py",
+  "scripts/fixed_math_authority_gate.py",
+  "scripts/fixed_math_authority_watchdog.py",
+  "scripts/stone0_build_wiring_gate.py",
+  "scripts/stone0_build_wiring_watchdog.py",
+  "sources/external_claims.toml",
+  "sources/external_claim_approvers",
+  "sources/external_claim_revocations.toml",
+  "docs/working/INDEPENDENT_AUTHORITY_RULE.md",
+  "docs/working/EXTERNAL_ADVERSE_CLAIM_RULE.md",
+  "crates/**",
+]
+
+[[gate]]
+id = "canonical.stone0-build-wiring"
+order = 66
+description = "Require one fail-closed Stone 0 build-graph owner with independent topology agreement."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/stone0_build_wiring_gate.py"]
+self_test = ["{python}", "scripts/stone0_build_wiring_gate.py", "--self-test"]
+timeout_seconds = 120
+cache = "content-hash"
+inputs = ["scripts/stone0_build_wiring_gate.py", "scripts/stone0_build_wiring_watchdog.py", "Cargo.toml", "justfile", "crates/stone0-build", "crates/stone0", "crates/planet/Cargo.toml", "crates/planet/build.rs", "crates/planet-substrate/Cargo.toml", "crates/planet-substrate/build.rs"]
+path_triggers = ["scripts/stone0_build_wiring_gate.py", "scripts/stone0_build_wiring_watchdog.py", "Cargo.toml", "justfile", "crates/stone0-build/**", "crates/stone0/**", "crates/planet/Cargo.toml", "crates/planet/build.rs", "crates/planet-substrate/Cargo.toml", "crates/planet-substrate/build.rs"]
+
+[[gate]]
+id = "canonical.fixed-math-authority"
+order = 67
+description = "Independently derive and bind every CPU and GPU Q32.32 transcendental-table constant."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/fixed_math_authority_gate.py"]
+self_test = ["{python}", "scripts/fixed_math_authority_gate.py", "--self-test"]
+timeout_seconds = 180
+cache = "content-hash"
+inputs = ["scripts/fixed_math_authority_gate.py", "scripts/fixed_math_authority_watchdog.py", "crates/units/data/fixed_math_authority_receipt.json", "crates/core/src/fixed.rs", "crates/gpu/src/transcendental.rs"]
+path_triggers = ["scripts/fixed_math_authority_gate.py", "scripts/fixed_math_authority_watchdog.py", "crates/units/data/fixed_math_authority_receipt.json", "crates/core/src/fixed.rs", "crates/gpu/src/transcendental.rs"]
+
+[[gate]]
+id = "canonical.external-claim-governance"
+order = 68
+description = "Require five independent lineages, exact scope, owner signature, and an independent watchdog before external adverse claims or contact."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/external_claim_gate.py"]
+self_test = ["{python}", "scripts/external_claim_gate.py", "--self-test"]
+timeout_seconds = 120
+cache = "content-hash"
+inputs = ["scripts/external_claim_gate.py", "scripts/external_claim_watchdog.py", "sources", "crates/physics/data", "docs/working"]
+path_triggers = ["scripts/external_claim_gate.py", "scripts/external_claim_watchdog.py", "sources/**", "crates/physics/data/**", "docs/working/**"]
+
+[[gate]]
 id = "canonical.source-registry"
 order = 70
 description = "Check generated source documentation against the source registry."

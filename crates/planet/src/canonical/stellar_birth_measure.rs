@@ -10,7 +10,7 @@ use super::{
     floor_magnitudes::AuditedFloorView,
     requirement_analysis::RequirementAnalysis,
     stellar_birth_artifacts::{
-        resolve_repository_artifacts, RepositoryStellarBirthArtifacts,
+        repository_stellar_birth_artifacts, RepositoryStellarBirthArtifacts,
         VerifiedJointPhysicalMeasure, VerifiedRealizationCoordinateLaw,
     },
     stellar_birth_dimensions::stellar_birth_dimensional_census,
@@ -272,7 +272,7 @@ pub(crate) fn require_birth_measure(
     let species = RequirementAnalysis::species_state_derivation(
         analyze_repository_species_state_support(floor),
     );
-    evaluate_artifacts(resolve_repository_artifacts(floor), vec![census, species])
+    evaluate_artifacts(repository_stellar_birth_artifacts(), vec![census, species])
 }
 
 #[cfg(test)]

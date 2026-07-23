@@ -21,15 +21,270 @@
 //! string a composite computes from is the same string the drift-check guards. The evaluation is exact
 //! rational arithmetic over [`BigRat`] with a single terminal round-half-to-even, so it is
 //! order-independent by construction (no per-operation rounding is a free choice, closing the
-//! representation channel the framing panel flagged). A transcendental like pi is computed to a declared
-//! working precision by a deterministic Machin series over integers (no hardware float), so the result is
-//! bit-identical on every machine. The whole computation runs once at catalogue or manifest load, off the
-//! per-tick canonical path.
+//! representation channel the framing panel flagged). Authority-bearing projections use the
+//! `certified_projection` pair: distinct parsers and exact Machin enclosures refine the whole formula until
+//! both endpoints occupy one rounding cell. The older point-valued evaluator remains a noncausal test and
+//! confirmation utility. The projection runs at catalogue or manifest load, off the per-tick canonical path.
 
 use crate::bignum::{BigRat, BigUint};
 use crate::fundamentals::SiDimension;
 #[cfg(test)]
 use crate::fundamentals::{execution_root, Composite, Fundamental};
+
+/// One exact coordinate supplied to a certified arithmetic projection.
+///
+/// This type proves representation and arithmetic only. Constructing one does
+/// not admit a physical value, establish floor ancestry, or authorize it for a
+/// canonical planet stage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CertifiedFormulaInput {
+    /// An engine integer and its binary fractional scale.
+    Scaled {
+        symbol: &'static str,
+        bits: i128,
+        scale_bits: u32,
+    },
+    /// A bounded integer significand times a signed power of two.
+    Binary {
+        symbol: &'static str,
+        bits: i128,
+        exponent2: i32,
+    },
+    /// A closed interval of two significands at one signed binary exponent.
+    BinaryInterval {
+        symbol: &'static str,
+        lower_bits: i128,
+        upper_bits: i128,
+        exponent2: i32,
+    },
+    /// A repository-owned exact decimal coordinate.
+    Decimal {
+        symbol: &'static str,
+        value: &'static str,
+    },
+}
+
+impl CertifiedFormulaInput {
+    pub const fn scaled(symbol: &'static str, bits: i128, scale_bits: u32) -> Self {
+        Self::Scaled {
+            symbol,
+            bits,
+            scale_bits,
+        }
+    }
+
+    pub const fn decimal(symbol: &'static str, value: &'static str) -> Self {
+        Self::Decimal { symbol, value }
+    }
+
+    pub const fn binary(symbol: &'static str, bits: i128, exponent2: i32) -> Self {
+        Self::Binary {
+            symbol,
+            bits,
+            exponent2,
+        }
+    }
+
+    const fn binary_interval(
+        symbol: &'static str,
+        lower_bits: i128,
+        upper_bits: i128,
+        exponent2: i32,
+    ) -> Self {
+        Self::BinaryInterval {
+            symbol,
+            lower_bits,
+            upper_bits,
+            exponent2,
+        }
+    }
+}
+
+/// A rounded integer plus the claim-scoped independent arithmetic receipt that
+/// selected it. The receipt does not admit the formula or its coordinates as
+/// physical inputs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CertifiedFormulaProjection {
+    bits: i128,
+    scale_bits: u32,
+    binary_exponent2: i32,
+    receipt_sha256: [u8; 32],
+}
+
+/// An opaque positive invariant factor certified for later interval
+/// propagation. It cannot be read as a physical output on its own.
+///
+/// ```compile_fail
+/// let factor = civsim_units::compute::certify_positive_formula_factor("1", &[], 32)
+///     .expect("the unit factor certifies");
+/// let leaked = format!("{factor:?}");
+/// # drop(leaked);
+/// ```
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct CertifiedPositiveFormulaFactor {
+    bits: i128,
+    binary_exponent2: i32,
+    receipt_sha256: [u8; 32],
+}
+
+impl CertifiedFormulaProjection {
+    pub const fn bits(self) -> i128 {
+        self.bits
+    }
+
+    pub const fn scale_bits(self) -> u32 {
+        self.scale_bits
+    }
+
+    pub const fn receipt_sha256(self) -> [u8; 32] {
+        self.receipt_sha256
+    }
+}
+
+/// Evaluate a formula through exact rational interval arithmetic.
+///
+/// A recursive-descent producer and a shunting-yard watchdog independently
+/// parse the same formula and enclose Machin's Pi series. The result is emitted
+/// only when both enclosures choose one positive magnitude bracket and the same
+/// round-half-even integer at `target_scale_bits`. Canonical consumers must
+/// separately prove floor or derived-state ancestry; the planet boundary gate
+/// forbids this raw arithmetic API at that front door.
+pub fn certify_formula_at_scale(
+    formula: &str,
+    inputs: &[CertifiedFormulaInput],
+    target_scale_bits: u32,
+) -> Result<CertifiedFormulaProjection, String> {
+    let internal = projection_inputs(inputs);
+    let certificate =
+        crate::certified_projection::certify_at_scale(formula, &internal, target_scale_bits)?;
+    Ok(CertifiedFormulaProjection {
+        bits: certificate.producer_bits,
+        scale_bits: target_scale_bits,
+        binary_exponent2: certificate.target_binary_exponent2,
+        receipt_sha256: certificate.receipt_sha256,
+    })
+}
+
+/// Certify a positive formula as an opaque dyadic factor for a terminal scale.
+///
+/// The fractional scale is derived from the independently agreed magnitude
+/// bracket. Its significance budget is `i128::BITS - terminal_scale_bits`, so
+/// callers cannot tune coefficient precision independently of the terminal
+/// representation. The factor can only be consumed through
+/// [`certify_positive_factored_formula_at_scale`].
+pub fn certify_positive_formula_factor(
+    formula: &str,
+    inputs: &[CertifiedFormulaInput],
+    terminal_scale_bits: u32,
+) -> Result<CertifiedPositiveFormulaFactor, String> {
+    let significant_bits = i128::BITS
+        .checked_sub(terminal_scale_bits)
+        .ok_or_else(|| "terminal scale exceeds the i128 factor representation".to_owned())?;
+    let internal = projection_inputs(inputs);
+    let certificate =
+        crate::certified_projection::certify_at_significance(formula, &internal, significant_bits)?;
+    Ok(CertifiedPositiveFormulaFactor {
+        bits: certificate.producer_bits,
+        binary_exponent2: certificate.target_binary_exponent2,
+        receipt_sha256: certificate.receipt_sha256,
+    })
+}
+
+/// Project `coefficient * dynamic_formula` without recomputing the invariant
+/// transcendental coefficient for every member of a sweep or quadrature.
+///
+/// A certified rounded coefficient encloses its source value inside its
+/// rounding cell. The implementation widens that cell to the adjacent dyadic
+/// integers, then sends the closed interval through the complete dynamic
+/// formula and the independent parser pair. One terminal integer proves every
+/// coefficient value inside the cell selects that same result. The returned
+/// receipt binds the factor receipt and terminal interval receipt.
+pub fn certify_positive_factored_formula_at_scale(
+    coefficient: CertifiedPositiveFormulaFactor,
+    dynamic_formula: &str,
+    inputs: &[CertifiedFormulaInput],
+    target_scale_bits: u32,
+) -> Result<CertifiedFormulaProjection, String> {
+    const COEFFICIENT_SYMBOL: &str = "__civsim_certified_coefficient";
+    if coefficient.bits <= 1 {
+        return Err("certified factored coefficient is not strictly positive".to_owned());
+    }
+    if inputs.iter().any(|input| match input {
+        CertifiedFormulaInput::Scaled { symbol, .. }
+        | CertifiedFormulaInput::Binary { symbol, .. }
+        | CertifiedFormulaInput::BinaryInterval { symbol, .. }
+        | CertifiedFormulaInput::Decimal { symbol, .. } => *symbol == COEFFICIENT_SYMBOL,
+    }) {
+        return Err("dynamic inputs use the reserved coefficient symbol".to_owned());
+    }
+    let combined_formula = format!("{COEFFICIENT_SYMBOL} * ({dynamic_formula})");
+    let mut combined_inputs = Vec::with_capacity(inputs.len() + 1);
+    combined_inputs.push(CertifiedFormulaInput::binary_interval(
+        COEFFICIENT_SYMBOL,
+        coefficient
+            .bits
+            .checked_sub(1)
+            .ok_or_else(|| "certified coefficient lower endpoint underflows".to_owned())?,
+        coefficient
+            .bits
+            .checked_add(1)
+            .ok_or_else(|| "certified coefficient upper endpoint overflows".to_owned())?,
+        coefficient.binary_exponent2,
+    ));
+    combined_inputs.extend_from_slice(inputs);
+    let projection =
+        certify_formula_at_scale(&combined_formula, &combined_inputs, target_scale_bits).map_err(
+            |error| {
+                format!("certified coefficient cell did not select one terminal integer: {error}")
+            },
+        )?;
+    let receipt_sha256 = crate::certified_projection::factored_receipt_digest(
+        coefficient.receipt_sha256,
+        coefficient.bits,
+        coefficient.binary_exponent2,
+        dynamic_formula,
+        target_scale_bits,
+        projection.receipt_sha256,
+        projection.bits,
+    )?;
+    Ok(CertifiedFormulaProjection {
+        bits: projection.bits,
+        scale_bits: target_scale_bits,
+        binary_exponent2: projection.binary_exponent2,
+        receipt_sha256,
+    })
+}
+
+fn projection_inputs(
+    inputs: &[CertifiedFormulaInput],
+) -> Vec<crate::certified_projection::ProjectionInput> {
+    inputs
+        .iter()
+        .map(|input| match *input {
+            CertifiedFormulaInput::Scaled {
+                symbol,
+                bits,
+                scale_bits,
+            } => crate::certified_projection::ProjectionInput::new(symbol, bits, scale_bits),
+            CertifiedFormulaInput::Binary {
+                symbol,
+                bits,
+                exponent2,
+            } => crate::certified_projection::ProjectionInput::binary(symbol, bits, exponent2),
+            CertifiedFormulaInput::BinaryInterval {
+                symbol,
+                lower_bits,
+                upper_bits,
+                exponent2,
+            } => crate::certified_projection::ProjectionInput::binary_interval(
+                symbol, lower_bits, upper_bits, exponent2,
+            ),
+            CertifiedFormulaInput::Decimal { symbol, value } => {
+                crate::certified_projection::ProjectionInput::decimal(symbol, value)
+            }
+        })
+        .collect()
+}
 
 /// Evaluate a composite's declared formula over its named inputs, EXACTLY as a rational. `resolve` maps a
 /// symbol (`pi`, `k_B`, ...) to its exact rational value. The returned rational is the composite's true
@@ -83,8 +338,13 @@ pub fn evaluate_formula_dimension(
 
 /// Pi to `digits` significant decimal digits, as an exact rational `(pi * 10^digits) / 10^digits`, by
 /// Machin's formula `pi = 16*arctan(1/5) - 4*arctan(1/239)`. Deterministic integer arithmetic only; no
-/// float, so the value is bit-identical everywhere. `digits` is the working precision (a reserved value:
-/// enough to resolve the composite at its scale plus a guard).
+/// float, so the value is bit-identical everywhere.
+///
+/// This point approximation is retained as a confirmation and test oracle. It
+/// does not certify its own truncation or a final rounding decision and must not
+/// mint a production value. Authority-bearing callers use
+/// [`certify_formula_at_scale`] so independent interval implementations prove
+/// the projection.
 pub fn pi(digits: u32) -> BigRat {
     let scale = BigUint::ten_pow(digits);
     let a5 = arctan_reciprocal_scaled(5, &scale);
@@ -150,10 +410,10 @@ pub fn compute_composite_at_scale(
 }
 
 /// The per-quantity fixed-point scale a composite is stored at, derived from the composite's own magnitude
-/// bracket and the caller's global significance target and guard (the R-UNITS-PIN reserved knobs), through
+/// bracket and a supplied integer representation target and headroom, through
 /// the crate's [`crate::derive_scale_bits`]. The magnitude bracket is read from the composite's known value
-/// (its order of magnitude), so the scale is a function of the quantity's own data plus the two reserved
-/// knobs, never an independent per-composite dial.
+/// (its order of magnitude), so the scale is a function of the quantity and one representation policy,
+/// never an independent per-composite dial. Canonical production obtains the target from execution types.
 #[cfg(test)]
 pub fn composite_scale_bits(
     composite: &Composite,
@@ -168,12 +428,12 @@ pub fn composite_scale_bits(
 
 /// The per-quantity fixed-point scale a raw fundamental is stored at when a consumer reads it at a
 /// scale, derived from the fundamental's own magnitude bracket and the caller's global significance
-/// target and guard (the R-UNITS-PIN reserved knobs), through the crate's [`crate::derive_scale_bits`].
+/// target and headroom, through the crate's [`crate::derive_scale_bits`].
 /// The same mechanism as [`composite_scale_bits`], applied to a fundamental: a fundamental such as the
 /// gravitational constant (magnitude about `2^-34`, below the canonical Q32.32 epsilon) derives a finer
 /// scale that holds it, so it is representable rather than truncating to zero. The scale is a function
-/// of the quantity's own magnitude plus the two reserved knobs, never an independent per-fundamental
-/// dial.
+/// of the quantity's own magnitude plus one representation policy, never an independent
+/// per-fundamental dial. Canonical production obtains that policy from execution types.
 #[cfg(test)]
 pub fn fundamental_scale_bits(
     fund: &Fundamental,
@@ -191,18 +451,19 @@ pub fn fundamental_scale_bits(
 /// rounded to `scale_bits` needs about `(scale_bits + magnitude_log2) * log10(2)` significant decimal
 /// digits, and a fixed guard covers the series-truncation error and the integer-power amplification, so the
 /// precision follows from the scale rather than being a free knob. Computed in integers (no float).
+#[cfg(test)]
 pub fn working_digits_for_scale(scale_bits: u32, magnitude_log2: i64) -> u32 {
-    const GUARD_DIGITS: i64 = 20;
-    let net = scale_bits as i64 + magnitude_log2;
-    let significant = if net > 0 { (net * 301) / 1000 } else { 0 };
-    (significant + GUARD_DIGITS).max(1) as u32
+    let required_bits = (i128::from(scale_bits) + i128::from(magnitude_log2) + 1).max(1);
+    let required_digits = (required_bits * 302 + 999) / 1000;
+    u32::try_from(required_digits.saturating_add(12)).unwrap_or(u32::MAX)
 }
 
 /// Derive a composite's value as a fixed-point magnitude at its OWN canonical scale (the
 /// [`composite_scale_bits`] scale), evaluating the formula exactly, computing any transcendental to the
 /// derived working precision, rounding ONCE, and running the fail-loud cross-check against the stored
-/// reference. The caller projects this to whatever narrower scale it consumes at. `sig_target` and `guard`
-/// are the global reserved knobs; `canonical_scale` is the substrate's default fixed-point scale.
+/// reference. The caller projects this to whatever narrower scale it consumes at. `sig_target`, `guard`,
+/// and `canonical_scale` describe the integer format; canonical production derives them from execution
+/// types rather than accepting them as physical inputs.
 #[cfg(test)]
 pub fn derived_composite_bits(
     composite: &Composite,
@@ -561,6 +822,61 @@ mod tests {
     }
 
     #[test]
+    fn factored_projection_matches_the_complete_certified_formula() {
+        let pi_factor = certify_positive_formula_factor("1 / pi^2", &[], 32).unwrap();
+        let inputs = [CertifiedFormulaInput::scaled("x", 3, 1)];
+        let factored =
+            certify_positive_factored_formula_at_scale(pi_factor, "x^2 + 1", &inputs, 32).unwrap();
+        let complete = certify_formula_at_scale("(x^2 + 1) / pi^2", &inputs, 32).unwrap();
+        assert_eq!(factored.bits(), complete.bits());
+        assert_eq!(factored.scale_bits(), complete.scale_bits());
+
+        let changed_formula =
+            certify_positive_factored_formula_at_scale(pi_factor, "x^2 + 2", &inputs, 32).unwrap();
+        let changed_inputs = certify_positive_factored_formula_at_scale(
+            pi_factor,
+            "x^2 + 1",
+            &[CertifiedFormulaInput::scaled("x", 4, 1)],
+            32,
+        )
+        .unwrap();
+        assert_ne!(factored.receipt_sha256(), changed_formula.receipt_sha256());
+        assert_ne!(factored.receipt_sha256(), changed_inputs.receipt_sha256());
+
+        let large = certify_positive_formula_factor("1e50 / pi^5", &[], 32).unwrap();
+        assert!(large.binary_exponent2 > 0);
+        let normalized =
+            certify_positive_factored_formula_at_scale(large, "x / 1e50", &inputs, 32).unwrap();
+        let normalized_complete = certify_formula_at_scale("x / pi^5", &inputs, 32).unwrap();
+        assert_eq!(normalized.bits(), normalized_complete.bits());
+    }
+
+    #[test]
+    fn factored_projection_refuses_unproved_or_ambiguous_cells() {
+        assert!(certify_positive_formula_factor("pi", &[], 0).is_err());
+        assert!(certify_positive_formula_factor("pi", &[], 128).is_err());
+
+        let factor = certify_positive_formula_factor("1", &[], 126).unwrap();
+        let straddle =
+            certify_positive_factored_formula_at_scale(factor, "1 / 2", &[], 0).unwrap_err();
+        assert!(straddle.contains("one terminal integer"));
+
+        let reserved = [CertifiedFormulaInput::scaled(
+            "__civsim_certified_coefficient",
+            1,
+            0,
+        )];
+        assert!(certify_positive_factored_formula_at_scale(factor, "1", &reserved, 32).is_err());
+
+        let invalid = CertifiedPositiveFormulaFactor {
+            bits: 1,
+            binary_exponent2: 0,
+            receipt_sha256: [0; 32],
+        };
+        assert!(certify_positive_factored_formula_at_scale(invalid, "1", &[], 32).is_err());
+    }
+
+    #[test]
     fn evaluation_is_order_independent() {
         // The same formula written in two algebraically-equal groupings gives the identical exact rational.
         let r = sigma_resolver(50);
@@ -644,7 +960,7 @@ mod tests {
     fn derived_composite_bits_scale_and_q32_projection() {
         use crate::fundamentals::STEFAN_BOLTZMANN;
         use crate::rescale_bits;
-        // Global reserved knobs (dev-fixture values): significance target 30 bits, guard 1.
+        // Generic mechanism fixture: a 30-bit significance target with one headroom bit.
         let (bits, scale) = derived_composite_bits(&STEFAN_BOLTZMANN, 30, 1, 32).unwrap();
         // sigma's magnitude is ~2^-25, so with sig_target 30 the derived scale is 55.
         assert_eq!(scale, 55);
@@ -683,8 +999,8 @@ mod tests {
             Some(0),
             "G underflows Q32.32, which is what the derived scale fixes"
         );
-        // The R-UNITS-PIN scale mechanism derives a finer scale from G's own magnitude (dev-fixture knobs:
-        // significance target 30 bits, guard 1), at which G is representable as a non-zero magnitude.
+        // The generic scale mechanism derives a finer scale from G's own magnitude under this test format:
+        // a 30-bit significance target and one headroom bit. G is then representable and non-zero.
         let scale = fundamental_scale_bits(&GRAVITATIONAL_CONSTANT, 30, 1, 32).unwrap();
         assert!(
             scale > 32,

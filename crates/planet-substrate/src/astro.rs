@@ -29,14 +29,15 @@
 //!
 //! The determinism and scale discipline: `L_sun` (~3.828e26 W) and `d^2` (~2.24e22 m^2 at one AU) overflow
 //! Q32.32, and the RESULT (~1361) is what fits, so the wide-magnitude divide runs in exact rational arithmetic
-//! (`civsim_units::bignum::BigRat`, the same integer-only path the Stefan-Boltzmann sigma uses) with pi from
-//! Machin's formula (`civsim_units::compute::pi`), rounding ONCE to the fixed-point scale at the end. The
+//! with an independently checked whole-formula interval certificate around Machin's formula for pi, rounding ONCE
+//! to the fixed-point scale at the end. The
 //! order-one arguments (the mass ratio, the exponent, the distance in AU) stay `Fixed`; the mass-luminosity
 //! power is `Fixed::powf`, the pinned transcendental. No floating point reaches canonical state.
 
 use civsim_core::Fixed;
 use civsim_units::bignum::{BigRat, BigUint};
-use civsim_units::compute;
+use civsim_units::compute::{self, CertifiedFormulaInput, CertifiedPositiveFormulaFactor};
+use std::sync::LazyLock;
 
 /// The solar luminosity `L_sun` in watts, the IAU 2015 Resolution B3 nominal value (3.828e26 W). A cited
 /// REFERENCE ANCHOR (the Sun-anchored scale of the mass-luminosity relation), not a per-world value.
@@ -76,10 +77,68 @@ pub const EARTH_MASS_KG: &str = "5.9722e24";
 /// not against a convention. Held as an integer-metre value so it constructs exactly in fixed-point.
 pub const EARTH_MEAN_RADIUS_M: i32 = 6_371_000;
 
-/// The number of decimal digits pi is computed to for the flux derivation. Far above the ~10 significant
-/// figures the Q32.32 result carries (a `2^-32` epsilon near a ~1361 magnitude is a relative ~1.7e-13), so
-/// the pi truncation never reaches the result's low bit. An engine-accuracy bound, not a world value.
-pub const FLUX_PI_DIGITS: u32 = 40;
+// These certificates prove terminal representation bits only. They do not admit the retained Solar reference
+// anchors to the absolute floor or make this pre-migration substrate reachable from the canonical stage runner.
+const ORBITAL_FLUX_FORMULA: &str = "L_sun * luminosity_lsun / (4 * pi * (distance_au * AU)^2)";
+pub(crate) const STELLAR_SURFACE_FLUX_FORMULA: &str =
+    "L_sun * luminosity_ratio / (4 * pi * (R_sun * radius_ratio)^2)";
+const VISCOUS_DISSIPATION_FORMULA: &str = "3 * accretion_rate_msun_myr * G * mass_ratio * M_sun^2 * inner_boundary_factor / (8 * pi * 1000000 * julian_year * (distance_au * AU)^3)";
+const REFERENCE_PERIOD_SQUARED_FORMULA: &str = "4 * pi^2 * AU^3 / (G * M_sun)";
+
+const ORBITAL_FLUX_COEFFICIENT_FORMULA: &str = "L_sun / (4 * pi * AU^2)";
+const ORBITAL_FLUX_DYNAMIC_FORMULA: &str = "luminosity_lsun / distance_au^2";
+const STELLAR_SURFACE_FLUX_COEFFICIENT_FORMULA: &str = "L_sun / (4 * pi * R_sun^2)";
+const STELLAR_SURFACE_FLUX_DYNAMIC_FORMULA: &str = "luminosity_ratio / radius_ratio^2";
+const VISCOUS_DISSIPATION_COEFFICIENT_FORMULA: &str =
+    "3 * G * M_sun^2 / (8 * pi * 1000000 * julian_year * AU^3)";
+const VISCOUS_DISSIPATION_DYNAMIC_FORMULA: &str =
+    "accretion_rate_msun_myr * mass_ratio * inner_boundary_factor / distance_au^3";
+
+static ORBITAL_FLUX_COEFFICIENT: LazyLock<Option<CertifiedPositiveFormulaFactor>> =
+    LazyLock::new(|| {
+        compute::certify_positive_formula_factor(
+            ORBITAL_FLUX_COEFFICIENT_FORMULA,
+            &[
+                CertifiedFormulaInput::decimal("L_sun", SOLAR_LUMINOSITY_W),
+                CertifiedFormulaInput::decimal("AU", ASTRONOMICAL_UNIT_M),
+            ],
+            Fixed::FRAC_BITS,
+        )
+        .ok()
+    });
+
+static STELLAR_SURFACE_FLUX_COEFFICIENT: LazyLock<Option<CertifiedPositiveFormulaFactor>> =
+    LazyLock::new(|| {
+        compute::certify_positive_formula_factor(
+            STELLAR_SURFACE_FLUX_COEFFICIENT_FORMULA,
+            &[
+                CertifiedFormulaInput::decimal("L_sun", SOLAR_LUMINOSITY_W),
+                CertifiedFormulaInput::decimal("R_sun", SOLAR_RADIUS_M),
+            ],
+            Fixed::FRAC_BITS,
+        )
+        .ok()
+    });
+
+static VISCOUS_DISSIPATION_COEFFICIENT: LazyLock<Option<CertifiedPositiveFormulaFactor>> =
+    LazyLock::new(|| {
+        let execution = civsim_units::constants::canonical_si_execution_magnitudes().ok()?;
+        let g = execution.get("G")?;
+        compute::certify_positive_formula_factor(
+            VISCOUS_DISSIPATION_COEFFICIENT_FORMULA,
+            &[
+                CertifiedFormulaInput::scaled("G", g.bits(), g.scale_bits()),
+                CertifiedFormulaInput::decimal("M_sun", SOLAR_MASS_KG),
+                CertifiedFormulaInput::decimal("julian_year", JULIAN_YEAR_S),
+                CertifiedFormulaInput::decimal("AU", ASTRONOMICAL_UNIT_M),
+            ],
+            Fixed::FRAC_BITS,
+        )
+        .ok()
+    });
+
+static REFERENCE_ORBITAL_PERIOD_SECONDS: LazyLock<Option<Fixed>> =
+    LazyLock::new(derive_reference_orbital_period_seconds);
 
 /// A non-negative `Fixed` (its bits over `2^FRAC_BITS`) as an exact rational, so an order-one `Fixed` argument
 /// multiplies into the wide-magnitude `BigRat` without leaving exact arithmetic. The caller passes a
@@ -134,16 +193,64 @@ pub fn stellar_flux_from_luminosity_lsun(
     if distance_au <= Fixed::ZERO {
         return None;
     }
-    let au = BigRat::from_decimal_str(ASTRONOMICAL_UNIT_M).ok()?;
-    let d = nonneg_fixed_to_bigrat(distance_au).mul(&au);
-    let d2 = d.mul(&d);
-    let four_pi = BigRat::from_i64(4).mul(&compute::pi(FLUX_PI_DIGITS));
-    let denom = four_pi.mul(&d2);
-    let l_sun = BigRat::from_decimal_str(SOLAR_LUMINOSITY_W).ok()?;
-    let luminosity = l_sun.mul(&nonneg_fixed_to_bigrat(luminosity_lsun));
-    let flux = luminosity.div(&denom);
-    let bits = flux.round_to_scale(Fixed::FRAC_BITS)?;
-    Fixed::from_bits_i128(bits)
+    let coefficient = (*ORBITAL_FLUX_COEFFICIENT)?;
+    if luminosity_lsun <= Fixed::ZERO {
+        return Some(Fixed::ZERO);
+    }
+    let projection = compute::certify_positive_factored_formula_at_scale(
+        coefficient,
+        ORBITAL_FLUX_DYNAMIC_FORMULA,
+        &[
+            CertifiedFormulaInput::scaled(
+                "luminosity_lsun",
+                i128::from(luminosity_lsun.to_bits().max(0)),
+                Fixed::FRAC_BITS,
+            ),
+            CertifiedFormulaInput::scaled(
+                "distance_au",
+                i128::from(distance_au.to_bits().max(0)),
+                Fixed::FRAC_BITS,
+            ),
+        ],
+        Fixed::FRAC_BITS,
+    )
+    .ok()?;
+    Fixed::from_bits_i128(projection.bits())
+}
+
+// @derives: the stellar surface flux terminal integer <- the certified luminosity-radius geometry factor and the star's dynamic luminosity and radius ratios
+pub(crate) fn certified_stellar_surface_flux_bits(
+    luminosity_ratio: Fixed,
+    radius_ratio: Fixed,
+) -> Option<i128> {
+    if radius_ratio <= Fixed::ZERO {
+        return None;
+    }
+    let coefficient = (*STELLAR_SURFACE_FLUX_COEFFICIENT)?;
+    if luminosity_ratio <= Fixed::ZERO {
+        return Some(0);
+    }
+    Some(
+        compute::certify_positive_factored_formula_at_scale(
+            coefficient,
+            STELLAR_SURFACE_FLUX_DYNAMIC_FORMULA,
+            &[
+                CertifiedFormulaInput::scaled(
+                    "luminosity_ratio",
+                    i128::from(luminosity_ratio.to_bits().max(0)),
+                    Fixed::FRAC_BITS,
+                ),
+                CertifiedFormulaInput::scaled(
+                    "radius_ratio",
+                    i128::from(radius_ratio.to_bits().max(0)),
+                    Fixed::FRAC_BITS,
+                ),
+            ],
+            Fixed::FRAC_BITS,
+        )
+        .ok()?
+        .bits(),
+    )
 }
 
 /// The stellar EFFECTIVE TEMPERATURE `T_eff` (K) a star radiates at, DERIVED from its mass through the
@@ -184,13 +291,8 @@ pub fn stellar_effective_temperature(
     // the Sun (a representable M^~1.9) scales the solar anchor, and the wide-magnitude stellar flux (which crosses
     // the Q32.32 ceiling near 6.4 M_sun) is never formed, the log-space-census discipline. Mathematically identical
     // to (F/sigma)^(1/4) and byte-identical at unit mass, but Betelgeuse-mass safe.
-    let r_sun = BigRat::from_decimal_str(SOLAR_RADIUS_M).ok()?;
-    let l_sun = BigRat::from_decimal_str(SOLAR_LUMINOSITY_W).ok()?;
-    let four_pi = BigRat::from_i64(4).mul(&compute::pi(FLUX_PI_DIGITS));
     // The Sun's OWN surface flux F_sun = L_sun/(4*pi*R_sun^2), ~6.3e7 W/m^2, which IS representable.
-    let solar_flux_bits = l_sun
-        .div(&four_pi.mul(&r_sun.mul(&r_sun)))
-        .round_to_scale(Fixed::FRAC_BITS)?;
+    let solar_flux_bits = certified_stellar_surface_flux_bits(Fixed::ONE, Fixed::ONE)?;
     let solar_flux = Fixed::from_bits_i128(solar_flux_bits)?;
     let sigma = civsim_units::constants::derived_stefan_boltzmann();
     let t_sun = civsim_physics::laws::radiative_equilibrium(solar_flux, Fixed::ONE, sigma, t_max);
@@ -285,7 +387,8 @@ pub fn irradiated_disk_temperature(
 /// bulk disk where the condensation fronts sit, its basis the inner truncation radius, retiring when `R_in`
 /// derives). `G` is the CODATA gravitational constant read from the fundamentals register (single source), and
 /// `M_sun` and the Julian year are the cited unit anchors. The wide-magnitude product (`Mdot`, `G`, `M_star`,
-/// `r^3` overflow or underflow Q32.32 while the ~few W/m^2 result fits) runs in exact BigRat and rounds once.
+/// `r^3` overflow or underflow Q32.32 while the ~few W/m^2 result fits) is enclosed as one exact formula by
+/// independent interval implementations and rounds once.
 /// `None` on a non-positive distance or a dissipation past the representable range.
 fn viscous_dissipation_flux(
     accretion_rate_msun_myr: Fixed,
@@ -296,30 +399,42 @@ fn viscous_dissipation_flux(
     if distance_au <= Fixed::ZERO {
         return None;
     }
-    let m_sun = BigRat::from_decimal_str(SOLAR_MASS_KG).ok()?;
-    // Mdot [kg/s] = accretion_rate [M_sun/Myr] * M_sun / (1e6 * Julian year).
-    let megayear = BigRat::from_decimal_str(JULIAN_YEAR_S)
-        .ok()?
-        .mul(&BigRat::from_i64(1_000_000));
-    let mdot = nonneg_fixed_to_bigrat(accretion_rate_msun_myr)
-        .mul(&m_sun)
-        .div(&megayear);
-    // Omega_K^2 [1/s^2] = G * M_star / r^3, with M_star = mass_ratio*M_sun and r = distance_au*AU.
-    let g = crate::absolute_floor::gravitational_constant_bigrat()?;
-    let m_star = nonneg_fixed_to_bigrat(mass_ratio).mul(&m_sun);
-    let au = BigRat::from_decimal_str(ASTRONOMICAL_UNIT_M).ok()?;
-    let r = nonneg_fixed_to_bigrat(distance_au).mul(&au);
-    let r3 = r.mul(&r).mul(&r);
-    let omega_k2 = g.mul(&m_star).div(&r3);
-    // D = (3/(8*pi)) * Mdot * Omega_K^2 * inner_boundary_factor.
-    let three_over_eight_pi =
-        BigRat::from_i64(3).div(&BigRat::from_i64(8).mul(&compute::pi(FLUX_PI_DIGITS)));
-    let d = three_over_eight_pi
-        .mul(&mdot)
-        .mul(&omega_k2)
-        .mul(&nonneg_fixed_to_bigrat(inner_boundary_factor));
-    let bits = d.round_to_scale(Fixed::FRAC_BITS)?;
-    Fixed::from_bits_i128(bits)
+    let coefficient = (*VISCOUS_DISSIPATION_COEFFICIENT)?;
+    if accretion_rate_msun_myr <= Fixed::ZERO
+        || mass_ratio <= Fixed::ZERO
+        || inner_boundary_factor <= Fixed::ZERO
+    {
+        return Some(Fixed::ZERO);
+    }
+    let projection = compute::certify_positive_factored_formula_at_scale(
+        coefficient,
+        VISCOUS_DISSIPATION_DYNAMIC_FORMULA,
+        &[
+            CertifiedFormulaInput::scaled(
+                "accretion_rate_msun_myr",
+                i128::from(accretion_rate_msun_myr.to_bits().max(0)),
+                Fixed::FRAC_BITS,
+            ),
+            CertifiedFormulaInput::scaled(
+                "mass_ratio",
+                i128::from(mass_ratio.to_bits().max(0)),
+                Fixed::FRAC_BITS,
+            ),
+            CertifiedFormulaInput::scaled(
+                "inner_boundary_factor",
+                i128::from(inner_boundary_factor.to_bits().max(0)),
+                Fixed::FRAC_BITS,
+            ),
+            CertifiedFormulaInput::scaled(
+                "distance_au",
+                i128::from(distance_au.to_bits().max(0)),
+                Fixed::FRAC_BITS,
+            ),
+        ],
+        Fixed::FRAC_BITS,
+    )
+    .ok()?;
+    Fixed::from_bits_i128(projection.bits())
 }
 
 /// The VISCOUS-DISK EFFECTIVE TEMPERATURE `T_visc(r)` (K) at an orbital distance, DERIVED from the accretional
@@ -407,19 +522,32 @@ pub fn disk_effective_temperature(
 /// ([`civsim_units::tier2::isqrt`]), so no float and no unrepresentable intermediate enters, the same
 /// wide-magnitude discipline the stellar flux uses. `None` only if the derivation exceeds the representable
 /// range, which it does not for the solar reference.
-fn reference_orbital_period_seconds() -> Option<Fixed> {
-    let au = BigRat::from_decimal_str(ASTRONOMICAL_UNIT_M).ok()?;
-    let m_sun = BigRat::from_decimal_str(SOLAR_MASS_KG).ok()?;
-    let g = crate::absolute_floor::gravitational_constant_bigrat()?;
-    let pi = compute::pi(FLUX_PI_DIGITS);
-    let four_pi2 = BigRat::from_i64(4).mul(&pi).mul(&pi);
-    let a3 = au.mul(&au).mul(&au);
+// @derives: the one-AU one-solar-mass reference orbital period <- the sealed gravitational constant and the exact astronomical-unit and solar-mass reference coordinates
+fn derive_reference_orbital_period_seconds() -> Option<Fixed> {
+    let execution = civsim_units::constants::canonical_si_execution_magnitudes().ok()?;
+    let g = execution.get("G")?;
     // The squared period T^2 = 4*pi^2*AU^3/(G*M_sun), in seconds^2 (~9.96e14). Rounded to the integer-second^2
     // scale (its ~15 significant figures are far finer than a period needs) and rooted once at Q32.32.
-    let t_squared = four_pi2.mul(&a3).div(&g.mul(&m_sun));
-    let t2_bits = i64::try_from(t_squared.round_to_scale(0)?).ok()?;
+    let t2_bits = i64::try_from(
+        compute::certify_formula_at_scale(
+            REFERENCE_PERIOD_SQUARED_FORMULA,
+            &[
+                CertifiedFormulaInput::decimal("AU", ASTRONOMICAL_UNIT_M),
+                CertifiedFormulaInput::scaled("G", g.bits(), g.scale_bits()),
+                CertifiedFormulaInput::decimal("M_sun", SOLAR_MASS_KG),
+            ],
+            0,
+        )
+        .ok()?
+        .bits(),
+    )
+    .ok()?;
     let t_bits = civsim_units::tier2::isqrt(t2_bits, 0, Fixed::FRAC_BITS)?;
     Fixed::from_bits_i128(t_bits as i128)
+}
+
+fn reference_orbital_period_seconds() -> Option<Fixed> {
+    *REFERENCE_ORBITAL_PERIOD_SECONDS
 }
 
 /// The ORBITAL PERIOD in world-seconds of a planet at `orbit_au` around a star of `star_mass_ratio` solar
@@ -673,7 +801,7 @@ pub fn viscous_similarity_surface_density(
         return None;
     }
     // ln Mdot [kg/s] = ln(accretion_rate) + ln(M_sun) - ln(1e6 * Julian year), the M_sun/Myr -> kg/s conversion in
-    // the log domain (the same conversion `viscous_dissipation_flux` forms in BigRat).
+    // the log domain (the same conversion `viscous_dissipation_flux` includes in its certified exact formula).
     let ln_megayear_s = civsim_physics::saha::ln_of_decimal(JULIAN_YEAR_S)?
         .checked_add(civsim_physics::saha::ln_of_decimal("1e6")?)?;
     let ln_mdot = accretion_rate_msun_myr
@@ -4831,6 +4959,54 @@ mod tests {
             close(flux, 1361.166),
             "a solar-mass star at one AU derives ~1361.17 W/m^2, got {}",
             flux.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn certified_pi_formulas_preserve_the_prior_terminal_bits() {
+        let surface_flux_bits = compute::certify_formula_at_scale(
+            STELLAR_SURFACE_FLUX_FORMULA,
+            &[
+                CertifiedFormulaInput::decimal("L_sun", SOLAR_LUMINOSITY_W),
+                CertifiedFormulaInput::scaled(
+                    "luminosity_ratio",
+                    i128::from(Fixed::ONE.to_bits()),
+                    Fixed::FRAC_BITS,
+                ),
+                CertifiedFormulaInput::decimal("R_sun", SOLAR_RADIUS_M),
+                CertifiedFormulaInput::scaled(
+                    "radius_ratio",
+                    i128::from(Fixed::ONE.to_bits()),
+                    Fixed::FRAC_BITS,
+                ),
+            ],
+            Fixed::FRAC_BITS,
+        )
+        .expect("unit stellar surface flux certifies")
+        .bits();
+        assert_eq!(surface_flux_bits, 270_319_838_694_804_619);
+        assert_eq!(
+            certified_stellar_surface_flux_bits(Fixed::ONE, Fixed::ONE),
+            Some(surface_flux_bits),
+            "factoring the invariant stellar coefficient preserves the whole-formula terminal bits"
+        );
+        assert_eq!(
+            stellar_flux_from_luminosity_lsun(Fixed::ONE, Fixed::ONE)
+                .expect("unit solar flux certifies")
+                .to_bits(),
+            5_846_165_453_342
+        );
+        assert_eq!(
+            viscous_dissipation_flux(Fixed::ONE, Fixed::ONE, Fixed::ONE, Fixed::ONE)
+                .expect("unit viscous inputs certify")
+                .to_bits(),
+            1_281_257_270_990
+        );
+        assert_eq!(
+            reference_orbital_period_seconds()
+                .expect("reference period certifies")
+                .to_bits(),
+            135_521_311_003_327_552
         );
     }
 

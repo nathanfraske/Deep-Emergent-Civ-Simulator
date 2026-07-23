@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg(feature = "cpu-backend")]
+
 //! The device-free Stage 0 bit-identity gate (R-GPU-CANON-PIN). Unlike `stage0_gate.rs` and
 //! `cross_backend.rs`, which need a CUDA device and self-skip without `CIVSIM_GPU`, this gate runs the
 //! pinned Q32.32 multiply and divide on the CubeCL CPU backend (MLIR/LLVM, no GPU) and checks each
-//! output against the `civsim_core::Fixed` oracle. It therefore runs on every `cargo test -p
-//! civsim-gpu`, with no hardware, proving the kernels' codegen and bit-identity on a second independent
-//! backend as a standing determinism check.
+//! output against the `civsim_core::Fixed` oracle. It runs in the sparse CPU evidence lane with
+//! `--features cpu-backend`, proving the kernels' codegen and bit-identity on a second independent
+//! implementation without adding Tracel LLVM to every pull request.
 //!
 //! Scope: only the pinned arithmetic runs here. The transcendental kernels (the CORDIC `sin`/`cos` and
 //! the `exp` family) still trip the `cubecl-opt` constant-propagation panic on the CPU backend

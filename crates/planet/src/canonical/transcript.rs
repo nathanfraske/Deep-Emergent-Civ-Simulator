@@ -1419,6 +1419,36 @@ mod tests {
             (0..exponent).fold(BigRat::from_i64(1), |acc, _| acc.mul(value))
         }
 
+        // Independent, exact-rational confirmation oracle. Machin's identity
+        // avoids importing the production formula evaluator or an authored
+        // decimal expansion of pi into this canonical-boundary test.
+        fn atan_reciprocal(reciprocal: i64, terms: u32) -> BigRat {
+            let one = BigRat::from_i64(1);
+            let x = one.div(&BigRat::from_i64(reciprocal));
+            let x_squared = x.mul(&x).reduce();
+            let mut x_power = x;
+            let mut sum = BigRat::from_i64(0);
+            for term_index in 0..terms {
+                let divisor = BigRat::from_i64(i64::from(2 * term_index + 1));
+                let term = x_power.div(&divisor).reduce();
+                sum = if term_index % 2 == 0 {
+                    sum.add(&term)
+                } else {
+                    sum.sub(&term)
+                }
+                .reduce();
+                x_power = x_power.mul(&x_squared).reduce();
+            }
+            sum
+        }
+
+        fn independent_pi() -> BigRat {
+            atan_reciprocal(5, 64)
+                .mul(&BigRat::from_i64(16))
+                .sub(&atan_reciprocal(239, 64).mul(&BigRat::from_i64(4)))
+                .reduce()
+        }
+
         let transcript = audited_transcript();
         let representation: BTreeMap<_, _> = transcript
             .representation()
@@ -1455,7 +1485,7 @@ mod tests {
         let h = rational("h");
         let e = rational("e");
         let na = rational("N_A");
-        let pi = civsim_units::compute::pi(90);
+        let pi = independent_pi();
         let sigma = BigRat::from_i64(2)
             .mul(&pow(&pi, 5))
             .mul(&pow(&kb, 4))
