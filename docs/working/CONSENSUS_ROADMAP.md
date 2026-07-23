@@ -41,6 +41,7 @@ observer independence bind the full runpath.
 
 ## Recent landings
 
+- 2026-07-22  Content-bound gate receipts, bounded parallel checks, and one globally capped native-WSL target path accelerate local verification without changing physical authority -> `TODOS.md` P-VERIFICATION-OPERATIONS
 - 2026-07-22  Observer-only scene DTOs expose transcript order, exact noncausal SI representation integers, stage reachability, refusal leaves, and open analyses while marking value payload accounting opaque at the viewer boundary -> `crates/viewer/src/scene.rs`
 - 2026-07-22  Direct public-API evidence pins the three measured floor records, one derived ancestry hop, complete Stage 1 refusal frontier, seven-stage reachability vector, and absence of realization, written state, and contingency -> `crates/planet/tests/canonical_observation.rs`
 - 2026-07-22  A planning-only file-to-invariant map records facade, shared-source, gate-baseline, evidence, and split-order constraints without moving a formula or broadening authority -> `docs/working/CANONICAL_FILE_INVARIANT_MAP.md`

@@ -8,6 +8,8 @@
 # inside WSL with the same Bash, Python, Rust, and GNU-tool assumptions as Linux.
 
 canonical_packages := "-p civsim-core -p civsim-ledger -p civsim-units -p civsim-physics -p civsim-materials -p civsim-world -p civsim-planet -p civsim-viewer -p civsim-gpu -p civsim-stone0"
+parked_target := env_var_or_default("CIVSIM_PARKED_TARGET_DIR", "target/parked")
+cargo_dev := "bash scripts/cargo_dev.sh"
 
 # Show the available recipes.
 default:
@@ -19,39 +21,39 @@ default:
 
 # Enter the canonical planet front door; incomplete physical closure emits a structured refusal.
 run *args:
-    cargo run -p civsim-planet --bin run_planet -- {{args}}
+    {{cargo_dev}} run -p civsim-planet --bin run_planet -- {{args}}
 
 # Compatibility name for the former derived view. This enters the same floor-only library runner and no viewer.
 run-derived:
-    cargo run -p civsim-planet --bin run_planet
+    {{cargo_dev}} run -p civsim-planet --bin run_planet
 
 # Report the missing-floor boundary without entering a physical stage. An incomplete receipt exits non-zero.
 readiness:
-    cargo run -p civsim-planet --bin run_planet -- --readiness
+    {{cargo_dev}} run -p civsim-planet --bin run_planet -- --readiness
 
 # Regenerate the centralized four-tier by seven-tag inventory from the audited catalog.
 ledger-inventory:
-    cargo run -p civsim-planet --bin ledger_inventory -- --write
+    {{cargo_dev}} run -p civsim-planet --bin ledger_inventory -- --write
 
 # Fail when the checked-in centralized ledger inventory does not match the audited catalog.
 ledger-inventory-check:
-    cargo run -p civsim-planet --bin ledger_inventory -- --check
+    {{cargo_dev}} run -p civsim-planet --bin ledger_inventory -- --check
 
 # Run the quarantined legacy dawn development fixture to its final state hash.
 run-dawn-legacy:
-    cargo run --release --manifest-path parked/Cargo.toml --target-dir target/parked -p civsim-sim --example run_world
+    {{cargo_dev}} run --release --manifest-path parked/Cargo.toml --target-dir "{{parked_target}}" -p civsim-sim --example run_world
 
 # Run the legacy living-world scenario.
 run-living-legacy:
-    cargo run --release --manifest-path parked/Cargo.toml --target-dir target/parked -p civsim-sim --example run_world -- --scenario living
+    {{cargo_dev}} run --release --manifest-path parked/Cargo.toml --target-dir "{{parked_target}}" -p civsim-sim --example run_world -- --scenario living
 
 # Enter the snapshot-only viewer; it refuses until immutable PlanetSnapshot transport is wired.
 view:
-    cargo run -p civsim-viewer
+    {{cargo_dev}} run -p civsim-viewer
 
 # Open the parked causal viewer under an explicit legacy name.
 view-living-legacy:
-    cargo run --release --manifest-path parked/Cargo.toml --target-dir target/parked -p civsim-viewer-legacy
+    {{cargo_dev}} run --release --manifest-path parked/Cargo.toml --target-dir "{{parked_target}}" -p civsim-viewer-legacy
 
 # Refuse until a canonical snapshot-only GPU adapter exists.
 view-gpu:
@@ -61,7 +63,7 @@ view-gpu:
 
 # Open the current causal viewer with GPU globe shading under an explicit legacy name.
 view-living-gpu-legacy:
-    cargo run --release --manifest-path parked/Cargo.toml --target-dir target/parked -p civsim-viewer-legacy --features gpu
+    {{cargo_dev}} run --release --manifest-path parked/Cargo.toml --target-dir "{{parked_target}}" -p civsim-viewer-legacy --features gpu
 
 # ---------------------------------------------------------------------------
 # Verify
@@ -108,21 +110,22 @@ doctor:
     just hooks-check
     python3 scripts/gate_runner.py --self-test
     python3 scripts/test_gate_runner.py
+    bash scripts/test_target_gc.sh
     python3 scripts/gate_runner.py run --tier doctor --phase pre
-    cargo metadata --locked --no-deps --format-version 1 >/dev/null
-    cargo metadata --locked --manifest-path parked/Cargo.toml --no-deps --format-version 1 >/dev/null
+    {{cargo_dev}} metadata --locked --no-deps --format-version 1 >/dev/null
+    {{cargo_dev}} metadata --locked --manifest-path parked/Cargo.toml --no-deps --format-version 1 >/dev/null
     python3 scripts/gate_runner.py self-tests --tier doctor
-    cargo run -q -p civsim-stone0 --bin stone0-gate -- --self-test
-    cargo run -q -p civsim-stone0 --bin stone0-gate -- --ci
+    {{cargo_dev}} run -q -p civsim-stone0 --bin stone0-gate -- --self-test
+    {{cargo_dev}} run -q -p civsim-stone0 --bin stone0-gate -- --ci
     python3 scripts/gate_runner.py run --tier doctor --phase post
 
 # Test the canonical abiotic package set. Parked and legacy compatibility packages are intentionally separate.
 test:
-    cargo test {{canonical_packages}} --all-targets
+    {{cargo_dev}} test {{canonical_packages}} --all-targets
 
 # Compile and test the complete parked workspace, including biology and civilization.
 test-legacy:
-    cargo test --manifest-path parked/Cargo.toml --target-dir target/parked --all-targets
+    {{cargo_dev}} test --manifest-path parked/Cargo.toml --target-dir "{{parked_target}}" --all-targets
 
 # Run retired calibration, profile, and quarantine ratchets against parked work only.
 audit-parked:
@@ -133,27 +136,27 @@ audit-parked:
 
 # Format the canonical workspace.
 fmt:
-    cargo fmt --all
+    {{cargo_dev}} fmt --all
 
 # Format the separately parked workspace.
 fmt-legacy:
-    cargo fmt --manifest-path parked/Cargo.toml --all
+    {{cargo_dev}} fmt --manifest-path parked/Cargo.toml --all
 
 # Canonical formatting check without writing.
 fmt-check:
-    cargo fmt --all --check
+    {{cargo_dev}} fmt --all --check
 
 # Lint the canonical abiotic package set.
 lint:
-    cargo clippy {{canonical_packages}} --all-targets -- -D warnings
+    {{cargo_dev}} clippy {{canonical_packages}} --all-targets -- -D warnings
 
 # Check formatting in the complete parked workspace.
 fmt-check-legacy:
-    cargo fmt --manifest-path parked/Cargo.toml --all --check
+    {{cargo_dev}} fmt --manifest-path parked/Cargo.toml --all --check
 
 # Lint the complete parked workspace, including biology and civilization.
 lint-legacy:
-    cargo clippy --manifest-path parked/Cargo.toml --target-dir target/parked --all-targets -- -D warnings
+    {{cargo_dev}} clippy --manifest-path parked/Cargo.toml --target-dir "{{parked_target}}" --all-targets -- -D warnings
 
 # The documentation verification suite (em dashes, banned adverbs, part numbering, fences). UNIX.
 verify:
@@ -166,19 +169,32 @@ _ci tier:
     just fmt-check
     python3 scripts/gate_runner.py --self-test
     python3 scripts/test_gate_runner.py
+    bash scripts/test_target_gc.sh
     python3 scripts/gate_runner.py run --tier {{tier}} --phase pre
     python3 scripts/gate_runner.py self-tests --tier {{tier}}
-    cargo run -q -p civsim-stone0 --bin stone0-gate -- --self-test
-    cargo run -q -p civsim-stone0 --bin stone0-gate -- --ci
+    {{cargo_dev}} run -q -p civsim-stone0 --bin stone0-gate -- --self-test
+    {{cargo_dev}} run -q -p civsim-stone0 --bin stone0-gate -- --ci
     python3 scripts/gate_runner.py run --tier {{tier}} --phase post
     just lint
     just test
-    RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links" cargo doc {{canonical_packages}} --no-deps --document-private-items
-    cargo test {{canonical_packages}} --doc
+    RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links" {{cargo_dev}} doc {{canonical_packages}} --no-deps --document-private-items
+    {{cargo_dev}} test {{canonical_packages}} --doc
 
 # Run the canonical PR tier, including the strict single-provider Diamond scan.
 ci:
     just _ci pr
+
+# Fast, non-certifying developer loop. The PR tier remains the merge receipt.
+check-fast:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just fmt-check
+    python3 scripts/gate_runner.py --self-test
+    python3 scripts/test_gate_runner.py
+    bash scripts/test_target_gc.sh
+    python3 scripts/gate_runner.py run --tier stop --phase pre
+    {{cargo_dev}} check {{canonical_packages}} --all-targets
+    python3 scripts/gate_runner.py run --tier stop --phase post
 
 # Run the same canonical recipe used by CI through the portable local wrapper.
 ci-local:
@@ -241,12 +257,13 @@ stop-gate:
 pins-dawn-legacy:
     #!/usr/bin/env bash
     set -euo pipefail
-    cargo build --release --manifest-path parked/Cargo.toml --target-dir target/parked -p civsim-sim --example run_world
+    target_dir="{{parked_target}}"
+    {{cargo_dev}} build --release --manifest-path parked/Cargo.toml --target-dir "$target_dir" -p civsim-sim --example run_world
     fail=0
     check() {
         local label="$1" expected="$2"; shift 2
         local got
-        got="$(./target/parked/release/examples/run_world "$@" | sed -n 's/.*final state_hash: \([0-9a-f]*\).*/\1/p' | tail -1)"
+        got="$("$target_dir/release/examples/run_world" "$@" | sed -n 's/.*final state_hash: \([0-9a-f]*\).*/\1/p' | tail -1)"
         if [ "$got" = "$expected" ]; then
             echo "  $label OK   $got"
         else
@@ -266,10 +283,18 @@ pins-dawn-legacy:
 # Housekeeping
 # ---------------------------------------------------------------------------
 
-# Bound the cargo build artifacts (LRU ring buffer under a size and worktree-count cap). UNIX.
+# Show the bounded native-WSL target and receipt locations.
+cache-info:
+    bash scripts/wsl_dev_env.sh --print
+
+# Bound the native Cargo target and drain retired per-worktree targets. UNIX.
 gc:
     bash scripts/target_gc.sh --verbose
 
 # Report what the artifact GC would remove, without removing it. UNIX.
 gc-dry:
     bash scripts/target_gc.sh --dry-run --verbose
+
+# Issue an online WSL filesystem trim without stopping the distribution.
+trim-wsl:
+    bash scripts/wsl_trim.sh --force --verbose

@@ -106,7 +106,7 @@ if [ -n "$repo_changed" ]; then
     exit 2
   fi
   if [ -n "$(git -C "$ROOT" status --porcelain -- crates/stone0 2>/dev/null)" ]; then
-    if ! out="$(cd "$ROOT" && cargo run -q -p civsim-stone0 --bin stone0-gate -- --self-test 2>&1)"; then
+    if ! out="$(cd "$ROOT" && bash scripts/cargo_dev.sh run -q -p civsim-stone0 --bin stone0-gate -- --self-test 2>&1)"; then
       echo "stop-gate: the Stone 0 native self-test failed." >&2
       printf '%s\n' "$out" | tail -20 >&2
       exit 2

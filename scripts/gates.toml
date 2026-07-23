@@ -21,7 +21,8 @@ phase = "pre"
 command = ["bash", "scripts/verify.sh"]
 timeout_seconds = 60
 no_self_test_reason = "The script reports independent checks over the maintained documents and has no synthetic fixture mode."
-cache = "content-hash"
+cache = "never"
+no_cache_reason = "The maintained-document verifier dispatches POSIX text utilities whose complete executable closure is outside the repository."
 inputs = ["scripts/verify.sh", "parked/docs/design.md", "parked/docs/audit.md"]
 path_triggers = ["scripts/verify.sh", "parked/docs/design.md", "parked/docs/audit.md"]
 
@@ -73,7 +74,8 @@ phase = "provenance"
 command = ["{python}", "scripts/planet_boundary_gate.py"]
 self_test = ["{python}", "scripts/planet_boundary_gate.py", "--self-test"]
 timeout_seconds = 180
-cache = "content-hash"
+cache = "never"
+no_cache_reason = "The boundary verifier dispatches the Cargo executable selected by its environment, so repository bytes alone do not close execution identity."
 inputs = [
   "scripts/planet_boundary_gate.py",
   "Cargo.toml",
@@ -116,9 +118,10 @@ phase = "provenance"
 command = ["{python}", "scripts/gen_sources.py", "--check"]
 self_test = ["{python}", "scripts/gen_sources.py", "--self-test"]
 timeout_seconds = 120
-cache = "content-hash"
-inputs = ["scripts/gen_sources.py", "sources", "docs/SOURCES.md"]
-path_triggers = ["scripts/gen_sources.py", "sources/**", "docs/SOURCES.md"]
+cache = "never"
+no_cache_reason = "Generated custody output depends on the existence of held paths outside the declared repository input closure."
+inputs = ["scripts/gen_sources.py", "sources", "docs/SOURCES.md", "crates/*/data/*/manifest.toml"]
+path_triggers = ["scripts/gen_sources.py", "sources/**", "docs/SOURCES.md", "crates/*/data/*/manifest.toml"]
 
 [[gate]]
 id = "canonical.derivation-annotations"
@@ -142,7 +145,8 @@ phase = "provenance"
 command = ["{python}", "scripts/diamond_gate.py", "--strict"]
 self_test = ["{python}", "scripts/diamond_gate.py", "--self-test"]
 timeout_seconds = 120
-cache = "content-hash"
+cache = "never"
+no_cache_reason = "The provider verifier dispatches the host grep executable, so repository bytes alone do not close execution identity."
 inputs = ["scripts/diamond_gate.py", "crates"]
 path_triggers = ["scripts/diamond_gate.py", "crates/**"]
 
@@ -305,28 +309,59 @@ order = 210
 description = "Check the centralized four-tier by seven-mark ledger inventory."
 tiers = ["doctor", "pr", "full", "nightly", "stop"]
 phase = "post"
-command = ["cargo", "run", "-q", "-p", "civsim-planet", "--bin", "ledger_inventory", "--", "--check"]
+command = ["bash", "scripts/cargo_dev.sh", "run", "-q", "-p", "civsim-planet", "--bin", "ledger_inventory", "--", "--check"]
 timeout_seconds = 300
 no_self_test_reason = "Check mode regenerates the inventory from the repository-owned catalog and compares the committed artifact."
-cache = "content-hash"
+cache = "never"
+no_cache_reason = "The planet build script runs Stone 0 across repository, Git-index, and external-secret state that this gate cannot seal in a content receipt."
 inputs = [
   "scripts/gates.toml",
+  "scripts/cargo_dev.sh",
+  "scripts/target_gc.sh",
+  "scripts/wsl_dev_env.sh",
   "Cargo.toml",
   "Cargo.lock",
+  "rust-toolchain.toml",
+  "scripts/*.html",
+  "scripts/*.ps1",
+  "scripts/*.py",
+  "scripts/*.sh",
+  "scripts/*.toml",
+  "scripts/*.tsv",
+  "scripts/*.txt",
+  "scripts/githooks",
+  "sources",
   "crates/ledger",
+  "crates/stone0",
   "crates/units",
-  "crates/planet/src/canonical",
-  "crates/planet/src/bin/ledger_inventory.rs",
+  "crates/planet",
+  "docs/SOURCES.md",
+  "docs/working/PHYSICS_FLOOR_REGISTRY.md",
   "docs/working/CANONICAL_LEDGER_INVENTORY.txt",
 ]
 path_triggers = [
   "scripts/gates.toml",
+  "scripts/cargo_dev.sh",
+  "scripts/target_gc.sh",
+  "scripts/wsl_dev_env.sh",
   "Cargo.toml",
   "Cargo.lock",
+  "rust-toolchain.toml",
+  "scripts/*.html",
+  "scripts/*.ps1",
+  "scripts/*.py",
+  "scripts/*.sh",
+  "scripts/*.toml",
+  "scripts/*.tsv",
+  "scripts/*.txt",
+  "scripts/githooks/**",
+  "sources/**",
   "crates/ledger/**",
+  "crates/stone0/**",
   "crates/units/**",
-  "crates/planet/src/canonical/**",
-  "crates/planet/src/bin/ledger_inventory.rs",
+  "crates/planet/**",
+  "docs/SOURCES.md",
+  "docs/working/PHYSICS_FLOOR_REGISTRY.md",
   "docs/working/CANONICAL_LEDGER_INVENTORY.txt",
 ]
 

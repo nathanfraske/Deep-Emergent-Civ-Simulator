@@ -1,6 +1,6 @@
 # Thin development aliases. The Just recipes and scripts remain the command source of truth.
 
-.PHONY: help hooks-install hooks-check doctor gates-list gates-run gates-self-tests run run-derived readiness run-dawn-legacy run-living-legacy view view-gpu view-living-legacy view-living-gpu-legacy ledger-inventory ledger-inventory-check verify check check-pr check-full check-nightly check-legacy ci ci-local ci-list ci-legacy ci-list-legacy test test-legacy audit-parked fmt fmt-check fmt-legacy fmt-check-legacy lint lint-legacy pins-dawn-legacy stop-gate gc gc-dry
+.PHONY: help hooks-install hooks-check doctor gates-list gates-run gates-self-tests run run-derived readiness run-dawn-legacy run-living-legacy view view-gpu view-living-legacy view-living-gpu-legacy ledger-inventory ledger-inventory-check verify check-fast check check-pr check-full check-nightly check-legacy ci ci-local ci-list ci-legacy ci-list-legacy test test-legacy audit-parked fmt fmt-check fmt-legacy fmt-check-legacy lint lint-legacy pins-dawn-legacy stop-gate cache-info gc gc-dry trim-wsl
 
 GATE_TIER ?= pr
 
@@ -13,6 +13,7 @@ GATES_LIST_CMD := $(DEV) gates-list $(GATE_TIER)
 GATES_RUN_CMD := $(DEV) gates-run $(GATE_TIER)
 GATES_SELF_TESTS_CMD := $(DEV) gates-self-tests $(GATE_TIER)
 VERIFY_CMD := $(DEV) verify
+CHECK_FAST_CMD := $(DEV) check-fast
 CHECK_CMD := $(DEV) check
 CHECK_PR_CMD := $(DEV) check-pr
 CHECK_FULL_CMD := $(DEV) check-full
@@ -45,8 +46,10 @@ LEDGER_INVENTORY_CMD := $(DEV) ledger-inventory
 LEDGER_INVENTORY_CHECK_CMD := $(DEV) ledger-inventory-check
 PINS_DAWN_LEGACY_CMD := $(DEV) pins-dawn-legacy
 STOP_CMD := $(DEV) stop-gate
+CACHE_INFO_CMD := $(DEV) cache-info
 GC_CMD := $(DEV) gc
 GC_DRY_CMD := $(DEV) gc-dry
+TRIM_WSL_CMD := $(DEV) trim-wsl
 else
 HOOKS_INSTALL_CMD := just hooks-install
 HOOKS_CHECK_CMD := just hooks-check
@@ -55,6 +58,7 @@ GATES_LIST_CMD := just gates-list $(GATE_TIER)
 GATES_RUN_CMD := just gates-run $(GATE_TIER)
 GATES_SELF_TESTS_CMD := just gates-self-tests $(GATE_TIER)
 VERIFY_CMD := just verify
+CHECK_FAST_CMD := just check-fast
 CHECK_CMD := just check-pr
 CHECK_PR_CMD := just check-pr
 CHECK_FULL_CMD := just check-full
@@ -87,8 +91,10 @@ LEDGER_INVENTORY_CMD := just ledger-inventory
 LEDGER_INVENTORY_CHECK_CMD := just ledger-inventory-check
 PINS_DAWN_LEGACY_CMD := just pins-dawn-legacy
 STOP_CMD := just stop-gate
+CACHE_INFO_CMD := just cache-info
 GC_CMD := just gc
 GC_DRY_CMD := just gc-dry
+TRIM_WSL_CMD := just trim-wsl
 endif
 
 help:
@@ -111,6 +117,7 @@ help:
 	  'make ledger-inventory regenerate four-tier by seven-tag inventory' \
 	  'make ledger-inventory-check verify the checked-in inventory' \
 	  'make verify           document and prose gate' \
+	  'make check-fast       non-certifying developer compile loop' \
 	  'make check            canonical PR tier' \
 	  'make check-full       canonical full CPU tier' \
 	  'make check-nightly    scheduled canonical tier' \
@@ -131,8 +138,10 @@ help:
 	  'make lint-legacy      parked workspace Clippy gate' \
 	  'make pins-dawn-legacy compare old dawn fixture digests' \
 	  'make stop-gate        repository Stop hook' \
+	  'make cache-info       show bounded native-WSL cache paths' \
 	  'make gc               bound Cargo build artifacts' \
-	  'make gc-dry           report artifact cleanup without deleting'
+	  'make gc-dry           report artifact cleanup without deleting' \
+	  'make trim-wsl         issue an online WSL filesystem trim'
 
 hooks-install:
 	@$(HOOKS_INSTALL_CMD)
@@ -187,6 +196,9 @@ ledger-inventory-check:
 
 verify:
 	@$(VERIFY_CMD)
+
+check-fast:
+	@$(CHECK_FAST_CMD)
 
 check:
 	@$(CHECK_CMD)
@@ -251,8 +263,14 @@ pins-dawn-legacy:
 stop-gate:
 	@$(STOP_CMD)
 
+cache-info:
+	@$(CACHE_INFO_CMD)
+
 gc:
 	@$(GC_CMD)
 
 gc-dry:
 	@$(GC_DRY_CMD)
+
+trim-wsl:
+	@$(TRIM_WSL_CMD)

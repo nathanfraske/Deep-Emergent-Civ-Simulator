@@ -114,13 +114,21 @@ print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "addit
 PY
 )"
 
-# Cargo build-artifact ring buffer (scripts/target_gc.sh). Cargo never garbage-collects a target
-# directory, and one target per agent worktree grew to 244 GB here, which is what pushed the volume into
-# the compression attempt that corrupted the install. This bounds it once per session. It is detached and
-# wholly silent because this hook's stdout must remain a single valid JSON object; the report goes to the
-# log. The script stands down by itself when a build is in flight and never touches a locked worktree.
-if [ -x "$ROOT/scripts/target_gc.sh" ]; then
-  ( setsid "$ROOT/scripts/target_gc.sh" >> "$ROOT/.claude/target_gc.log" 2>&1 & ) >/dev/null 2>&1 </dev/null
+# Cargo artifacts once reached 244 GB across per-agent targets. Session maintenance now shares one
+# native-WSL target per clone, enforces its hard cap, drains old worktree targets, and issues a throttled
+# online fstrim. It is detached because this hook's stdout must remain one valid JSON object.
+if [ -f "$ROOT/scripts/session_maintenance.sh" ]; then
+  # Keep detached maintenance output diagnostic but bounded. Trimming before
+  # launch avoids an ever-growing ignored file across long-lived clones.
+  maintenance_log="$ROOT/.claude/target_gc.log"
+  if [ -f "$maintenance_log" ] && [ "$(wc -c < "$maintenance_log" 2>/dev/null || echo 0)" -gt 1048576 ]; then
+    maintenance_tail="$(mktemp "${TMPDIR:-/tmp}/civsim-maintenance-log.XXXXXX" 2>/dev/null || true)"
+    if [ -n "$maintenance_tail" ]; then
+      tail -c 262144 "$maintenance_log" > "$maintenance_tail" 2>/dev/null && mv "$maintenance_tail" "$maintenance_log"
+      rm -f "$maintenance_tail"
+    fi
+  fi
+  ( setsid bash "$ROOT/scripts/session_maintenance.sh" >> "$ROOT/.claude/target_gc.log" 2>&1 & ) >/dev/null 2>&1 </dev/null
 fi
 
 # Guard the Python step: on any failure (including a crash on unusual content) emit a

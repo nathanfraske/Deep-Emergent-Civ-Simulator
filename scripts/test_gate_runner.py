@@ -7,11 +7,13 @@ import copy
 import contextlib
 import dataclasses
 import io
+import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import unittest
 from pathlib import Path
@@ -57,6 +59,22 @@ class InventoryValidationTests(unittest.TestCase):
             self.assertTrue(gate.inputs)
             self.assertTrue(gate.path_triggers)
             self.assertTrue(gate.self_test or gate.no_self_test_reason)
+        by_id = {gate.gate_id: gate for gate in inventory.gates}
+        self.assertIn(
+            "crates/*/data/*/manifest.toml",
+            by_id["canonical.source-registry"].inputs,
+        )
+        self.assertIn("crates/planet", by_id["canonical.ledger-inventory"].inputs)
+        self.assertIn("scripts/*.py", by_id["canonical.ledger-inventory"].inputs)
+        for gate_id in (
+            "docs.legacy-archive",
+            "canonical.planet-boundary",
+            "canonical.source-registry",
+            "canonical.diamond-single-provider",
+            "canonical.ledger-inventory",
+        ):
+            self.assertEqual(by_id[gate_id].cache, "never")
+            self.assertTrue(by_id[gate_id].no_cache_reason)
 
     def test_missing_command_fails(self) -> None:
         data = valid_data()
@@ -77,6 +95,15 @@ class InventoryValidationTests(unittest.TestCase):
         second["order"] = 5
         data["gate"].append(second)  # type: ignore[union-attr]
         self.assert_invalid(data, "gate order drift")
+
+    def test_phase_drift_fails_within_a_tier(self) -> None:
+        data = valid_data()
+        second = copy.deepcopy(data["gate"][0])  # type: ignore[index]
+        second["id"] = "test.second"
+        second["order"] = 20
+        second["phase"] = "pre"
+        data["gate"].append(second)  # type: ignore[union-attr]
+        self.assert_invalid(data, "gate phase drift")
 
     def test_shell_string_fails(self) -> None:
         data = valid_data()
@@ -281,6 +308,185 @@ class InputClosureTests(unittest.TestCase):
         self.assertEqual(result, 2)
         self.assertNotIn(gate_runner.POLICY_DETECTION_MARKER, output.getvalue())
 
+    def test_success_receipts_are_content_and_command_bound(self) -> None:
+        temporary, root, gate = self.make_root()
+        self.addCleanup(temporary.cleanup)
+        manifest = root / "scripts" / "gates.toml"
+        cache_dir = root / "cache"
+        counter = root / "counter.txt"
+        script = root / "scripts" / "check.py"
+        script.write_text(
+            "from pathlib import Path\n"
+            "counter = Path('counter.txt')\n"
+            "value = int(counter.read_text() if counter.exists() else '0')\n"
+            "counter.write_text(str(value + 1))\n",
+            encoding="utf-8",
+        )
+
+        with mock.patch.object(gate_runner, "ROOT", root):
+            first = gate_runner.execute_gate(
+                gate,
+                gate.command,
+                dry_run=False,
+                manifest_path=manifest,
+                cache_dir=cache_dir,
+                read_cache=True,
+                write_cache=True,
+            )
+            second_output = io.StringIO()
+            with contextlib.redirect_stdout(second_output):
+                second = gate_runner.execute_gate(
+                    gate,
+                    gate.command,
+                    dry_run=False,
+                    manifest_path=manifest,
+                    cache_dir=cache_dir,
+                    read_cache=True,
+                    write_cache=True,
+                )
+        self.assertIs(first, gate_runner.GateOutcome.Passed)
+        self.assertIs(second, gate_runner.GateOutcome.Passed)
+        self.assertEqual(counter.read_text(encoding="utf-8"), "1")
+        self.assertIn("[CACHED] test.first", second_output.getvalue())
+
+        receipt_path = next(cache_dir.rglob("*.json"))
+        expired = json.loads(receipt_path.read_text(encoding="utf-8"))
+        expired["created_unix"] = 0
+        receipt_path.write_text(json.dumps(expired), encoding="utf-8")
+        with mock.patch.object(gate_runner, "ROOT", root):
+            after_expiry = gate_runner.execute_gate(
+                gate,
+                gate.command,
+                dry_run=False,
+                manifest_path=manifest,
+                cache_dir=cache_dir,
+                read_cache=True,
+                write_cache=True,
+            )
+        self.assertIs(after_expiry, gate_runner.GateOutcome.Passed)
+        self.assertEqual(counter.read_text(encoding="utf-8"), "2")
+
+        script.write_text(script.read_text(encoding="utf-8") + "# changed\n", encoding="utf-8")
+        changed_command = dataclasses.replace(
+            gate,
+            command=gate.command + ("ignored-argument",),
+        )
+        with mock.patch.object(gate_runner, "ROOT", root):
+            after_input_change = gate_runner.execute_gate(
+                gate,
+                gate.command,
+                dry_run=False,
+                manifest_path=manifest,
+                cache_dir=cache_dir,
+                read_cache=True,
+                write_cache=True,
+            )
+            command_change = gate_runner.execute_gate(
+                changed_command,
+                changed_command.command,
+                dry_run=False,
+                manifest_path=manifest,
+                cache_dir=cache_dir,
+                read_cache=True,
+                write_cache=True,
+            )
+        self.assertIs(after_input_change, gate_runner.GateOutcome.Passed)
+        self.assertIs(command_change, gate_runner.GateOutcome.Passed)
+        self.assertEqual(counter.read_text(encoding="utf-8"), "4")
+
+        changed_path = os.environ.get("PATH", "") + os.pathsep + str(root / "unused")
+        with mock.patch.dict(os.environ, {"PATH": changed_path}):
+            with mock.patch.object(gate_runner, "ROOT", root):
+                environment_change = gate_runner.execute_gate(
+                    gate,
+                    gate.command,
+                    dry_run=False,
+                    manifest_path=manifest,
+                    cache_dir=cache_dir,
+                    read_cache=True,
+                    write_cache=True,
+                )
+                environment_hit = gate_runner.execute_gate(
+                    gate,
+                    gate.command,
+                    dry_run=False,
+                    manifest_path=manifest,
+                    cache_dir=cache_dir,
+                    read_cache=True,
+                    write_cache=True,
+                )
+        self.assertIs(environment_change, gate_runner.GateOutcome.Passed)
+        self.assertIs(environment_hit, gate_runner.GateOutcome.Passed)
+        self.assertEqual(counter.read_text(encoding="utf-8"), "5")
+
+        never_cached = dataclasses.replace(gate, cache="never", no_cache_reason="test")
+        with mock.patch.object(gate_runner, "ROOT", root):
+            for _ in range(2):
+                outcome = gate_runner.execute_gate(
+                    never_cached,
+                    never_cached.command,
+                    dry_run=False,
+                    manifest_path=manifest,
+                    cache_dir=cache_dir,
+                    read_cache=True,
+                    write_cache=True,
+                )
+                self.assertIs(outcome, gate_runner.GateOutcome.Passed)
+        self.assertEqual(counter.read_text(encoding="utf-8"), "7")
+
+        secret = "synthetic-owner-override-must-not-enter-receipts"
+        with mock.patch.dict(os.environ, {"STONE0_OVERRIDE": secret}):
+            with mock.patch.object(gate_runner, "ROOT", root):
+                for _ in range(2):
+                    outcome = gate_runner.execute_gate(
+                        gate,
+                        gate.command,
+                        dry_run=False,
+                        manifest_path=manifest,
+                        cache_dir=cache_dir,
+                        read_cache=True,
+                        write_cache=True,
+                    )
+                    self.assertIs(outcome, gate_runner.GateOutcome.Passed)
+        self.assertEqual(counter.read_text(encoding="utf-8"), "9")
+        self.assertNotIn(
+            secret,
+            "".join(path.read_text(encoding="utf-8") for path in cache_dir.rglob("*.json")),
+        )
+
+        receipts_before_failure = sorted(cache_dir.rglob("*.json"))
+        script.write_text(
+            "from pathlib import Path\n"
+            "counter = Path('counter.txt')\n"
+            "value = int(counter.read_text() if counter.exists() else '0')\n"
+            "counter.write_text(str(value + 1))\n"
+            "raise SystemExit(3)\n",
+            encoding="utf-8",
+        )
+        with mock.patch.object(gate_runner, "ROOT", root):
+            failed_once = gate_runner.execute_gate(
+                gate,
+                gate.command,
+                dry_run=False,
+                manifest_path=manifest,
+                cache_dir=cache_dir,
+                read_cache=True,
+                write_cache=True,
+            )
+            failed_twice = gate_runner.execute_gate(
+                gate,
+                gate.command,
+                dry_run=False,
+                manifest_path=manifest,
+                cache_dir=cache_dir,
+                read_cache=True,
+                write_cache=True,
+            )
+        self.assertIs(failed_once, gate_runner.GateOutcome.OperationalFailure)
+        self.assertIs(failed_twice, gate_runner.GateOutcome.OperationalFailure)
+        self.assertEqual(counter.read_text(encoding="utf-8"), "11")
+        self.assertEqual(sorted(cache_dir.rglob("*.json")), receipts_before_failure)
+
 
 class ClientParityTests(unittest.TestCase):
     def run_client(self, command: list[str]) -> list[str]:
@@ -313,6 +519,121 @@ class ClientParityTests(unittest.TestCase):
                 "bash is unavailable; tracked hook execution is platform-specific"
             )
         return bash
+
+    def test_parallel_workers_overlap_with_phase_barriers_and_authority_order(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gate-parallel-test-") as temporary:
+            root = Path(temporary)
+            scripts = root / "scripts"
+            scripts.mkdir()
+            shutil.copy2(ROOT / "scripts" / "gate_runner.py", scripts / "gate_runner.py")
+            (scripts / "pre.py").write_text(
+                "from pathlib import Path\nimport time\n"
+                "time.sleep(0.3)\nPath('pre.done').write_text('ok')\nprint('pre')\n",
+                encoding="utf-8",
+            )
+            for name, other in (("first", "second"), ("second", "first")):
+                (scripts / f"{name}.py").write_text(
+                    "from pathlib import Path\nimport time\n"
+                    "assert Path('pre.done').exists()\n"
+                    f"Path('{name}.ready').write_text('ok')\n"
+                    "deadline = time.monotonic() + 3\n"
+                    f"while not Path('{other}.ready').exists():\n"
+                    "    if time.monotonic() > deadline:\n"
+                    "        raise SystemExit('parallel rendezvous timed out')\n"
+                    "    time.sleep(0.01)\n"
+                    f"print({name!r})\n",
+                    encoding="utf-8",
+                )
+            (scripts / "post.py").write_text(
+                "from pathlib import Path\n"
+                "assert Path('first.ready').exists()\n"
+                "assert Path('second.ready').exists()\n"
+                "print('post')\n",
+                encoding="utf-8",
+            )
+            (scripts / "gates.toml").write_text(
+                """[inventory]
+schema = 1
+tiers = ["pr"]
+
+[[gate]]
+id = "test.pre"
+order = 5
+description = "pre"
+tiers = ["pr"]
+phase = "pre"
+command = ["{python}", "scripts/pre.py"]
+self_test = ["{python}", "scripts/pre.py"]
+timeout_seconds = 10
+cache = "never"
+no_cache_reason = "phase canary"
+inputs = ["scripts/pre.py"]
+path_triggers = ["scripts/pre.py"]
+
+[[gate]]
+id = "test.first"
+order = 10
+description = "first"
+tiers = ["pr"]
+phase = "provenance"
+command = ["{python}", "scripts/first.py"]
+self_test = ["{python}", "scripts/first.py"]
+timeout_seconds = 10
+cache = "never"
+no_cache_reason = "parallel canary"
+inputs = ["scripts/first.py"]
+path_triggers = ["scripts/first.py"]
+
+[[gate]]
+id = "test.second"
+order = 20
+description = "second"
+tiers = ["pr"]
+phase = "provenance"
+command = ["{python}", "scripts/second.py"]
+self_test = ["{python}", "scripts/second.py"]
+timeout_seconds = 10
+cache = "never"
+no_cache_reason = "parallel canary"
+inputs = ["scripts/second.py"]
+path_triggers = ["scripts/second.py"]
+
+[[gate]]
+id = "test.post"
+order = 30
+description = "post"
+tiers = ["pr"]
+phase = "post"
+command = ["{python}", "scripts/post.py"]
+self_test = ["{python}", "scripts/post.py"]
+timeout_seconds = 10
+cache = "never"
+no_cache_reason = "phase canary"
+inputs = ["scripts/post.py"]
+path_triggers = ["scripts/post.py"]
+""",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(scripts / "gate_runner.py"),
+                    "run",
+                    "--tier",
+                    "pr",
+                    "--jobs",
+                    "2",
+                    "--no-cache",
+                ],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertLess(result.stdout.index("pre"), result.stdout.index("first"))
+            self.assertLess(result.stdout.index("first"), result.stdout.index("second"))
+            self.assertLess(result.stdout.index("second"), result.stdout.index("post"))
 
     def test_pre_push_list_mode_matches_the_authority(self) -> None:
         bash = self.require_bash()
@@ -543,12 +864,20 @@ cat > "$STONE_STDIN_LOG"
         self.assertIn(
             '"gates-self-tests" = "just gates-self-tests"', powershell
         )
+        for task in ("check-fast", "cache-info", "trim-wsl"):
+            self.assertIn(f'"{task}"', powershell)
+        self.assertIn("source scripts/wsl_dev_env.sh --quiet", powershell)
 
         justfile = (ROOT / "justfile").read_text(encoding="utf-8")
         self.assertIn(
             "python3 scripts/gate_runner.py list --tier {{tier}} --ids-only",
             justfile,
         )
+        self.assertIn('env_var_or_default("CIVSIM_PARKED_TARGET_DIR"', justfile)
+        self.assertIn('cargo_dev := "bash scripts/cargo_dev.sh"', justfile)
+        self.assertNotRegex(justfile, r"(?m)^\s+cargo (?:run|test|check|clippy|doc|build)")
+        for recipe in ("check-fast:", "cache-info:", "trim-wsl:"):
+            self.assertIn(recipe, justfile)
 
     def test_just_and_local_ci_print_the_same_pr_ids(self) -> None:
         if shutil.which("just") is None:

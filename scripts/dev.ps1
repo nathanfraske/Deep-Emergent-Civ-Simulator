@@ -34,6 +34,7 @@ param(
         "ledger-inventory",
         "ledger-inventory-check",
         "verify",
+        "check-fast",
         "check",
         "check-pr",
         "check-full",
@@ -55,8 +56,10 @@ param(
         "lint-legacy",
         "pins-dawn-legacy",
         "stop-gate",
+        "cache-info",
         "gc",
-        "gc-dry"
+        "gc-dry",
+        "trim-wsl"
     )]
     [string]$Task = "doctor",
 
@@ -107,7 +110,7 @@ $commands = @{
     "gates-self-tests" = "just gates-self-tests"
     "doctor" = @'
 set -euo pipefail
-required=(bash python3 git cargo rustc rustup rustfmt just grep awk sed diff mktemp pgrep setsid)
+required=(bash python3 git cargo rustc rustup rustfmt just grep awk sed diff mktemp pgrep setsid realpath sha256sum flock)
 missing=0
 for tool in "${required[@]}"; do
   if command -v "$tool" >/dev/null 2>&1; then
@@ -137,6 +140,7 @@ just doctor
     "ledger-inventory" = "just ledger-inventory"
     "ledger-inventory-check" = "just ledger-inventory-check"
     "verify"           = "just verify"
+    "check-fast"       = "just check-fast"
     "check"            = "just check-pr"
     "check-pr"         = "just check-pr"
     "check-full"       = "just check-full"
@@ -158,8 +162,10 @@ just doctor
     "lint-legacy"      = "just lint-legacy"
     "pins-dawn-legacy" = "just pins-dawn-legacy"
     "stop-gate"        = "just stop-gate"
+    "cache-info"       = "just cache-info"
     "gc"               = "just gc"
     "gc-dry"           = "just gc-dry"
+    "trim-wsl"         = "just trim-wsl"
 }
 
 $command = $commands[$Task]
@@ -168,6 +174,6 @@ if ($TaskArgs.Count -gt 0) {
     $command = "$command $($quotedArgs -join ' ')"
 }
 
-$bashScript = "cd $(ConvertTo-BashLiteral $wslRoot)`n$command"
+$bashScript = "set -euo pipefail`ncd $(ConvertTo-BashLiteral $wslRoot)`nsource scripts/wsl_dev_env.sh --quiet`n$command"
 & $wsl.Source @wslArgs -e bash -lc $bashScript
 exit $LASTEXITCODE
