@@ -40,6 +40,11 @@
 use crate::idiv_round_half_even;
 use std::cmp::Ordering;
 
+/// Number of magnitude bits carried by [`I256`]. Scale accumulation and terminal right shifts are accepted
+/// only while they name one of these bits (`0..=255`). A wider scale needs a wider accumulator or a new
+/// scale plan, so the wide path returns `None` rather than treating an out-of-domain scale as underflow.
+const I256_BITS: u32 = 256;
+
 /// Round `value` to the nearest multiple of `2^shift` and divide it out, ties to even. For `shift == 0`
 /// this is the identity. `value` may be negative; the euclidean rounding in [`idiv_round_half_even`] carries
 /// the sign correctly. For `shift >= 127` the divisor `2^shift` is not a positive `i128` (`1i128 << 127` sets
@@ -359,6 +364,9 @@ impl I256 {
     /// Round the value right by `shift` bits, ties to even, and return the signed magnitude as an `i128`
     /// (the mantissa fits `i128`), or `None` if the rounded magnitude exceeds `i128`.
     fn round_shr(&self, shift: u32) -> Option<i128> {
+        if shift >= I256_BITS {
+            return None;
+        }
         let mut q = I256::shr_mag(&self.mag, shift);
         if shift > 0 {
             let round_bit = I256::test_bit(&self.mag, shift - 1);
@@ -406,6 +414,10 @@ pub struct WideAccum {
 }
 
 impl WideAccum {
+    fn scale_in_domain(scale: u32) -> bool {
+        scale < I256_BITS
+    }
+
     /// Start a chain from a scaled mantissa.
     pub fn new(bits: i64, scale: u32) -> Self {
         WideAccum {
@@ -414,31 +426,50 @@ impl WideAccum {
         }
     }
 
-    /// Multiply another scaled mantissa into the chain; the running scale accumulates. `None` on i256 overflow.
+    /// Multiply another scaled mantissa into the chain; the running scale accumulates. `None` on i256
+    /// overflow, scale-addition overflow, or a running scale outside the i256 domain.
     pub fn mul(&self, bits: i64, scale: u32) -> Option<WideAccum> {
+        let accumulated_scale = self.scale.checked_add(scale)?;
+        if !Self::scale_in_domain(self.scale)
+            || !Self::scale_in_domain(scale)
+            || !Self::scale_in_domain(accumulated_scale)
+        {
+            return None;
+        }
         Some(WideAccum {
             value: self.value.mul_i64(bits)?,
-            scale: self.scale + scale,
+            scale: accumulated_scale,
         })
     }
 
     /// The integer power of a single scaled mantissa: `bits^exp` at scale `exp*scale`, by repeated multiply in
-    /// the wide accumulator. `exp == 0` is the dimensionless one at scale zero.
+    /// the wide accumulator. `exp == 0` is the dimensionless one at scale zero. `None` is returned when the
+    /// input scale is outside the i256 domain, or when scale multiplication overflows or leaves that domain.
     pub fn power(bits: i64, scale: u32, exp: u32) -> Option<WideAccum> {
+        let accumulated_scale = scale.checked_mul(exp)?;
+        if !Self::scale_in_domain(scale) || !Self::scale_in_domain(accumulated_scale) {
+            return None;
+        }
         if exp == 0 {
             return Some(WideAccum::new(1, 0));
         }
-        let mut acc = WideAccum::new(bits, scale);
+        let mut value = I256::from_i64(bits);
         for _ in 1..exp {
-            acc = acc.mul(bits, scale)?;
+            value = value.mul_i64(bits)?;
         }
-        Some(acc)
+        Some(WideAccum {
+            value,
+            scale: accumulated_scale,
+        })
     }
 
     /// Subtract another chain AT THE SAME running scale (the difference-of-quartics case). `None` if the scales
     /// differ (the planner keeps the two sub-chains at one scale) or on overflow.
     pub fn sub(&self, other: &WideAccum) -> Option<WideAccum> {
-        if self.scale != other.scale {
+        if !Self::scale_in_domain(self.scale)
+            || !Self::scale_in_domain(other.scale)
+            || self.scale != other.scale
+        {
             return None;
         }
         Some(WideAccum {
@@ -449,7 +480,10 @@ impl WideAccum {
 
     /// Add another chain at the same running scale. `None` if the scales differ or on overflow.
     pub fn add(&self, other: &WideAccum) -> Option<WideAccum> {
-        if self.scale != other.scale {
+        if !Self::scale_in_domain(self.scale)
+            || !Self::scale_in_domain(other.scale)
+            || self.scale != other.scale
+        {
             return None;
         }
         Some(WideAccum {
@@ -462,7 +496,10 @@ impl WideAccum {
     /// output scale must not exceed the running scale (the chain is finer than its result); `None` otherwise,
     /// or if the rounded mantissa does not fit `i64`.
     pub fn round_to_scale(&self, target: u32) -> Option<i64> {
-        if target > self.scale {
+        if !Self::scale_in_domain(self.scale)
+            || !Self::scale_in_domain(target)
+            || target > self.scale
+        {
             return None;
         }
         fit_i64(self.value.round_shr(self.scale - target)?)
@@ -768,6 +805,36 @@ mod tests {
         // t^2 keeping the full product at scale 2*s_t exceeds i64, so the single-op i128 mul returns the
         // widen signal there (it cannot carry the un-rounded quartic that the wide accumulator holds).
         assert_eq!(mul(t, s_t, t, s_t, 2 * s_t), None);
+    }
+
+    #[test]
+    fn wide_scale_domain_refuses_invalid_scales_without_panicking() {
+        // The audit canary: the old terminal shift indexed beyond the four-limb magnitude and panicked.
+        assert_eq!(WideAccum::new(1, 300).round_to_scale(0), None);
+        assert_eq!(I256::from_i64(1).round_shr(300), None);
+
+        // Scale 255 is the last valid terminal shift. Scale 256 and an out-of-domain target fail closed.
+        assert_eq!(WideAccum::new(1, 255).round_to_scale(0), Some(0));
+        assert_eq!(WideAccum::new(1, 256).round_to_scale(0), None);
+        assert_eq!(WideAccum::new(1, 0).round_to_scale(256), None);
+        assert_eq!(WideAccum::new(1, 300).round_to_scale(300), None);
+
+        // Both machine-word overflow and a representable sum outside the i256 scale domain are refusals.
+        assert!(WideAccum::new(1, u32::MAX).mul(1, 1).is_none());
+        assert!(WideAccum::new(1, 200).mul(1, 56).is_none());
+        assert!(WideAccum::new(1, 0).mul(1, 300).is_none());
+        assert!(WideAccum::new(1, 300)
+            .add(&WideAccum::new(1, 300))
+            .is_none());
+        assert!(WideAccum::new(1, 300)
+            .sub(&WideAccum::new(1, 300))
+            .is_none());
+
+        // Exercise checked scale multiplication separately from the bounded-domain check.
+        let overflow_exp = u32::MAX / 255 + 1;
+        assert!(WideAccum::power(1, 255, overflow_exp).is_none());
+        assert!(WideAccum::power(1, 128, 2).is_none());
+        assert!(WideAccum::power(1, 300, 0).is_none());
     }
 
     // Guard the oracle helper itself against a stale comparison path.

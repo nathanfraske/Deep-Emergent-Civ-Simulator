@@ -31,8 +31,8 @@ use crate::{derive_scale_bits, DerivedScale};
 
 /// A quantity's declared magnitude envelope: the floor-base-2 logarithms of its largest and smallest bound
 /// magnitudes, and, if it carries one, the log2 of its declared PHYSICAL FLOOR (below which it is treated as
-/// zero or absent). The envelope and the floor are per-world data (reserved-with-basis); the planner reads
-/// them, it authors none.
+/// zero or absent). The planner reads these typed bounds and authors none. Canonical producers must derive
+/// and receipt them from upstream state; callers cannot use the generic planner to admit a world value.
 #[derive(Clone, Copy, Debug)]
 pub struct QuantityEnvelope {
     pub lo_log2: i32,
@@ -119,10 +119,10 @@ fn width_of(wide_bits: u32) -> Width {
 }
 
 /// Plan a law's op graph at load: derive every node's scale, size its intermediate width, and enforce the
-/// floor invariant. `resolve` reads an input quantity's declared envelope; `sig_target` and `guard` are the
-/// global reserved significance and headroom the scale derivation reads. Returns the ROOT node's plan, or an
+/// floor invariant. `resolve` reads an input quantity's declared envelope; `sig_target` and `guard` describe
+/// the integer representation target and headroom. Returns the ROOT node's plan, or an
 /// error naming the first `Div`/`Ln` node whose operand resolves neither a declared floor nor a declared
-/// physical-limit-at-zero (fail loud, the same discipline as an unset reserved value).
+/// physical-limit-at-zero. Canonical use derives those arguments from execution types and upstream state.
 pub fn plan(
     expr: &LawExpr,
     resolve: &dyn Fn(u32) -> QuantityEnvelope,

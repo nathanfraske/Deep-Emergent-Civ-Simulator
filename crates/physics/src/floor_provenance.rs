@@ -12,30 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The physics-floor provenance grade register (provenance register Phase 2, the floor unification;
-//! `docs/PROVENANCE_LEDGER.md`).
+//! Candidate provenance audit for the broad physics data population.
 //!
-//! A sidecar to the floor manifests (which carry the two-tag `real`/`fantasy` provenance inline): it refines
-//! each floor value entry's provenance into the owner's seven-tag register (the same tags the calibration
-//! side carries), source-verified from each entry's own recorded ground. It also carries the
-//! `derive_first_defect` marker, the gate's seam-2 correction: a bulk material property STORED on a
-//! substance rather than DERIVED from its mineral or element components is a generality defect (Principle
-//! 11, admit-the-alien), ORTHOGONAL to the refutability provenance, so the value stays `[M]` measured and the
-//! defect is separately countable for the materials buildout that resolves it. `authoring_surface` is the
-//! floor's contribution to the honesty number (the closure-plus-authored count); the full DAG join over the
-//! unified calibration-plus-floor register is the calibration-side query.
+//! This is not the canonical absolute floor and cannot admit a value. The canonical floor contains only the
+//! entries in the generated four-tier by seven-mark ledger inventory. This sidecar keeps migration candidates
+//! auditable: it maps each broad physics-data row to one of the seven accounting marks, or to the fail-closed
+//! `unverified_measurement_candidate` sentinel when `[M]` has not been established. It also carries the
+//! `derive_first_defect` marker: a bulk material property stored on a substance rather than derived from its
+//! mineral or element components is an admit-the-alien defect orthogonal to the candidate evidence claim.
+//! The marker never promotes a row to `[M]`. A `[C]` or `[A]` record here is an inadmissible candidate, never
+//! a canonical input.
 
 use serde::Deserialize;
 
-/// One floor value entry's seven-tag grade, keyed to the entry's id in the floor manifests.
+/// One broad physics-data candidate's provenance audit record.
 #[derive(Debug, Clone, Deserialize)]
-pub struct FloorGrade {
-    /// The floor entry id (an axis, substance, or element id), matching the manifests.
+pub struct FloorCandidateRecord {
+    /// The broad-data entry id (an axis, substance, element, or phase id), matching the manifests.
     pub id: String,
-    /// The seven-tag grade: `measured`, `derived`, `estimator`, `closure`, `authored`, `contingency`, or
-    /// `written_state`.
-    pub grade: String,
-    /// For a `derived` grade, the named floor quantities or laws it computes from.
+    /// One of the seven canonical provenance spellings, or the fail-closed measurement-candidate sentinel.
+    #[serde(rename = "grade")]
+    pub status: String,
+    /// For a `derived` status, the named candidate quantities or laws it computes from.
     #[serde(default)]
     pub derived_from: Vec<String>,
     /// A bulk material property stored on the substance rather than derived from its components: a
@@ -50,8 +48,8 @@ pub struct FloorGrade {
     /// into the consolidated source registry.
     ///
     /// Without it the DAG stops one step short of the evidence. [`Self::derived_from`] walks a derived
-    /// quantity back to the floor quantities it computes from, and `unified_provenance` joins those with
-    /// the calibration side, but a LEAF has nowhere left to point: nothing connects a measured floor value
+    /// quantity back to the candidate quantities it computes from, but a LEAF has nowhere left to point:
+    /// nothing connects a measured candidate value
     /// to the paper, table, or dataset it was read out of, and no gate can ask whether it traces to a held
     /// primary. This closes that hop, so a walk from a derived world quantity can reach a checksummed,
     /// archived source rather than ending at a bare id.
@@ -68,15 +66,15 @@ pub struct FloorGrade {
     pub sources: Vec<String>,
 }
 
-/// The floor grade register, loaded from `crates/physics/data/floor_provenance.toml`.
+/// Candidate audit records loaded from `crates/physics/data/floor_provenance.toml`.
 #[derive(Debug, Clone, Deserialize)]
-pub struct FloorProvenance {
-    /// The per-entry grades. Renamed from the `[[grade]]` TOML array.
+pub struct FloorCandidateRegistry {
+    /// The per-entry candidate records. The TOML array retains its historical `[[grade]]` spelling.
     #[serde(default, rename = "grade")]
-    pub grades: Vec<FloorGrade>,
+    pub records: Vec<FloorCandidateRecord>,
 }
 
-impl FloorProvenance {
+impl FloorCandidateRegistry {
     /// Parse a register from TOML text.
     pub fn from_toml_str(s: &str) -> Result<Self, String> {
         toml::from_str(s).map_err(|e| e.to_string())
@@ -87,30 +85,26 @@ impl FloorProvenance {
         Self::from_toml_str(include_str!("../data/floor_provenance.toml"))
     }
 
-    /// A grade by entry id.
-    pub fn grade(&self, id: &str) -> Option<&FloorGrade> {
-        self.grades.iter().find(|g| g.id == id)
+    /// A candidate audit record by entry id.
+    pub fn record(&self, id: &str) -> Option<&FloorCandidateRecord> {
+        self.records.iter().find(|record| record.id == id)
     }
 
-    /// The AUTHORING SURFACE: the ids graded `closure` or `authored`, the floor's contribution to the honesty
-    /// number (the world-content values whose outcomes rest on set-points no laboratory could refute without
-    /// running the sim). The floor `derived` entries compute from measured or law inputs with no closure
-    /// ancestry, so the declared closure-plus-authored count is the effective count on the floor; the full
-    /// DAG-join over the unified calibration-plus-floor register is the calibration-side query. Returned in
-    /// register order, deterministic.
-    pub fn authoring_surface(&self) -> Vec<&str> {
-        self.grades
+    /// Candidate rows marked closure or authored. These are excluded from the initial absolute floor and remain
+    /// visible here so an old reserved coupling cannot be mistaken for an admitted input.
+    pub fn inadmissible_candidates(&self) -> Vec<&str> {
+        self.records
             .iter()
-            .filter(|g| g.grade == "closure" || g.grade == "authored")
-            .map(|g| g.id.as_str())
+            .filter(|record| record.status == "closure" || record.status == "authored")
+            .map(|record| record.id.as_str())
             .collect()
     }
 
     /// The DERIVE-FIRST / GENERALITY defects: bulk material properties stored on a substance rather than
-    /// derived from components, separately countable from the authoring surface (a value can be measured and
-    /// a generality defect at once). The materials buildout resolves these. Returned in register order.
+    /// derived from components, separately countable from the inadmissible-candidate set (a value can be measured
+    /// and a generality defect at once). The materials buildout resolves these. Returned in register order.
     pub fn derive_first_defects(&self) -> Vec<&str> {
-        self.grades
+        self.records
             .iter()
             .filter(|g| g.derive_first_defect)
             .map(|g| g.id.as_str())
@@ -123,29 +117,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_embedded_floor_register_parses_and_the_authoring_surface_is_the_reserved_couplings() {
-        let reg = FloorProvenance::embedded().expect("the embedded floor grade register parses");
+    fn the_embedded_candidate_register_keeps_reserved_couplings_inadmissible() {
+        let reg =
+            FloorCandidateRegistry::embedded().expect("the embedded candidate register parses");
         assert_eq!(
-            reg.grades.len(),
-            243,
-            "every floor value entry is graded (235 axes/substances/elements plus 8 candidate phases, enstatite added)"
+            reg.records.len(),
+            203,
+            "every broad physics-data candidate has an audit record"
         );
-        // The floor authoring surface is the handful of genuine owner-reserved biology and chemistry
-        // couplings, source-verified; the physics quantity axes and the metrological atomic-weight
-        // conventions are measured, not on the authoring surface (the seam PD1 caught and the gate confirmed
-        // at source). The number is a QUERY over the register, never a hand-written literal.
-        let surface = reg.authoring_surface();
+        // These rows remain visible precisely because closure or authored candidates cannot enter the initial
+        // absolute floor. The canonical inventory is the separate authority.
+        let surface = reg.inadmissible_candidates();
         assert_eq!(
             surface,
-            vec![
-                "bio.consumer.hill_exponent",
-                "bio.decomposition_rate",
-                "bio.net_harm",
-                "chem.corrosion_susceptibility",
-                "chem.solute_affinity",
-                "opt.spectral_band",
-            ],
-            "the floor authoring surface is the six genuine reserved couplings"
+            vec!["chem.corrosion_susceptibility", "chem.solute_affinity",],
+            "the two active reserved couplings remain inadmissible candidates"
         );
         // The derive-first / generality defects (bulk properties stored not derived) are separately
         // countable and non-empty; each is a measured value AND a generality defect.
@@ -153,13 +139,10 @@ mod tests {
             !reg.derive_first_defects().is_empty(),
             "the composite-material bulk rows carry the derive-first defect marker"
         );
-        // Every grade is one of the seven; a derived grade names its inputs.
-        // EIGHT since 2026-07-19: `unverified_measurement_candidate` is the honest tier for a value LABELLED
-        // measured with no machine-checkable evidence behind it. See the variant's doc in
-        // crates/foundation/src/calibration.rs for why 244 such labels were downgraded rather than baselined.
-        const SEVEN: [&str; 8] = [
+        // The accounting taxonomy stays exactly seven. The measurement-candidate spelling is an audit sentinel,
+        // not an eighth mark and never `[M]`.
+        const SEVEN: [&str; 7] = [
             "measured",
-            "unverified_measurement_candidate",
             "derived",
             "estimator",
             "closure",
@@ -167,18 +150,19 @@ mod tests {
             "contingency",
             "written_state",
         ];
-        for g in &reg.grades {
+        for record in &reg.records {
             assert!(
-                SEVEN.contains(&g.grade.as_str()),
-                "{} has a bad grade '{}'",
-                g.id,
-                g.grade
+                SEVEN.contains(&record.status.as_str())
+                    || record.status == "unverified_measurement_candidate",
+                "{} has an unknown candidate status '{}'",
+                record.id,
+                record.status
             );
-            if g.grade == "derived" {
+            if record.status == "derived" {
                 assert!(
-                    !g.derived_from.is_empty(),
+                    !record.derived_from.is_empty(),
                     "{} is derived but names no inputs",
-                    g.id
+                    record.id
                 );
             }
         }

@@ -308,7 +308,11 @@ mod tests {
         // metallic route escalates (the honest partial fill, an oxide-EOS slice fills it later) not a number.
         let (t, a) = floors();
         let ladder = IonizationLadder::standard().expect("ionization ladder");
-        let d_state = DStateRadii::standard().expect("d-state radii");
+        let d_state = DStateRadii::standard(
+            &civsim_units::constants::canonical_si_execution_magnitudes()
+                .expect("the sealed physical floor projects"),
+        )
+        .expect("d-state radii");
         let radii = IonicRadii::standard().expect("ionic radii");
         let mit = MitReference::standard().expect("MIT reference set");
         let guard = CorrelationClassifier::calibrate(&t, &ladder, &d_state, &radii, &mit)

@@ -15,7 +15,7 @@
 
 """The quarantine gate: keeps the living-world quarantine ledger honest against the source.
 
-The ledger (docs/working/quarantine_ledger.toml) inventories the parked living-world reserved values that
+The ledger (parked/quarantine_ledger.toml) inventories the parked living-world reserved values that
 carry no provenance or deprecated/outdated provenance under the value-authoring line, isolated from active
 development until each owes its derive-or-cite. The values are NOT removed (the parked world still runs on
 them); they are quarantined: named in one register, flagged by defect class, and frozen so active work does
@@ -39,7 +39,7 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-LEDGER = ROOT / "docs" / "working" / "quarantine_ledger.toml"
+LEDGER = ROOT / "parked" / "quarantine_ledger.toml"
 
 REQUIRED_FIELDS = ["id", "file", "anchor", "value", "shapes", "verdict", "defect_class", "owed"]
 VERDICTS = {"no-provenance", "deprecated-provenance"}
@@ -180,8 +180,17 @@ def main():
         return 1
 
     def reader(path):
-        p = ROOT / path
-        return p.read_text() if p.exists() else None
+        # The ledger predates the workspace split. Entries that were already
+        # parked name `parked/...`; entries that followed the old root layout
+        # still name `crates/...`. Resolve the explicit repository path first,
+        # then the same relative path under the parked workspace. This keeps
+        # the historical anchors intact without pretending those files remain
+        # on the canonical runpath.
+        candidates = (ROOT / path, ROOT / "parked" / path)
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate.read_text()
+        return None
 
     problems = verify(entries, reader)
     by_verdict, by_class = summarize(entries)

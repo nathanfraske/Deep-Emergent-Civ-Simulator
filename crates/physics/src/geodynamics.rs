@@ -102,6 +102,78 @@ pub fn airy_isostatic_elevation(
     crustal_thickness.checked_mul(fraction)
 }
 
+/// A CRUSTAL COLUMN'S FLEXURAL LOAD: its buoyancy anomaly, as a pressure over its own footprint.
+///
+/// # WHY THIS EXISTS, AND WHAT IT IS THE BRIDGE BETWEEN
+///
+/// [`airy_isostatic_elevation`] reads ONE column's own properties and answers for that column alone. It has no
+/// lateral term at all, so under it every column floats independently and neighbours say nothing to each other:
+/// a load can only ever push its own column down, relief is exactly as rough as the field of thicknesses that
+/// produced it, and a boundary between two crustal types is a STEP. That is a faithful implementation of Airy
+/// isostasy and it is also why rendered relief reads as a field of blocks.
+///
+/// A plate BENDS, and bending is lateral. To ask the flexure substrate for an elevation the column has to become
+/// a LOAD with a position and a footprint, which is what this returns. The flexural answer is then the
+/// superposition over every column's load ([`crate::flexural_relief::FlexedPlate::deflection_km`]), and it
+/// carries the neighbourhood the Airy law cannot see.
+///
+/// # THE LOAD IS THE BUOYANCY ANOMALY, AND THAT IS WHAT MAKES THE TWO LAWS ONE LAW
+///
+/// `p = (rho_m - rho_c) g T`, the same contrast [`airy_isostatic_elevation`] takes and the same thickness,
+/// expressed as a pressure. Against a restoring contrast of `rho_m` the far-field limit of a wide strip is
+/// `p / (rho_m g) = T (rho_m - rho_c) / rho_m`, which IS the Airy elevation. So flexure GENERALIZES the
+/// flotation law rather than competing with it: Airy is its `D -> 0` limit, verified numerically in
+/// `crates/physics/src/flexural_relief.rs` down to a residual of `3.26e-9 km`.
+///
+/// A denser-than-mantle column returns a NEGATIVE pressure and founders, which the flexure kernel carries
+/// through as a downward deflection, the same passthrough the Airy law makes rather than clamping.
+///
+/// # UNITS
+///
+/// The flexure substrate's own coherent system: `crustal_density` and `mantle_density` in `1000 kg/m^3`,
+/// `crustal_thickness_km` and `half_width_km` in kilometres, `gravity_km_s2` in `km/s^2`. The product then
+/// lands in gigapascals exactly (`1e3 kg/m^3 * 1e3 m/s^2 * 1e3 m = 1e9 Pa`), so no conversion factor appears
+/// here and none is authored. NOTE that this differs from [`airy_isostatic_elevation`], which is scale-free in
+/// its thickness and so is often called with metres; a column fed to both must be converted once by the caller.
+///
+/// `half_width_km` is the column's own footprint and is CALLER DATA, never a value this module declares: a
+/// province is as wide as the world made it. `None` on a non-positive mantle density, gravity or half-width, or
+/// on a fixed-point overflow, never a fabricated load.
+// @derives: a crustal column's flexural load <- its density contrast against the mantle, its thickness, the surface gravity and its own footprint
+pub fn column_buoyancy_load(
+    crustal_density: Fixed,
+    mantle_density: Fixed,
+    crustal_thickness_km: Fixed,
+    gravity_km_s2: Fixed,
+    centre_km: Fixed,
+    half_width_km: Fixed,
+) -> Option<crate::flexure::Load> {
+    if mantle_density <= Fixed::ZERO || gravity_km_s2 <= Fixed::ZERO || half_width_km <= Fixed::ZERO
+    {
+        return None;
+    }
+    let contrast = mantle_density.checked_sub(crustal_density)?;
+    // THE LOAD IS DOWNWARD-POSITIVE, because that is the sense the Green's functions are written in
+    // (`FlexedPlate::deflection_km`). A crust LIGHTER than the mantle has a positive buoyancy contrast and
+    // therefore a NEGATIVE downward load: it pushes the plate up, and it must, or a continent sinks.
+    //
+    // This carried the buoyancy contrast straight through as a positive magnitude until a review caught it,
+    // which made light crust load the plate downward and turned the resulting relief upside down. The sign is
+    // the physics here rather than a convention: `(rho_m - rho_c)` positive means buoyant means up.
+    let downward = contrast
+        .checked_mul(crustal_thickness_km)?
+        .checked_mul(gravity_km_s2)
+        .and_then(|up| Fixed::ZERO.checked_sub(up))?;
+    Some(crate::flexure::Load {
+        kind: crate::flexure::LoadKind::UniformStripY {
+            half_width: half_width_km,
+        },
+        magnitude: downward,
+        x: centre_km,
+        y: Fixed::ZERO,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,5 +242,194 @@ mod tests {
         assert_eq!(c.crustal_density, Fixed::ZERO);
         assert_eq!(c.crustal_thickness, Fixed::ZERO);
         assert_eq!(c.isostatic_elevation, Fixed::ZERO);
+    }
+}
+
+#[cfg(test)]
+mod flexural_bridge_tests {
+    use super::*;
+    use crate::flexural_relief::FlexedPlate;
+    use crate::flexure::scaled;
+
+    fn f64_of(x: Fixed) -> f64 {
+        x.to_f64_lossy()
+    }
+
+    /// An Earth-like plate: `E = 70 GPa`, `nu = 0.25`, a 40 km elastic thickness, floating on a 3.3 mantle at
+    /// `9.8 m/s^2`. Every input is the flexure module's own declared fixture; nothing here is fitted.
+    fn earthlike_plate() -> FlexedPlate {
+        let d = crate::flexure::flexural_rigidity(
+            Fixed::from_int(70),
+            Fixed::from_ratio(1, 4),
+            Fixed::from_int(40),
+        )
+        .expect("the fixture plate has a rigidity");
+        let d_internal = scaled::internal_rigidity(d).expect("the rigidity converts inward");
+        FlexedPlate::from_internal_rigidity(
+            d_internal,
+            Fixed::from_ratio(33, 10),
+            Fixed::from_ratio(98, 10_000),
+        )
+        .expect("the fixture plate loads")
+    }
+
+    #[test]
+    fn a_crustal_boundary_is_a_step_under_airy_and_a_ramp_under_flexure() {
+        // THE WHOLE POINT OF THE BRIDGE, stated as the one measurement that separates the two laws.
+        //
+        // Two provinces meet at x = 0: felsic continent (2.65) to the left, mafic ocean (3.0) to the right, both
+        // 35 km thick. Under AIRY each column answers from its own density alone, so the elevation is one value
+        // to the left of the boundary and another to the right with NOTHING in between: a discontinuity at a
+        // single coordinate, no matter how finely the surface is sampled. That is the block-edged relief the
+        // flotation law produces by construction, and no amount of display smoothing makes it terrain.
+        //
+        // Under FLEXURE the plate carries bending stress across the boundary, so the transition is a RAMP whose
+        // width is the plate's own flexural parameter. Nothing selects that width: it falls out of the rigidity
+        // and the restoring term.
+        let rho_m = Fixed::from_ratio(33, 10);
+        let felsic = Fixed::from_ratio(265, 100);
+        let mafic = Fixed::from_int(3);
+        let thickness_km = Fixed::from_int(35);
+        let gravity = Fixed::from_ratio(98, 10_000);
+        let half_width = Fixed::from_int(400);
+
+        // AIRY: two numbers, and the step between them.
+        let airy_felsic = airy_isostatic_elevation(felsic, rho_m, thickness_km).expect("felsic");
+        let airy_mafic = airy_isostatic_elevation(mafic, rho_m, thickness_km).expect("mafic");
+        assert!(
+            airy_felsic > airy_mafic,
+            "the lighter province floats higher: {} against {}",
+            f64_of(airy_felsic),
+            f64_of(airy_mafic)
+        );
+
+        let plate = earthlike_plate();
+        let loads = [
+            column_buoyancy_load(
+                felsic,
+                rho_m,
+                thickness_km,
+                gravity,
+                Fixed::from_int(-400),
+                half_width,
+            )
+            .expect("the felsic province loads"),
+            column_buoyancy_load(
+                mafic,
+                rho_m,
+                thickness_km,
+                gravity,
+                Fixed::from_int(400),
+                half_width,
+            )
+            .expect("the mafic province loads"),
+        ];
+        // READ AS ELEVATION, positive UP, which is the whole point of the typed boundary: these tests
+        // compared raw DOWNWARD deflections against Airy elevations until a review caught the inversion.
+        let at = |x: i32| {
+            f64_of(
+                plate
+                    .elevation_km(&loads, Fixed::from_int(x), Fixed::ZERO)
+                    .expect("the boundary evaluates")
+                    .km(),
+            )
+        };
+
+        // THE TRANSITION IS MONOTONE AND SPREAD, sampled across the boundary rather than at it. A step would
+        // give the same value at every sample on one side; a ramp gives a different value at each.
+        let samples: Vec<f64> = (-4..=4).map(|i| at(i * 50)).collect();
+        for pair in samples.windows(2) {
+            assert!(
+                pair[0] > pair[1],
+                "the flexural transition falls monotonically across the boundary: {:?}",
+                samples
+            );
+        }
+        // AND IT IS A REAL SPREAD rather than a numerically smeared step: the change across the sampled window
+        // is a substantial fraction of the total contrast between the two provinces' far fields.
+        let far_left = at(-390);
+        let far_right = at(390);
+        let contrast = far_left - far_right;
+        let across_window = samples[0] - samples[samples.len() - 1];
+        assert!(
+            across_window > contrast * 0.1,
+            "the boundary transition is spread over the flexural parameter, not concentrated at x = 0: \
+             {across_window} of a {contrast} contrast"
+        );
+        eprintln!(
+            "boundary: alpha={:.1} km, far L={:.6} km, far R={:.6} km, across +-200 km={:.6} km",
+            f64_of(plate.flexural_parameter_km().expect("alpha")),
+            far_left,
+            far_right,
+            across_window
+        );
+    }
+
+    #[test]
+    fn a_denser_than_mantle_column_founders_rather_than_being_clamped() {
+        // The Airy law passes a negative elevation through rather than clamping, because a dense delamination
+        // sinking is the physical outcome. The load bridge must agree: a denser-than-mantle column produces a
+        // NEGATIVE pressure and the plate carries it down.
+        let rho_m = Fixed::from_ratio(33, 10);
+        let dense = Fixed::from_ratio(35, 10);
+        let load = column_buoyancy_load(
+            dense,
+            rho_m,
+            Fixed::from_int(35),
+            Fixed::from_ratio(98, 10_000),
+            Fixed::ZERO,
+            Fixed::from_int(400),
+        )
+        .expect("a foundering column is still a load");
+        assert!(
+            load.magnitude > Fixed::ZERO,
+            "a denser-than-mantle column is a POSITIVE downward load, got {}",
+            f64_of(load.magnitude)
+        );
+        let e = earthlike_plate()
+            .elevation_km(&[load], Fixed::ZERO, Fixed::ZERO)
+            .expect("it evaluates")
+            .km();
+        assert!(
+            e < Fixed::ZERO,
+            "and it founders rather than being clamped at zero, got elevation {}",
+            f64_of(e)
+        );
+    }
+
+    #[test]
+    fn the_load_bridge_refuses_rather_than_fabricating() {
+        let g = Fixed::from_ratio(98, 10_000);
+        let rho_m = Fixed::from_ratio(33, 10);
+        let t = Fixed::from_int(35);
+        assert!(
+            column_buoyancy_load(
+                Fixed::from_int(3),
+                Fixed::ZERO,
+                t,
+                g,
+                Fixed::ZERO,
+                Fixed::from_int(400)
+            )
+            .is_none(),
+            "a zero mantle density is not a mantle"
+        );
+        assert!(
+            column_buoyancy_load(
+                Fixed::from_int(3),
+                rho_m,
+                t,
+                Fixed::ZERO,
+                Fixed::ZERO,
+                Fixed::from_int(400)
+            )
+            .is_none(),
+            "a world with no gravity has no isostasy"
+        );
+        assert!(
+            column_buoyancy_load(Fixed::from_int(3), rho_m, t, g, Fixed::ZERO, Fixed::ZERO)
+                .is_none(),
+            "a column with no footprint is not a distributed load"
+        );
     }
 }

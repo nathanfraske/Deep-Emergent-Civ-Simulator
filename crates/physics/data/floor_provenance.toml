@@ -1,113 +1,20 @@
 # Copyright 2026 Nathan M. Fraske
 # Licensed under the Apache License, Version 2.0; see LICENSE.
 #
-# The physics-floor provenance grade register (provenance register Phase 2, the floor unification).
-# Sidecar to the floor manifests: each value entry's two-tag real/fantasy provenance refined into the
-# owner's seven-tag register (docs/PROVENANCE_LEDGER.md). A `real` entry refines to [M] measured, [D]
-# derived (with derived_from), or [E] estimator; a `fantasy` entry to [A] authored, [C] closure, [D]
-# derived, or [X] contingency. The tag is DERIVED from the entry's own recorded ground, source-verified
-# (the panel is a lead, source is the verdict), never re-authored. `derive_first_defect` marks a bulk
-# material property stored on the substance rather than derived from its components: a generality defect
-# (Principle 11, admit-the-alien) ORTHOGONAL to the refutability provenance, so the value stays [M] and
-# the defect is separately countable for the materials buildout that resolves it (the gate's seam-2
-# correction, verified at source). scripts/floor_provenance_gate.py enforces completeness and the
-# real/fantasy-to-grade consistency; the honesty number is the closure-plus-authored query over this
-# register unified with reserved.toml.
-
-[[grade]]
-id = "bio.consumer.assimilation"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "bio.consumer.fermentation"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "bio.consumer.hill_exponent"
-grade = "closure"
-unsettled = true
-
-[[grade]]
-id = "bio.consumer.reference_tolerance"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "bio.consumer.requirement"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "bio.convective_surface"
-grade = "unverified_measurement_candidate"
-unsettled = true
-
-[[grade]]
-id = "bio.decomposition_barrier"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "bio.decomposition_rate"
-grade = "closure"
-
-[[grade]]
-id = "bio.energy_density"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "bio.lipid_fraction"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "bio.mineral_ash_fraction"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "bio.net_harm"
-grade = "closure"
-unsettled = true
-
-[[grade]]
-id = "bio.net_nutrition"
-grade = "derived"
-derived_from = ["law.net_nutrition"]
-unsettled = true
-
-[[grade]]
-id = "bio.nonstructural_carbohydrate_fraction"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "bio.protein_fraction"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "bio.respiratory_surface"
-grade = "unverified_measurement_candidate"
-unsettled = true
-
-[[grade]]
-id = "bio.structural_carbohydrate_fraction"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "bio.toxin.alkaloid"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "bio.toxin.cardiac_glycoside"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "bio.toxin.cyanogenic"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "bio.toxin_load_coarse"
-grade = "derived"
-derived_from = ["bio.toxin.alkaloid", "bio.toxin.cyanogenic", "bio.toxin.cardiac_glycoside", "registered per-class toxin maxima"]
-
-[[grade]]
-id = "bio.water_fraction"
-grade = "unverified_measurement_candidate"
+# Candidate-provenance audit for the broad, pre-migration physics data population.
+#
+# This file is not the canonical absolute floor and cannot admit a value to the runpath. Canonical
+# membership and the four-tier by seven-mark counts come only from civsim-ledger and the repository-owned
+# absolute-floor catalog. The historical `[[grade]]` and `grade =` spellings remain for data compatibility.
+# A row records one of the exact seven marks, [D] [M] [E] [C] [A] [W] [X], or the explicit
+# `unverified_measurement_candidate` refusal sentinel. That sentinel is not an eighth mark and never
+# renders [M]. A citation or a status here establishes evidence custody only.
+#
+# `derive_first_defect` marks a broad data row stored on a substance rather than derived from its
+# constituents. It is an admit-the-alien migration defect orthogonal to the candidate's evidence status.
+# `scripts/floor_provenance_gate.py` enforces completeness, known status vocabulary, and the older
+# real/fantasy evidence-ground consistency. Admission still requires derive-first exhaustion, the
+# Buckingham-Pi budget, Gap Law, Residual Law, a unique tier slot, and fail-closed behavior.
 
 [[grade]]
 id = "chem.acidity"
@@ -144,18 +51,6 @@ id = "opt.emissivity"
 grade = "unverified_measurement_candidate"
 
 [[grade]]
-id = "opt.emissivity.band_0"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "opt.emissivity.band_1"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "opt.emissivity.band_2"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
 id = "opt.reflectance"
 grade = "unverified_measurement_candidate"
 
@@ -171,11 +66,6 @@ unsettled = true
 [[grade]]
 id = "opt.source_power"
 grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "opt.spectral_band"
-grade = "closure"
-unsettled = true
 
 [[grade]]
 id = "opt.transmittance"
@@ -249,30 +139,6 @@ id = "mag.permeability"
 grade = "unverified_measurement_candidate"
 
 [[grade]]
-id = "acoustic.absorption_coefficient"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "acoustic.absorption_reference"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "acoustic.formant_frequency"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "acoustic.frequency"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "acoustic.resonator_length"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "acoustic.source_power"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
 id = "air"
 grade = "unverified_measurement_candidate"
 
@@ -334,11 +200,6 @@ id = "fluid.dynamic_viscosity"
 grade = "unverified_measurement_candidate"
 
 [[grade]]
-id = "fluid.gas_transfer_coefficient"
-grade = "estimator"
-unsettled = true
-
-[[grade]]
 id = "fluid.immersed_volume"
 grade = "contingency"
 unsettled = true
@@ -349,10 +210,6 @@ grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "fluid.moisture_content"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "fluid.respirable_content"
 grade = "unverified_measurement_candidate"
 
 [[grade]]
@@ -407,11 +264,6 @@ id = "u238"
 grade = "unverified_measurement_candidate"
 
 [[grade]]
-id = "carrion"
-grade = "unverified_measurement_candidate"
-derive_first_defect = true
-
-[[grade]]
 id = "clay"
 grade = "unverified_measurement_candidate"
 derive_first_defect = true
@@ -433,21 +285,6 @@ derive_first_defect = true
 
 [[grade]]
 id = "loam"
-grade = "unverified_measurement_candidate"
-derive_first_defect = true
-
-[[grade]]
-id = "oilseed"
-grade = "unverified_measurement_candidate"
-derive_first_defect = true
-
-[[grade]]
-id = "spent_hull"
-grade = "unverified_measurement_candidate"
-derive_first_defect = true
-
-[[grade]]
-id = "tuber"
 grade = "unverified_measurement_candidate"
 derive_first_defect = true
 
@@ -571,17 +408,8 @@ id = "mech.static_friction"
 grade = "unverified_measurement_candidate"
 
 [[grade]]
-id = "mech.stroke_length"
-grade = "unverified_measurement_candidate"
-
-[[grade]]
 id = "mech.velocity"
 grade = "unverified_measurement_candidate"
-
-[[grade]]
-id = "oak"
-grade = "unverified_measurement_candidate"
-derive_first_defect = true
 
 [[grade]]
 id = "therm.boiling_temperature"

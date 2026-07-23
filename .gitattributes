@@ -1,0 +1,13 @@
+# Repository text is deterministic across Linux, WSL, Git Bash, and native
+# Windows tools. Exact-byte research holdings are exempted below.
+* text=auto eol=lf
+
+# Held research artifacts are addressed by byte receipts in their manifests and
+# offline provenance tests. Git must never rewrite those bytes on checkout.
+crates/physics/data/bhac15/BHAC15_tracks+structure -text !eol
+crates/physics/data/aesopus_lowt/*.dat -text !eol
+crates/physics/data/janaf/*.txt -text !eol
+crates/physics/data/optical_constants_aesopus/*.dat -text !eol
+crates/physics/data/phase_conductivity/cod/*.cif -text !eol
+crates/physics/data/**/*.pdf -text !eol
+scripts/aesopus_1.0_form.html -text !eol

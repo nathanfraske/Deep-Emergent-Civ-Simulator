@@ -1,0 +1,23 @@
+[package]
+name = "civsim-gpu-legacy"
+description = "Parked compatibility facade for retired world generation, globe presentation, being, and perception GPU kernels."
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "civsim_gpu"
+
+[dependencies]
+civsim-core = { path = "../../../crates/core", features = ["legacy-domains"] }
+civsim-gpu-abiotic = { package = "civsim-gpu", path = "../../../crates/gpu" }
+cubecl = { version = "0.10", features = ["cuda", "cpu", "vulkan"] }
+
+[dev-dependencies]
+civsim-world = { package = "civsim-world-legacy", path = "../world" }
+
+[lints.clippy]
+disallowed_types = "allow"

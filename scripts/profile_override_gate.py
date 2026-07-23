@@ -2,43 +2,16 @@
 # Copyright 2026 Nathan M. Fraske
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); see LICENSE.
-"""THE PROFILE OVERRIDE GATE: a calibration profile may override a reserved value, and must SAY SO.
+"""Retired profile-override diagnostic for the parked calibration tree.
 
-WHY THIS EXISTS. `calibration/reserved.toml` is the canonical register: the runbook says every reserved
-value lives there with a mandatory category and provenance, and the scenario design calls a profile "an
-override set layered over calibration/reserved.toml". The CODE does no layering. `CalibrationManifest::load`
-parses one file into one map, and `run_world` loads `dev-fixtures.toml` or `mirror.toml` DIRECTLY, so
-`reserved.toml` never participates in a run at all.
+The former living-world path loaded ``dev-fixtures.toml`` or ``mirror.toml`` directly rather than
+layering either profile over ``reserved.toml``. This gate retains the exact collision and unit-mismatch
+ratchet under ``parked/calibration`` so defects in that historical work remain visible. It does not
+authorize profile values, define canonical admission, or participate in the abiotic planet runpath.
 
-The consequence was invisible and large. Seventy-one ids exist in both `reserved.toml` and `mirror.toml`.
-FORTY of them carry different values, with nothing in the tree comparing or arbitrating any of them: the
-canonical register says one number, the file the simulation actually reads says another, and both look
-authoritative. `climate.mean_surface_temperature` is 287 canonically and 288 on the living path.
-
-THREE ARE WORSE THAN A DISAGREEMENT and this gate names them separately, because they are not overrides at
-all. They disagree on UNIT:
-
-    physiology.thermal_setpoint    kelvin  vs  temperature
-    physiology.thermal_half_band   kelvin  vs  temperature
-    hydrology.saturation_cap       mpa     vs  saturation_index
-
-A megapascal and a dimensionless saturation index are not the same quantity at two values. They are two
-quantities sharing a name, which is the diamond in its purest form, and no override declaration can make
-that legitimate. They must be renamed or reconciled.
-
-WHAT THIS GATE ENFORCES. Not "profiles may not override": overriding is the declared design. It enforces
-that an override is DECLARED rather than discovered, so a divergence is a sentence someone wrote instead of
-a number someone finds later. A collision passes only when the profile entry carries:
-
-    overrides_reserved = "<why this world's value differs from the canonical one>"
-
-and a unit mismatch never passes, declaration or not.
-
-RATCHET, NOT AMNESTY. The seventy-one existing collisions are baselined so the gate can be turned on today
-rather than after seventy-one arbitration decisions, and the baseline is SHRINK-ONLY by construction: it is
-keyed on (id, profile, reserved_value, profile_value), so changing either value un-baselines the row and
-the gate convicts it. A baselined row that no longer collides is also an error, because a stale waiver is
-how a ledger becomes an amnesty for something that comes back.
+The shrink-only baseline is keyed on id, profile, finding kind, register value, and profile value.
+Changing either value exposes the row for renewed inspection, while a disappeared collision makes its
+old baseline row stale. Unit mismatches remain recorded defects rather than waivable overrides.
 
 Usage:
     profile_override_gate.py              enforce
@@ -51,9 +24,9 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-RESERVED = ROOT / "calibration" / "reserved.toml"
-PROFILES = ROOT / "calibration" / "profiles"
-BASELINE = ROOT / "scripts" / "profile_override_baseline.tsv"
+RESERVED = ROOT / "parked" / "calibration" / "reserved.toml"
+PROFILES = ROOT / "parked" / "calibration" / "profiles"
+BASELINE = ROOT / "parked" / "scripts" / "profile_override_baseline.tsv"
 
 
 def parse_entries(text):
@@ -131,7 +104,7 @@ def main():
     findings = scan()
 
     if "--generate" in sys.argv:
-        print("# Profile override baseline v1. SHRINK-ONLY: rows may be deleted, never added.")
+        print("# Parked profile override baseline v1. SHRINK-ONLY: rows may be deleted, never added.")
         print("# id\tprofile\tkind\treserved_value\tprofile_value")
         for _rid, _p, kind, _d, key in sorted(findings):
             if kind == "undeclared-override":
@@ -148,7 +121,7 @@ def main():
         assert classify("a.b", res["a.b"], bad_unit)[0] == "unit-mismatch"
         equal = {"value": "1", "unit": "kelvin"}
         assert classify("a.b", res["a.b"], equal) is None, "an equal value is no collision"
-        print("profile override gate self-test: ok (4 cases, every detector fires)")
+        print("retired profile override gate self-test: ok (4 cases, every detector fires)")
         return 0
 
     # THE KNOWN-DEFECT LEDGER for unit mismatches, and it is NOT a waiver. A waiver would say "this
@@ -165,7 +138,7 @@ def main():
         # it: the dev fixture carried a dimensionless 0.5 identity offset declared as `kelvin`, so both
         # sides claimed the same unit and the mismatch was invisible. Relabelling it `ratio` made the gate
         # convict it, which is the outcome an honest label is FOR. The real fix is a rename, since a
-        # normalised mapping offset is not a mean surface temperature; that touches the default run path
+        # normalised mapping offset is not a mean surface temperature; that touched the retired run path
         # and its consumers, so it is recorded here rather than done in a hurry.
         ("climate.mean_surface_temperature", "dev-fixtures.toml"),
         ("metabolism.kleiber_coefficient", "dev-fixtures.toml"),
@@ -190,7 +163,7 @@ def main():
         print(f"UNIT MISMATCH (never waivable) {rid} in {prof}: {detail}")
         print("    Two quantities sharing an id, not one quantity at two values. Rename or reconcile.")
     for rid, prof, _k, detail, _key in unwaived:
-        print(f"UNDECLARED OVERRIDE {rid} in {prof}: canonical {detail}")
+        print(f"UNDECLARED OVERRIDE {rid} in {prof}: parked register {detail}")
         print('    Add `overrides_reserved = "<why this world differs>"`, or make the values agree.')
     for b in sorted(stale):
         print(f"STALE BASELINE {b[0]} in {b[1]}: no longer collides at these values. Delete the row.")
@@ -206,10 +179,10 @@ def main():
     total = len(unit_mismatches) + len(unwaived) + len(stale) + len(stale_unit)
     if total:
         print()
-        print(f"profile override gate: FAILED. {total} finding(s).")
+        print(f"retired profile override gate: FAILED. {total} finding(s).")
         return 1
     print(
-        f"profile override gate: clean ({len(undeclared)} declared-or-baselined override(s), "
+        f"retired profile override gate: clean ({len(undeclared)} declared-or-baselined override(s), "
         f"{len(carried_unit)} carried unit defect(s), 0 new)"
     )
     return 0

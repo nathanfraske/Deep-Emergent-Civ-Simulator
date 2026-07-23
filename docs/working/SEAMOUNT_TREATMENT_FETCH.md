@@ -1,10 +1,19 @@
 # The seamount treatment: what the primaries did with an axisymmetric load
 
-This document is the primary-source fetch that decides `MIDBAND_ARC_AUDIT_PACKET.md` section B6. Slice 3 refused the circular load rather than faking it: `M = -DK` is the line-load form, the axisymmetric case carries `nu/r` against `1/r`, and a 2-D yield surface would be needed if the fibre state were biaxial. **That refusal is confirmed correct by the primaries, verbatim.** But the question B6 raises, whether the arc's own stated primary hindcast target is unserved, turns out to rest on a premise this fetch refutes: **the arc's hindcast row was never computed through the moment-curvature construction at all.**
+This primary-source record supports the active flexure evidence debt in
+`ABIOTIC_EVIDENCE_DEBT.md` and the `P-LOAD-FLEXURE` work in `TODOS.md`. It was
+commissioned to decide section B6 of the historical packet now retained at
+`parked/docs/working/MIDBAND_ARC_AUDIT_PACKET.md`. That slice refused the
+circular load rather than applying `M = -DK`, the line-load form, to a geometry
+whose moment carries `nu/r` against the curvature's `1/r`. The primaries confirm
+that refusal. They also refute B6's deeper premise: the arc's hindcast row was
+never computed through the moment-curvature construction.
 
-This file is a verification record only. `GEOTHERM_FETCHES.md` and `TE_CONSTRUCTION_FETCH.md` are not edited here (one writer per doc); what this fetch answers or corrects in them is marked, and the owner decides what they carry forward.
-
-Nothing here is set. Every value below is a cited literature value read from a primary, and the reserved-versus-set question is untouched.
+This file is evidence custody and verification only. A citation, checksum,
+literature row, conditioning field, or internal reproduction does not admit a
+magnitude to the canonical runpath. Every value below remains an unadmitted
+candidate until it derives from the sealed floor, completes the full admission
+receipt in one unique residual slot, or causes a structured refusal.
 
 ---
 
@@ -306,11 +315,11 @@ The tree offered two branches. **The evidence takes neither, because the premise
 
 **So what the evidence supports, stated plainly:**
 
-The seamount hindcast does not need the axisymmetric yield-envelope machinery, because the target never used one. **The comparison the rows license is in RIGIDITY SPACE**, which is what slice 3 already emits canonically (`D_eq`, per audit packet A5), and A5's reasoning is confirmed from an independent direction by this fetch: Calmant's rows are `D` fits, and their `Te` is that `D` re-expressed through an assumed pair. The hindcast is therefore: derive `D`, convert to `Te` through **Calmant's** `(E, nu)`, compare. That makes `(E, nu)` a **mandatory row field**, and section 5.3 shows why it cannot be defaulted: the pair the arc would assume moves `Te` by 14 per cent under the charitable reading of Calmant's table and by a factor of 2.5 under its printed one.
+The seamount hindcast evidence does not require axisymmetric yield-envelope machinery, because the target never used one. **The comparison licensed as a validation operation is in RIGIDITY SPACE.** The retained, noncanonical `moment_equivalence` substrate emits `D_eq`, and this fetch confirms the reason from an independent direction: Calmant's rows are `D` fits, and their `Te` is that `D` re-expressed through an assumed pair. A diagnostic comparison therefore derives `D`, converts the literature row through **Calmant's** `(E, nu)`, and compares in the row's own frame. That makes `(E, nu)` a mandatory evidence-conditioning field. It does not make either value a physical input. Section 5.3 shows why the pair cannot be defaulted: it moves `Te` by 14 per cent under the charitable reading of Calmant's table and by a factor of 2.5 under its printed one.
 
-The row-method field the ruling called for is still the right instrument, and the literature already has one: Calmant's Table 3 labels each estimate 2-D or 3-D. The fields the evidence requires are **load class** (isolated-circular against chain-line-load, which McNutt and Menard make a per-load choice and Calmant price at a factor of 3.6), **`(E, nu)`**, and **whether the row is `Te(elastic)` or `Te(YSE)`**, which is the one that reclassifies the arc's primary target.
+The literature already supplies the row-method distinction: Calmant's Table 3 labels each estimate 2-D or 3-D. `crates/physics/src/elastic_thickness_rows.rs` now carries the corresponding diagnostic schema: load class, method, modulus pair, sample role, and `Te(elastic)` versus `Te(YSE)`. Those fields preserve evidence conditioning and cannot steer a generated planet. The factor-of-3.6 isolated-circular versus chain-line-load penalty remains second-hand to Watts et al. (1988), so it is not an admitted bound.
 
-**What this fetch does NOT settle, and exactly what would settle it.** Whether the uniaxial envelope is adequate for an axisymmetric load is **unmeasured in this corpus** (section 8.6). No source reached computes it, so the honest position is that the biaxial question is open on the physics and moot on the hindcast: moot because the rows carry no yield envelope to mismatch, open because the arc's forward solve does carry one. If the owner wants it closed on the physics rather than deferred, the sources that would close it are outside these three, and the cheaper prior step is section 8.8: the seamount curvatures sit at 4 to 8 `x10^-8 m^-1`, in the decade where Watts and Burov's ratio is near 1, so **the yielding correction the biaxial question refines may be small at exactly these loads**. That is a reason to measure the ratio there before building a yield surface for it, and it is not a claim that it is small, which no primary prints.
+**What this fetch does not settle, and what would settle it.** Whether the uniaxial envelope is adequate for an axisymmetric load is unmeasured in this corpus (section 8.6). No reached source computes a biaxial fibre state. The internal test `the_uniaxial_cost_is_measured_at_the_hindcast_curvatures` computes `Te(YSE)/Te(elastic)` inside one uniaxial implementation over selected fixture conditions. That result is a conditioned `[D]` sensitivity, not `[M]` evidence and not a uniaxial-versus-biaxial comparison. It cannot close the external gap. A source-backed comparison, or a derivation and admission receipt for the missing constitutive relation, is required before a biaxial correction can enter the canonical path. Until then the hindcast remains an observer-only diagnostic and unsupported forward use refuses.
 
 ---
 

@@ -1,0 +1,19 @@
+[package]
+name = "civsim-physics-legacy"
+description = "Parked compatibility facade for the retired biology and civilization physics surface."
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+civsim-core = { path = "../../../crates/core", features = ["legacy-domains"] }
+civsim-physics-abiotic = { package = "civsim-physics", path = "../../../crates/physics" }
+civsim-units = { package = "civsim-units-legacy", path = "../units" }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+[lints.clippy]
+disallowed_types = "allow"

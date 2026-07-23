@@ -310,7 +310,7 @@ Phase 2 builds the emic layer Part 55 specifies: a `CultureMeasurementSystem` ho
 culture's own named units, each `EmicUnit` carrying its dimension, its conversion to the
 absolute system (which the engine knows and the culture does not), and its origin (a body
 part, a seed, a vessel, a celestial cycle); and a `PhysicalUnderstanding` holding a culture's
-theories of physics, which may be incomplete or wrong and which evolve by the same
+theories of physics, which may be provisional or later superseded and which evolve by the same
 conception-and-transmission machinery as technology and belief (Parts 9, 23, 41). The flag
 names two specific requirements Phase 1 must not foreclose: a round-trip exactness rule for
 conversions (the emic-to-absolute-to-emic round trip is lossy today by up to one epsilon for a

@@ -1,0 +1,525 @@
+[inventory]
+schema = 1
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop", "legacy"]
+description = "Ordered structural gate authority for canonical and parked work."
+remaining_non_inventory = [
+  "Cargo format, Clippy, test, and Rustdoc commands remain in justfile.",
+  "Native Stone 0 credential and tombstone scans remain in civsim-stone0.",
+  "Pushed-history credential scanning remains in the tracked pre-push and CI scripts.",
+  "Parked crate compilation, tests, and ignored tests remain in justfile and CI.",
+]
+
+# Every command is an argument array. The runner never passes these values to a
+# shell parser. `{python}` resolves to the interpreter running gate_runner.py.
+
+[[gate]]
+id = "docs.legacy-archive"
+order = 10
+description = "Verify the maintained parked design and audit documents."
+tiers = ["doctor", "pr", "full", "nightly", "stop"]
+phase = "pre"
+command = ["bash", "scripts/verify.sh"]
+timeout_seconds = 60
+no_self_test_reason = "The script reports independent checks over the maintained documents and has no synthetic fixture mode."
+cache = "never"
+no_cache_reason = "The maintained-document verifier dispatches POSIX text utilities whose complete executable closure is outside the repository."
+inputs = ["scripts/verify.sh", "parked/docs/design.md", "parked/docs/audit.md"]
+path_triggers = ["scripts/verify.sh", "parked/docs/design.md", "parked/docs/audit.md"]
+
+[[gate]]
+id = "canonical.constructor-boundary"
+order = 20
+description = "Reject new unaudited value constructors in active source."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/constructor_gate.py"]
+self_test = ["{python}", "scripts/constructor_gate.py", "--self-test"]
+timeout_seconds = 120
+cache = "content-hash"
+inputs = ["scripts/constructor_gate.py", "scripts/constructor_baseline.tsv", "crates"]
+path_triggers = ["scripts/constructor_gate.py", "scripts/constructor_baseline.tsv", "crates/**"]
+
+[[gate]]
+id = "canonical.floor-provenance"
+order = 30
+description = "Verify the candidate provenance census and seven accounting marks."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/floor_provenance_gate.py"]
+self_test = ["{python}", "scripts/floor_provenance_gate.py", "--self-test"]
+timeout_seconds = 120
+cache = "content-hash"
+inputs = ["scripts/floor_provenance_gate.py", "crates/physics/data", "crates/physics/src"]
+path_triggers = ["scripts/floor_provenance_gate.py", "crates/physics/data/**", "crates/physics/src/**"]
+
+[[gate]]
+id = "canonical.determinism"
+order = 40
+description = "Reject nondeterministic APIs outside the audited baseline."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/determinism_gate.py"]
+self_test = ["{python}", "scripts/determinism_gate.py", "--self-test"]
+timeout_seconds = 120
+cache = "content-hash"
+inputs = ["scripts/determinism_gate.py", "scripts/determinism_baseline.tsv", "crates"]
+path_triggers = ["scripts/determinism_gate.py", "scripts/determinism_baseline.tsv", "crates/**"]
+
+[[gate]]
+id = "canonical.planet-boundary"
+order = 50
+description = "Enforce floor ingress, typed adapters, package ownership, and observer-only viewing."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/planet_boundary_gate.py"]
+self_test = ["{python}", "scripts/planet_boundary_gate.py", "--self-test"]
+timeout_seconds = 180
+cache = "never"
+no_cache_reason = "The boundary verifier dispatches the Cargo executable selected by its environment, so repository bytes alone do not close execution identity."
+inputs = [
+  "scripts/planet_boundary_gate.py",
+  "Cargo.toml",
+  "Cargo.lock",
+  "crates",
+  "parked/Cargo.toml",
+  "parked/Cargo.lock",
+  "parked/crates",
+]
+path_triggers = [
+  "scripts/planet_boundary_gate.py",
+  "Cargo.toml",
+  "Cargo.lock",
+  "crates/**",
+  "parked/Cargo.toml",
+  "parked/Cargo.lock",
+  "parked/crates/**",
+]
+
+[[gate]]
+id = "canonical.source-custody"
+order = 60
+description = "Verify source coverage, checksums, anchors, licences, and custody rules."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/sources_gate.py"]
+self_test = ["{python}", "scripts/sources_gate.py", "--self-test"]
+timeout_seconds = 180
+cache = "never"
+no_cache_reason = "The gate can inspect restricted custody outside the repository, so repository content alone is not a complete cache key."
+inputs = ["scripts/sources_gate.py", "scripts/sources_baseline.tsv", "sources", "docs/SOURCES.md", "crates/physics/data"]
+path_triggers = ["scripts/sources_gate.py", "scripts/sources_baseline.tsv", "sources/**", "docs/SOURCES.md", "crates/physics/data/**"]
+
+[[gate]]
+id = "canonical.authority-watchdog"
+order = 65
+description = "Require independent pairs for active authority-bearing mechanical claims."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/authority_watchdog_gate.py"]
+self_test = ["{python}", "scripts/authority_watchdog_gate.py", "--self-test"]
+timeout_seconds = 120
+cache = "content-hash"
+inputs = [
+  "scripts/gates.toml",
+  "scripts/gate_runner.py",
+  "scripts/authority_watchdog_gate.py",
+  "scripts/authority_registry_watchdog.py",
+  "scripts/authority_watchdog.toml",
+  "scripts/external_claim_gate.py",
+  "scripts/external_claim_watchdog.py",
+  "scripts/fixed_math_authority_gate.py",
+  "scripts/fixed_math_authority_watchdog.py",
+  "scripts/stone0_build_wiring_gate.py",
+  "scripts/stone0_build_wiring_watchdog.py",
+  "sources/external_claims.toml",
+  "sources/external_claim_approvers",
+  "sources/external_claim_revocations.toml",
+  "docs/working/INDEPENDENT_AUTHORITY_RULE.md",
+  "docs/working/EXTERNAL_ADVERSE_CLAIM_RULE.md",
+  "crates",
+]
+path_triggers = [
+  "scripts/gates.toml",
+  "scripts/gate_runner.py",
+  "scripts/authority_watchdog_gate.py",
+  "scripts/authority_registry_watchdog.py",
+  "scripts/authority_watchdog.toml",
+  "scripts/external_claim_gate.py",
+  "scripts/external_claim_watchdog.py",
+  "scripts/fixed_math_authority_gate.py",
+  "scripts/fixed_math_authority_watchdog.py",
+  "scripts/stone0_build_wiring_gate.py",
+  "scripts/stone0_build_wiring_watchdog.py",
+  "sources/external_claims.toml",
+  "sources/external_claim_approvers",
+  "sources/external_claim_revocations.toml",
+  "docs/working/INDEPENDENT_AUTHORITY_RULE.md",
+  "docs/working/EXTERNAL_ADVERSE_CLAIM_RULE.md",
+  "crates/**",
+]
+
+[[gate]]
+id = "canonical.stone0-build-wiring"
+order = 66
+description = "Require one fail-closed Stone 0 build-graph owner with independent topology agreement."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/stone0_build_wiring_gate.py"]
+self_test = ["{python}", "scripts/stone0_build_wiring_gate.py", "--self-test"]
+timeout_seconds = 120
+cache = "content-hash"
+inputs = ["scripts/stone0_build_wiring_gate.py", "scripts/stone0_build_wiring_watchdog.py", "Cargo.toml", "justfile", "crates/stone0-build", "crates/stone0", "crates/planet/Cargo.toml", "crates/planet/build.rs", "crates/planet-substrate/Cargo.toml", "crates/planet-substrate/build.rs"]
+path_triggers = ["scripts/stone0_build_wiring_gate.py", "scripts/stone0_build_wiring_watchdog.py", "Cargo.toml", "justfile", "crates/stone0-build/**", "crates/stone0/**", "crates/planet/Cargo.toml", "crates/planet/build.rs", "crates/planet-substrate/Cargo.toml", "crates/planet-substrate/build.rs"]
+
+[[gate]]
+id = "canonical.fixed-math-authority"
+order = 67
+description = "Independently derive and bind every CPU and GPU Q32.32 transcendental-table constant."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/fixed_math_authority_gate.py"]
+self_test = ["{python}", "scripts/fixed_math_authority_gate.py", "--self-test"]
+timeout_seconds = 180
+cache = "content-hash"
+inputs = ["scripts/fixed_math_authority_gate.py", "scripts/fixed_math_authority_watchdog.py", "crates/units/data/fixed_math_authority_receipt.json", "crates/core/src/fixed.rs", "crates/gpu/src/transcendental.rs"]
+path_triggers = ["scripts/fixed_math_authority_gate.py", "scripts/fixed_math_authority_watchdog.py", "crates/units/data/fixed_math_authority_receipt.json", "crates/core/src/fixed.rs", "crates/gpu/src/transcendental.rs"]
+
+[[gate]]
+id = "canonical.external-claim-governance"
+order = 68
+description = "Require five independent lineages, exact scope, owner signature, and an independent watchdog before external adverse claims or contact."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/external_claim_gate.py"]
+self_test = ["{python}", "scripts/external_claim_gate.py", "--self-test"]
+timeout_seconds = 120
+cache = "content-hash"
+inputs = ["scripts/external_claim_gate.py", "scripts/external_claim_watchdog.py", "sources", "crates/physics/data", "docs/working"]
+path_triggers = ["scripts/external_claim_gate.py", "scripts/external_claim_watchdog.py", "sources/**", "crates/physics/data/**", "docs/working/**"]
+
+[[gate]]
+id = "canonical.source-registry"
+order = 70
+description = "Check generated source documentation against the source registry."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/gen_sources.py", "--check"]
+self_test = ["{python}", "scripts/gen_sources.py", "--self-test"]
+timeout_seconds = 120
+cache = "never"
+no_cache_reason = "Generated custody output depends on the existence of held paths outside the declared repository input closure."
+inputs = ["scripts/gen_sources.py", "sources", "docs/SOURCES.md", "crates/*/data/*/manifest.toml"]
+path_triggers = ["scripts/gen_sources.py", "sources/**", "docs/SOURCES.md", "crates/*/data/*/manifest.toml"]
+
+[[gate]]
+id = "canonical.derivation-annotations"
+order = 80
+description = "Verify deriving-substrate annotations against the audited baseline."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/derives_gate.py"]
+self_test = ["{python}", "scripts/derives_gate.py", "--self-test"]
+timeout_seconds = 120
+cache = "content-hash"
+inputs = ["scripts/derives_gate.py", "scripts/derives_baseline.tsv", "crates"]
+path_triggers = ["scripts/derives_gate.py", "scripts/derives_baseline.tsv", "crates/**"]
+
+[[gate]]
+id = "canonical.diamond-single-provider"
+order = 90
+description = "Require one provider or an explicit arbitration for each derived quantity."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/diamond_gate.py", "--strict"]
+self_test = ["{python}", "scripts/diamond_gate.py", "--self-test"]
+timeout_seconds = 120
+cache = "never"
+no_cache_reason = "The provider verifier dispatches the host grep executable, so repository bytes alone do not close execution identity."
+inputs = ["scripts/diamond_gate.py", "crates"]
+path_triggers = ["scripts/diamond_gate.py", "crates/**"]
+
+[[gate]]
+id = "canonical.floor-registry"
+order = 100
+description = "Check the generated physics floor discovery registry."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/gen_floor_registry.py", "--check"]
+timeout_seconds = 120
+no_self_test_reason = "Check mode compares a fresh rendering with the committed artifact; the generator has no separate synthetic fixture mode."
+cache = "content-hash"
+inputs = ["scripts/gen_floor_registry.py", "crates", "docs/working/PHYSICS_FLOOR_REGISTRY.md"]
+path_triggers = ["scripts/gen_floor_registry.py", "crates/**", "docs/working/PHYSICS_FLOOR_REGISTRY.md"]
+
+[[gate]]
+id = "evidence.aesopus"
+order = 110
+description = "Verify AESOPUS evidence receipts and extracted values."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/aesopus_provenance_test.py"]
+timeout_seconds = 120
+no_self_test_reason = "The script verifies held AESOPUS artifacts directly and exposes regeneration rather than a synthetic detector fixture."
+cache = "never"
+no_cache_reason = "The evidence check can resolve held artifacts outside the repository."
+inputs = ["scripts/aesopus_provenance_test.py", "scripts/aesopus_fields.py", "crates/physics/data", "sources"]
+path_triggers = ["scripts/aesopus_provenance_test.py", "scripts/aesopus_fields.py", "crates/physics/data/**", "sources/**"]
+
+[[gate]]
+id = "evidence.bhac15"
+order = 120
+description = "Verify BHAC15 evidence receipts and extracted grid custody."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/bhac15_provenance_test.py"]
+timeout_seconds = 120
+no_self_test_reason = "The script verifies the held BHAC15 artifact and has no synthetic detector fixture."
+cache = "never"
+no_cache_reason = "The evidence check can resolve held artifacts outside the repository."
+inputs = ["scripts/bhac15_provenance_test.py", "crates/physics/data/bhac15", "crates/physics/data/hayashi_wall.toml", "sources"]
+path_triggers = ["scripts/bhac15_provenance_test.py", "crates/physics/data/bhac15/**", "crates/physics/data/hayashi_wall.toml", "sources/**"]
+
+[[gate]]
+id = "evidence.condensation-mu"
+order = 130
+description = "Verify condensation and molecular-weight evidence receipts."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/condensation_mu_provenance_test.py"]
+timeout_seconds = 120
+no_self_test_reason = "The script checks source-backed repository artifacts and has no synthetic detector fixture."
+cache = "never"
+no_cache_reason = "The evidence check can resolve held artifacts outside the repository."
+inputs = ["scripts/condensation_mu_provenance_test.py", "crates/physics/data", "sources"]
+path_triggers = ["scripts/condensation_mu_provenance_test.py", "crates/physics/data/**", "sources/**"]
+
+[[gate]]
+id = "evidence.convection-scaling"
+order = 140
+description = "Verify convection-scaling evidence receipts."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/convection_scaling_provenance_test.py"]
+timeout_seconds = 120
+no_self_test_reason = "The script checks source-backed repository artifacts and has no synthetic detector fixture."
+cache = "never"
+no_cache_reason = "The evidence check can resolve held artifacts outside the repository."
+inputs = ["scripts/convection_scaling_provenance_test.py", "crates/physics/data", "sources"]
+path_triggers = ["scripts/convection_scaling_provenance_test.py", "crates/physics/data/**", "sources/**"]
+
+[[gate]]
+id = "evidence.disk-arc-literature"
+order = 150
+description = "Verify disk-arc literature receipts."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/disk_arc_literature_provenance_test.py"]
+self_test = ["{python}", "scripts/disk_arc_literature_provenance_test.py", "--self-test"]
+timeout_seconds = 120
+cache = "never"
+no_cache_reason = "The evidence check can resolve held artifacts outside the repository."
+inputs = ["scripts/disk_arc_literature_provenance_test.py", "crates/physics/data/disk_arc_literature", "sources"]
+path_triggers = ["scripts/disk_arc_literature_provenance_test.py", "crates/physics/data/disk_arc_literature/**", "sources/**"]
+
+[[gate]]
+id = "evidence.gruneisen"
+order = 160
+description = "Verify Gruneisen evidence receipts."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/gruneisen_provenance_test.py"]
+timeout_seconds = 120
+no_self_test_reason = "The script checks source-backed repository artifacts and has no synthetic detector fixture."
+cache = "never"
+no_cache_reason = "The evidence check can resolve held artifacts outside the repository."
+inputs = ["scripts/gruneisen_provenance_test.py", "crates/physics/data", "sources"]
+path_triggers = ["scripts/gruneisen_provenance_test.py", "crates/physics/data/**", "sources/**"]
+
+[[gate]]
+id = "evidence.janaf"
+order = 170
+description = "Verify JANAF evidence receipts."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/janaf_provenance_test.py"]
+timeout_seconds = 120
+no_self_test_reason = "The script checks source-backed repository artifacts and has no synthetic detector fixture."
+cache = "never"
+no_cache_reason = "The evidence check can resolve held artifacts outside the repository."
+inputs = ["scripts/janaf_provenance_test.py", "crates/physics/data", "sources"]
+path_triggers = ["scripts/janaf_provenance_test.py", "crates/physics/data/**", "sources/**"]
+
+[[gate]]
+id = "evidence.phase-conductivity"
+order = 180
+description = "Verify phase-conductivity evidence receipts."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/phase_conductivity_provenance_test.py"]
+timeout_seconds = 120
+no_self_test_reason = "The script checks source-backed repository artifacts and has no synthetic detector fixture."
+cache = "never"
+no_cache_reason = "The evidence check can resolve held artifacts outside the repository."
+inputs = ["scripts/phase_conductivity_provenance_test.py", "crates/physics/data", "sources"]
+path_triggers = ["scripts/phase_conductivity_provenance_test.py", "crates/physics/data/**", "sources/**"]
+
+[[gate]]
+id = "evidence.rayleigh-eigenvalue"
+order = 190
+description = "Verify Rayleigh-eigenvalue evidence receipts."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/rayleigh_eigenvalue_provenance_test.py"]
+timeout_seconds = 120
+no_self_test_reason = "The script checks source-backed repository artifacts and has no synthetic detector fixture."
+cache = "never"
+no_cache_reason = "The evidence check can resolve held artifacts outside the repository."
+inputs = ["scripts/rayleigh_eigenvalue_provenance_test.py", "crates/physics/data", "sources"]
+path_triggers = ["scripts/rayleigh_eigenvalue_provenance_test.py", "crates/physics/data/**", "sources/**"]
+
+[[gate]]
+id = "evidence.thermoelastic-anchors"
+order = 200
+description = "Verify thermoelastic anchor evidence receipts."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/thermoelastic_anchors_provenance_test.py"]
+self_test = ["{python}", "scripts/thermoelastic_anchors_provenance_test.py", "--self-test"]
+timeout_seconds = 120
+cache = "never"
+no_cache_reason = "The evidence check can resolve held artifacts outside the repository."
+inputs = ["scripts/thermoelastic_anchors_provenance_test.py", "crates/physics/data", "sources"]
+path_triggers = ["scripts/thermoelastic_anchors_provenance_test.py", "crates/physics/data/**", "sources/**"]
+
+[[gate]]
+id = "canonical.ledger-inventory"
+order = 210
+description = "Check the centralized four-tier by seven-mark ledger inventory."
+tiers = ["doctor", "pr", "full", "nightly", "stop"]
+phase = "post"
+command = ["bash", "scripts/cargo_dev.sh", "run", "-q", "-p", "civsim-planet", "--bin", "ledger_inventory", "--", "--check"]
+timeout_seconds = 300
+no_self_test_reason = "Check mode regenerates the inventory from the repository-owned catalog and compares the committed artifact."
+cache = "never"
+no_cache_reason = "The planet build script runs Stone 0 across repository, Git-index, and external-secret state that this gate cannot seal in a content receipt."
+inputs = [
+  "scripts/gates.toml",
+  "scripts/cargo_dev.sh",
+  "scripts/target_gc.sh",
+  "scripts/wsl_dev_env.sh",
+  "Cargo.toml",
+  "Cargo.lock",
+  "rust-toolchain.toml",
+  "scripts/*.html",
+  "scripts/*.ps1",
+  "scripts/*.py",
+  "scripts/*.sh",
+  "scripts/*.toml",
+  "scripts/*.tsv",
+  "scripts/*.txt",
+  "scripts/githooks",
+  "sources",
+  "crates/ledger",
+  "crates/stone0",
+  "crates/units",
+  "crates/planet",
+  "docs/SOURCES.md",
+  "docs/working/PHYSICS_FLOOR_REGISTRY.md",
+  "docs/working/CANONICAL_LEDGER_INVENTORY.txt",
+]
+path_triggers = [
+  "scripts/gates.toml",
+  "scripts/cargo_dev.sh",
+  "scripts/target_gc.sh",
+  "scripts/wsl_dev_env.sh",
+  "Cargo.toml",
+  "Cargo.lock",
+  "rust-toolchain.toml",
+  "scripts/*.html",
+  "scripts/*.ps1",
+  "scripts/*.py",
+  "scripts/*.sh",
+  "scripts/*.toml",
+  "scripts/*.tsv",
+  "scripts/*.txt",
+  "scripts/githooks/**",
+  "sources/**",
+  "crates/ledger/**",
+  "crates/stone0/**",
+  "crates/units/**",
+  "crates/planet/**",
+  "docs/SOURCES.md",
+  "docs/working/PHYSICS_FLOOR_REGISTRY.md",
+  "docs/working/CANONICAL_LEDGER_INVENTORY.txt",
+]
+
+[[gate]]
+id = "legacy.constructor-boundary"
+order = 300
+description = "Reject new unaudited constructors in the parked compatibility workspace."
+tiers = ["legacy"]
+phase = "provenance"
+command = ["{python}", "scripts/constructor_gate.py", "--parked"]
+self_test = ["{python}", "scripts/constructor_gate.py", "--parked", "--self-test"]
+timeout_seconds = 120
+cache = "content-hash"
+inputs = [
+  "scripts/constructor_gate.py",
+  "parked/scripts/constructor_baseline.tsv",
+  "parked/crates/bio/src",
+  "parked/crates/compose/src",
+  "parked/crates/foundation/src",
+  "parked/crates/sim/src",
+  "parked/crates/viewer/src",
+]
+path_triggers = ["scripts/constructor_gate.py", "parked/scripts/constructor_baseline.tsv", "parked/crates/**"]
+
+[[gate]]
+id = "legacy.provenance"
+order = 310
+description = "Run the parked provenance ratchet."
+tiers = ["legacy"]
+phase = "provenance"
+command = ["{python}", "scripts/provenance_gate.py"]
+self_test = ["{python}", "scripts/provenance_gate.py", "--self-test"]
+timeout_seconds = 120
+cache = "content-hash"
+inputs = ["scripts/provenance_gate.py", "parked/calibration/reserved.toml"]
+path_triggers = ["scripts/provenance_gate.py", "parked/**"]
+
+[[gate]]
+id = "legacy.quarantine"
+order = 320
+description = "Run the parked quarantine-ledger ratchet."
+tiers = ["legacy"]
+phase = "provenance"
+command = ["{python}", "scripts/quarantine_gate.py"]
+self_test = ["{python}", "scripts/quarantine_gate.py", "--self-test"]
+timeout_seconds = 120
+cache = "content-hash"
+inputs = [
+  "scripts/quarantine_gate.py",
+  "parked/quarantine_ledger.toml",
+  "parked/crates/bio/src",
+  "parked/crates/foundation/src",
+  "parked/crates/sim/src",
+]
+path_triggers = ["scripts/quarantine_gate.py", "parked/quarantine_ledger.toml", "parked/**"]
+
+[[gate]]
+id = "legacy.profile-overrides"
+order = 330
+description = "Run the parked profile-override ratchet."
+tiers = ["legacy"]
+phase = "provenance"
+command = ["{python}", "scripts/profile_override_gate.py"]
+self_test = ["{python}", "scripts/profile_override_gate.py", "--self-test"]
+timeout_seconds = 120
+cache = "content-hash"
+inputs = [
+  "scripts/profile_override_gate.py",
+  "parked/calibration/reserved.toml",
+  "parked/calibration/profiles",
+  "parked/scripts/profile_override_baseline.tsv",
+]
+path_triggers = ["scripts/profile_override_gate.py", "parked/calibration/**", "parked/scripts/profile_override_baseline.tsv"]

@@ -1,0 +1,31 @@
+# Legacy biology constructor audit, retained outside the canonical baseline.
+# pattern<TAB>path<TAB>count<TAB>class<TAB>reason<TAB>digest
+::from_bits(	parked/crates/bio/src/belief.rs	2	bit-arithmetic	belief-mass mean computed in bit-space (sum over count)	c0ed66e9fdeb85e3
+::from_bits(	parked/crates/bio/src/evidence.rs	1	bit-arithmetic	evidence weight reconstructed from a value computed in bit-space	c5005fcfc3545d5d
+::from_bits(	parked/crates/bio/src/tom.rs	1	engine-constant	LADDER_WEIGHT_FLOOR = 1 bit, the smallest representable ladder weight	6b86b273ff34fce1
+::from_decimal_str(	parked/crates/bio/src/anatomy.rs	1	dev-fixture	a decimal-parser helper for a labelled kind-fixture string argument	043a718774c572bd
+::from_bits(	parked/crates/foundation/src/decompose.rs	1	bit-arithmetic	decomposition drive computed in bit-space (temperature minus barrier), clamped	aa2bcc1e40d47bdc
+::from_bits(	parked/crates/foundation/src/transmission.rs	1	test-fixture	a bit-scale tolerance in a transmission test	d4735e3a265e16ee
+::from_bits(	parked/crates/sim/src/absence.rs	1	engine-constant	LIFESPAN_HAZARD_THRESHOLD = 0.5 (1 << FRAC_BITS-1), a hazard midpoint	9c3a7c1e6fab5522
+::from_bits(	parked/crates/sim/src/axiom.rs	3	bit-arithmetic	group-belief mean and variance accumulated in bit-space, plus a test tolerance	125ff867edaa21f7
+::from_bits(	parked/crates/sim/src/controller.rs	2	bit-arithmetic	controller-weight mutation applied in bit-space (weight bits plus deviation bits)	16672113d2ce7d69
+::from_bits(	parked/crates/sim/src/environ.rs	1	bit-arithmetic	the derived molar gas constant R = N_A*k_B reconstructed from its rescaled Q32.32 bits (the same CODATA composite-compute projection as the derived Stefan-Boltzmann sigma)	d4a01c7fef1a8850
+::from_bits(	parked/crates/sim/src/homeostasis.rs	1	engine-constant	MIN_CAP ~1e-6, the smallest representable reserve capacity floor	3c5dab3b4209f28e
+::from_bits(	parked/crates/sim/src/institution.rs	5	bit-arithmetic	apportionment residue split into exact bit-halves (the indivisible-residue handler)	822d00d01c5a8c14
+::from_bits(	parked/crates/sim/src/insult.rs	6	bit-arithmetic	damage and repair arithmetic in bit-space (complement, difference, abs), plus tiny test inputs	2dae46fa840beab4
+::from_bits(	parked/crates/sim/src/langmod.rs	1	engine-constant	LOSS_THRESHOLD = 0.5, a labelled function-loss knee fixture	43884fa5b76853eb
+::from_bits(	parked/crates/sim/src/locomotion.rs	2	engine-constant	HALF (0.5) and HEADING_EPS (~1e-3), heading-quantisation constants	e883b74b1efe494a
+::from_bits(	parked/crates/sim/src/lod.rs	3	bit-arithmetic	apportionment share bits and the level-of-detail wealth-proxy deserialization round-trip	dd812cdab076b88b
+::from_bits(	parked/crates/sim/src/morphogen.rs	6	engine-constant	damage bit-accumulation and the JITTER/GROWTH_LO/GROWTH_HI/HALF growth-band constants	bcfa05c19b6363ae
+::from_bits(	parked/crates/sim/src/nonlocal_coupling.rs	2	test-fixture	the budget-conservation test reconstructs a Fixed from the per-cell field's bit-sum to compare against the ledger's ColumnSolid balance	64387fc25dcc60ad
+::from_bits(	parked/crates/sim/src/physiology.rs	1	bit-arithmetic	a derived value reconstructed from bits; the Stefan-Boltzmann derivation and its bit assertion moved to civsim-units	82c01ce15b431d42
+::from_bits(	parked/crates/sim/src/runner.rs	7	engine-constant	promotion and stencil-stability constants, temperature-field deserialization, strike-damage bit-accumulation, and labelled AIR_K/WATER_K test fixtures	90ec62a56b48f6f4
+::from_bits(	parked/crates/sim/src/trace.rs	2	bit-arithmetic	a decay complement computed in bit-space	ea2532b9ac56f7c7
+::from_bits(	parked/crates/sim/src/typology.rs	1	test-fixture	a bit-exact assertion in a typology test	7dd616efef085420
+::from_bits(	parked/crates/sim/src/world.rs	1	bit-arithmetic	a field cell average computed in bit-space (numerator over count)	98a4960e0a6451af
+::from_decimal_str(	parked/crates/sim/src/morphogen.rs	1	dev-fixture	a decimal-parser helper for a labelled morphogen dev-fixture string argument	043a718774c572bd
+::from_decimal_str(	parked/crates/sim/src/runner.rs	17	dev-fixture	labelled non-canonical scenario values (the spawn_predator demo geometry and the test-scenario CreatureSelectionParams mutation spreads); production wiring must never promote these values to the canonical absolute floor	9d21340e8118a0ad
+::from_bits(	parked/crates/compose/src/interval.rs	3	bit-arithmetic	saturating add, subtract, and multiply reconstruct checked i128 results in the parked interval arithmetic	525dc81045dcf639
+::from_decimal_str(	parked/crates/compose/src/capability.rs	1	dev-fixture	the labelled legacy FunctionLawRegistry dev seed parses its fixture reference magnitudes through one helper	043a718774c572bd
+::from_decimal_str(	parked/crates/compose/src/form.rs	4	dev-fixture	the labelled legacy form and join dev seeds parse their fixture geometry and efficiency values	37c1906b962fff62
+::from_decimal_str(	parked/crates/viewer/src/main.rs	2	authored-should-derive	the retired causal viewer accepts caller-authored star mass and orbit magnitudes; this is preserved only as parked evidence and is forbidden at the canonical planet front door	94bdefb9530fe63a

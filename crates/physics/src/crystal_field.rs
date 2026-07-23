@@ -26,9 +26,9 @@
 //! the banked ligand-field machinery by Jorgensen's optical-electronegativity relation
 //! (`E_CT = 30000 cm^-1 * (chi_opt(ligand) - chi_opt(metal))`); the scale constant is primary-cited, but the per-
 //! species optical electronegativities `chi_opt(O2-)`, `chi_opt(Fe3+)`, `chi_opt(Fe2+)` are in Jorgensen's 1969-1971
-//! books (not web-open), so that derivation is FLAGGED (see `docs/working/MORNING_REVIEW.md`) and the band energies
-//! are instead supplied as DIRECT single-crystal optical measurements (the same idiom as the monoxide `Delta_o`
-//! below, a per-chromophore cited datum, never a factorization, never fabricated).
+//! books (not web-open), so that derivation remains open in
+//! `docs/working/ABIOTIC_EVIDENCE_DEBT.md`. The direct single-crystal optical measurements below are retained as
+//! candidate evidence. They do not enter the canonical absolute floor merely because they are cited.
 //!
 //! `Delta_o` FACTORIZES (Jorgensen): `Delta_o = f(ligand) * g(ion)`, with `f` dimensionless (`f(H2O) = 1.00`
 //! PINNED, since multiplicativity breaks across sources otherwise) and `g` in `10^3 cm^-1`. The free-ion Racah `B`

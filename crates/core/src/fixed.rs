@@ -44,6 +44,48 @@ pub const FRAC_BITS: u32 = 32;
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Fixed(i64);
 
+/// THE OUTCOME OF AN EXPONENTIAL IN FIXED POINT, distinguishing the three ways it can fail to be a number.
+///
+/// # WHY A TYPE RATHER THAN A SENTINEL
+///
+/// [`Fixed::exp`] saturates to [`Fixed::MAX`] and flushes to [`Fixed::ZERO`] at its rails, and the first
+/// attempt at a checked exponential SNIFFED those values back afterwards. That cannot work through a
+/// wrapping operation: if the argument itself overflowed on the way in, `exp` receives a plausible WRAPPED
+/// number, returns a plausible finite result, and there is no sentinel left to read. The loss is already
+/// unrecoverable by the time anything looks.
+///
+/// So the classification happens on the ARGUMENT, before evaluation, and it is carried in the type.
+///
+/// # THE TWO FAILURES ARE NOT THE SAME AND CALLERS MUST NOT TREAT THEM ALIKE
+///
+/// [`Self::Overflow`] is unbounded error: the true value is past what the representation holds and nothing
+/// about the returned number relates to it. [`Self::Underflow`] is bounded by about one ulp: the true value
+/// was already below the grid, so ZERO is very nearly right and is often the answer a caller wants. Collapsing
+/// both into one refusal makes a conservative floor look like a caught defect and hides the real one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExpOutcome {
+    /// The exponential is representable and this is its value.
+    Finite(Fixed),
+    /// The true value lies below one ulp. Zero is within an ulp of correct; a caller that wants the floor
+    /// may take it, and one that wants to know it happened now can.
+    Underflow,
+    /// The true value is past [`Fixed::MAX`]. Nothing representable relates to it.
+    Overflow,
+    /// The input is outside the function's domain (for a power, a non-positive base).
+    Domain,
+}
+
+impl ExpOutcome {
+    /// The value where the exponential is finite, and `None` at either rail or outside the domain. The
+    /// lossy view, for a caller with no distinct policy.
+    pub fn finite(self) -> Option<Fixed> {
+        match self {
+            ExpOutcome::Finite(v) => Some(v),
+            _ => None,
+        }
+    }
+}
+
 impl Fixed {
     /// Fractional bits, also exposed as the module constant [`FRAC_BITS`].
     pub const FRAC_BITS: u32 = FRAC_BITS;
@@ -91,7 +133,7 @@ impl Fixed {
     /// Parse a decimal string into `Fixed` using only integer arithmetic, so the
     /// conversion is exact to the fixed-point grid and identical on every machine;
     /// floating point is never touched. This is the canonical text-to-`Fixed` reader
-    /// the calibration manifest and the data-driven substrate loaders both use, so a
+    /// repository data loaders use, so a
     /// datasheet value or a reserved number reaches canonical state losslessly.
     pub fn from_decimal_str(s: &str) -> Result<Fixed, String> {
         let s = s.trim();
@@ -494,6 +536,40 @@ impl Fixed {
         Fixed::from_int(e).mul(LN2) + ln_m
     }
 
+    // @derives: a permutation-independent log-domain sum <- the input log magnitudes and the fixed-point exp and ln kernels
+    /// `ln(sum_i exp(x_i))` over a non-empty slice, evaluated in the max-shifted domain so no exponential can
+    /// overflow. The shifted terms are non-negative fixed-point values, so their saturating sum is independent of
+    /// caller order. A subtraction that falls below the representable window contributes zero, which is the
+    /// fixed-point image of its exponentially negligible term. Returns `None` only for an empty slice.
+    ///
+    /// This is the sole workspace provider. Domain crates may expose compatibility wrappers, but they delegate
+    /// here rather than implementing a second reduction.
+    /// @provides log_sum_exp
+    pub fn log_sum_exp(values: &[Fixed]) -> Option<Fixed> {
+        let (&first, rest) = values.split_first()?;
+        let mut max = first;
+        for &value in rest {
+            if value > max {
+                max = value;
+            }
+        }
+
+        let mut sum = Fixed::ZERO;
+        for &value in values {
+            let shifted_exp = match value.checked_sub(max) {
+                Some(shifted) => shifted.exp(),
+                None => Fixed::ZERO,
+            };
+            sum = sum.saturating_add(shifted_exp);
+        }
+
+        if sum <= Fixed::ZERO {
+            Some(max)
+        } else {
+            Some(max.saturating_add(sum.ln()))
+        }
+    }
+
     /// Sine and cosine together, integer-only and deterministic (CORDIC). Reduces the angle to
     /// `[-pi/4, pi/4]` by quadrant, rotates, and maps back. Returns `(sin, cos)`.
     #[inline]
@@ -571,11 +647,157 @@ impl Fixed {
 
     /// Real power `x^y = exp(y * ln x)` for `x > 0`, composed from the pinned `ln` and `exp`. A
     /// non-positive base returns zero (the domain guard).
+    ///
+    /// # IT SATURATES SILENTLY, and that is inherited rather than chosen
+    ///
+    /// [`Fixed::exp`] saturates to [`Fixed::MAX`] above an argument of about 21.5, which its own
+    /// documentation states as an honest Q32.32 limit. This function is `exp(y ln x)`, so it inherits
+    /// that rail whenever `y ln x` crosses it, and until 2026-07-19 it did not say so. A caller reading
+    /// only this comment had no way to learn it.
+    ///
+    /// MEASURED, because the threshold is what a caller needs: at the Dohnanyi slope `y = 2.5`, a base
+    /// spanning 3.8 decades already rails, and at 6 decades this returns `2.147e9` where the true value
+    /// is `1e15`. Six orders of magnitude, with no error and no signal.
+    ///
+    /// WHAT IS AND IS NOT WRONG HERE, stated precisely because the loose version overstates it. The rail
+    /// condition is `y ln x > 21.5`, which is `x^y > e^21.5`, which is about `Fixed::MAX`. So this
+    /// saturates EXACTLY when its result stops being representable: the arithmetic is not wrong, the
+    /// SIGNAL is missing. It cannot distinguish "your answer is 2.147e9" from "your answer does not fit",
+    /// and it reports the former in both cases.
+    ///
+    /// That is not hypothetical. Two functions in `world::impact_flux` documented a fail-soft on a
+    /// too-wide size range, did not have one because of this rail, and returned `1.5e-2` where the truth
+    /// was `3.2e-8`, five and a half orders high, in a value a caller would have believed.
+    ///
+    /// SURVEYED ACROSS THE TREE, so the exposure is a measurement rather than an alarm. Budgets below are
+    /// MAGNITUDES of `y ln x`, against a window about 22 wide either way. Of the shapes the engine calls:
+    /// the crater strength group reaches `13.9` (toward the underflow side), the Mie-Grueneisen volume
+    /// ratio `8.6` at the steepest banked `q` (also underflow), the disk surface density `5.6`, the
+    /// metallicity dex power `2.8` (toward saturation), and the Birch-Murnaghan cube root `0.4`. The full
+    /// site-by-site measurement, with the input bound behind each number and which rail each approaches,
+    /// is `docs/working/POWF_CALL_SITE_AUDIT.md`.
+    ///
+    /// TWO SHAPES REACH A RAIL. The impact size-frequency ratio spends `34.5` over six decades of size,
+    /// and `world::impact_flux` now guards it (a too-wide reservoir refuses rather than answering). The
+    /// stellar mass-luminosity power `M^3.5` rails above `464` solar masses, and it was found ESCAPING:
+    /// the railed luminosity reaches a caller as a plausible flux at distance, `166x` low at `2000` solar
+    /// masses with no signal. Both call sites now read the sentinel back.
+    ///
+    /// THERE ARE TWO RAILS, and they are not the same kind of failure. The upper one saturates to
+    /// [`Fixed::MAX`] when `y ln x > 21.4875626` (measured, the point where `exp` exceeds `2^31`), and its
+    /// error is UNBOUNDED: at `(1e8)^2.5` this returns `2.147e9` against a truth of `1e20`. The lower one
+    /// underflows to [`Fixed::ZERO`] when `y ln x < -22`, and its error is bounded by roughly ONE ULP,
+    /// because `e^-22 = 2.79e-10` and one ulp is `2.33e-10`, so a zeroed result was never more than 1.2
+    /// grid steps from zero to begin with. Treat the upper rail as a defect to guard and the lower one as
+    /// the representable floor doing its job.
+    ///
+    /// THE EXPONENT WINDOW, the cheapest bound a caller can check. `ln` of a representable positive
+    /// `Fixed` lies in `[-22.1807098, 21.4875626]` (the ulp and [`Fixed::MAX`]), so an exponent inside
+    /// `[-0.9687499, +0.9918528]` CANNOT reach either rail for ANY representable base, no matter what the
+    /// base is. Every cube root, fourth root, and fractional exponent in the tree is covered by that one
+    /// fact and needs no further argument. Outside the window the caller owes a bound on the BASE.
+    ///
+    /// Use [`Fixed::checked_powf`] where the result feeds a decision. Reach for this one only where the
+    /// operands are bounded by something that keeps `y ln x` inside the window, and say what that is.
     pub fn powf(self, y: Fixed) -> Fixed {
         if self <= Fixed::ZERO {
             return Fixed::ZERO;
         }
         y.mul(self.ln()).exp()
+    }
+
+    /// `x^y`, or `None` where the composition rails.
+    ///
+    /// Reads [`Fixed::exp`]'s saturation sentinel back rather than trusting the value: a result of
+    /// exactly [`Fixed::MAX`] from a finite argument means the exponential clamped, so the true power is
+    /// somewhere above the representable window and no number here is honest. A non-positive base
+    /// returns `None` rather than [`Fixed::powf`]'s zero, because a domain violation is not a result.
+    ///
+    /// THE TWO FALSE POSITIVES, stated so they are not discovered later. A computation whose true value
+    /// lands exactly on `Fixed::MAX` is indistinguishable from a rail and is refused. A computation whose
+    /// true value falls below one ulp is indistinguishable from an underflow and is refused, where the
+    /// bare form would return the zero that is in fact the correct representable answer. Both are the
+    /// right trade: a wrong number that looks right costs more than a refusal on a boundary a caller can
+    /// widen.
+    pub fn checked_powf(self, y: Fixed) -> Option<Fixed> {
+        self.powf_outcome(y).finite()
+    }
+
+    /// `self^y` WITH ITS FAILURE CLASSIFIED, which is what [`Self::checked_powf`] discards.
+    ///
+    /// # THE PRODUCT IS CHECKED, AND THAT IS THE HALF THE FIRST VERSION MISSED
+    ///
+    /// `powf` is `exp(y ln x)`, and the first checked form read `y.mul(self.ln()).exp()` and then compared
+    /// the RESULT against the rails. `mul` is the WRAPPING multiply. When `y ln x` itself left the window it
+    /// wrapped to a plausible argument, `exp` returned a plausible finite number, and no sentinel survived
+    /// for the check to find: the answer was already wrong and no longer detectably so. The product is now
+    /// `checked_mul`, so an overflow there is caught where it happens instead of being laundered through an
+    /// exponential.
+    ///
+    /// # THE RAILS ARE READ ON THE ARGUMENT, NOT SNIFFED FROM THE VALUE
+    ///
+    /// [`Fixed::exp`] saturates rather than wrapping, so the classification is a comparison on `y ln x`
+    /// before evaluating rather than an equality test on something that may legitimately BE a rail. A true
+    /// result landing exactly on `Fixed::MAX` used to be refused as a false positive; it is `Finite` now,
+    /// because the argument test can tell them apart.
+    ///
+    /// # THE EDGE IS DERIVED, AND THE AUTHORED 22 WAS THE SECOND HALF OF THE SAME DEFECT
+    ///
+    /// The first version of this test read `arg > 22`, copied from [`Fixed::exp`]'s own saturation guard. 22
+    /// is not the representable edge: `exp` reaches `Fixed::MAX` at [`Self::exp_max_argument`],
+    /// `ln(Fixed::MAX) = 21.4875626`. Across the whole band `(21.4875626, 22]` the argument test called the
+    /// result `Finite` while [`Fixed::exp`]'s `scale_pow2` had already saturated it to `Fixed::MAX`, so a
+    /// railed value was returned as an answer. That is the laundering this function exists to stop,
+    /// reintroduced one layer up by an authored constant standing where a derived one belongs. The mass
+    /// luminosity `M^3.5` lands in that band at 464 solar masses (`3.5 ln 464 = 21.4896`), which is how it
+    /// surfaced.
+    // @derives: a classified fixed-point power <- the base, the exponent and the representable window
+    pub fn powf_outcome(self, y: Fixed) -> ExpOutcome {
+        if self <= Fixed::ZERO {
+            return ExpOutcome::Domain;
+        }
+        let Some(arg) = y.checked_mul(self.ln()) else {
+            // The exponent times the log left the window. Its SIGN tells which rail it was heading for, and
+            // the operands are what decide it: a positive product overflows, a negative one underflows.
+            let positive = (y > Fixed::ZERO) == (self > Fixed::ONE);
+            return if positive {
+                ExpOutcome::Overflow
+            } else {
+                ExpOutcome::Underflow
+            };
+        };
+        arg.exp_outcome()
+    }
+
+    /// The largest argument whose exponential is representable, DERIVED from the representation rather than
+    /// authored: `exp(x)` exceeds [`Fixed::MAX`] exactly when `x` exceeds `ln(Fixed::MAX)`.
+    ///
+    /// Measured against [`Fixed::exp`] behavior rather than trusted from the algebra: the last
+    /// argument whose exponential lands below the rail is `21.487560871` and the first that reaches it is
+    /// `21.487563870`, so this derived edge falls inside the measured crossover. Within the `1.5e-6` sliver
+    /// below it the series rails about `2e-6` early in relative terms, which is the accuracy the top of the
+    /// range carries anyway.
+    // @derives: the representable exponential edge <- the natural log of the representation's ceiling
+    pub fn exp_max_argument() -> Fixed {
+        Fixed::MAX.ln()
+    }
+
+    /// [`Fixed::exp`] WITH ITS FAILURE CLASSIFIED, the sibling of [`Self::powf_outcome`] for a caller that
+    /// already holds the exponent.
+    ///
+    /// The underflow edge stays at `-22`, which is [`Fixed::exp`]'s own floor rather than the
+    /// representation's: the smallest positive `Fixed` is `2^-32`, whose log is `-22.1807`. Between the two
+    /// the true value is under one ulp, so zero is very nearly right and `Underflow` is the honest report.
+    /// The overflow edge is the derived one, because there the gap is the whole distance to the rail.
+    // @derives: a classified fixed-point exponential <- the argument and the representable window
+    pub fn exp_outcome(self) -> ExpOutcome {
+        if self > Fixed::exp_max_argument() {
+            return ExpOutcome::Overflow;
+        }
+        if self < Fixed::from_int(-22) {
+            return ExpOutcome::Underflow;
+        }
+        ExpOutcome::Finite(self.exp())
     }
 
     /// The COMPLEMENTARY ERROR FUNCTION `erfc(x) = 1 - erf(x)`, by Abramowitz and Stegun 7.1.26 (a
@@ -591,7 +813,35 @@ impl Fixed {
     /// numeric type rather than a fact about any one domain. Two consumers need it and must not
     /// drift apart: Ewald's real-space sum (where the argument `alpha r` is always non-negative) and
     /// the half-space cooling geotherm (`erf(z / (2 sqrt(kappa t)))`, the lid profile).
+    ///
+    /// # THE SQUARE IS BOUNDED BEFORE IT IS TAKEN, WHICH IS WHAT MAKES IT SOUND
+    ///
+    /// `self * self` is the WRAPPING multiply, and it is a cast rather than an arithmetic overflow,
+    /// so the workspace's `overflow-checks` never saw it. Past `sqrt(Fixed::MAX) = 46340.95` the
+    /// square wrapped negative, `Fixed::ZERO - it` became large positive, `exp` saturated to
+    /// `Fixed::MAX`, and the tiny polynomial multiplied that rail back down into a plausible finite
+    /// number: `erfc(46341)` returned `36042.5` against a true `0`, and `erf` inherited it as
+    /// `-36041.5` against a true `1`. The guard below bounds `self` before the square is formed, so
+    /// the wrap is unreachable by construction rather than by caller discipline.
+    ///
+    /// The edge is DERIVED rather than authored, from [`Fixed::exp`]'s own floor: `exp(-x^2)` falls
+    /// below that floor once `x^2` exceeds 22, and zero is the correctly rounded answer there
+    /// (`erfc(4.69) = 3.3e-11`, about 0.14 ulp). Between that edge and the wrap the old code already
+    /// returned exactly zero by the same underflow, so this moves no bit that was ever right.
+    ///
+    /// Measured, the guard is comfortably conservative: `erfc` quantizes to zero at `4.48` (the last
+    /// nonzero argument is `4.47`, at exactly one ulp), while the guard sits at `4.6904`. Every
+    /// argument it turns away was already returning zero, so no resolvable value is truncated.
     pub fn erfc(self) -> Fixed {
+        // TESTED BEFORE THE REFLECTION on purpose: the reflection negates, and `Fixed::ZERO - MIN`
+        // overflows. Reaching the edge first means the negation only ever runs on a bounded argument.
+        let edge = Fixed::erfc_zero_argument();
+        if self > edge {
+            return Fixed::ZERO;
+        }
+        if self < Fixed::ZERO - edge {
+            return Fixed::from_int(2);
+        }
         if self < Fixed::ZERO {
             return Fixed::from_int(2) - (Fixed::ZERO - self).erfc();
         }
@@ -605,6 +855,18 @@ impl Fixed {
         // Horner: t * (a1 + t*(a2 + t*(a3 + t*(a4 + t*a5)))).
         let poly = t * (a1 + t * (a2 + t * (a3 + t * (a4 + t * a5))));
         poly * (Fixed::ZERO - self * self).exp()
+    }
+
+    /// The argument at which [`Fixed::erfc`] is zero to the representation, DERIVED from
+    /// [`Fixed::exp`]'s floor rather than authored: `erfc` carries a factor `exp(-x^2)`, that factor
+    /// falls below the floor once `x^2` exceeds 22, and `sqrt(22) = 4.6904`. At the edge the true
+    /// value is `3.3e-11`, about 0.14 ulp, so zero is the correctly rounded answer beyond it.
+    ///
+    /// Bounding the argument here is also what makes `erfc`'s unchecked square sound, so this is a
+    /// soundness boundary as well as an accuracy one.
+    // @derives: the argument beyond which erfc is zero <- the exponential's representable floor
+    pub fn erfc_zero_argument() -> Fixed {
+        Fixed::from_int(22).sqrt()
     }
 
     /// The ERROR FUNCTION `erf(x) = 1 - erfc(x)`, composed from the pinned [`Fixed::erfc`] so the
@@ -695,6 +957,151 @@ impl fmt::Display for Fixed {
 }
 
 #[cfg(test)]
+mod powf_rail_tests {
+    use super::*;
+
+    /// THE RAIL IS REAL AND `checked_powf` CATCHES IT, measured at the threshold rather than asserted.
+    ///
+    /// `powf` is `exp(y ln x)` and `exp` saturates above about 21.5, so a wide enough base rails. This
+    /// pins the measured behaviour so a future change to `exp`'s window cannot move it silently.
+    #[test]
+    fn powf_rails_where_checked_powf_refuses() {
+        let exponent = Fixed::from_ratio(25, 10); // the Dohnanyi slope's p - 1
+                                                  // Inside the window: both agree.
+        for decades in [1i32, 2, 3] {
+            let base = Fixed::from_int(10i32.pow(decades as u32));
+            let bare = base.powf(exponent);
+            let checked = base
+                .checked_powf(exponent)
+                .expect("inside the window it answers");
+            assert_eq!(bare, checked, "{decades} decades must agree");
+            assert_ne!(bare, Fixed::MAX, "{decades} decades must not rail");
+        }
+        // Past it: the bare form returns MAX and lies; the checked form refuses.
+        for decades in [4i32, 5, 6] {
+            let base = Fixed::from_int(10i32.pow(decades as u32));
+            assert_eq!(
+                base.powf(exponent),
+                Fixed::MAX,
+                "{decades} decades rails the bare form, which is the defect being documented"
+            );
+            assert!(
+                base.checked_powf(exponent).is_none(),
+                "{decades} decades must REFUSE rather than return the rail"
+            );
+        }
+    }
+
+    /// THE EXPONENT WINDOW, the bound that classifies most call sites without any argument about the base.
+    ///
+    /// `ln` of a representable positive `Fixed` lies in `[ln(ulp), ln(MAX)] = [-22.1807098, 21.4875626]`,
+    /// so `y ln x` is bounded by the exponent alone. An exponent inside `[-0.9687499, +0.9918528]` cannot
+    /// reach either rail for ANY representable base. This SWEEPS the whole representable range (every
+    /// power-of-two magnitude, both extremes) at each edge and one step past it, so the window is measured
+    /// rather than derived, and a future change to `exp`'s or `ln`'s window moves this test.
+    ///
+    /// The two edges are different because the rails are not symmetric: the upper rail sits at
+    /// `+21.4875626` and the lower at `-22`, and a negative exponent maps the MOST negative log (the ulp,
+    /// `-22.1807098`) onto the UPPER rail, which is why the negative edge is the tighter of the two.
+    #[test]
+    fn the_exponent_window_cannot_rail_for_any_representable_base() {
+        // Spanning set: every power-of-two magnitude in the representable range, plus both extremes.
+        let mut bases: Vec<Fixed> = (0..63).map(|k| Fixed::from_bits(1i64 << k)).collect();
+        bases.push(Fixed::MAX);
+        bases.push(Fixed::from_bits(1));
+        bases.push(Fixed::ONE);
+        let rails = |y: Fixed| -> bool {
+            bases
+                .iter()
+                .filter(|b| **b > Fixed::ZERO)
+                .any(|b| b.powf(y) == Fixed::MAX || b.powf(y) == Fixed::ZERO)
+        };
+
+        // Inside the window, at both edges: nothing rails.
+        let positive_edge = Fixed::from_ratio(9_918_528, 10_000_000);
+        let negative_edge = Fixed::ZERO - Fixed::from_ratio(9_687_499, 10_000_000);
+        assert!(
+            !rails(positive_edge),
+            "the positive edge +0.9918528 must clear both rails for every representable base"
+        );
+        assert!(
+            !rails(negative_edge),
+            "the negative edge -0.9687499 must clear both rails for every representable base"
+        );
+
+        // One step past each edge: the window is tight, not merely sufficient.
+        assert!(
+            rails(Fixed::from_ratio(9_918_529, 10_000_000)),
+            "one step past the positive edge must rail, or the stated window is loose"
+        );
+        assert!(
+            rails(Fixed::ZERO - Fixed::from_ratio(9_687_500, 10_000_000)),
+            "one step past the negative edge must rail, or the stated window is loose"
+        );
+
+        // The exponents the engine calls inside the window, named so a change to one is caught here.
+        for (name, num, den) in [
+            ("cube root", 1i64, 3i64),
+            ("two thirds", 2, 3),
+            ("fourth root", 1, 4),
+            ("square root", 1, 2),
+            ("Chen-Tse hardness", 585, 1000),
+            ("Watson latent heat", 38, 100),
+            ("Neufeld collision", 1561, 10000),
+            ("Hofmeister simple lattice", 95, 100),
+            ("mass-radius beta", 8, 10),
+        ] {
+            let y = Fixed::from_ratio(num, den);
+            assert!(!rails(y), "{name} ({num}/{den}) must be inside the window");
+        }
+        for (name, num, den) in [
+            ("metallicity-luminosity lambda", 44i64, 100i64),
+            ("metallicity-radius mu", 18, 1000),
+            ("crater outer exponent", 64706, 100000),
+        ] {
+            let y = Fixed::ZERO - Fixed::from_ratio(num, den);
+            assert!(!rails(y), "{name} (-{num}/{den}) must be inside the window");
+        }
+    }
+
+    /// THE TWO RAILS ARE NOT THE SAME KIND OF FAILURE, measured so the audit's classification stands on a
+    /// number. The upper rail's error is unbounded; the lower rail's is about one ulp, because it fires
+    /// only where the true value was already at the bottom of the grid.
+    #[test]
+    fn the_lower_rail_costs_about_one_ulp_and_the_upper_one_is_unbounded() {
+        // The zero rail fires below `e^-22`; one ulp is `2^-32`. The gap is one grid step, so a zeroed
+        // result was never more than that far from zero.
+        let one_ulp = Fixed::from_bits(1).to_f64_lossy();
+        let zero_rail = (-22.0f64).exp();
+        assert!(
+            zero_rail / one_ulp < 1.25,
+            "the zero rail must sit within about one ulp of the grid floor, got {} ulp",
+            zero_rail / one_ulp
+        );
+        // The upper rail, by contrast, understates without bound.
+        let exponent = Fixed::from_ratio(25, 10);
+        let got = Fixed::from_int(10).powi(8).powf(exponent).to_f64_lossy();
+        assert_eq!(got, Fixed::MAX.to_f64_lossy(), "(1e8)^2.5 rails");
+        assert!(
+            1e20 / got > 1e10,
+            "the upper rail understates by more than ten orders here, got {}x",
+            1e20 / got
+        );
+    }
+
+    /// A non-positive base is a domain violation, not a result. The bare form returns zero, which a
+    /// caller can mistake for a computed value; the checked form refuses.
+    #[test]
+    fn a_non_positive_base_refuses_rather_than_reading_zero() {
+        assert_eq!(Fixed::ZERO.powf(Fixed::ONE), Fixed::ZERO);
+        assert!(Fixed::ZERO.checked_powf(Fixed::ONE).is_none());
+        assert!((Fixed::ZERO - Fixed::ONE)
+            .checked_powf(Fixed::ONE)
+            .is_none());
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -710,6 +1117,43 @@ mod tests {
         assert_eq!(Fixed::from_int(1), Fixed::ONE);
         let x = Fixed::from_int(7);
         assert_eq!(x.mul(Fixed::ONE), x, "multiplying by ONE is identity");
+    }
+
+    #[test]
+    fn log_sum_exp_is_total_on_nonempty_slices_and_permutation_independent() {
+        assert_eq!(Fixed::log_sum_exp(&[]), None);
+        assert_eq!(
+            Fixed::log_sum_exp(&[Fixed::from_int(7)]),
+            Some(Fixed::from_int(7))
+        );
+
+        let values = [
+            Fixed::from_int(7),
+            Fixed::from_int(3),
+            Fixed::from_int(-2),
+            Fixed::from_int(5),
+        ];
+        let expected = Fixed::log_sum_exp(&values).unwrap();
+        for permutation in [
+            [values[0], values[1], values[2], values[3]],
+            [values[3], values[2], values[1], values[0]],
+            [values[1], values[3], values[0], values[2]],
+            [values[2], values[0], values[3], values[1]],
+        ] {
+            assert_eq!(Fixed::log_sum_exp(&permutation), Some(expected));
+        }
+
+        let wide = Fixed::log_sum_exp(&[Fixed::ONE, Fixed::MIN]).unwrap();
+        assert_eq!(
+            wide,
+            Fixed::ONE,
+            "an underflowed shifted term contributes zero"
+        );
+        assert_eq!(
+            Fixed::log_sum_exp(&[Fixed::MAX, Fixed::MAX]),
+            Some(Fixed::MAX),
+            "an unrepresentable result follows the Fixed saturation policy"
+        );
     }
 
     #[test]
@@ -865,5 +1309,258 @@ mod tests {
         assert!(Fixed::from_int(-1) < Fixed::ZERO);
         assert!(Fixed::from_ratio(1, 2) < Fixed::ONE);
         assert!(Fixed::from_int(3) > Fixed::from_ratio(5, 2));
+    }
+
+    #[test]
+    fn the_checked_power_catches_a_wrapping_product_that_the_sentinel_could_not() {
+        // THE DEFECT THIS PINS. `powf` is `exp(y ln x)`, and the first checked form read
+        // `y.mul(self.ln()).exp()` and compared the RESULT against the rails. `mul` wraps. When `y ln x`
+        // itself left the window it wrapped to a plausible argument, `exp` returned a plausible finite
+        // number, and no sentinel survived for the check to find. Found by review.
+        //
+        // A large base with a large exponent is the shape that does it: `ln` is bounded by about 21.49, so a
+        // big enough `y` overflows the product long before `exp` is reached.
+        let big = Fixed::from_int(1_000_000);
+        let huge_y = Fixed::from_int(2_000_000_000);
+        assert_eq!(
+            big.powf_outcome(huge_y),
+            ExpOutcome::Overflow,
+            "an overflowing product is caught where it happens, not laundered through exp"
+        );
+        assert_eq!(big.checked_powf(huge_y), None);
+
+        // THE TWO RAILS ARE DISTINGUISHED, which a single `None` could not do.
+        let tiny = Fixed::from_ratio(1, 1000);
+        assert_eq!(
+            tiny.powf_outcome(Fixed::from_int(100)),
+            ExpOutcome::Underflow
+        );
+        assert_eq!(
+            Fixed::from_int(1000).powf_outcome(Fixed::from_int(100)),
+            ExpOutcome::Overflow
+        );
+        // A NON-POSITIVE BASE IS A DOMAIN ERROR, not a rail.
+        assert_eq!(Fixed::ZERO.powf_outcome(Fixed::ONE), ExpOutcome::Domain);
+        assert_eq!(
+            Fixed::from_int(-2).powf_outcome(Fixed::ONE),
+            ExpOutcome::Domain
+        );
+
+        // AND THE ORDINARY CASE IS UNCHANGED, to the bit, so this is a classification and not a rewrite.
+        for (b, e) in [(2i32, 3i32), (10, 2), (7, 1), (3, 4)] {
+            let base = Fixed::from_int(b);
+            let expo = Fixed::from_int(e);
+            assert_eq!(
+                base.powf_outcome(expo).finite().map(|v| v.to_bits()),
+                Some(base.powf(expo).to_bits()),
+                "{b}^{e} must be bit-identical to the bare form"
+            );
+        }
+    }
+
+    #[test]
+    fn the_exponential_outcome_names_which_rail_it_hit() {
+        assert_eq!(
+            Fixed::from_int(30).exp_outcome(),
+            ExpOutcome::Overflow,
+            "past the upper rail the error is unbounded"
+        );
+        assert_eq!(
+            Fixed::from_int(-30).exp_outcome(),
+            ExpOutcome::Underflow,
+            "past the lower rail the error is about one ulp"
+        );
+        assert_eq!(
+            Fixed::ONE.exp_outcome().finite().map(|v| v.to_bits()),
+            Some(Fixed::ONE.exp().to_bits())
+        );
+    }
+
+    /// THE EDGE IS THE REPRESENTATION'S, NOT AN AUTHORED 22, pinned by measurement at the crossover.
+    ///
+    /// The first classified form tested `arg > 22`, copied from [`Fixed::exp`]'s own saturation guard.
+    /// `exp` reaches the rail at `ln(Fixed::MAX) = 21.4875626`, so across `(21.4875626, 22]` the argument
+    /// test called a saturated `Fixed::MAX` a finite answer. This pins the derived edge, the band that was
+    /// laundering, and the fact that `exp` saturates rather than wrapping (which is what makes a comparison
+    /// on the argument sound in the first place).
+    #[test]
+    fn the_representable_edge_is_derived_and_the_authored_band_no_longer_launders() {
+        let edge = Fixed::exp_max_argument();
+
+        // The edge is where the algebra says, and the measurement agrees: the last argument below the rail
+        // is 21.487560871 and the first at it is 21.487563870, so the derived edge falls between them.
+        assert!(
+            edge > Fixed::from_ratio(21_487_560, 1_000_000)
+                && edge < Fixed::from_ratio(21_487_564, 1_000_000),
+            "the derived edge {} must land inside the measured crossover",
+            edge.to_f64_lossy()
+        );
+
+        // EVERY ARGUMENT IN THE OLD BAND RAILS, and every one of them is now named an overflow rather than
+        // returned as a value. Walking it is what proves the band is closed rather than its endpoints moved.
+        let mut arg = edge + Fixed::from_ratio(1, 1_000_000);
+        let stop = Fixed::from_int(22);
+        let step = (stop - edge).div(Fixed::from_int(64));
+        while arg <= stop {
+            assert_eq!(
+                arg.exp().to_bits(),
+                Fixed::MAX.to_bits(),
+                "exp({}) is a saturated rail",
+                arg.to_f64_lossy()
+            );
+            assert_eq!(
+                arg.exp_outcome(),
+                ExpOutcome::Overflow,
+                "a saturated rail at {} must be named, not returned",
+                arg.to_f64_lossy()
+            );
+            arg += step;
+        }
+
+        // BELOW THE EDGE IT STILL ANSWERS, so this closed a hole rather than narrowing the window.
+        let inside = edge - Fixed::from_ratio(1, 1000);
+        assert!(
+            inside.exp() < Fixed::MAX,
+            "just inside the edge the exponential is below the rail"
+        );
+        assert!(
+            matches!(inside.exp_outcome(), ExpOutcome::Finite(_)),
+            "just inside the edge the answer is finite"
+        );
+
+        // THE CASE THAT SURFACED IT: the mass-luminosity power at the production exponent. 463 solar masses
+        // resolves and 464 refuses, and 464 is inside the old authored band rather than past 22.
+        let alpha = Fixed::from_ratio(35, 10);
+        let at_463 = Fixed::from_int(463).powf_outcome(alpha);
+        let at_464 = Fixed::from_int(464).powf_outcome(alpha);
+        assert!(
+            matches!(at_463, ExpOutcome::Finite(_)),
+            "463 solar masses is the last representable mass"
+        );
+        assert_eq!(
+            at_464,
+            ExpOutcome::Overflow,
+            "464 solar masses rails and must be named, not returned as the rail"
+        );
+        let arg_464 = alpha.mul(Fixed::from_int(464).ln());
+        assert!(
+            arg_464 > edge && arg_464 < Fixed::from_int(22),
+            "464 lands inside the band the authored 22 was letting through"
+        );
+    }
+
+    /// ERFC IS BOUNDED, MONOTONE, AND ZERO PAST ITS EDGE, which the wrapping square broke.
+    ///
+    /// `self * self` is a wrapping multiply through a cast, so `overflow-checks` never saw it. Past
+    /// `sqrt(Fixed::MAX) = 46340.95` the square wrapped negative, `exp` saturated, and the tiny
+    /// polynomial multiplied the rail back into a plausible finite answer: `erfc(46341)` returned
+    /// `36042.5` against a true `0`. The range sweep is the assertion that convicts it, by five
+    /// orders of magnitude. Monotonicity is asserted separately because the failure was NON-monotone
+    /// in the argument, so endpoint testing could not have bracketed it.
+    #[test]
+    fn erfc_stays_inside_its_range_and_falls_monotonically_past_the_wrap() {
+        // A&S 7.1.26 carries a stated maximum error of 1.5e-7, so the range check allows exactly it.
+        let fit_error = Fixed::from_ratio(15, 100_000_000);
+        let one = Fixed::ONE + fit_error;
+
+        // THE SWEEP THAT CONVICTS, geometric so it reaches the wrap band in few steps. 46341 is the
+        // first argument whose square wrapped; the decade beyond it was equally wrong.
+        let mut probes = vec![
+            Fixed::ZERO,
+            Fixed::from_ratio(1, 2),
+            Fixed::ONE,
+            Fixed::from_int(2),
+            Fixed::from_int(4),
+            Fixed::erfc_zero_argument(),
+        ];
+        for m in [5i32, 10, 100, 1_000, 46_340, 46_341, 50_000, 1_000_000] {
+            probes.push(Fixed::from_int(m));
+        }
+
+        let mut previous = Fixed::from_int(2);
+        for x in probes {
+            let v = x.erfc();
+            assert!(
+                v >= Fixed::ZERO && v <= one,
+                "erfc({}) = {} left [0, 1]",
+                x.to_f64_lossy(),
+                v.to_f64_lossy()
+            );
+            assert!(
+                v <= previous,
+                "erfc must not rise: erfc({}) = {} against a previous {}",
+                x.to_f64_lossy(),
+                v.to_f64_lossy(),
+                previous.to_f64_lossy()
+            );
+            previous = v;
+
+            // erf inherits the range through `1 - erfc`, and inherited the defect too.
+            let e = x.erf();
+            assert!(
+                e >= Fixed::ZERO - fit_error && e <= one,
+                "erf({}) = {} left [0, 1]",
+                x.to_f64_lossy(),
+                e.to_f64_lossy()
+            );
+        }
+
+        // THE NEGATIVE SIDE REFLECTS AND DOES NOT PANIC. `Fixed::MIN` is the case the reflection
+        // could not survive, because `Fixed::ZERO - Fixed::MIN` overflows; the edge test runs first.
+        assert_eq!(Fixed::MIN.erfc(), Fixed::from_int(2));
+        assert_eq!(
+            (Fixed::ZERO - Fixed::from_int(1_000_000)).erfc(),
+            Fixed::from_int(2)
+        );
+        // erfc(0) = 1 to the fit's own error, which anchors the top of the range.
+        let at_zero = Fixed::ZERO.erfc();
+        assert!(
+            at_zero <= one && at_zero >= Fixed::ONE - fit_error,
+            "erfc(0) = {} must sit on 1 to the fit's stated 1.5e-7",
+            at_zero.to_f64_lossy()
+        );
+
+        // THE EDGE IS WHERE THE EXPONENTIAL FLOOR PUTS IT, and just inside it the answer is nonzero,
+        // so this closed a hole rather than truncating the function early.
+        let edge = Fixed::erfc_zero_argument();
+        let expected_edge = Fixed::from_ratio(46_904, 10_000);
+        let edge_gap = if edge > expected_edge {
+            edge - expected_edge
+        } else {
+            expected_edge - edge
+        };
+        assert!(
+            edge_gap < Fixed::from_ratio(1, 1000),
+            "the derived edge is sqrt(22) = 4.6904, got {}",
+            edge.to_f64_lossy()
+        );
+        assert_eq!(
+            (edge + Fixed::from_ratio(1, 100)).erfc(),
+            Fixed::ZERO,
+            "past the edge erfc is zero to the representation"
+        );
+
+        // THE GUARD SITS BEYOND THE RESOLUTION EDGE, which is what makes it byte-neutral rather than
+        // merely safe. Measured: erfc quantizes to zero at 4.48 (the last nonzero argument is 4.47,
+        // at exactly 1 ulp), while the derived guard is 4.6904. So every argument the guard turns
+        // away was already returning zero through the exponential's own underflow, and no resolvable
+        // value is truncated by it. Asserted rather than asserted-about, by finding the crossover.
+        let mut first_zero = Fixed::ZERO;
+        let mut probe = Fixed::from_int(4);
+        while probe < edge {
+            if probe.erfc() == Fixed::ZERO {
+                first_zero = probe;
+                break;
+            }
+            probe += Fixed::from_ratio(1, 100);
+        }
+        assert!(
+            first_zero > Fixed::ZERO && first_zero < edge,
+            "erfc must reach zero before the guard, so the guard truncates nothing resolvable"
+        );
+        assert!(
+            Fixed::from_int(4).erfc() > Fixed::ZERO,
+            "well inside the edge erfc is comfortably resolvable"
+        );
     }
 }

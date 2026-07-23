@@ -18,9 +18,8 @@
 //! primitive. This module pins the schema over it so the whole engine keys every
 //! draw the same way:
 //!
-//! - A registered [`Phase`] set, so a phase id is assigned here once rather than as a
-//!   hand-written magic number at the call site. Two draw sites cannot silently share
-//!   a phase number, which is the collision R-RNG-COORD names.
+//! - A typed [`Phase`] identifier. The active abiotic layer does not publish a closed
+//!   domain registry; any canonical phase identity must come from its owning protocol.
 //! - A fixed canonical coordinate order ([`DrawKey`]), so every site folds the same
 //!   fields in the same places (region, locus, secondary locus, tick, phase, slot).
 //!   The tick is always present, which the older `(entity, phase)` coordinate omitted.
@@ -29,19 +28,20 @@
 //! - A degrade rule: a coordinate that does not apply folds as [`ABSENT`], distinct
 //!   from a present zero, so "no secondary locus" never aliases "secondary locus 0".
 //!
-//! The phase registry is engine mechanics, the RNG-core exemption Principle 11 grants,
-//! so it is Rust rather than data. The keying stays integer and counter-based: a draw
-//! is still `key.rng(seed).at(counter)`, a pure function of its coordinate.
+//! The keying stays integer and counter-based: a draw is
+//! `key.rng(seed).at(counter)`, a pure function of its coordinate.
 
 use crate::rng::Rng;
 
-/// A registered simulation phase. Assigned here once; a new draw site adds a constant
-/// rather than inventing a magic number at the call site (R-RNG-COORD). The numeric
-/// values are arbitrary but must stay distinct and stable across releases, since they
-/// are folded into canonical streams.
+/// A simulation phase identifier folded into a draw coordinate.
+///
+/// The active abiotic substrate carries the generic identifier without a closed list of
+/// domain phases. Retired biology and civilization phase constants are available only
+/// under the `legacy-domains` compatibility feature used by the parked workspace.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord, Hash)]
 pub struct Phase(pub u32);
 
+#[cfg(feature = "legacy-domains")]
 impl Phase {
     /// A perception roll: whether a mind perceives a trace.
     pub const PERCEPTION: Phase = Phase(0x01);
@@ -275,7 +275,7 @@ impl DrawKey {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy-domains"))]
 mod tests {
     use super::*;
 

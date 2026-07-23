@@ -32,7 +32,7 @@ except Exception:
 
 ti = data.get("tool_input", {}) or {}
 blob = ""
-for key in ("script", "name"):
+for key in ("script", "name", "prompt", "message", "task_name"):
     v = ti.get(key)
     if isinstance(v, str):
         blob += "\n" + v
@@ -52,8 +52,10 @@ low = blob.lower()
 if not re.search(r"audit|panel|lens|blind|adversar|confirmation.bias|framing", low):
     sys.exit(0)
 
-# Already acknowledged: let it through so re-invoking never loops.
-if "panels-reviewed" in low:
+# Already acknowledged and mechanically smoke-gated: let it through so
+# re-invoking never loops. The second marker prevents a template from claiming
+# panel review while omitting the required section 11 fail-closed stage.
+if "panels-reviewed" in low and "input-bias-smoke-cleared" in low:
     sys.exit(0)
 
 sys.stderr.write(
@@ -79,7 +81,8 @@ sys.stderr.write(
     "Confirm your workflow covers the relevant standing types (and, for a world-content audit, "
     "all five section 9 lenses run as independent panelists with per-finding verify; for any "
     "load-bearing panel, the section 11 smoke test on the construction before the verdict is trusted). "
-    "Then add a comment line containing `panels-reviewed` near the top of the script and re-invoke.\n"
+    "Then add comment lines containing `panels-reviewed` and `input-bias-smoke-cleared` near the top "
+    "of the script only after both requirements are implemented, and re-invoke.\n"
 )
 sys.exit(2)
 '

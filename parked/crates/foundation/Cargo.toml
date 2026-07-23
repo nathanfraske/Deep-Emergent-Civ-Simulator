@@ -1,0 +1,38 @@
+[package]
+name = "civsim-foundation"
+description = "The leaf substrates of the simulation layer: the material and matter-cycle substrate, the value and sensorium substrates, the clock, the conserved-projection registry, the surface-transport lane, the transmission substrate, and the scenario and substrate loaders. Every module here reaches no other module of civsim-sim, which is what let them move; civsim-sim depends on this crate and never the reverse."
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+civsim-core = { path = "../../../crates/core", features = ["legacy-domains"] }
+civsim-ledger = { path = "../../../crates/ledger" }
+# The parked biology arc. The clock reads the calibration manifest, the material substrate reads the
+# genome's composition axes, and breeding reads the genetic scheme. bio depends only on core, physics,
+# and compose, so this adds no cycle and no heavy dependency.
+# The physics floor: the contact-transfer registry binds a contact channel to a floor law, the material
+# substrate reads the biology-and-composition floor, and the tectonic-regime readout reads the rheology
+# terms. physics depends only on core.
+civsim-physics = { package = "civsim-physics-legacy", path = "../physics" }
+# The emergent technology-composition evaluator (design Part 41): the contact-transfer registry names the
+# function laws an acting part delivers energy through. compose depends only on core and physics.
+civsim-compose = { path = "../compose" }
+# The spatial and worldgen layer: the located-identity join places occupants on the world's coordinates,
+# and the material, decomposer, and surface-driver fields are keyed by world coordinates. World owns the
+# resident geology fields and depends on the shared physics GeodynamicColumn contract.
+civsim-world = { package = "civsim-world-legacy", path = "../world" }
+# serde and toml parse the data-driven substrate definitions, the scenario files, and the decomposer,
+# transmission, and provenance registries. No floating point reaches canonical state through them.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+[lints.clippy]
+# R-CANON-WALK: no unordered containers in canonical state (see clippy.toml).
+disallowed_types = "deny"
+
+[dev-dependencies]
+civsim-bio = { path = "../bio" }

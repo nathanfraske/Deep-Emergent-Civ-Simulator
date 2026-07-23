@@ -53,7 +53,6 @@ pub mod correlation;
 pub mod creep;
 pub mod definition;
 pub mod differentiation;
-pub mod disk_composition;
 pub mod electronic;
 pub mod equilibrium_condensation;
 pub mod freezer;
@@ -64,6 +63,7 @@ pub mod log;
 pub mod magnetism;
 pub mod memo;
 pub mod metallic;
+pub mod mie_gruneisen_debye;
 pub mod nucleation;
 pub mod opacity_registry;
 pub mod optics;
@@ -72,6 +72,7 @@ pub mod quench;
 pub mod stoner;
 pub mod surface_composition;
 pub mod thermochemical;
+pub mod thermoelastic;
 pub mod verdict;
 
 pub use assemblage::{

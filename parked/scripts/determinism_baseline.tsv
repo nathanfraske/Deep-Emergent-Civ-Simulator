@@ -1,0 +1,7 @@
+# Parked determinism baseline. This preserves diagnostics for the retired biology, compose,
+# foundation, and sim packages. It is historical coverage, not canonical evidence or admission.
+# The legacy viewer remains outside the state scan because its wall-clock reads serve rendering.
+# Columns: pattern<TAB>path<TAB>count<TAB>reason.
+Instant::now	parked/crates/foundation/src/profile.rs	1	profiling timer accumulates elapsed nanoseconds for stderr reporting and never stores wall time in simulation state
+Instant::now	parked/crates/sim/src/world.rs	7	six tick_timed phase measurements return diagnostics only; the seventh site is a test-only worker benchmark
+HashMap	parked/crates/foundation/src/calibration.rs	3	retired manifest uses key lookups and preserves declaration order in a separate Vec for every ordered walk

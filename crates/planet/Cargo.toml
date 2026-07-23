@@ -1,0 +1,31 @@
+[package]
+name = "civsim-planet"
+description = "Ledger-governed construction and deterministic evolution of derived stars, planetary systems, and planets."
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+[dependencies]
+civsim-ledger = { path = "../ledger" }
+civsim-units = { path = "../units" }
+
+[dev-dependencies]
+civsim-core = { path = "../core" }
+
+[build-dependencies]
+civsim-stone0-build = { path = "../stone0-build" }
+
+[lints.clippy]
+disallowed_types = "deny"
+
+[[bin]]
+name = "run_planet"
+path = "src/bin/run_planet.rs"
+
+[[bin]]
+name = "ledger_inventory"
+path = "src/bin/ledger_inventory.rs"

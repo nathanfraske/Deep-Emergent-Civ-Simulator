@@ -1,0 +1,16 @@
+[package]
+name = "civsim-units-legacy"
+description = "Parked compatibility facade for the retired emic and civilization measurement surface."
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+civsim-units-abiotic = { package = "civsim-units", path = "../../../crates/units" }
+serde = { version = "1", features = ["derive"] }
+
+[lints.clippy]
+disallowed_types = "allow"

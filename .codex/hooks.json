@@ -1,0 +1,107 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -lc 'root=$(git rev-parse --show-toplevel) && exec bash \"$root/.codex/hooks/run-hook.sh\" substrate-first'",
+            "commandWindows": "python -c \"import pathlib,runpy,subprocess,sys; root=pathlib.Path(subprocess.check_output(['git','rev-parse','--show-toplevel'], text=True).strip()); script=root/'.codex/hooks/run-hook.py'; sys.argv=[str(script),'substrate-first']; runpy.run_path(str(script),run_name='__main__')\"",
+            "timeout": 30,
+            "statusMessage": "Checking substrate-first discipline"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -lc 'root=$(git rev-parse --show-toplevel) && exec bash \"$root/.codex/hooks/run-hook.sh\" session-start'",
+            "commandWindows": "python -c \"import pathlib,runpy,subprocess,sys; root=pathlib.Path(subprocess.check_output(['git','rev-parse','--show-toplevel'], text=True).strip()); script=root/'.codex/hooks/run-hook.py'; sys.argv=[str(script),'session-start']; runpy.run_path(str(script),run_name='__main__')\"",
+            "timeout": 180,
+            "statusMessage": "Loading project memory and verification baseline"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^(apply_patch|Edit|Write|str_replace)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -lc 'root=$(git rev-parse --show-toplevel) && exec bash \"$root/.codex/hooks/run-hook.sh\" customs-guard'",
+            "commandWindows": "python -c \"import pathlib,runpy,subprocess,sys; root=pathlib.Path(subprocess.check_output(['git','rev-parse','--show-toplevel'], text=True).strip()); script=root/'.codex/hooks/run-hook.py'; sys.argv=[str(script),'customs-guard']; runpy.run_path(str(script),run_name='__main__')\"",
+            "timeout": 30,
+            "statusMessage": "Checking maintained-prose customs"
+          }
+        ]
+      },
+      {
+        "matcher": "^(Workflow|spawn_agent|collaboration\\.spawn_agent)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -lc 'root=$(git rev-parse --show-toplevel) && exec bash \"$root/.codex/hooks/run-hook.sh\" workflow-panel-reminder'",
+            "commandWindows": "python -c \"import pathlib,runpy,subprocess,sys; root=pathlib.Path(subprocess.check_output(['git','rev-parse','--show-toplevel'], text=True).strip()); script=root/'.codex/hooks/run-hook.py'; sys.argv=[str(script),'workflow-panel-reminder']; runpy.run_path(str(script),run_name='__main__')\"",
+            "timeout": 30,
+            "statusMessage": "Checking panel construction"
+          }
+        ]
+      },
+      {
+        "matcher": "^(Bash|shell_command|functions\\.shell_command)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -lc 'root=$(git rev-parse --show-toplevel) && exec bash \"$root/.codex/hooks/run-hook.sh\" pipeline-status-guard'",
+            "commandWindows": "python -c \"import pathlib,runpy,subprocess,sys; root=pathlib.Path(subprocess.check_output(['git','rev-parse','--show-toplevel'], text=True).strip()); script=root/'.codex/hooks/run-hook.py'; sys.argv=[str(script),'pipeline-status-guard']; runpy.run_path(str(script),run_name='__main__')\"",
+            "timeout": 30,
+            "statusMessage": "Checking verifier pipeline status"
+          }
+        ]
+      },
+      {
+        "matcher": "^(Agent|spawn_agent|collaboration\\.spawn_agent)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -lc 'root=$(git rev-parse --show-toplevel) && exec bash \"$root/.codex/hooks/run-hook.sh\" fetch-brief-guard'",
+            "commandWindows": "python -c \"import pathlib,runpy,subprocess,sys; root=pathlib.Path(subprocess.check_output(['git','rev-parse','--show-toplevel'], text=True).strip()); script=root/'.codex/hooks/run-hook.py'; sys.argv=[str(script),'fetch-brief-guard']; runpy.run_path(str(script),run_name='__main__')\"",
+            "timeout": 30,
+            "statusMessage": "Checking research fetch brief"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^(apply_patch|Edit|Write|str_replace)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -lc 'root=$(git rev-parse --show-toplevel) && exec bash \"$root/.codex/hooks/run-hook.sh\" post-edit-check'",
+            "commandWindows": "python -c \"import pathlib,runpy,subprocess,sys; root=pathlib.Path(subprocess.check_output(['git','rev-parse','--show-toplevel'], text=True).strip()); script=root/'.codex/hooks/run-hook.py'; sys.argv=[str(script),'post-edit-check']; runpy.run_path(str(script),run_name='__main__')\"",
+            "timeout": 60,
+            "statusMessage": "Verifying maintained prose"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -lc 'root=$(git rev-parse --show-toplevel) && exec bash \"$root/.codex/hooks/run-hook.sh\" stop-gate'",
+            "commandWindows": "python -c \"import pathlib,runpy,subprocess,sys; root=pathlib.Path(subprocess.check_output(['git','rev-parse','--show-toplevel'], text=True).strip()); script=root/'.codex/hooks/run-hook.py'; sys.argv=[str(script),'stop-gate']; runpy.run_path(str(script),run_name='__main__')\"",
+            "timeout": 600,
+            "statusMessage": "Running repository completion gate"
+          }
+        ]
+      }
+    ]
+  }
+}

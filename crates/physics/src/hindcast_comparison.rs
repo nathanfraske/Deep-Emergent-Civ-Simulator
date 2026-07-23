@@ -45,8 +45,8 @@
 //!
 //! No result carries a corrected or target `T_e`, no field a derivation should hit, and a miss is the residual law
 //! firing, reported, never absorbed. The partition ([`crate::elastic_thickness_rows::SampleRole`]) rides every
-//! result and is read from the row, never chosen here, because a row's calibration eligibility was declared in the
-//! data before any fit. The overlap test carries no authored tolerance: both bands' widths are their own sources'.
+//! result and is read from the row, never chosen here. The role is observer-only metadata and never authorizes a
+//! value or inversion. The overlap test carries no authored tolerance: both bands' widths are their own sources'.
 
 use crate::elastic_thickness_rows::{ElasticThicknessRow, ObservedElasticThickness, SampleRole};
 use crate::moment_equivalence::RigidityBand;
@@ -153,8 +153,8 @@ pub fn compare_to_row(derived: RigidityBand, row: &ElasticThicknessRow) -> Hindc
         // lies ENTIRELY above `D(max)` (its low edge exceeds the ceiling). The open lower side is never invented.
         ObservedElasticThickness::UpperBound { max_km } => {
             match crate::flexure::flexural_rigidity(e, nu, max_km) {
-                Some(d_max) => derived.low() <= d_max,
-                None => {
+                Ok(d_max) => derived.low() <= d_max,
+                Err(_) => {
                     return HindcastComparison::Refused {
                         reason: ComparisonRefusal::RigidityRefused,
                     }
@@ -165,8 +165,8 @@ pub fn compare_to_row(derived: RigidityBand, row: &ElasticThicknessRow) -> Hindc
         // unless the derived band lies ENTIRELY below `D(min)` (its high edge falls under the floor).
         ObservedElasticThickness::LowerBound { min_km } => {
             match crate::flexure::flexural_rigidity(e, nu, min_km) {
-                Some(d_min) => derived.high() >= d_min,
-                None => {
+                Ok(d_min) => derived.high() >= d_min,
+                Err(_) => {
                     return HindcastComparison::Refused {
                         reason: ComparisonRefusal::RigidityRefused,
                     }
@@ -259,7 +259,7 @@ mod tests {
                 low_km: Fixed::from_int(20),
                 high_km: Fixed::from_int(40),
             },
-            SampleRole::OutOfSample,
+            SampleRole::IndependentValidation,
             e,
             nu,
         );
@@ -268,7 +268,7 @@ mod tests {
         assert_eq!(
             compare_to_row(derived, &row),
             HindcastComparison::Consistent {
-                sample_role: SampleRole::OutOfSample
+                sample_role: SampleRole::IndependentValidation
             },
             "bands that overlap are consistent, and the partition rides the result"
         );
@@ -282,7 +282,7 @@ mod tests {
                 low_km: Fixed::from_int(20),
                 high_km: Fixed::from_int(40),
             },
-            SampleRole::MirrorCalibratable,
+            SampleRole::ReferenceDiagnostic,
             e,
             nu,
         );
@@ -291,7 +291,7 @@ mod tests {
         assert_eq!(
             compare_to_row(derived, &row),
             HindcastComparison::Miss {
-                sample_role: SampleRole::MirrorCalibratable,
+                sample_role: SampleRole::ReferenceDiagnostic,
                 rung: ResidualRung::DefectHunt,
             },
             "disjoint bands are a miss at the residual law's first rung, carrying the partition, never a verdict"
@@ -306,7 +306,7 @@ mod tests {
             ObservedElasticThickness::UpperBound {
                 max_km: Fixed::from_int(12),
             },
-            SampleRole::OutOfSample,
+            SampleRole::IndependentValidation,
             e,
             nu,
         );
@@ -315,7 +315,7 @@ mod tests {
         assert_eq!(
             compare_to_row(soft, &row),
             HindcastComparison::Consistent {
-                sample_role: SampleRole::OutOfSample
+                sample_role: SampleRole::IndependentValidation
             },
             "a plate at or below the observed ceiling is consistent with an upper bound"
         );
@@ -324,7 +324,7 @@ mod tests {
         assert_eq!(
             compare_to_row(stiff, &row),
             HindcastComparison::Miss {
-                sample_role: SampleRole::OutOfSample,
+                sample_role: SampleRole::IndependentValidation,
                 rung: ResidualRung::DefectHunt,
             },
             "a plate entirely stiffer than the observed ceiling misses an upper bound"
@@ -339,7 +339,7 @@ mod tests {
             ObservedElasticThickness::LowerBound {
                 min_km: Fixed::from_int(90),
             },
-            SampleRole::OutOfSample,
+            SampleRole::IndependentValidation,
             e,
             nu,
         );
@@ -348,7 +348,7 @@ mod tests {
         assert_eq!(
             compare_to_row(stiff, &row),
             HindcastComparison::Consistent {
-                sample_role: SampleRole::OutOfSample
+                sample_role: SampleRole::IndependentValidation
             },
             "a plate at or above the observed floor is consistent with a lower bound"
         );
@@ -357,7 +357,7 @@ mod tests {
         assert_eq!(
             compare_to_row(soft, &row),
             HindcastComparison::Miss {
-                sample_role: SampleRole::OutOfSample,
+                sample_role: SampleRole::IndependentValidation,
                 rung: ResidualRung::DefectHunt,
             },
             "a plate entirely softer than the observed floor misses a lower bound"

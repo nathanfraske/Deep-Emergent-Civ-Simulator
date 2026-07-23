@@ -86,7 +86,7 @@ and `ohm_voltage`, `solenoid_field`, and `flux_linkage` (now non-negative magnit
 declared `[0, MAX]` axes, so the overflow cap is sign-correct; the Lenz-law sign `faraday_emf`
 recovers comes from the signed tick-to-tick difference of two non-negative flux samples, not from a
 signed flux, so `solenoid_field` and `flux_linkage` agree on the magnitude reading). The bare
-subtractions in `bend_stress`, `axial_stress`, and `friction` are now saturating. Each carries a
+subtractions in `bend_stress`, `axial_stress`, and `coulomb_friction_response` are now saturating. Each carries a
 regression test.
 
 ## Specification and wiring seams (not kernel arithmetic)

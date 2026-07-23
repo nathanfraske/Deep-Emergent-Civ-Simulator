@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The closed-form fixed-point law kernels of the two floors (build phase 2).
+//! The closed-form fixed-point law kernels of the active abiotic floors.
 //!
 //! Each kernel is the fixed Rust of an [`crate::InteractionLaw`]: a pure function of
 //! the participating entities' axis values and the law's reserved constants, reporting
@@ -26,7 +26,7 @@
 //! ratios forced by Q32.32, and the mathematical constants. This is the Principle-11
 //! engine-mechanics exemption, the same one the RNG phase numbers take.
 //!
-//! Every kernel obeys the discipline the two red passes hardened the proposals to: a
+//! Every kernel obeys the hardened arithmetic discipline: a
 //! product or quotient that can exceed the Q32.32 ceiling is formed with checked
 //! arithmetic and routed to its physical limit rather than wrapping; a saturation guard
 //! is ordered before the operation it protects; and a cross-class reduction is the
@@ -50,13 +50,6 @@ const C_KW: Fixed = Fixed::from_int(1_000);
 /// One half, the kinetic-energy coefficient, exact in Q32.32 (bit pattern `1 << 31`).
 const HALF: Fixed = Fixed::from_bits(1 << 31);
 
-/// The overflow-safe saturation ratio for the squared Hill term: the largest `r` with
-/// `r^2` below the representable ceiling (2^31), so the guard `r > R_SAT_N2` provably
-/// precedes the square. Forced by Q32.32, not a reserved realism value.
-const R_SAT_N2: Fixed = Fixed::from_int(46340);
-/// The overflow-safe saturation ratio for the cubed Hill term (`1290^3` fits, `1291^3`
-/// wraps), so the guard precedes the cube.
-const R_SAT_N3: Fixed = Fixed::from_int(1290);
 /// The overflow-safe ceiling for squaring a velocity in [`kinetic_energy`]:
 /// `sqrt(2^31) = 46340`, beyond which `v * v` would wrap.
 const V2_MAX: Fixed = Fixed::from_int(46340);
@@ -71,143 +64,6 @@ fn pi_squared() -> Fixed {
 /// constant).
 fn von_mises() -> Fixed {
     Fixed::from_decimal_str("0.57735026918963").expect("von Mises literal is valid")
-}
-
-/// A small-integer power `r^n` for `n` in 1..=3, formed by repeated checked multiply, so
-/// an overflow is `None` rather than a silent wrap.
-fn pow_int(r: Fixed, n: u8) -> Option<Fixed> {
-    match n {
-        1 => Some(r),
-        2 => r.checked_mul(r),
-        3 => r.checked_mul(r).and_then(|r2| r2.checked_mul(r)),
-        _ => None,
-    }
-}
-
-fn r_sat(n: u8) -> Fixed {
-    match n {
-        2 => R_SAT_N2,
-        _ => R_SAT_N3,
-    }
-}
-
-// === Biology (R-PHYS-BIO): net nutrition, harm, edibility ===
-
-/// Per-nutrient-class satisfaction in [0, 1]. A `requirement` of `None` (the class is
-/// not required) or zero is fully satisfied (it never lowers the Liebig minimum); an
-/// abundant supply against a tiny requirement saturates to one rather than wrapping a
-/// false zero (the wave-0 NEW-DET-3 fix).
-pub fn satisfaction(supply: Fixed, assimilation: Fixed, requirement: Option<Fixed>) -> Fixed {
-    let req = match requirement {
-        None => return ONE,
-        Some(r) if r == ZERO => return ONE,
-        Some(r) => r,
-    };
-    let num = match supply.checked_mul(assimilation) {
-        // Both factors are non-negative fractions, so an overflowing product is abundant supply:
-        // route to full satisfaction, the same extreme the divide-overflow below reaches, not to zero.
-        Some(x) => x,
-        None => return ONE,
-    };
-    match num.checked_div(req) {
-        Some(s) => s.clamp(ZERO, ONE),
-        None => ONE,
-    }
-}
-
-/// Net nutrition: the Liebig minimum across the classes (the limiting nutrient). The
-/// min-fold is associative and commutative, so the result is order-independent.
-pub fn net_nutrition(classes: &[(Fixed, Fixed, Option<Fixed>)]) -> Fixed {
-    classes
-        .iter()
-        .fold(ONE, |acc, &(s, a, r)| acc.min(satisfaction(s, a, r)))
-}
-
-/// Per-toxin-class harm in [0, harm_cap] by the integer-Hill dose response. A
-/// not-applicable tolerance (`None`) skips the class (zero harm); a present tolerance of
-/// zero, or a dose-to-tolerance ratio beyond the representable range, routes to the
-/// maximum-harm cap (the wave-0 NEW-DET-2 fix); and the saturation guard is ordered
-/// before the power so `r^n` never wraps (the NEW-DET-1 fix). `n` is the per-(class,
-/// consumer) integer exponent.
-pub fn harm_class(dose: Fixed, tolerance: Option<Fixed>, n: u8, harm_cap: Fixed) -> Fixed {
-    let tol = match tolerance {
-        None => return ZERO,
-        Some(t) => t,
-    };
-    if dose == ZERO {
-        return ZERO;
-    }
-    let r = match dose.checked_div(tol) {
-        Some(r) => r,
-        None => return harm_cap,
-    };
-    if n >= 2 && r > r_sat(n) {
-        return harm_cap;
-    }
-    let rn = match pow_int(r, n) {
-        Some(p) => p,
-        None => return harm_cap,
-    };
-    match rn.checked_add(ONE) {
-        Some(den) => match rn.checked_div(den) {
-            Some(h) => h.clamp(ZERO, harm_cap),
-            None => harm_cap,
-        },
-        None => harm_cap,
-    }
-}
-
-/// Net harm: the order-independent saturating sum of the per-class harms, capped.
-pub fn net_harm(
-    classes: &[(Fixed, Option<Fixed>, u8)],
-    harm_cap: Fixed,
-    total_cap: Fixed,
-) -> Fixed {
-    Fixed::saturating_sum(
-        classes
-            .iter()
-            .map(|&(d, t, n)| harm_class(d, t, n, harm_cap)),
-    )
-    .min(total_cap)
-}
-
-/// The measured edibility tuple. The law reports only measured quantities; the
-/// gain-versus-danger valuation lives in the agent layer, and the medicinal value is a
-/// reserved relational refinement, so neither is baked here. The margin is the aggregate
-/// safety ratio, formed with a checked divide so a near-clean meal saturates to
-/// `margin_cap` rather than wrapping (the wave-0 NEW-DET-5 fix).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Edibility {
-    /// Net nutrition in [0, 1].
-    pub net_nutrition: Fixed,
-    /// Net harm in [0, total_cap].
-    pub net_harm: Fixed,
-    /// The aggregate safety margin, capped at `margin_cap`.
-    pub margin: Fixed,
-}
-
-/// Compute the edibility tuple from the measured nutrition and harm and the aggregate
-/// tolerance and dose.
-pub fn edibility(
-    net_nutrition: Fixed,
-    net_harm: Fixed,
-    tolerance_aggregate: Fixed,
-    dose_aggregate: Fixed,
-    margin_cap: Fixed,
-) -> Edibility {
-    let margin = if dose_aggregate == ZERO {
-        margin_cap
-    } else {
-        match tolerance_aggregate.checked_div(dose_aggregate) {
-            Some(m) => m.min(margin_cap),
-            None => margin_cap,
-        }
-    };
-    Edibility {
-        net_nutrition,
-        net_harm,
-        margin,
-    }
 }
 
 // === Mechanics (R-PHYS-MECH) ===
@@ -370,9 +226,9 @@ pub fn stress_force(stress: Fixed, area: Fixed, force_max: Fixed) -> Fixed {
 /// sets the tip speed but not the delivered energy (a heavier part swings slower for the same work). `force`
 /// is the actuating force in NEWTONS, formed from the acting material's strength over its cross-section by
 /// [`stress_force`] (which applies the megapascal-to-newton `C_PA` bridge, so the resulting energy is on the
-/// joule scale the Griffith resistance is on). `distance` is the stroke the force acts over (the acting part's
-/// own grown `mech.stroke_length`, an m), grown independently of the segment length so their ratio is per-body
-/// data, never a fixed one. The conversion efficiency is one, a lossless floor idealization (the
+/// joule scale the Griffith resistance is on). `distance` is the physical displacement over which the force
+/// acts, in metres. The caller must derive that displacement from its own geometry or refuse; this kernel does
+/// not supply a catalog value. The conversion efficiency is one, a lossless floor idealization (the
 /// energy-conservation ceiling, like a frictionless limit); a per-material toughness derating is the disclosed,
 /// physics-derivable refinement, not an authored world value. `energy_max` is the representability cap the
 /// product saturates at. A zero force (no actuating strength) or zero stroke yields zero energy (the absence
@@ -569,7 +425,7 @@ pub struct Friction {
 /// over input power ratio, a measured consequence, with the value judgment left to the
 /// agent layer.
 #[allow(clippy::too_many_arguments)]
-pub fn friction(
+pub fn coulomb_friction_response(
     static_coefficient: Fixed,
     kinetic_coefficient: Fixed,
     normal: Fixed,
@@ -621,7 +477,7 @@ pub fn reach(segment_lengths: &[Fixed]) -> Fixed {
 /// Weight: the load force from mass and the shared gravitational acceleration (`F = m
 /// g`). The gravitational acceleration is the owner's reserved value (terran 9.81 with a
 /// per-world override), passed in.
-pub fn weight(mass: Fixed, gravity: Fixed, force_max: Fixed) -> Fixed {
+pub fn weight_force(mass: Fixed, gravity: Fixed, force_max: Fixed) -> Fixed {
     match mass.checked_mul(gravity) {
         Some(f) => f.min(force_max),
         None => force_max,
@@ -640,11 +496,8 @@ pub fn power(force: Fixed, velocity: Fixed, power_max: Fixed) -> Fixed {
     }
 }
 
-/// Mechanical power on the WATT scale: force times velocity with no kilowatt bridge, the
-/// SI-watt sibling of [`power`]. This is the scale the metabolism bridge
-/// ([`metabolic_drain_fraction`]) and the basal rate ([`basal_metabolic_rate`]) work in, so a
-/// derived exertion drain and the resting drain share one power scale rather than differing by the
-/// kilowatt factor. An overflowing product routes to the reserved power cap.
+/// Mechanical power on the watt scale: force times velocity with no kilowatt bridge, the
+/// SI-watt sibling of [`power`]. An overflowing product routes to the reserved power cap.
 pub fn power_watts(force: Fixed, velocity: Fixed, power_max: Fixed) -> Fixed {
     match force.checked_mul(velocity) {
         Some(p) => p.min(power_max),
@@ -700,7 +553,7 @@ pub fn euler_buckle(
 /// Shear (or torsional) stress and the margin against the shear strength. An anisotropic
 /// or brittle substance carries an independent shear strength; an isotropic ductile one
 /// derives it from yield by the von Mises ratio.
-pub fn shear(
+pub fn shear_stress(
     shear_force: Fixed,
     shear_area: Fixed,
     independent_shear_strength: Option<Fixed>,
@@ -785,7 +638,7 @@ pub fn wear(
 /// is `V * specific_cut_energy * C_VOL`. That is the SAME kilojoule scale as `fracture_energy *
 /// crack_area` in [`fracture_onset`], so a wear increment and a fracture tolerance are directly
 /// commensurate with NO free per-insult weight: the commensuration is the floor's own cut work,
-/// keyed on the being's own `specific_cut_energy`. `energy_max` caps the result; `C_VOL` exceeds one,
+/// keyed on the tool-material pair's `specific_cut_energy`. `energy_max` caps the result; `C_VOL` exceeds one,
 /// so an intermediate that overflows the representable range means the true energy already exceeds
 /// any sane `energy_max` and routes to the cap.
 #[allow(clippy::too_many_arguments)]
@@ -873,10 +726,28 @@ pub fn conduction(
 /// TERMS-DROPPED (owner ruling 2026-07-18, the Terran audit): this is the MOBILE-LID / single-lid isoviscous
 /// instance, valid where the surface participates in the overturn. A stagnant-lid body (the catalog MAJORITY:
 /// Mars-class, Venus-class, most one-plate worlds) has a temperature-dependent viscosity that locks the cold lid,
-/// and its heat loss is SUPPRESSED through the rheological temperature scale `RT^2 / E*` (`E*` the banked creep
-/// activation energy). That branch is DERIVABLE from rows already in the tree, keyed to the `tectonic_regime`
-/// dispatch, and is a FLAGGED follow-on (the debts ledger), not built here. Clamped to `flux_max`; a non-positive
-/// boundary layer reads back the conductive flux. Deterministic fixed-point.
+/// and its heat loss is SUPPRESSED by a power of the rheological temperature scale. That branch now exists as
+/// [`stagnant_lid_rheological_theta`] and [`ln_stagnant_lid_nusselt`], reading a cited convention from
+/// [`crate::convection_scaling::StagnantLidConvention`]. Clamped to `flux_max`; a non-positive boundary layer
+/// reads back the conductive flux. Deterministic fixed-point.
+///
+/// THIS COMMENT PREVIOUSLY CARRIED TWO FALSE CLAIMS, retired 2026-07-19 rather than edited around, because a
+/// stale comment is a claim the reader has no reason to doubt.
+///
+/// It said the suppression was "DERIVABLE from rows already in the tree". Only partly. The activation energy
+/// and the activation-volume bracket are banked ([`crate::creep_rows`]), and they are enough for the
+/// rheological temperature scale. The SCALING COEFFICIENT AND CONVENTION were not in the tree at all and had to
+/// be fetched and cited; they now live in `data/convection_scaling.toml`. The scale itself was also stated as
+/// `RT^2 / E*`, which is the zero-pressure Newtonian form and is NOT consistent with the viscosity this engine
+/// runs: the admitted creep row carries `E* + P V*` in its exponent, and the creep INVERSION divides that
+/// enthalpy by the stress exponent, so the scale the engine's own `ln_viscosity` implies carries both terms.
+/// [`stagnant_lid_rheological_theta`] takes all of them.
+///
+/// It also said the branch would be "keyed to the `tectonic_regime` dispatch". That architecture is rejected by
+/// the module it names: `civsim_foundation::tectonic_regime` states that regime labels are observer-only and
+/// NEVER causal, so a law may not branch on one. Selecting the branch is a separate, still-open question that
+/// belongs to a continuous causal quantity (convective stress against lid yield strength), and no such input
+/// reaches this consumer today. Nothing here dispatches, and neither kernel below is wired into the run path.
 pub fn mantle_convective_heat_flux(
     conductive_flux: Fixed,
     layer_depth: Fixed,
@@ -899,6 +770,192 @@ pub fn mantle_convective_heat_flux(
         Some(q) => q.min(flux_max),
         None => flux_max,
     }
+}
+
+/// THE FRANK-KAMENETSKII PARAMETER `theta`, the reciprocal of the stagnant lid's RHEOLOGICAL TEMPERATURE SCALE.
+///
+/// Where a temperature-dependent viscosity locks a cold lid, the layer's full temperature drop is not what drives
+/// the flow. Only the warm sublayer beneath the lid, over which the viscosity changes by about `e`, participates,
+/// so the driving drop is `delta_T_rh` and the suppression the heat loss suffers is a power of the ratio
+/// `theta = delta_T / delta_T_rh`. This returns that ratio. Its consumer is [`ln_stagnant_lid_nusselt`].
+///
+/// # THE DEFINITION IS THE SOURCE'S, AND IT IS A DERIVATIVE RATHER THAN A GUESS
+///
+/// `theta = |delta_T * d(ln eta)/dT|` (Schulz, Tosi, Plesa and Breuer 2020, Geophys. J. Int. 220, 18-36,
+/// eq. 29, attributed there to Reese et al. 1999). Carried out on an Arrhenius viscosity whose exponent is
+/// `(E* + P V*) / (n R T)`, and taken along the thermal path so the pressure co-varies with the temperature, it
+/// gives what this computes:
+///
+/// ```text
+///   theta = [ (delta_T / T_i) * (E* + P V*) - P V* ] / (n R T_i)
+/// ```
+///
+/// At `n = 1` this is eq. (29) as printed. The published form carries the two energy terms and no stress
+/// exponent, which is the Newtonian instance; the general `n` is not a liberty taken with it but the same
+/// source's own effective viscosity, eq. (21), whose Arrhenius term is divided by `n_i`, put through the same
+/// definition. TWO INDEPENDENT CHECKS HOLD THAT READING UP, both in the tests below. Evaluated at that paper's
+/// own Table 1 diffusion-creep row (`n = 1`, `E* = 375 kJ/mol`, `V* = 8.2 cm^3/mol`) and its own Mars-like
+/// constants, this expression reproduces the `theta` range of 24.2 to 27.6 the paper reports for those runs, at
+/// an interior temperature near 1900 K. Evaluated at its dislocation row (`n = 3.5`, `E* = 530 kJ/mol`,
+/// `V* = 17 cm^3/mol`) it lands in the 11.4 to 12.8 the paper reports for those runs; dropping the `n` gives
+/// roughly forty, about three times the top of the paper's own stated range.
+///
+/// # WHY IT IS KEYED THIS WAY AND NOT THE FAMILIAR `R T^2 / E*`
+///
+/// The textbook scale is `R T_i^2 / E*`, whose `theta` is `E* delta_T / (R T_i^2)`. That form is a SPECIAL CASE,
+/// and it is not this engine's case, in two ways that both matter.
+///
+/// PRESSURE. The admitted creep rows put `E* + P V*` in the Arrhenius exponent, never `E*` alone, so a `theta`
+/// built on `E*` would describe a viscosity the engine does not have. The activation volume stiffens the rock
+/// with depth, opposing the softening from heat, and the second term above is that opposition: the net effect of
+/// pressure on `theta` is `P V* (delta_T - T_i) / (n R T_i^2)`, so it RAISES `theta` while the layer's
+/// temperature drop exceeds its interior temperature and LOWERS it once the interior is the hotter of the two.
+/// The sign is not free, and neither is its being carried.
+///
+/// STRESS EXPONENT. The production creep row is non-Newtonian (`n = 3.5`), and this is where the familiar form
+/// is most misleading. A power-law rock at a fixed strain rate carries stress `sigma ~ eps_dot^(1/n)`, so the
+/// effective viscosity's activation enthalpy is `(E* + P V*) / n`, not `E* + P V*`. That division is not a
+/// modelling choice made here; it is what the engine already computes, in
+/// [`crate::creep_rows::ductile_strength_mpa`], whose single-row inverse divides the log-space rate residual
+/// (`ln eps_dot` less the row's intercept, which is where `-(E* + P V*) / (R T)` sits) by the row's stress
+/// exponent, and in [`crate::convective_viscosity`], which forms `eta = sigma / (2 eps_dot)` from that stress.
+/// So `n` is in this signature because it is already in `ln_viscosity`, and a `theta` without it would be
+/// inconsistent with the very number the Rayleigh number was formed from. At `n = 3.5` the difference is a
+/// factor of 3.5 in `theta`, which the suppression then raises to its own exponent. A composite of several
+/// admitted rows carries a rate-weighted blend rather than one row's exponent, so `n` is the caller's to supply
+/// and is never assumed here; today the production viscosity solve offers the composite a single candidate, the
+/// dry dislocation row, so that composite reduces to its 3.5.
+///
+/// # UNITS, AND WHY THE SI PAIRING IS THE ONE THAT DOES NOT WORK
+///
+/// `E*` and the product `P V*` must be the same energy per mole, and `R` must be that unit per kelvin.
+/// Temperatures in kelvin. The pressure and volume are taken as MEGAPASCALS and CUBIC CENTIMETRES PER MOLE,
+/// whose product is joules per mole exactly, which is the creep bank's own pairing: `ln_rate_intercept` in
+/// [`crate::creep_rows`] forms its Arrhenius numerator from precisely those two units, so a caller carrying a
+/// [`crate::creep_rows::CreepConditions`] multiplies its `pressure_gpa` by 1000 and passes the row's volume
+/// through unchanged.
+///
+/// THE ARITHMETICALLY IDENTICAL SI PAIRING (`Pa` and `m^3/mol`) IS UNUSABLE HERE, and this is a representability
+/// limit rather than a preference. Q32.32 tops out near `2.147e9`, and a lid-base pressure on a Mars-class body
+/// is already `3.2e9 Pa`; a terrestrial lower-mantle pressure is `1e11 Pa`. The pressure argument would not
+/// survive construction, let alone the multiply. In megapascals the same state is `3237`, with the whole
+/// planetary range comfortably inside the window, and `P V*` lands at the same joules per mole either way. This
+/// is the same residency argument [`ln_stokes_velocity`] and the creep module's log-space strain rate make.
+///
+/// `R` is a parameter rather than a module constant, per this module's contract that a kernel bakes no value:
+/// pass the CODATA-derived `R = N_A k_B` the creep bank derives from the registered fundamentals, never a
+/// hand-typed decimal.
+///
+/// Returns `None` on a non-positive interior temperature, stress exponent or gas constant, on an unrepresentable
+/// intermediate, and on a non-positive `theta`. That last is a refusal rather than a clamp: a non-positive
+/// `theta` means the pressure stiffening has overwhelmed the thermal softening along the path, so there is no
+/// rheological temperature scale to suppress anything and the stagnant-lid form does not apply. Deterministic
+/// fixed-point.
+// @derives: the stagnant lid's Frank-Kamenetskii parameter <- the interior temperature and layer temperature drop, the admitted creep row's activation energy, activation volume and stress exponent, and the pressure
+pub fn stagnant_lid_rheological_theta(
+    internal_temperature_k: Fixed,
+    temperature_drop_k: Fixed,
+    activation_energy_j_per_mol: Fixed,
+    pressure_mpa: Fixed,
+    activation_volume_cm3_per_mol: Fixed,
+    stress_exponent: Fixed,
+    molar_gas_constant_j_per_mol_k: Fixed,
+) -> Option<Fixed> {
+    if internal_temperature_k <= ZERO
+        || stress_exponent <= ZERO
+        || molar_gas_constant_j_per_mol_k <= ZERO
+    {
+        return None;
+    }
+    // MPa * cm^3/mol is J/mol exactly (1e6 Pa * 1e-6 m^3/mol), the creep bank's own conversion boundary.
+    let pressure_work = pressure_mpa.checked_mul(activation_volume_cm3_per_mol)?;
+    let enthalpy = activation_energy_j_per_mol.checked_add(pressure_work)?;
+    // Reassociated so no `delta_T * (E* + P V*)` product forms: at mantle values that numerator is ~1e9 and
+    // sits against the Q32.32 ceiling, while the same quantity divided by T_i first is ~1e6 and has room.
+    let drop_ratio = temperature_drop_k.checked_div(internal_temperature_k)?;
+    let numerator = drop_ratio
+        .checked_mul(enthalpy)?
+        .checked_sub(pressure_work)?;
+    let denominator = stress_exponent
+        .checked_mul(molar_gas_constant_j_per_mol_k)?
+        .checked_mul(internal_temperature_k)?;
+    let theta = numerator.checked_div(denominator)?;
+    if theta <= ZERO {
+        return None;
+    }
+    Some(theta)
+}
+
+/// THE STAGNANT-LID NUSSELT NUMBER in log domain: `ln Nu = ln alpha + gamma ln theta + beta ln Ra`, the
+/// suppressed sibling of the mobile-lid [`mantle_convective_heat_flux`].
+///
+/// A stagnant lid loses heat more slowly than a mobile one at the same vigour, because the cold lid conducts
+/// rather than overturns and only the warm sublayer beneath it convects. The suppression enters as a negative
+/// power of the Frank-Kamenetskii parameter ([`stagnant_lid_rheological_theta`]), so the whole law is
+/// `Nu = alpha theta^gamma Ra^beta` with `gamma` negative.
+///
+/// # THE CONVENTION IS THE CALLER'S, AND IT IS THREE NUMBERS OR NONE
+///
+/// `alpha`, `gamma` and `beta` come from a cited [`crate::convection_scaling::StagnantLidConvention`], and they
+/// are read together because none is meaningful alone: each was fitted against the others AND against a
+/// particular definition of `theta` and of the Rayleigh number. Four are banked and none is a default. The
+/// classical linearized family (Batra and Foley 2021, Geophys. J. Int. 228, 631-663, their eq. 8) is one
+/// parameter deep, `gamma = -(1 + beta)`, and splits by convection pattern: `(0.48, -4/3, 1/3)` when the pattern
+/// is time-dependent, which is the branch a purely internally heated interior takes, and `(2.95, -6/5, 1/5)`
+/// when it is steady. The Arrhenius family (Schulz et al. 2020, their eqs. 34 and 35) fitted a full
+/// pressure-carrying viscosity and got a much shallower `theta` exponent, which its authors attribute to that
+/// pressure dependence.
+///
+/// # `Nu >= 1` IS THE DEFINITION, HERE AS THERE
+///
+/// Convection never transports less than conduction, so `ln Nu` is clamped at zero. This is the same definition
+/// the mobile-lid law states, and it is load-bearing in this form: the parameterized law is a high-`Ra`
+/// asymptotic, and a lid stiff enough (a large `theta`) drives the raw expression below one, where the honest
+/// answer is that the body conducts. Clamping at the conductive limit is that answer; it is never an authored
+/// floor.
+///
+/// # WHAT IS RESERVED, AND ON WHAT BASIS
+///
+/// NO BANKED COEFFICIENT WAS FITTED AT THIS ENGINE'S OWN RHEOLOGY. The linearized rows are Newtonian by
+/// construction and carry no pressure at all. The Arrhenius rows carry pressure and were run on this engine's
+/// own creep bank (Hirth and Kohlstedt 2003 dry olivine, the same `E* = 530 kJ/mol` and `n = 3.5` the admitted
+/// row holds), but their published fits span that study's diffusion-creep and reduced-enthalpy runs, which are
+/// Newtonian, and the authors warn in their own words that care should be taken applying them to dislocation
+/// creep. The non-Newtonian primaries that would settle it (Reese, Solomatov and Moresi 1998 and 1999) are
+/// paywalled with no free copy found, so nothing was transcribed from them and no row stands in for them.
+///
+/// A coefficient for a non-Newtonian, pressure-carrying stagnant lid is therefore RESERVED. Its basis, so the
+/// choice is informed rather than arbitrary: `alpha` is set by the MARGINAL STABILITY of the sublayer that
+/// convects beneath the lid, which is the same kind of quantity this column already banks for the whole layer
+/// as `ra_crit_*`. Batra and Foley say so in their own terms: with Solomatov's stagnant-lid critical Rayleigh
+/// number `Ra_c = 20.9 theta^4`, their eq. (10) reads `Nu ~ (Ra_i / Ra_c)^beta`, so `alpha` is absorbing a
+/// critical Rayleigh number raised to `-beta`. The owner sets it either by adopting one banked row with its
+/// scope declared at the call site, or by calibrating against the Mars-class surface heat flux the deep-time
+/// model is already compared to, or by commissioning the missing non-Newtonian primary. Until then the honest
+/// reading is that the four banked rows BRACKET the answer and that none of them is it.
+///
+/// Returns `None` on a non-positive `theta` or `alpha` (neither has a logarithm, and a non-positive coefficient
+/// is not a scaling law) or on an unrepresentable intermediate. `ln_rayleigh` is the log-domain Rayleigh number
+/// [`ln_rayleigh_number`] already produces, so no linear `Ra` has to form. Deterministic fixed-point.
+// @derives: the stagnant lid's log-domain Nusselt enhancement <- the log Rayleigh number, the Frank-Kamenetskii parameter, and a cited scaling convention's coefficient and two exponents
+pub fn ln_stagnant_lid_nusselt(
+    ln_rayleigh: Fixed,
+    theta: Fixed,
+    coefficient: Fixed,
+    theta_exponent: Fixed,
+    rayleigh_exponent: Fixed,
+) -> Option<Fixed> {
+    if theta <= ZERO || coefficient <= ZERO {
+        return None;
+    }
+    let suppression = theta.ln().checked_mul(theta_exponent)?;
+    let vigour = ln_rayleigh.checked_mul(rayleigh_exponent)?;
+    let ln_nusselt = coefficient
+        .ln()
+        .checked_add(suppression)?
+        .checked_add(vigour)?;
+    // Nu >= 1 is the definition of a convective enhancement, so ln Nu >= 0.
+    Some(ln_nusselt.max(ZERO))
 }
 
 /// The sensible-heat energy to effect a temperature change: `m c dT`.
@@ -1340,17 +1397,12 @@ pub fn convective_flux(h: Fixed, area: Fixed, hot: Fixed, cold: Fixed, flux_max:
     }
 }
 
-/// Fick's-law membrane gas exchange in the mass-transfer (Sherwood) form: J = k*A*(c_medium -
-/// c_internal) (kg/s), the signed rate at which a respiratory surface exchanges the respirable species
-/// with the medium it sits in (R-MEDIUM). Positive is uptake from a richer medium; negative is loss to
-/// a poorer one (a water-breather in air off-gassing and suffocating). The concentration difference is
-/// a signed saturating subtract over `fluid.respirable_content` (both ports read that one axis, as
-/// `convective_flux` differences one temperature axis), so equal concentrations are zero flux
-/// (equilibrium, no authored preference) and the sign is the exchange direction. The magnitude is
-/// capped at the reserved representability limit; a zero coefficient or area (no exchange surface) reads
-/// zero. Nothing here reads a medium label: only the respirable content of the medium the surface sits
-/// in, so a gill in water and a lung in air are the same kernel over different concentrations
-/// (Principle 9).
+/// Fick's-law membrane gas exchange in the mass-transfer (Sherwood) form:
+/// `J = k*A*(c_medium - c_internal)` (kg/s). Positive flux enters from the higher-concentration side;
+/// negative flux leaves toward it. The concentration difference is a signed saturating subtract, so
+/// equal concentrations produce zero flux and the sign follows the physical gradient. The magnitude
+/// is capped at the caller's representability limit; a zero coefficient or area produces zero. This
+/// reusable kernel reads no organism, medium, or world label. Its retired catalog binding is parked.
 pub fn membrane_gas_flux(
     coefficient: Fixed,
     area: Fixed,
@@ -2113,7 +2165,7 @@ pub fn reaction(
 /// Eyring primitive. `reduced_barrier` is the SINGLE dimensionless group `E*/(k_B*T)` (equivalently the molar
 /// `E_a/(R*T)`, the same number), formed by the caller at its own working scale (see [`reduced_barrier`]);
 /// `prefactor` is the attempt frequency in the caller's own rate unit (a constant Arrhenius `A`, an Eyring
-/// `k_B*T/h` from [`eyring_prefactor`], or the freezer's `nu = c_s/a`). DOMAIN-NEUTRAL: no material, organism,
+/// `k_B*T/h` from [`eyring_prefactor`], or the freezer's `nu = c_s/a`). DOMAIN-NEUTRAL: no material, application,
 /// or mechanism enters the signature; the domain lives entirely in the two scalars the caller computes, so the
 /// same law serves diffusion, enzyme turnover, mantle creep, prebiotic chemistry, and memory fade alike.
 /// A non-positive prefactor yields zero (no attempts, no rate). The reduced barrier is clamped non-negative (a
@@ -2417,136 +2469,6 @@ pub fn geometric_spread(
     }
 }
 
-/// The monotone response law a being's sensory channel transduces a received magnitude by: a physics-floor
-/// family of established sensory psychophysics (Principle 9), where the mechanism is fixed Rust and the
-/// SELECTION and its parameters are the being's own data (Principle 11). A lineage whose sense compresses,
-/// expands, or responds linearly is a different variant or a different shape value, a data row, never a code
-/// rewrite. [`ResponseLaw::Linear`] is the degenerate default: [`transduce`] under it reproduces
-/// `magnitude * gain` bit-for-bit, so the family strictly generalizes a plain linear sensitivity.
-///
-/// SCOPE and its flagged limits (the slice-2 audit named these): the family is the MONOTONE, unbounded
-/// responses (linear, power-law expansive or compressive, logarithmic), and [`transduce`] clamps every one
-/// to `activation_max`, so the ceiling is a hard clip rather than a smooth saturation. Two response shapes
-/// real receptors exhibit are NOT yet in the family, so they are flagged floor extensions (a new variant
-/// plus its law, the strict-generalization pattern), not authored elsewhere: a SATURATING response
-/// (Naka-Rushton or Hill, `activation = gain * m^n / (k^n + m^n)`, the dominant real transducer nonlinearity
-/// and the natural shape for a finite-ceiling mana or redox receptor), and a NON-MONOTONE tuned or band-pass
-/// response (a receptor with a preferred magnitude, peaking then falling). Until those variants land, a
-/// saturating or tuned sense is not a data row under this family; the admit-the-alien claim holds for the
-/// monotone shapes only.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub enum ResponseLaw {
-    /// Linear: `activation = gain * magnitude`. The degenerate default, bit-identical to a plain
-    /// multiplicative sensitivity.
-    Linear,
-    /// Stevens power law: `activation = gain * magnitude^shape`. `shape < 1` compresses (a
-    /// diminishing-returns sense), `shape > 1` expands. Near `shape = 1` it approximates Linear (through the
-    /// transcendental path, not bit-identically, so Linear is the default for the exact linear case).
-    Power,
-    /// Fechner logarithm: `activation = gain * ln(1 + shape * magnitude)`. Compresses a wide dynamic range,
-    /// zero at zero magnitude, `shape` sets the compression.
-    LogCompressive,
-}
-
-/// Transduce a received magnitude into an internal activation through a being's own monotone response law,
-/// clamped to `[0, activation_max]`. Pure and deterministic (the fixed-point `ln`/`powf` are the pinned
-/// integer transcendentals). The response SHAPE is the being's data, never the mechanism: `Linear` with a
-/// gain is the degenerate default and reproduces `magnitude * gain` bit-for-bit (a strict generalization),
-/// so a logarithmic, power-law, or (with a threshold the caller applies) thresholded sense is a data row,
-/// not a rewrite. A non-positive magnitude has no percept and reads zero.
-pub fn transduce(
-    magnitude: Fixed,
-    law: ResponseLaw,
-    gain: Fixed,
-    shape: Fixed,
-    activation_max: Fixed,
-) -> Fixed {
-    if magnitude <= ZERO {
-        return ZERO;
-    }
-    let raw = match law {
-        ResponseLaw::Linear => magnitude.checked_mul(gain).unwrap_or(activation_max),
-        ResponseLaw::Power => match magnitude.powf(shape).checked_mul(gain) {
-            Some(a) => a,
-            None => activation_max,
-        },
-        ResponseLaw::LogCompressive => {
-            let scaled = match shape.checked_mul(magnitude) {
-                Some(x) => x,
-                None => return activation_max,
-            };
-            // The Fechner argument `1 + shape*magnitude` stays above zero by the law's own DOMAIN, derived
-            // from the physics rather than set: `magnitude > 0` (guarded above) and `shape >= 0` (the
-            // monotone-compressive contract, "monotone shapes only" per this law's doc), so the argument is at
-            // or above one. That derived floor, not the storage epsilon, bounds the log (Principle 10, the
-            // R-UNITS-PIN floor invariant): `guarded_ln` clamps the argument up to the derived floor ONE, so it
-            // is byte-neutral on the contract (the argument is already >= 1, so the clamp is a no-op and the log
-            // is exact) and fail-safe if a mis-declared negative shape ever drove the argument below the domain,
-            // rather than the silent `ln(arg<=0) -> Fixed::MIN` sentinel it rode before. No value is authored:
-            // the floor is the physics of the compressive law.
-            let arg = Fixed::ONE + scaled;
-            match civsim_units::guard::guarded_ln(
-                arg,
-                civsim_units::guard::ZeroGuard::Floor(Fixed::ONE),
-            )
-            .checked_mul(gain)
-            {
-                Some(a) => a,
-                None => activation_max,
-            }
-        }
-    };
-    raw.clamp(ZERO, activation_max)
-}
-
-/// The discrimination law a being quantizes a transduced activation into a discrete perceptual bucket by: a
-/// physics-floor family for how finely a being tells two signals apart (Principle 9), the SELECTION and the
-/// step its own data (Principle 11). [`DiscriminationLaw::AbsoluteStep`] is the degenerate default:
-/// [`discriminate`] under it reproduces a uniform floor quantization bit-for-bit, strictly generalizing an
-/// absolute just-noticeable difference. The bucket is the stable key a downstream per-feature belief is
-/// minted from, so which signals count as the same perceived kind derives from the being's own sense, never
-/// an authored taxonomy.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub enum DiscriminationLaw {
-    /// A uniform absolute step: `bucket = floor(activation / step)`. Equal intervals; the degenerate
-    /// default.
-    AbsoluteStep,
-    /// A Weber-relative step: equal RATIOS, not equal intervals (a magnitude-relative just-noticeable
-    /// difference). `bucket = floor(ln(activation) / ln(1 + step))`, so a fixed fractional change spans one
-    /// bucket at any magnitude.
-    WeberRelative,
-}
-
-/// Quantize a transduced activation into a discrete perceptual bucket through a being's own discrimination
-/// law. Deterministic. A non-positive step (a misconfiguration) reads bucket zero, the same fail-safe the
-/// percept subsystem's uniform bucket uses. `AbsoluteStep` reproduces `floor(activation / step)` bit-for-bit
-/// (a strict generalization of the absolute just-noticeable difference).
-pub fn discriminate(activation: Fixed, law: DiscriminationLaw, step: Fixed) -> i64 {
-    if step.to_bits() <= 0 {
-        return 0;
-    }
-    match law {
-        DiscriminationLaw::AbsoluteStep => activation
-            .checked_div(step)
-            .map(|q| q.to_int() as i64)
-            .unwrap_or(0),
-        DiscriminationLaw::WeberRelative => {
-            if activation <= ZERO {
-                return 0;
-            }
-            let den = (Fixed::ONE + step).ln();
-            if den.to_bits() <= 0 {
-                return 0;
-            }
-            activation
-                .ln()
-                .checked_div(den)
-                .map(|q| q.to_int() as i64)
-                .unwrap_or(0)
-        }
-    }
-}
-
 /// Split an incident radiant flux at an interface into (reflected, absorbed, transmitted), each a
 /// bounded fraction of the incident so no overflow forms; the absorbed is the residual (R+T+A=1),
 /// clamped non-negative. The light-field gating of Part 5 and the surface half of perception
@@ -2711,113 +2633,6 @@ pub fn surface_balance_temperature(
         i += 1;
     }
     lo.saturating_add(sat_sub(hi, lo).checked_div(two).unwrap_or(ZERO))
-}
-
-// === Metabolism (R-METABOLIZE): resting metabolic power and the drain bridge ===
-//
-// The resting-metabolism kernels that free the authored base_metabolic_drain, exertion_drain_coupling,
-// and field.body_exchange scalars: the drain a body pays derives from its mass and tissue against the
-// physics, not from a per-axis authored number. Every kernel is total, integer, and overflow-capped in
-// the house style (checked arithmetic routing an out-of-range product to its physical limit, caps the
-// reserved representability bounds passed by the caller). Nothing here reads an identity: two bodies
-// diverge from mass, composition, medium, and temperature alone (Principle 9).
-
-/// Basal (resting) metabolic rate P = a * m^(3/4) (W), Kleiber's law over body mass. The 3/4 exponent
-/// is an authored universal physics affordance (West, Brown, and Enquist's fractal-network derivation
-/// holds across taxa; Principle 9 permits authored physics), evaluated by the EXACT two-square-root
-/// fixed-point identity m^(3/4) = sqrt(m * sqrt(m)): `m^(1/2)` then `m * m^(1/2) = m^(3/2)` then its
-/// square root, so no exp/ln is touched and the result is bit-identical on every machine (both roots
-/// are the exact deterministic integer isqrt). The coefficient `a` is the caller's reserved owner
-/// anchor. Zero (or negative) mass has no metabolism and reads zero; an out-of-range product routes to
-/// the reserved rate cap.
-pub fn basal_metabolic_rate(mass: Fixed, coeff_a: Fixed, rate_max: Fixed) -> Fixed {
-    if mass <= ZERO {
-        return ZERO;
-    }
-    // m^(3/4) = sqrt(m * sqrt(m)): the two exact square roots of the identity, no transcendental.
-    let root = mass.sqrt(); // m^(1/2)
-    let inner = match mass.checked_mul(root) {
-        Some(x) => x, // m^(3/2)
-        None => return rate_max,
-    };
-    let m34 = inner.sqrt(); // m^(3/4)
-    match coeff_a.checked_mul(m34) {
-        Some(p) => p.min(rate_max),
-        None => rate_max,
-    }
-}
-
-/// The resting thermoregulatory heat-loss power (W): the order-independent saturating sum of the Newton
-/// convective flux ([`convective_flux`]) and the Stefan-Boltzmann radiant emission ([`radiant_emission`])
-/// over the body's exposed surface area, the power a body must replace by metabolism to hold its core
-/// temperature against the medium. It reuses the two resolved heat-transport kernels unchanged, reads
-/// only the body and medium temperatures, the surface area, and the two surface constants (`h`,
-/// emissivity, sigma), and takes no identity, so a hot body in a cold medium and its temperature mirror
-/// diverge from temperature alone (Principle 9). Capped at the reserved flux limit; a body at the medium
-/// temperature loses nothing (equilibrium).
-#[allow(clippy::too_many_arguments)]
-pub fn resting_heat_loss(
-    h: Fixed,
-    area: Fixed,
-    body_temp: Fixed,
-    medium_temp: Fixed,
-    emissivity: Fixed,
-    sigma_bits: i64,
-    sigma_scale: u32,
-    flux_max: Fixed,
-) -> Fixed {
-    let convective = convective_flux(h, area, body_temp, medium_temp, flux_max);
-    // The radiant term takes sigma at its full derived scale (the Tier-2 lift, R-UNITS-PIN slice 4): sigma
-    // enters at full precision instead of the Q32.32 truncation, its precision-critical `sigma*(T_hot^4 -
-    // T_cold^4)` computed in one wide accumulator and rounded once.
-    let radiant = radiant_emission_tier2(
-        emissivity,
-        area,
-        body_temp,
-        medium_temp,
-        sigma_bits,
-        sigma_scale,
-        flux_max,
-    );
-    Fixed::saturating_sum([convective, radiant]).min(flux_max)
-}
-
-/// Bridge a resting metabolic power (W) to a fraction of the energy reserve drained per tick. The
-/// resting demand is the order-independent saturating sum of the basal rate and the thermoregulatory
-/// replacement (`basal + heat_loss`, W); the energy the reserve holds is `energy_capacity *
-/// energy_density` (the reserve's energy-storing tissue times its per-unit energy content, J); the
-/// fraction is the energy spent this tick over the energy stored, `(power * tick_seconds) / stored`,
-/// with the spent energy formed before the divide (a modest per-tick joule figure) so a representable
-/// fraction is never pre-saturated. A zero-power demand drains nothing; a zero-energy store (no reserve
-/// tissue) drains fully (the cap); an out-of-range spend routes to the cap. Clamped to `[0, frac_max]`.
-pub fn metabolic_drain_fraction(
-    basal: Fixed,
-    heat_loss: Fixed,
-    energy_capacity: Fixed,
-    energy_density: Fixed,
-    tick_seconds: Fixed,
-    frac_max: Fixed,
-) -> Fixed {
-    let power = Fixed::saturating_sum([basal, heat_loss]);
-    if power <= ZERO {
-        return ZERO;
-    }
-    let stored = match energy_capacity.checked_mul(energy_density) {
-        Some(e) => e,
-        // A store so large it overflows is effectively inexhaustible over one tick: negligible fraction.
-        None => return ZERO,
-    };
-    if stored <= ZERO {
-        return frac_max;
-    }
-    let spent = match power.checked_mul(tick_seconds) {
-        Some(x) => x, // the joules spent this tick
-        None => return frac_max,
-    };
-    match spent.checked_div(stored) {
-        Some(f) => f.clamp(ZERO, frac_max),
-        None => frac_max,
-    }
 }
 
 // === Electricity and magnetism (R-PHYS-W3, wave 3) ===
@@ -2995,74 +2810,6 @@ pub fn nernst_emf(
     standard_emf.saturating_add(adj)
 }
 
-/// The reversible MICHAELIS-MENTEN uptake flux (per tick, in the source's stock units): the substrate-
-/// saturating Hill term times the reversible thermodynamic drive,
-/// `v = Vmax * (S^h / (Km^h + S^h)) * drive`, with `drive = 1 - exp(-q E / (k_B*T))` the free-energy factor of
-/// the couple's EMF `E` (`dG = -qE` per reaction event, `q = n*e` the carrier charge): forward (`drive` toward
-/// one) when the reaction releases free energy (`E > 0`), zero at equilibrium (`E = 0`), and negative below
-/// it, so a source powers NO life below its own (Nernst-shifted) equilibrium. The STRUCTURAL conservation
-/// clamp `min(v, S)` is applied here (a draw never exceeds the present stock, `v <= S` is not free), and the
-/// flux is floored at zero (no reverse uptake). The Hill exponent `h` is the cooperativity (`h = 1` the plain
-/// Monod `S/(Km+S)`); `Km` the half-saturation stock is per-source-class kinetics data; and `Vmax` is the
-/// maximum specific uptake the CALLER derives from the being's own catalyst tissue (`Vmax = kcat * catalyst`,
-/// the emergent-throughput architecture, no authored efficiency scalar), passed in here. The thermal factor
-/// uses the same per-particle `k_B*T/q` as [`nernst_emf`]. Deterministic fixed-point (`Fixed::powf`/`exp`,
-/// integer-only and pinned).
-#[allow(clippy::too_many_arguments)]
-pub fn reversible_uptake_flux(
-    stock: Fixed,
-    vmax: Fixed,
-    km: Fixed,
-    hill: Fixed,
-    emf: Fixed,
-    boltzmann_k: Fixed,
-    temperature: Fixed,
-    carrier_charge: Fixed,
-) -> Fixed {
-    if stock <= ZERO || vmax <= ZERO {
-        return ZERO;
-    }
-    // The Hill-saturating substrate term S^h / (Km^h + S^h), in [0, 1). A zero stock is zero (no draw).
-    let sh = stock.powf(hill);
-    let kmh = km.powf(hill);
-    let denom = kmh.saturating_add(sh);
-    let saturation = if denom > ZERO {
-        sh.checked_div(denom).unwrap_or(ZERO)
-    } else {
-        ZERO
-    };
-    // The reversible thermodynamic drive 1 - exp(-q E / (k_B*T)): one far forward, zero at equilibrium,
-    // negative below it (floored to zero by the clamp: no life below the couple's own equilibrium).
-    let kt = boltzmann_k.checked_mul(temperature);
-    let drive = match kt {
-        Some(kt) if kt > ZERO && carrier_charge > ZERO => {
-            let scaled = carrier_charge
-                .checked_mul(emf)
-                .and_then(|qe| qe.checked_div(kt));
-            match scaled {
-                Some(s) => ONE - (ZERO - s).exp(),
-                // An overflowing exponent means an enormous forward drive: saturate to one.
-                None => ONE,
-            }
-        }
-        // No thermal scale given: forward at full when the standard drive is spontaneous.
-        _ => {
-            if emf > ZERO {
-                ONE
-            } else {
-                ZERO
-            }
-        }
-    };
-    let raw = vmax
-        .checked_mul(saturation)
-        .unwrap_or(vmax)
-        .checked_mul(drive)
-        .unwrap_or(ZERO);
-    // min(v, S) conservation clamp plus the no-reverse-uptake floor.
-    raw.clamp(ZERO, stock)
-}
-
 /// Element resistance R = rho*L/A (Ohm), the measured geometric consequence of the material and shape;
 /// a vanishing cross-section is an open (the cap).
 pub fn resistance(resistivity: Fixed, length: Fixed, area: Fixed, r_max: Fixed) -> Fixed {
@@ -3215,78 +2962,6 @@ pub fn inductor_energy(inductance: Fixed, current: Fixed, e_max: Fixed) -> Fixed
         Some(u) => u.min(e_max),
         None => e_max,
     }
-}
-
-// === Language processing cost (R-LANG-TYPOLOGY, the word-order harmony floor) ===
-//
-// The two direction-NEUTRAL kernels the sim-side word-order harmony tilt derives from
-// (crates/sim/src/typology.rs owns the branching-consistency mapping that turns a grammar into an
-// extent). Both are LABEL-BLIND and DIRECTION-BLIND: they see only a scalar domain extent and a
-// scalar cost reduction, never a word-order value, so they cannot privilege one linear order over
-// its mirror and they author no attractor (Principle 9). What they reward is CONSISTENCY (a shorter
-// dependency-integration domain costs less to hold), never a specific direction. Each is a pure
-// closed-form Fixed function, saturation-capped in the house idiom, and total on adversarial input.
-
-/// The dependency-integration parse cost of holding a linearization domain in working memory
-/// (Hawkins 1983/2004's processing account of the branching-direction anchor; Gibson 1998 dependency
-/// locality): a monotone-increasing, saturating function of how much material a head must hold before
-/// it is integrated (`domain_extent`), SOFTENED by the parser's working-memory capacity. The
-/// integer-Hill saturating form `extent / (extent + memory)` (the same dose-response shape
-/// [`harm_class`] uses) scaled by the reserved `cost_max`: a zero extent is zero cost, an unbounded
-/// extent saturates at `cost_max`, and at `extent == memory` the cost is half of `cost_max`. A larger
-/// memory capacity shifts the half-cost point outward, so the same domain costs a higher-capacity
-/// parser less (the per-race softening). Direction-blind: `domain_extent` is a magnitude, never a
-/// word-order value.
-pub fn parse_cost(domain_extent: Fixed, memory_capacity: Fixed, cost_max: Fixed) -> Fixed {
-    if domain_extent <= ZERO {
-        return ZERO;
-    }
-    // den = extent + memory (both taken non-negative), saturating: a saturated sum is a huge
-    // denominator, handled by the divide (frac routes toward the extent/extent = one limit).
-    let den = domain_extent.saturating_add(memory_capacity.max(ZERO));
-    if den <= ZERO {
-        // den >= extent > 0 always holds, so this is unreachable; guard so the divide is total and a
-        // degenerate denominator routes to the full cost rather than a wrap.
-        return cost_max.max(ZERO);
-    }
-    // frac = extent / den in (0, 1]; against a fixed memory, frac -> one as the extent grows.
-    let frac = match domain_extent.checked_div(den) {
-        Some(f) => f,
-        None => return cost_max.max(ZERO),
-    };
-    // Scale the [0, 1] cost fraction by the reserved ceiling, capped rather than wrapped.
-    match cost_max.checked_mul(frac) {
-        Some(c) => c.clamp(ZERO, cost_max.max(ZERO)),
-        None => cost_max.max(ZERO),
-    }
-}
-
-/// The multiplicative harmony tilt a cost reduction earns: `exp(cost_reduction / temperature)`, the
-/// softmax weight of the lower-cost (consistent) option relative to the baseline, floored at one and
-/// saturating at `tilt_max`. `cost_reduction` is the parse cost a consistent choice AVOIDS (a
-/// [`parse_cost`] output), and `temperature` is the softmax scale: a small temperature makes the tilt
-/// bite hard, a large one flattens it toward one. A zero (or negative) reduction earns no tilt (the
-/// weight floors at one, so the law never pushes a weight below its prior), and the deterministic
-/// zero-temperature limit saturates at `tilt_max`. The exponential is the canon-pinned deterministic
-/// [`Fixed::exp`] (R-GPU-CANON-PIN), integer-only and bit-identical on every backend; for a large
-/// argument it saturates, and the clamp routes that to `tilt_max`. Direction-blind: the argument is a
-/// scalar cost, never a word-order value.
-pub fn harmony_tilt(cost_reduction: Fixed, temperature: Fixed, tilt_max: Fixed) -> Fixed {
-    if cost_reduction <= ZERO {
-        return ONE;
-    }
-    if temperature <= ZERO {
-        // exp(reduction / 0+) -> infinity: the hard-max (deterministic) limit saturates at the cap.
-        return tilt_max.max(ONE);
-    }
-    let z = match cost_reduction.checked_div(temperature) {
-        Some(z) => z,
-        // A reduction-over-temperature past the representable range is the same hard-max limit.
-        None => return tilt_max.max(ONE),
-    };
-    // exp(z) with z >= 0 is >= 1 (and saturates to Fixed::MAX for a large z); clamp to a bounded
-    // boost in [ONE, tilt_max] so the tilt never wraps and never falls below one.
-    z.exp().clamp(ONE, tilt_max.max(ONE))
 }
 
 // --- The MEMORY PRIMITIVES (the genesis-forward temporal dimension) ---
@@ -3514,6 +3189,33 @@ pub fn thermal_density_anomaly(
     };
     // The density excess is negative for a warmer (lighter) parcel: delta_rho = -(rho*alpha*dT).
     sat_sub(ZERO, magnitude)
+}
+
+/// Whether a buoyancy contrast DRIVES convection or SUPPRESSES it, which its magnitude cannot say.
+///
+/// The layer is unstable exactly when the interior parcel is LIGHTER than its reference, so it rises:
+/// `delta_rho < 0`. That one test covers every case, including the ones an absolute value erases:
+///
+/// - ordinary expansion, interior hotter (`alpha > 0`, `dT > 0`): `delta_rho < 0`, unstable. Heated from
+///   below, it overturns.
+/// - ordinary expansion, interior COLDER (`alpha > 0`, `dT < 0`): `delta_rho > 0`, stable. Heated from
+///   above, it does not overturn at ANY magnitude.
+/// - NEGATIVE thermal expansion, interior hotter (`alpha < 0`, `dT > 0`): `delta_rho > 0`, stable. Heating
+///   makes the parcel denser, so the buoyancy that would drive convection instead pins the layer.
+/// - negative expansion, interior colder (`alpha < 0`, `dT < 0`): `delta_rho < 0`, unstable.
+///
+/// The two middle rows are why this exists. [`rayleigh_number`] and [`ln_rayleigh_number`] both take
+/// `|delta_rho|`, which is correct for the RATIO they compute (a Rayleigh number is a positive
+/// dimensionless group and a logarithm has no negative branch) and silent about the regime. A consumer that
+/// compares `Ra` against `Ra_crit` without this predicate declares a stably stratified layer to be
+/// convecting, and the MORE stable it is, the more vigorously it appears to convect.
+///
+/// A negative-expansion material is a data row rather than a special case here: the sign arrives already
+/// composed by [`thermal_density_anomaly`], which forms `-(rho alpha dT)`, so nothing keys on the material
+/// being alien. It is the same test in all four rows.
+// @derives: the convective stability sense <- the sign of the buoyancy contrast
+pub fn buoyancy_drives_convection(density_anomaly: Fixed) -> bool {
+    density_anomaly < ZERO
 }
 
 /// Rayleigh number, the convection ONSET control parameter: `Ra = |delta_rho| * g * d^3 / (eta * kappa)`,
@@ -4362,7 +4064,6 @@ mod tests {
     // Dev fixtures: representable caps for the determinism harness, never canon. The
     // owner's set caps reach a kernel through the calibration manifest when the engine
     // wires it; these only have to be below the Q32.32 ceiling for the harness to run.
-    const HARM_CAP: Fixed = Fixed::ONE;
     const F_INT: fn(i32) -> Fixed = Fixed::from_int;
 
     fn cap(v: i32) -> Fixed {
@@ -4428,260 +4129,6 @@ mod tests {
         assert_eq!(
             geometric_spread(p, Fixed::from_int(100_000), 3, four_pi, irrad_max),
             Fixed::ZERO,
-        );
-    }
-
-    // --- Perception: the transduction response family and the discrimination family ---
-
-    #[test]
-    fn transduce_linear_default_reproduces_magnitude_times_gain() {
-        // The degenerate default is a strict generalization: Linear reproduces `magnitude * gain`
-        // bit-for-bit in the non-overflow regime (the shape parameter is ignored), so wiring a plain
-        // linear sensitivity through the family changes no bit.
-        let cap = cap(1_000_000);
-        let shape_ignored = Fixed::from_int(3);
-        for &m in &[
-            Fixed::from_int(1),
-            Fixed::from_int(50),
-            Fixed::from_ratio(3, 2),
-        ] {
-            for &g in &[
-                Fixed::from_int(1),
-                Fixed::from_int(4),
-                Fixed::from_ratio(1, 2),
-            ] {
-                assert_eq!(
-                    transduce(m, ResponseLaw::Linear, g, shape_ignored, cap),
-                    m.mul(g).min(cap),
-                    "Linear transduction must be byte-identical to magnitude * gain",
-                );
-            }
-        }
-        // The clamp bites at the activation ceiling.
-        assert_eq!(
-            transduce(
-                Fixed::from_int(10),
-                ResponseLaw::Linear,
-                Fixed::from_int(10),
-                shape_ignored,
-                Fixed::from_int(50)
-            ),
-            Fixed::from_int(50),
-            "the activation is clamped to activation_max",
-        );
-    }
-
-    #[test]
-    fn discriminate_absolute_step_reproduces_the_uniform_bucket() {
-        // AbsoluteStep reproduces `floor(activation / step)` bit-for-bit, the same formula (and the same
-        // non-positive-step fail-safe) the percept subsystem's feature_bucket uses.
-        let step = Fixed::from_ratio(1, 4);
-        for &v in &[
-            Fixed::ZERO,
-            Fixed::from_ratio(1, 8),
-            Fixed::from_int(1),
-            Fixed::from_ratio(9, 4),
-        ] {
-            let expected = v.checked_div(step).map(|q| q.to_int() as i64).unwrap_or(0);
-            assert_eq!(
-                discriminate(v, DiscriminationLaw::AbsoluteStep, step),
-                expected
-            );
-        }
-        // A non-positive step reads bucket zero (the misconfiguration fail-safe).
-        assert_eq!(
-            discriminate(
-                Fixed::from_int(5),
-                DiscriminationLaw::AbsoluteStep,
-                Fixed::ZERO
-            ),
-            0
-        );
-    }
-
-    #[test]
-    fn transduce_all_laws_are_monotone_and_zero_at_zero() {
-        let cap = cap(1_000_000);
-        let gain = Fixed::from_int(2);
-        // Every law reads zero at zero magnitude (no percept from no signal).
-        for law in [
-            ResponseLaw::Linear,
-            ResponseLaw::Power,
-            ResponseLaw::LogCompressive,
-        ] {
-            assert_eq!(
-                transduce(Fixed::ZERO, law, gain, Fixed::from_ratio(1, 2), cap),
-                Fixed::ZERO
-            );
-        }
-        // Every law is monotone increasing in the magnitude.
-        for law in [
-            ResponseLaw::Linear,
-            ResponseLaw::Power,
-            ResponseLaw::LogCompressive,
-        ] {
-            let a = transduce(Fixed::from_int(2), law, gain, Fixed::from_ratio(1, 2), cap);
-            let b = transduce(Fixed::from_int(8), law, gain, Fixed::from_ratio(1, 2), cap);
-            assert!(
-                b > a,
-                "transduction is monotone increasing in the magnitude"
-            );
-        }
-    }
-
-    #[test]
-    fn transduce_power_and_log_compress_a_wide_range() {
-        // A compressive law (Stevens power with shape < 1, or Fechner log) grows sub-linearly: doubling
-        // the input less than doubles the activation, unlike the linear default.
-        let cap = cap(1_000_000);
-        let gain = Fixed::ONE;
-        let m = Fixed::from_int(16);
-        for law in [ResponseLaw::Power, ResponseLaw::LogCompressive] {
-            let shape = Fixed::from_ratio(1, 2);
-            let at_m = transduce(m, law, gain, shape, cap);
-            let at_2m = transduce(m.mul(Fixed::from_int(2)), law, gain, shape, cap);
-            assert!(
-                at_2m < at_m.mul(Fixed::from_int(2)),
-                "a compressive law grows sub-linearly (doubling input less than doubles activation)",
-            );
-        }
-        // The linear default does NOT compress: doubling the input doubles the activation.
-        let lin_m = transduce(m, ResponseLaw::Linear, gain, Fixed::ONE, cap);
-        let lin_2m = transduce(
-            m.mul(Fixed::from_int(2)),
-            ResponseLaw::Linear,
-            gain,
-            Fixed::ONE,
-            cap,
-        );
-        assert_eq!(lin_2m, lin_m.mul(Fixed::from_int(2)));
-    }
-
-    #[test]
-    fn discriminate_weber_bucket_step_is_bounded_across_magnitude_unlike_absolute() {
-        // Weber-relative quantizes on equal RATIOS, so a doubling advances the bucket by a near-constant
-        // (bounded) amount at any magnitude (the continuous ratio ln(2)/ln(1+step) is constant; flooring
-        // leaves it constant within one bucket). The absolute step instead advances by a GROWING amount at
-        // high magnitude. That contrast is the Weber property.
-        let step = Fixed::from_ratio(1, 2);
-        let weber =
-            |v: i32| discriminate(Fixed::from_int(v), DiscriminationLaw::WeberRelative, step);
-        let abs = |v: i32| discriminate(Fixed::from_int(v), DiscriminationLaw::AbsoluteStep, step);
-        let w_low = weber(8) - weber(4);
-        let w_high = weber(256) - weber(128);
-        assert!(
-            (w_low - w_high).abs() <= 1,
-            "the Weber increment per doubling stays near-constant across magnitude (low {w_low}, high {w_high})",
-        );
-        let a_low = abs(8) - abs(4);
-        let a_high = abs(256) - abs(128);
-        assert!(
-            a_high > a_low,
-            "the absolute-step increment per doubling grows with magnitude (low {a_low}, high {a_high})",
-        );
-        // A non-positive activation reads bucket zero.
-        assert_eq!(
-            discriminate(Fixed::ZERO, DiscriminationLaw::WeberRelative, step),
-            0
-        );
-    }
-
-    // --- Biology ---
-
-    #[test]
-    fn net_nutrition_is_the_limiting_nutrient_and_order_independent() {
-        let half = Fixed::from_ratio(1, 2);
-        let a = (Fixed::ONE, Fixed::ONE, Some(Fixed::ONE)); // fully satisfied
-        let b = (half, Fixed::ONE, Some(Fixed::ONE)); // half satisfied (the limiter)
-        let c = (Fixed::ONE, Fixed::ONE, None); // not required, contributes one
-        let forward = net_nutrition(&[a, b, c]);
-        let reversed = net_nutrition(&[c, b, a]);
-        assert_eq!(forward, half, "the minimum is the limiting nutrient");
-        assert_eq!(forward, reversed, "the min-fold is order-independent");
-    }
-
-    #[test]
-    fn abundant_supply_saturates_rather_than_wrapping_a_false_zero() {
-        // A one-bit requirement against full supply must read fully satisfied, not the
-        // wrapped zero the wave-0 NEW-DET-3 attack produced.
-        let tiny = Fixed::from_bits(1);
-        assert_eq!(satisfaction(Fixed::ONE, Fixed::ONE, Some(tiny)), Fixed::ONE);
-    }
-
-    #[test]
-    fn harm_routes_an_out_of_range_ratio_to_the_cap_not_garbage() {
-        // dose 38000 against tolerance 1e-6 is a ratio of ~3.8e10, far past the
-        // representable ceiling; it must route to the max-harm cap (the NEW-DET-2 fix),
-        // not wrap r to a small or negative value.
-        let dose = Fixed::from_int(38000);
-        let tol = Fixed::from_decimal_str("0.000001").unwrap();
-        assert_eq!(harm_class(dose, Some(tol), 3, HARM_CAP), HARM_CAP);
-    }
-
-    #[test]
-    fn harm_cube_boundary_computes_below_the_overflow_and_caps_above() {
-        // At r = 1290 the cube fits and harm is computed; at r = 1291 the guard fires
-        // and harm is the cap, never a wrapped value.
-        let at = harm_class(Fixed::from_int(1290), Some(Fixed::ONE), 3, HARM_CAP);
-        let over = harm_class(Fixed::from_int(1291), Some(Fixed::ONE), 3, HARM_CAP);
-        assert!(at < HARM_CAP, "r=1290 computes a sub-cap harm");
-        assert_eq!(
-            over, HARM_CAP,
-            "r=1291 is guarded to the cap before the cube"
-        );
-    }
-
-    #[test]
-    fn the_same_food_is_poison_to_one_consumer_and_safe_to_another() {
-        // Race-blindness: one dose, two tolerances, the harm differs purely by the
-        // consumer datum, and swapping the consumers swaps the outcomes.
-        let dose = Fixed::from_int(10);
-        let fragile = Some(Fixed::ONE); // low tolerance: high harm
-        let hardy = Some(Fixed::from_int(1000)); // high tolerance: low harm
-        let h_fragile = harm_class(dose, fragile, 2, HARM_CAP);
-        let h_hardy = harm_class(dose, hardy, 2, HARM_CAP);
-        assert!(h_fragile > h_hardy, "the fragile consumer takes more harm");
-        // Swapping the two consumer vectors swaps the outputs exactly.
-        assert_eq!(harm_class(dose, hardy, 2, HARM_CAP), h_hardy);
-        assert_eq!(harm_class(dose, fragile, 2, HARM_CAP), h_fragile);
-    }
-
-    #[test]
-    fn not_applicable_tolerance_skips_but_zero_tolerance_is_maximally_harmful() {
-        assert_eq!(harm_class(Fixed::from_int(5), None, 2, HARM_CAP), ZERO);
-        assert_eq!(
-            harm_class(Fixed::from_int(5), Some(ZERO), 2, HARM_CAP),
-            HARM_CAP
-        );
-    }
-
-    #[test]
-    fn net_harm_sum_is_order_independent() {
-        let classes = [
-            (Fixed::from_int(2), Some(Fixed::ONE), 2u8),
-            (Fixed::from_int(3), Some(Fixed::from_int(2)), 1u8),
-            (Fixed::from_int(1), None, 3u8),
-        ];
-        let mut reversed = classes;
-        reversed.reverse();
-        assert_eq!(
-            net_harm(&classes, HARM_CAP, cap(10)),
-            net_harm(&reversed, HARM_CAP, cap(10))
-        );
-    }
-
-    #[test]
-    fn edibility_margin_saturates_on_a_near_clean_meal() {
-        // A tiny nonzero aggregate dose against an appreciable tolerance must saturate to
-        // the margin cap, not wrap to a small or inverted reading (the NEW-DET-5 fix).
-        let tol = Fixed::from_int(5000);
-        let dose = Fixed::from_decimal_str("0.000001").unwrap();
-        let e = edibility(Fixed::ONE, ZERO, tol, dose, cap(1_000_000));
-        assert_eq!(e.margin, cap(1_000_000));
-        // A zero dose also reads the cap.
-        assert_eq!(
-            edibility(Fixed::ONE, ZERO, tol, ZERO, cap(1_000_000)).margin,
-            cap(1_000_000)
         );
     }
 
@@ -4820,8 +4267,8 @@ mod tests {
     }
 
     #[test]
-    fn shear_derives_the_von_mises_ratio_when_no_independent_strength() {
-        let (_applied, tau_material) = shear(
+    fn shear_stress_derives_the_von_mises_ratio_when_no_independent_strength() {
+        let (_applied, tau_material) = shear_stress(
             ZERO,
             Fixed::from_int(1),
             None,
@@ -4897,6 +4344,373 @@ mod tests {
             q_cond,
             "Nu is clamped to 1"
         );
+    }
+
+    /// `R = N_A k_B`, derived through the SAME registered fundamentals `creep_rows` derives it from, so these
+    /// tests feed the kernel the constant the production path would and never a hand-typed 8.314.
+    fn derived_molar_gas_constant() -> Fixed {
+        let n_a = civsim_units::bignum::BigRat::from_decimal_str(
+            civsim_units::fundamentals::fundamental("N_A")
+                .expect("Avogadro is a registered fundamental")
+                .value,
+        )
+        .expect("Avogadro parses");
+        let k_b = civsim_units::bignum::BigRat::from_decimal_str(
+            civsim_units::fundamentals::fundamental("k_B")
+                .expect("Boltzmann is a registered fundamental")
+                .value,
+        )
+        .expect("Boltzmann parses");
+        Fixed::from_bits_i128(
+            n_a.mul(&k_b)
+                .round_to_scale(Fixed::FRAC_BITS)
+                .expect("R fits Q32.32"),
+        )
+        .expect("R projects to Fixed")
+    }
+
+    /// Schulz et al. 2020 Table 1: Mars-like, `rho = 3500 kg/m^3`, `g = 3.7 m/s^2`, `delta_T = 2000 K`. The
+    /// pressure at the base of the top thermal boundary layer is hydrostatic at the lid depth, `rho g z`,
+    /// reported in MEGAPASCALS because the same number in pascals (3.2e9 at a 250 km lid) is past the Q32.32
+    /// ceiling: the kernel's unit note is load-bearing and this helper is where it first bites.
+    fn schulz_lid_pressure_mpa(lid_depth_km: i32) -> Fixed {
+        // rho g z / 1e6, formed as (3500 * 3.7 * 1000 * km) / 1e6 = 3.7 * 3.5 * km.
+        Fixed::from_ratio(37, 10)
+            .mul(Fixed::from_ratio(35, 10))
+            .mul(Fixed::from_int(lid_depth_km))
+    }
+
+    #[test]
+    fn the_rheological_theta_reproduces_the_sources_own_newtonian_range() {
+        // TRANSCRIPTION REFEREE, against the primary's own reported numbers rather than against itself.
+        // Schulz et al. 2020 report theta between 24.2 and 27.6 for their DIFFUSION-CREEP runs, whose Table 1
+        // row is Newtonian: E* = 375 kJ/mol, V* = 8.2 cm^3/mol, n = 1. Their interior temperature is not
+        // printed, so the check is that the kernel lands inside their stated band at a plausible interior for a
+        // box whose contrast is 2000 K over a 250 km lid, which it does between 1850 and 1900 K. The band is
+        // narrow (a 14 per cent window) and theta runs as 1/T_i^2, so a wrong pressure term or a wrong
+        // reassociation would not sit inside it.
+        let r = derived_molar_gas_constant();
+        let p = schulz_lid_pressure_mpa(250);
+        let e_star = Fixed::from_int(375_000);
+        let v_star = Fixed::from_ratio(82, 10); // 8.2 cm^3/mol
+        let mut previous: Option<Fixed> = None;
+        for t_i in [1850, 1900] {
+            let theta = stagnant_lid_rheological_theta(
+                Fixed::from_int(t_i),
+                Fixed::from_int(2000),
+                e_star,
+                p,
+                v_star,
+                ONE,
+                r,
+            )
+            .expect("a Newtonian olivine lid has a rheological scale");
+            assert!(
+                theta > Fixed::from_ratio(242, 10) && theta < Fixed::from_ratio(276, 10),
+                "at T_i = {t_i} K theta is {}, outside the source's own 24.2 to 27.6",
+                theta
+            );
+            if let Some(prev) = previous {
+                assert!(
+                    theta < prev,
+                    "a hotter interior must soften and lower theta"
+                );
+            }
+            previous = Some(theta);
+        }
+    }
+
+    #[test]
+    fn the_rheological_theta_divides_by_the_stress_exponent_the_viscosity_divides_by() {
+        // THE NON-NEWTONIAN CATCH, and the reason `n` is in the signature at all. Schulz et al. report theta
+        // between 11.4 and 12.8 for their DISLOCATION runs, whose Table 1 row is the engine's own admitted row:
+        // E* = 530 kJ/mol, V* = 17e-6 m^3/mol, n = 3.5. The n = 1 reading of their printed eq. (29) gives about
+        // 40 at the same inputs, three times outside their own stated range; dividing by the stress exponent,
+        // as their effective viscosity eq. (21) does and as this engine's creep inversion already does, lands
+        // inside it. The two are checked against each other so the factor cannot be silently dropped.
+        let r = derived_molar_gas_constant();
+        let p = schulz_lid_pressure_mpa(200);
+        let e_star = Fixed::from_int(530_000);
+        let v_star = Fixed::from_int(17); // 17 cm^3/mol
+        let n = Fixed::from_ratio(35, 10);
+        let t_i = Fixed::from_int(1750);
+        let drop = Fixed::from_int(2000);
+        let non_newtonian = stagnant_lid_rheological_theta(t_i, drop, e_star, p, v_star, n, r)
+            .expect("theta exists");
+        let newtonian_reading =
+            stagnant_lid_rheological_theta(t_i, drop, e_star, p, v_star, ONE, r)
+                .expect("theta exists");
+        assert!(
+            non_newtonian > Fixed::from_ratio(114, 10)
+                && non_newtonian < Fixed::from_ratio(128, 10),
+            "the n = 3.5 theta is {}, outside the source's own 11.4 to 12.8 for its dislocation runs",
+            non_newtonian
+        );
+        assert!(
+            newtonian_reading > Fixed::from_int(35),
+            "dropping n gives {}, which is the reading this test exists to reject",
+            newtonian_reading
+        );
+        // And the relation is exactly a division, not an approximation: theta(n) = theta(1) / n.
+        let scaled = newtonian_reading.checked_div(n).expect("representable");
+        assert!(
+            (scaled - non_newtonian).abs() < Fixed::from_ratio(1, 100_000),
+            "theta must scale as 1/n exactly"
+        );
+    }
+
+    #[test]
+    fn the_rheological_theta_recovers_the_textbook_pressure_free_form() {
+        // LIMITING CASE. At V* = 0 and n = 1 the kernel must collapse to the familiar theta = E* dT / (R T_i^2),
+        // which is the form Batra & Foley 2021 use for an internally heated body (their section 5). The
+        // expectation is COMPUTED from that closed form rather than reasoned to.
+        let r = derived_molar_gas_constant();
+        let e_star = Fixed::from_int(300_000);
+        let t_i = Fixed::from_int(1600);
+        let drop = Fixed::from_int(1350);
+        let theta = stagnant_lid_rheological_theta(t_i, drop, e_star, ZERO, ZERO, ONE, r)
+            .expect("theta exists");
+        let closed_form = e_star
+            .mul(drop)
+            .checked_div(r.mul(t_i).mul(t_i))
+            .expect("E* dT / (R T^2) is representable");
+        assert!(
+            (theta - closed_form).abs() < Fixed::from_ratio(1, 10_000),
+            "the pressure-free Newtonian limit is {} against the closed form {}",
+            theta,
+            closed_form
+        );
+        // And the pressure term's sign is the one the doc states: it RAISES theta while dT > T_i and LOWERS it
+        // once T_i is the larger, because the two terms carry opposite signs and their sum is P V* (dT - T_i).
+        let v_star = Fixed::from_int(17); // 17 cm^3/mol
+        let p = Fixed::from_int(3000); // 3 GPa, in the megapascals the kernel takes
+        let hot_interior = stagnant_lid_rheological_theta(t_i, drop, e_star, p, v_star, ONE, r)
+            .expect("theta exists");
+        assert!(
+            hot_interior < theta,
+            "with dT ({}) below T_i ({}) the pressure term must lower theta",
+            drop,
+            t_i
+        );
+        let big_drop = Fixed::from_int(2400);
+        let cold_pressure_free =
+            stagnant_lid_rheological_theta(t_i, big_drop, e_star, ZERO, ZERO, ONE, r).unwrap();
+        let cold_with_pressure =
+            stagnant_lid_rheological_theta(t_i, big_drop, e_star, p, v_star, ONE, r).unwrap();
+        assert!(
+            cold_with_pressure > cold_pressure_free,
+            "with dT above T_i the pressure term must raise theta"
+        );
+    }
+
+    #[test]
+    fn the_rheological_theta_refuses_rather_than_returning_a_meaningless_scale() {
+        let r = derived_molar_gas_constant();
+        let e = Fixed::from_int(300_000);
+        assert!(
+            stagnant_lid_rheological_theta(ZERO, Fixed::from_int(1000), e, ZERO, ZERO, ONE, r)
+                .is_none(),
+            "no interior temperature, no scale"
+        );
+        assert!(
+            stagnant_lid_rheological_theta(
+                Fixed::from_int(1600),
+                Fixed::from_int(1000),
+                e,
+                ZERO,
+                ZERO,
+                ZERO,
+                r
+            )
+            .is_none(),
+            "a zero stress exponent is not a creep law"
+        );
+        // Pressure stiffening that overwhelms the thermal softening leaves no rheological temperature scale:
+        // the kernel refuses rather than reporting a negative or zero theta a logarithm would then swallow.
+        // A deep, hot, nearly isothermal layer is the real case: at T_i = 1600 K with only a 100 K drop across
+        // it, the sign flips once P V* passes E* dT / (T_i - dT) = 20 kJ/mol, which 5 GPa on a 17 cm^3/mol
+        // activation volume (85 kJ/mol) is well past. The boundary is COMPUTED here, not chosen.
+        let v_star = Fixed::from_int(17);
+        let boundary_pv = e
+            .mul(Fixed::from_int(100))
+            .checked_div(Fixed::from_int(1600 - 100))
+            .expect("representable");
+        let deep_pressure = Fixed::from_int(5000); // 5 GPa in MPa
+        assert!(
+            deep_pressure.mul(v_star) > boundary_pv,
+            "the test's pressure must be past the sign flip it is checking"
+        );
+        assert!(
+            stagnant_lid_rheological_theta(
+                Fixed::from_int(1600),
+                Fixed::from_int(100),
+                e,
+                deep_pressure,
+                v_star,
+                ONE,
+                r
+            )
+            .is_none(),
+            "a non-positive theta is a refusal, never a clamped one"
+        );
+    }
+
+    #[test]
+    fn the_worked_example_referees_the_nusselt_kernel_against_the_sources_own_number() {
+        // MAGNITUDE REFEREE against a printed prediction. Schulz et al. 2020 section 4.5.2 run their own
+        // eq. (35) at Ra_har = 2.89e6 and theta = 12.73 and report Nu = 2.499, against a measured 2.507.
+        // Evaluating the printed formula at the printed inputs gives 2.462, about 1.5 per cent under their
+        // printed prediction, which is a spread inside the source itself and is recorded on the row rather than
+        // smoothed. So the kernel is held to the formula exactly and to the paper's two numbers within 2 per
+        // cent, which is the source's own honest width and not a tolerance chosen to make this pass.
+        let convection = crate::convection_scaling::ConvectionScaling::standard()
+            .expect("the vendored column loads");
+        let c = convection
+            .stagnant_lid_convention("nu_stag_arrhenius_harmonic_ra")
+            .expect("the harmonic-Ra row is present");
+        let theta = Fixed::from_ratio(1273, 100);
+        let ln_ra = Fixed::from_ratio(289, 100)
+            .mul(Fixed::from_int(1_000_000))
+            .ln();
+        let ln_nu = ln_stagnant_lid_nusselt(
+            ln_ra,
+            theta,
+            c.coefficient,
+            c.theta_exponent,
+            c.rayleigh_exponent,
+        )
+        .expect("a stagnant lid at Ra ~ 3e6 convects");
+        let nu = ln_nu.exp();
+        assert!(
+            (nu - Fixed::from_ratio(2499, 1000)).abs() < Fixed::from_ratio(5, 100),
+            "the kernel gives Nu = {}, more than 2 per cent from the source's predicted 2.499",
+            nu
+        );
+        assert!(
+            (nu - Fixed::from_ratio(2507, 1000)).abs() < Fixed::from_ratio(5, 100),
+            "the kernel gives Nu = {}, more than 2 per cent from the source's measured 2.507",
+            nu
+        );
+    }
+
+    #[test]
+    fn the_stagnant_lid_loses_less_heat_than_the_mobile_lid_at_the_same_vigour() {
+        // THE WHOLE POINT OF THE BRANCH, computed rather than asserted. At one Rayleigh number, the mobile-lid
+        // law the engine runs today and the stagnant-lid law are evaluated side by side and the suppression is
+        // read off. Ra = 1e7 with the planetary rigid-free Ra_crit and the internal-heating prefactor 2^(-4/3)
+        // against the time-dependent stagnant convention at theta = 25, an Arrhenius olivine mantle's value.
+        let convection = crate::convection_scaling::ConvectionScaling::standard()
+            .expect("the vendored column loads");
+        let ra = Fixed::from_int(10_000_000);
+        let ra_crit = convection
+            .critical_rayleigh(crate::convection_scaling::BoundaryCondition::RigidFree)
+            .expect("the planetary eigenvalue is present");
+        let a = convection
+            .nusselt_prefactor_at_internal_fraction(ONE)
+            .expect("the internal-heating prefactor derives");
+        let mobile = a.mul(
+            ra.checked_div(ra_crit)
+                .unwrap()
+                .powf(Fixed::from_ratio(1, 3)),
+        );
+        let c = convection
+            .stagnant_lid_convention("nu_stag_time_dependent_C1")
+            .expect("the time-dependent row is present");
+        let stagnant = ln_stagnant_lid_nusselt(
+            ra.ln(),
+            Fixed::from_int(25),
+            c.coefficient,
+            c.theta_exponent,
+            c.rayleigh_exponent,
+        )
+        .expect("a stiff lid still convects at Ra = 1e7")
+        .exp();
+        assert!(
+            stagnant < mobile,
+            "the stagnant lid must lose less than the mobile lid: Nu_stag {} against Nu_mobile {}",
+            stagnant,
+            mobile
+        );
+        // The suppression is a factor of several, not a rounding: theta^(-4/3) at theta = 25 is about 1/73.
+        assert!(
+            stagnant.mul(Fixed::from_int(3)) < mobile,
+            "at theta = 25 the suppression is at least threefold, measured {} against {}",
+            stagnant,
+            mobile
+        );
+        // And a stiffer lid suppresses harder: theta is the only thing that moves between these two.
+        let stiffer = ln_stagnant_lid_nusselt(
+            ra.ln(),
+            Fixed::from_int(40),
+            c.coefficient,
+            c.theta_exponent,
+            c.rayleigh_exponent,
+        )
+        .expect("still representable")
+        .exp();
+        assert!(stiffer < stagnant, "a larger theta must suppress more");
+        // While a more vigorous interior loses more: Ra is the only thing that moves between these two.
+        let hotter = ln_stagnant_lid_nusselt(
+            Fixed::from_int(100_000_000).ln(),
+            Fixed::from_int(25),
+            c.coefficient,
+            c.theta_exponent,
+            c.rayleigh_exponent,
+        )
+        .expect("still representable")
+        .exp();
+        assert!(hotter > stagnant, "a larger Rayleigh number must lose more");
+    }
+
+    #[test]
+    fn the_stagnant_lid_nusselt_floors_at_the_conductive_limit_and_refuses_the_rest() {
+        let convection = crate::convection_scaling::ConvectionScaling::standard()
+            .expect("the vendored column loads");
+        let c = convection
+            .stagnant_lid_convention("nu_stag_time_dependent_C1")
+            .expect("the time-dependent row is present");
+        // A lid stiff enough drives the raw expression below one, where the honest answer is that the body
+        // conducts. Nu >= 1 is the definition of a convective enhancement, so ln Nu floors at exactly zero and
+        // never below it. At theta = 400 and Ra = 1e6 the unclamped form is far under unity.
+        let ln_nu = ln_stagnant_lid_nusselt(
+            Fixed::from_int(1_000_000).ln(),
+            Fixed::from_int(400),
+            c.coefficient,
+            c.theta_exponent,
+            c.rayleigh_exponent,
+        )
+        .expect("representable");
+        assert_eq!(ln_nu, ZERO, "the conductive limit is ln Nu = 0, exactly");
+        // The clamp is a floor and not a pin: a vigorous, soft interior still reports its enhancement.
+        assert!(
+            ln_stagnant_lid_nusselt(
+                Fixed::from_int(100_000_000).ln(),
+                Fixed::from_int(10),
+                c.coefficient,
+                c.theta_exponent,
+                c.rayleigh_exponent,
+            )
+            .expect("representable")
+                > ZERO
+        );
+        // Neither a non-positive theta nor a non-positive coefficient has a logarithm, and a zero coefficient
+        // is not a scaling law. Both refuse rather than returning the ln sentinel dressed as an answer.
+        assert!(ln_stagnant_lid_nusselt(
+            Fixed::from_int(10),
+            ZERO,
+            c.coefficient,
+            c.theta_exponent,
+            c.rayleigh_exponent
+        )
+        .is_none());
+        assert!(ln_stagnant_lid_nusselt(
+            Fixed::from_int(10),
+            Fixed::from_int(20),
+            ZERO,
+            c.theta_exponent,
+            c.rayleigh_exponent
+        )
+        .is_none());
     }
 
     #[test]
@@ -4979,166 +4793,6 @@ mod tests {
         // caps are test stand-ins for the owner's reserved values, never canon.
         assert_eq!(F_INT(7), Fixed::from_int(7));
         assert_eq!(cap(3), Fixed::from_int(3));
-    }
-
-    // --- Metabolism (R-METABOLIZE) ---
-
-    #[test]
-    fn basal_rate_reproduces_a_mass_three_quarters_by_the_two_sqrt_identity() {
-        // m^(3/4) = sqrt(m * sqrt(m)), exact where m is a perfect fourth power: 16^(3/4) = 8 and
-        // 256^(3/4) = 64, reconstructed to the last fixed-point bit by the two integer square roots.
-        let a = Fixed::ONE;
-        let big = cap(1_000_000);
-        assert_eq!(
-            basal_metabolic_rate(Fixed::from_int(16), a, big),
-            Fixed::from_int(8),
-            "16^(3/4) = 8 by the two-sqrt identity"
-        );
-        assert_eq!(
-            basal_metabolic_rate(Fixed::from_int(256), a, big),
-            Fixed::from_int(64),
-            "256^(3/4) = 64"
-        );
-        // The coefficient scales the power linearly.
-        assert_eq!(
-            basal_metabolic_rate(Fixed::from_int(16), Fixed::from_int(3), big),
-            Fixed::from_int(24),
-            "a scales the rate: 3 * 16^(3/4) = 24"
-        );
-    }
-
-    #[test]
-    fn basal_rate_is_zero_at_zero_mass_and_saturates_to_the_cap() {
-        assert_eq!(
-            basal_metabolic_rate(ZERO, Fixed::ONE, cap(1_000_000)),
-            ZERO,
-            "no mass, no metabolism"
-        );
-        assert_eq!(
-            basal_metabolic_rate(Fixed::from_int(256), Fixed::ONE, Fixed::from_int(10)),
-            Fixed::from_int(10),
-            "64 W against a 10 W cap routes to the cap"
-        );
-    }
-
-    #[test]
-    fn basal_rate_is_monotone_increasing_yet_sublinear() {
-        let a = Fixed::ONE;
-        let big = cap(1_000_000);
-        let small = basal_metabolic_rate(Fixed::from_int(16), a, big); // 8
-        let large = basal_metabolic_rate(Fixed::from_int(256), a, big); // 64
-        assert!(large > small, "a larger body has the higher resting rate");
-        // Sublinear: mass rose 16x (16 -> 256) but the rate rose only 8x (8 -> 64), so the rate is
-        // below the linear extrapolation of the smaller body (the Kleiber signature).
-        assert!(
-            large < small.checked_mul(Fixed::from_int(16)).unwrap(),
-            "the rate grows slower than mass: 64 < 8 * 16"
-        );
-    }
-
-    #[test]
-    fn resting_loss_is_the_saturating_sum_of_convection_and_radiation() {
-        // The thermoregulatory loss is exactly convective_flux + radiant_emission over the area, the two
-        // resolved heat-transport kernels reused unchanged. A body warmer than its medium so both terms
-        // are positive.
-        let h = Fixed::from_ratio(1, 10);
-        let area = Fixed::from_int(2);
-        let body = Fixed::from_int(310);
-        let medium = Fixed::from_int(280);
-        let emissivity = Fixed::from_ratio(95, 100);
-        // Sigma at a fine scale (5.67e-8 at scale 55), the value the Tier-2 radiant term consumes.
-        let sigma_scale = 55u32;
-        let sigma_bits = civsim_units::bignum::BigRat::from_decimal_str("0.0000000567")
-            .unwrap()
-            .round_to_scale(sigma_scale)
-            .unwrap() as i64;
-        let big = cap(1_000_000_000);
-        let convective = convective_flux(h, area, body, medium, big);
-        let radiant =
-            radiant_emission_tier2(emissivity, area, body, medium, sigma_bits, sigma_scale, big);
-        let want = Fixed::saturating_sum([convective, radiant]).min(big);
-        assert_eq!(
-            resting_heat_loss(
-                h,
-                area,
-                body,
-                medium,
-                emissivity,
-                sigma_bits,
-                sigma_scale,
-                big
-            ),
-            want,
-            "resting loss = convective_flux + the Tier-2 radiant term over the area"
-        );
-        // A body at the medium temperature loses nothing.
-        assert_eq!(
-            resting_heat_loss(
-                h,
-                area,
-                body,
-                body,
-                emissivity,
-                sigma_bits,
-                sigma_scale,
-                big
-            ),
-            ZERO,
-            "no gradient, no loss (equilibrium)"
-        );
-    }
-
-    #[test]
-    fn drain_fraction_is_energy_spent_over_energy_stored() {
-        // basal 10 W, no heat loss, reserve 100 units at density 1 (stored 100 J), one-second tick:
-        // spent 10 J over stored 100 J is a tenth of the reserve per tick.
-        let frac = metabolic_drain_fraction(
-            Fixed::from_int(10),
-            ZERO,
-            Fixed::from_int(100),
-            Fixed::ONE,
-            Fixed::ONE,
-            Fixed::ONE,
-        );
-        assert_eq!(frac, Fixed::from_ratio(1, 10));
-        // A larger store drains a smaller fraction of itself for the same power (the reserve-side half of
-        // the Kleiber signature): ten times the stored energy, a tenth of the fraction.
-        let bigger = metabolic_drain_fraction(
-            Fixed::from_int(10),
-            ZERO,
-            Fixed::from_int(1000),
-            Fixed::ONE,
-            Fixed::ONE,
-            Fixed::ONE,
-        );
-        assert!(bigger < frac, "a larger reserve drains a smaller fraction");
-        assert_eq!(bigger, Fixed::from_ratio(1, 100));
-        // A zero-energy reserve (no energy tissue) drains fully to the cap; a zero-power demand drains
-        // nothing.
-        assert_eq!(
-            metabolic_drain_fraction(
-                Fixed::from_int(10),
-                ZERO,
-                ZERO,
-                Fixed::ONE,
-                Fixed::ONE,
-                Fixed::ONE
-            ),
-            Fixed::ONE,
-            "no reserve tissue, full drain"
-        );
-        assert_eq!(
-            metabolic_drain_fraction(
-                ZERO,
-                ZERO,
-                Fixed::from_int(100),
-                Fixed::ONE,
-                Fixed::ONE,
-                Fixed::ONE
-            ),
-            ZERO,
-            "no resting power, no drain"
-        );
     }
 
     // --- Hardening: product-before-divide reassociation (the wave-1 discipline, extended) ---
@@ -5568,12 +5222,6 @@ mod tests {
 
     #[test]
     fn overflowing_and_degenerate_branches_route_to_the_correct_physical_extreme() {
-        // satisfaction: an overflowing supply*assimilation is abundance, so full satisfaction.
-        assert_eq!(
-            satisfaction(Fixed::MAX, Fixed::MAX, Some(Fixed::ONE)),
-            ONE,
-            "an overflowing supply product is fully satisfied, not starving"
-        );
         // contact_pressure: an overflowing contact area spreads the force to zero pressure.
         assert_eq!(
             contact_pressure(Fixed::ONE, Fixed::MAX, cap(2_000_000_000)),
@@ -6155,123 +5803,7 @@ mod tests {
         );
     }
 
-    // --- Language processing cost (R-LANG-TYPOLOGY) ---
-
-    #[test]
-    fn parse_cost_is_zero_at_zero_extent_and_below() {
-        let m = Fixed::from_int(4);
-        let cap = Fixed::ONE;
-        assert_eq!(parse_cost(ZERO, m, cap), ZERO, "no domain, no cost");
-        assert_eq!(
-            parse_cost(Fixed::from_int(-3), m, cap),
-            ZERO,
-            "a negative extent has no cost"
-        );
-    }
-
-    #[test]
-    fn parse_cost_saturates_at_the_cap_for_an_unbounded_extent() {
-        let m = Fixed::from_int(4);
-        let cap = Fixed::from_int(7);
-        // A huge extent against a finite memory drives extent/(extent+memory) -> one, so the cost
-        // reaches the cap rather than wrapping.
-        assert_eq!(
-            parse_cost(Fixed::MAX, m, cap),
-            cap,
-            "unbounded extent saturates"
-        );
-        // And it never exceeds the cap on the way there.
-        assert!(parse_cost(Fixed::from_int(1000), m, cap) <= cap);
-        assert!(
-            parse_cost(Fixed::from_int(1000), m, cap) < cap,
-            "still below the cap at a finite extent"
-        );
-    }
-
-    #[test]
-    fn parse_cost_is_monotone_increasing_in_extent() {
-        let m = Fixed::from_int(4);
-        let cap = Fixed::ONE;
-        let c1 = parse_cost(Fixed::from_int(1), m, cap);
-        let c2 = parse_cost(Fixed::from_int(2), m, cap);
-        let c3 = parse_cost(Fixed::from_int(8), m, cap);
-        assert!(c1 < c2 && c2 < c3, "cost rises with the held domain extent");
-        // At extent == memory the cost is half the cap (the Hill half-saturation point).
-        let half = parse_cost(m, m, cap);
-        assert_eq!(
-            half,
-            Fixed::from_ratio(1, 2),
-            "half cost at extent == memory"
-        );
-    }
-
-    #[test]
-    fn parse_cost_is_softened_by_working_memory() {
-        let cap = Fixed::ONE;
-        let extent = Fixed::from_int(4);
-        let small = parse_cost(extent, Fixed::from_int(1), cap);
-        let large = parse_cost(extent, Fixed::from_int(16), cap);
-        assert!(
-            large < small,
-            "a larger working-memory capacity lowers the parse cost of the same domain"
-        );
-    }
-
-    #[test]
-    fn parse_cost_caps_rather_than_wraps_at_extremes() {
-        // Adversarial extremes route to a bounded [0, cap], never a wrap or panic.
-        let cap = Fixed::from_int(5);
-        for &e in &[Fixed::MIN, ZERO, Fixed::ONE, Fixed::MAX] {
-            for &mem in &[Fixed::MIN, ZERO, Fixed::from_int(3), Fixed::MAX] {
-                let c = parse_cost(e, mem, cap);
-                assert!(
-                    c >= ZERO && c <= cap,
-                    "parse_cost stayed in [0, cap] for e and mem"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn harmony_tilt_floors_at_one_and_needs_a_reduction() {
-        let temp = Fixed::from_ratio(1, 10);
-        let cap = Fixed::from_int(64);
-        assert_eq!(harmony_tilt(ZERO, temp, cap), ONE, "no reduction, no tilt");
-        assert_eq!(
-            harmony_tilt(Fixed::from_int(-2), temp, cap),
-            ONE,
-            "a negative reduction never pushes below one"
-        );
-        // A positive reduction earns a tilt strictly above one.
-        let t = harmony_tilt(Fixed::from_ratio(3, 10), temp, cap);
-        assert!(
-            t > ONE && t <= cap,
-            "a real reduction earns a bounded boost"
-        );
-    }
-
-    #[test]
-    fn harmony_tilt_saturates_at_the_cap_for_an_unbounded_reduction() {
-        let tiny_temp = Fixed::from_ratio(1, 1000);
-        let cap = Fixed::from_int(32);
-        // A large reduction over a tiny temperature drives exp past the representable range: it
-        // saturates at the cap rather than wrapping.
-        assert_eq!(harmony_tilt(Fixed::from_int(100), tiny_temp, cap), cap);
-        // The deterministic zero-temperature limit is the same hard max.
-        assert_eq!(harmony_tilt(Fixed::from_ratio(1, 4), ZERO, cap), cap);
-    }
-
-    #[test]
-    fn harmony_tilt_is_monotone_in_the_reduction() {
-        let temp = Fixed::from_ratio(1, 4);
-        let cap = Fixed::from_int(1 << 16);
-        let a = harmony_tilt(Fixed::from_ratio(1, 10), temp, cap);
-        let b = harmony_tilt(Fixed::from_ratio(3, 10), temp, cap);
-        let c = harmony_tilt(Fixed::from_ratio(6, 10), temp, cap);
-        assert!(a < b && b < c, "a larger avoided cost earns a larger tilt");
-    }
-
-    // --- Nernst EMF and reversible uptake flux (redox depth extension) ---
+    // --- Nernst EMF (redox depth extension) ---
 
     #[test]
     fn standard_potential_shifts_linearly_with_temperature() {
@@ -6340,73 +5872,6 @@ mod tests {
             empty,
             Fixed::ZERO,
             "an empty donor collapses the drive to no yield, got {empty:?}"
-        );
-    }
-
-    #[test]
-    fn reversible_uptake_flux_saturates_in_stock_drives_with_emf_and_conserves() {
-        // The reversible Michaelis-Menten flux saturates in the substrate (Hill/Monod), scales with the
-        // thermodynamic drive of the EMF, is floored at zero below equilibrium, and never exceeds the present
-        // stock (the structural min(v, S) conservation clamp). Thermal factor is the per-particle k_B*T/q.
-        let kt = Fixed::from_ratio(257, 10_000);
-        let temp = Fixed::ONE;
-        let q = Fixed::ONE;
-        let vmax = Fixed::from_int(2); // the caller derives this from catalyst tissue; a fixture here
-        let km = Fixed::ONE;
-        let h = Fixed::ONE; // plain Monod S/(Km+S)
-        let e_fwd = Fixed::from_ratio(8, 10); // strongly spontaneous
-
-        // Monotone rising in the stock (more substrate, more flux), up to Vmax*drive.
-        let low = reversible_uptake_flux(Fixed::from_ratio(1, 2), vmax, km, h, e_fwd, kt, temp, q);
-        let high = reversible_uptake_flux(Fixed::from_int(100), vmax, km, h, e_fwd, kt, temp, q);
-        assert!(
-            high > low && low > Fixed::ZERO,
-            "the flux rises and saturates with the stock (low {low:?}, high {high:?})"
-        );
-        // Drive: a stronger EMF pulls a larger flux at the same stock; a zero EMF (at equilibrium) pulls none.
-        let weak = reversible_uptake_flux(
-            Fixed::from_int(100),
-            vmax,
-            km,
-            h,
-            Fixed::from_ratio(1, 100),
-            kt,
-            temp,
-            q,
-        );
-        assert!(
-            high > weak,
-            "a stronger EMF drives a larger flux (strong {high:?}, weak {weak:?})"
-        );
-        let at_equil =
-            reversible_uptake_flux(Fixed::from_int(100), vmax, km, h, Fixed::ZERO, kt, temp, q);
-        assert_eq!(
-            at_equil,
-            Fixed::ZERO,
-            "at equilibrium (zero EMF) the flux is zero, got {at_equil:?}"
-        );
-        // Below equilibrium (negative EMF): no reverse uptake, floored at zero.
-        let below = reversible_uptake_flux(
-            Fixed::from_int(100),
-            vmax,
-            km,
-            h,
-            Fixed::from_ratio(-5, 10),
-            kt,
-            temp,
-            q,
-        );
-        assert_eq!(
-            below,
-            Fixed::ZERO,
-            "below its equilibrium the source powers no life, got {below:?}"
-        );
-        // Conservation: with a small stock the draw is capped at the stock (min(v, S)), never more.
-        let tiny_stock = Fixed::from_ratio(1, 100);
-        let capped = reversible_uptake_flux(tiny_stock, vmax, km, h, e_fwd, kt, temp, q);
-        assert!(
-            capped <= tiny_stock,
-            "the flux never exceeds the present stock (flux {capped:?}, stock {tiny_stock:?})"
         );
     }
 

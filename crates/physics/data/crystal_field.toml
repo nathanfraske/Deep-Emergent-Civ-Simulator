@@ -142,8 +142,8 @@ source = "MnO Pratt & Coelho PhysRev 116, 281 (1959): model-dependent (d5 all-sp
 # (ivct). The IDEAL derivation (Jorgensen's E_CT = 30000 cm^-1 * (chi_opt(ligand) - chi_opt(metal))) is FLAGGED, not
 # built: the 30 kK scale constant is primary-cited (Jorgensen, Mol.Phys. 6, 43 (1963); Prog.Inorg.Chem. 12, 101
 # (1970)) but the per-species optical electronegativities chi_opt(O2-)/chi_opt(Fe3+)/chi_opt(Fe2+) are in Jorgensen's
-# 1969-1971 books (not web-open) and could not be secured with a primary cite, so they are surfaced to MORNING_REVIEW
-# rather than fabricated. Each energy below is a cited measurement, surfaced for owner verification, never invented.
+# 1969-1971 books (not web-open) and could not be secured with a primary cite. The derivation and admission debt is
+# tracked in docs/working/ABIOTIC_EVIDENCE_DEBT.md. Each energy below is candidate evidence, not an admitted input.
 [[charge_transfer]]
 kind = "lmct"
 metal = "Fe3+"

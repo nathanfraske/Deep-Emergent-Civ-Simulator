@@ -1,4 +1,21 @@
-# Planetary and stellar physics: the derive-first map (owner research, in progress)
+# Superseded planetary and stellar derive map: historical research inventory
+
+Status: superseded by the canonical absolute-floor ruling of 2026-07-20.
+
+The mechanisms and derivation leads below remain useful research evidence, but
+the earlier per-world initial-condition vector, authored seams, calibration
+language, familiar-system anchors, and caller-selected contingency do not. They
+cannot enter the active runner. The sole source of physical causal values is
+the sealed absolute physics floor. A quantity must derive, pass the complete
+floor
+admission contract after derivation exhaustion, or refuse. Generated `[X]` and
+`[W]` state may appear only after an admitted physical measure and an approved
+realization-coordinate law exist. Earth, the Sun, local chemistry, a profile,
+or a viewer choice may validate or display a result but cannot select it.
+
+Use `docs/working/ABIOTIC_EVIDENCE_DEBT.md` for active migration status. Terms
+such as authored input, semi-authored seam, per-world vector, and initial
+condition below describe retired methodology rather than current permission.
 
 Owner-supplied derive-first cascade for celestial mechanics, stellar physics, atmospheric retention, and weather (2026-07-11), captured as a living map and extended as the research continues. This is the answer to "what are the other big physics substrates we will hit a wall with": most of this domain is not a wall, it is a derive-first payoff. The thesis, audited and confirmed below: this whole domain bottoms out at the fundamental constants already in the floor (G, k_B, h, c), a small per-world INITIAL-CONDITION vector (the orbital, rotational, and bulk-body state), and the periodic table (molar masses, and molecular polarizabilities for the optics). Near-zero authored calibration, and what remains authored is named at the end.
 

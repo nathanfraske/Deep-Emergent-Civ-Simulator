@@ -12,13 +12,37 @@ Custody is one of three. `in_repo`: bytes held in-tree, checksum verifiable with
 witness. `external`: bytes in local custody outside the repo, checksum plus archive snapshot.
 The licence decides which is permitted; see `docs/working/FETCH_PIPELINE_PLAN.md` section 3.
 
-**38 sources** (11 registry, 27 mirrored).
+**47 sources** (16 registry, 31 mirrored).
 
 ## Registry (hand-maintained)
 
+### `akiyama_1991_tetsu_dense_iron_oxides`
+
+Akiyama, T., Ogura, G., Ohota, H., Takahashi, R., Waseda, Y. & Yagi, J., 1991, Thermal Conductivities of Dense Iron Oxides, Tetsu-to-Hagane 77(2), 231. The Iron and Steel Institute of Japan. Received 25 May 1990.
+
+- sha256: `66aa4d79478d7f760bc24f0d6e094b8567989c87c5b0ac3e4e213b1af6f63538`
+- archived: https://web.archive.org/web/20251127152019/https://www.jstage.jst.go.jp/article/tetsutohagane1955/77/2/77_2_231/_pdf
+- scope: Thermal conductivity of dense pure hematite, magnetite, wustite and iron by the laser flash method from room temperature to 1553 K. Same samples, same apparatus and same authors as akiyama_1992_isij_iron_oxides. Registered so the measurement lineage behind the banked hematite value is traceable to the paper that made the measurement, rather than stopping at the paper that fitted it.
+- custody: witness
+- licence (**NOT redistributable**): CC BY-NC-ND 4.0, read from the article page: 'This is an open access article under the terms of the Creative Commons [Attribution-NonCommercial-NoDerivatives 4.0 International] license', linking creativecommons.org/licenses/by-nc-nd/4.0. Bytes are not held for the same reason as its sibling: the NC term is incompatible with this repository's blanket Apache-2.0 grant, and the ND term forbids a slim.
+- licence evidence: https://www.jstage.jst.go.jp/article/tetsutohagane1955/77/2/77_2_231/_article (CC BY-NC-ND 4.0 statement and licence link, read from the raw page).
+- free route (publisher-open): https://www.jstage.jst.go.jp/article/tetsutohagane1955/77/2/77_2_231/_pdf
+
+### `akiyama_1992_isij_iron_oxides`
+
+Akiyama, T., Ohta, H., Takahashi, R., Waseda, Y. & Yagi, J., 1992, Measurement and Modeling of Thermal Conductivity for Dense Iron Oxide and Porous Iron Ore Agglomerates in Stepwise Reduction, ISIJ International 32(7), 829-837, DOI 10.2355/isijinternational.32.829. The Iron and Steel Institute of Japan.
+
+- sha256: `717ea04ab464c61eb06031c2b13541962218f2bd0eab12fa17664cfde877acd2`
+- archived: https://web.archive.org/web/20251129124947/https://www.jstage.jst.go.jp/article/isijinternational1989/32/7/32_7_829/_pdf
+- scope: Thermal conductivity of DENSE pure iron oxides and iron over room temperature to 1553 K at 50 K intervals, on disk compacts hot-isostatically pressed from 1 micrometre powder at 1173 K and 150 MPa, with the paper stating the porosity 'was found to be less than 0.1%'. The value read here is the Fe2O3 branch at its stated lower bound, 298 K. SCOPE LIMIT that governs use: this is a dense POLYCRYSTAL of 99.9 percent purity carrying 400 ppm Mn and 200 ppm Al, so it is a phase property only to the extent that grain boundaries and that impurity load are negligible; it is not a single crystal. The paper's porous iron-ore agglomerate values are a different question entirely and are not read.
+- custody: witness
+- licence (**NOT redistributable**): CC BY-NC-ND 4.0, read from the article page rather than inferred from free-to-read status: the page states 'This is an open access article under the terms of the Creative Commons Attribution-NonCommercial-NoDerivs license' and links creativecommons.org/licenses/by-nc-nd/4.0, under '(c) The Iron and Steel Institute of Japan'. THE LICENCE PERMITS REDISTRIBUTION AND THIS REPOSITORY STILL MAY NOT HOLD THE BYTES, which is the finding worth carrying. The NC term forbids commercial use; this repo ships under Apache-2.0, which grants it. sources/licences.toml records the identical conflict for its MIT OpenCourseWare file and calls shipping such a file under a blanket Apache-2.0 statement an overclaim. Holding these bytes would repeat a convicted defect, so none are held. The ND term separately forbids a slim, so the choice was whole-or-nothing and nothing is correct here. The values themselves are facts and are uncopyrightable, so reading and citing them is safe either way.
+- licence evidence: https://www.jstage.jst.go.jp/article/isijinternational1989/32/7/32_7_829/_article (the CC BY-NC-ND 4.0 statement and licence link, read from the raw page rather than from a summariser); LICENSE and Cargo.toml in this repo for the Apache-2.0 side of the conflict; sources/licences.toml for the precedent.
+- free route (publisher-open): https://www.jstage.jst.go.jp/article/isijinternational1989/32/7/32_7_829/_pdf
+
 ### `bstar2006_lanz_hubeny`
 
-Lanz, T. and Hubeny, I., 2007, A Grid of NLTE Line-Blanketed Model Atmospheres of Early B-Type Stars (BSTAR2006), ApJS 169, 83-104, DOI 10.1086/511270 (verified at the primary: doi.org/10.1086/511270 resolves to this title at IOP; the earlier 10.1086/511268 was WRONG, it resolves to an unrelated silicate-obscuration paper). arXiv astro-ph/0611891.
+Lanz, T. and Hubeny, I., 2007, A Grid of NLTE Line-Blanketed Model Atmospheres of Early B-Type Stars (BSTAR2006), ApJS 169, 83-104, DOI 10.1086/511270 (verified at the primary: doi.org/10.1086/511270 resolves to this title at IOP; the repository's earlier 10.1086/511268 fetch seed resolves to a different paper). arXiv astro-ph/0611891.
 
 - sha256: `e5435bab670315a6611c2e7b252de9b8c6f88f12ce8a26d1c1c28906c0e24e10`
 - archived: https://web.archive.org/web/20260719182515/https://arxiv.org/pdf/astro-ph/0611891
@@ -40,6 +64,16 @@ Crystallography Open Database (COD), https://www.crystallography.net/cod/, eleve
 - licence evidence: https://www.crystallography.net/cod/ and the per-file header in each held CIF
 - free route (repository): https://www.crystallography.net/cod/
 - holding: `crates/physics/data/phase_conductivity/cod/`
+
+### `codata_2018_adjustment`
+
+Tiesinga, E., Mohr, P. J., Newell, D. B. and Taylor, B. N., 2021, CODATA Recommended Values of the Fundamental Physical Constants: 2018, Journal of Physical and Chemical Reference Data 50, 033105, DOI 10.1063/5.0064853.
+
+- sha256: `6d712bdc99719540bec65c7d1ef11b00f5d321e6083e9e6ed7d3de6fb8062908`
+- archived: https://web.archive.org/web/20250525020415id_/https://physics.nist.gov/cuu/pdf/JPCRD2018CODATA.pdf
+- scope: The method, input-data cutoff, least-squares adjustment, uncertainty treatment, and tables underlying the 2018 CODATA recommended values. It supports the value table's provenance and uncertainty semantics; it is not treated as an independent second measurement source.
+- custody: witness
+- licence (redistribution unconfirmed): The paper states copyright 2021 by the U.S. Secretary of Commerce on behalf of the United States and All rights reserved. No redistribution permission was inferred. The repository therefore holds no paper bytes and uses citation-plus-witness custody.
 
 ### `flexure_tafi`
 
@@ -101,6 +135,16 @@ Five published structure determinations in American Mineralogist, read as the pr
 - licence evidence: http://www.minsocam.org/msa/Copyright.html
 - free route (publisher-open): http://www.minsocam.org/ammin/AM51/AM51_123.pdf
 
+### `nist_codata_2018_ascii`
+
+National Institute of Standards and Technology, Fundamental Physical Constants: Complete Listing, 2018 CODATA adjustment, NIST Standard Reference Database 121, Gaithersburg, Maryland.
+
+- sha256: `8c47c05db62c4d314a5244db51a47b4831616e55a8d357ced373a8620ff43be1`
+- archived: https://web.archive.org/web/20241219074053id_/https://physics.nist.gov/cuu/Constants/ArchiveASCII/allascii_2018.txt
+- scope: The seven exact SI representation rows and three measured physical-invariant rows used by crates/units/src/fundamentals.rs, including each printed value, uncertainty or exact marker, and SI unit. Only fine-structure constant, Newtonian constant of gravitation, and electron mass are physical-floor candidates; the SI-defining rows are noncausal representation metadata. The 2018 adjustment remains pinned for this transcript schema; this entry does not authorize silent replacement by a later adjustment.
+- custody: witness
+- licence (redistribution unconfirmed): NIST identifies the constants database as Standard Reference Database 121, and the Standard Reference Data Act permits copyright in SRD compilations. No redistribution grant for these table bytes was established. The repository therefore holds no copy and records only the citation, factual row values, checksum, and public archive witness.
+
 ### `nsrds_nbs8`
 
 Powell, R.W., Ho, C.Y. & Liley, P.E., 1966, Thermal Conductivity of Selected Materials, NSRDS-NBS 8, National Standard Reference Data System, National Bureau of Standards, U.S. Department of Commerce, issued November 25, 1966, 168 p.
@@ -136,6 +180,18 @@ Touloukian, Y.S. (ed.), 1966, Recommended Values of the Thermophysical Propertie
 - licence evidence: the printed 'Copyright 1970, Purdue Research Foundation' notice in the sibling volume TPRC Data Series Volume 2 (DTIC ADA951936), read at line 395 of its extracted text
 - free route (gov-work): https://ntrs.nasa.gov/api/citations/19660014513/downloads/19660014513.pdf
 
+### `tprc_vol2_nonmetallic_solids`
+
+Touloukian, Y.S., Powell, R.W., Ho, C.Y. & Klemens, P.G., 1970, Thermophysical Properties of Matter, The TPRC Data Series, Volume 2: Thermal Conductivity, Nonmetallic Solids. Thermophysical Properties Research Center, Purdue University; IFI/Plenum, New York-Washington. Held publicly as DTIC AD-A951936, Distribution Statement A.
+
+- sha256: `7ef2fdaf9e2711e4dede65cd6ca717003ef983e7f3f3b4e19fde501c1d03e154`
+- archived: https://web.archive.org/web/20250202023422/https://apps.dtic.mil/sti/tr/pdf/ADA951936.pdf
+- scope: Thermal conductivity of nonmetallic solids: single oxides, mixtures, minerals and miscellaneous compounds, each as a figure, a specification table describing every specimen, and a data table of the digitised curve. Read here ONLY for the spinel question, and the scope limit is the whole point of the entry: TPRC's spinel coverage is a set of SPECIMENS, and their compositions are what disqualify them from standing for the stoichiometric phase.
+- custody: witness
+- licence (**NOT redistributable**): NOT REDISTRIBUTABLE, and the finding is inherited rather than newly made: the sibling TPRC volume prints 'Copyright 1970, Purdue Research Foundation', and this repository's touloukian_1966_oxides entry already withholds bytes on exactly that ground. Distribution Statement A governs onward distribution by the Government, not a grant of copyright licence to this project. The numeric values are facts and are uncopyrightable, so reading and citing them is safe, which is what is done here. At 85 MB it would in any case be the largest artifact in the tree by an order of magnitude.
+- licence evidence: the printed 'Copyright 1970, Purdue Research Foundation' notice in the TPRC Data Series (recorded at line 395 of the extracted text of DTIC ADA951936 by the earlier phase-conductivity fetch, and carried forward here rather than re-derived).
+- free route (gov-work): https://web.archive.org/web/20250202023422/https://apps.dtic.mil/sti/tr/pdf/ADA951936.pdf
+
 ### `usgs_ofr88690`
 
 Diment, W.H. & Pratt, H.R., 1988, Thermal conductivity of some rock-forming minerals: a tabulation, U.S. Geological Survey Open-File Report 88-690, 15 p., DOI 10.3133/ofr88690.
@@ -169,6 +225,19 @@ Byerlee, J., 1978, Friction of rocks, Pure and Applied Geophysics 116, 615-626, 
 - licence evidence: https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits
 - free route (gov-work): https://earthquake.usgs.gov/static/lfs/research/rockphysics/Friction_of_rocks.pdf
 - authority: `crates/physics/data/byerlee_1978/manifest.toml`
+
+### `convection_scaling.batra_foley_2021`
+
+Batra, K., Foley, B.J. (2021), Scaling laws for stagnant-lid convection with a buoyant crust, Geophys. J. Int. 228(1), 631-663, doi 10.1093/gji/ggab366. Volume, issue, pages and date verified at Crossref rather than assumed from the manuscript.
+
+- sha256: `858dda2aa7fbef10f93f72a7fb77624f893171d405a0b8fea4975ced408965ab`
+- archived: https://web.archive.org/web/20260719225200/https://par.nsf.gov/biblio/10389156
+- scope: 2-D Cartesian, free-slip top and bottom, periodic sides, temperature fixed at the top and bottom so the models are BOTTOM-HEATED with no internal heating. Frank-Kamenetskii LINEARIZED viscosity (eq. 5), so temperature-dependent, NEWTONIAN, and with NO activation volume and NO pressure dependence. theta was sampled at two values only, 13.82 and 16.12 (viscosity contrasts 1e6 and 1e7), over reference Rayleigh numbers 1e6 to 1e8.
+- custody: witness
+- licence (**NOT redistributable**): Geophysical Journal International (Royal Astronomical Society, Oxford University Press), all rights reserved. NOT open access: Crossref reports the licence URL as the OUP standard-publication-model page, the subscription model, with no Creative Commons or other reuse grant attached. The copy read is the AUTHOR ACCEPTED MANUSCRIPT deposited in the NSF Public Access Repository under the NSF public-access policy, which makes the manuscript publicly readable and grants no redistribution right, so the bytes are not held.
+- licence evidence: https://academic.oup.com/journals/pages/access_purchase/rights_and_permissions
+- free route (funder-repository-accepted-manuscript): https://par.nsf.gov/servlets/purl/10389156
+- authority: `crates/physics/data/convection_scaling/manifest.toml`
 
 ### `convection_scaling.bodenschatz_pesch_ahlers_2000`
 
@@ -208,6 +277,19 @@ Ricard, Y., Physics of mantle convection, course notes, ENS de Lyon (section 4.5
 
 - sha256: `3a732fb76a67a21877c7a7538d258fe3d0c91c18fe89c70cb9bdb061560fdda6`
 - archived: http://web.archive.org/web/20260718143529/https://perso.ens-lyon.fr/yanick.ricard/note-convection
+- authority: `crates/physics/data/convection_scaling/manifest.toml`
+
+### `convection_scaling.schulz_tosi_plesa_breuer_2020`
+
+Schulz, F., Tosi, N., Plesa, A.-C., Breuer, D. (2020), Stagnant-lid convection with diffusion and dislocation creep rheology: Influence of a non-evolving grain size, Geophys. J. Int. 220(1), 18-36, doi 10.1093/gji/ggz417 (advance access 2019 September 17). Volume, issue, pages and date verified at Crossref.
+
+- sha256: `a7e8f41dcc02733b24b8c39d47e8c529e534b58e25d7c228aee83f198077e28e`
+- archived: https://web.archive.org/web/20260719224847/https://elib.dlr.de/130183/1/ggz417.pdf
+- scope: 2-D Cartesian box of aspect ratio one, free-slip, reflective side walls, isothermal top and bottom so the models are BOTTOM-HEATED with no internal heating, 200 x 200 uniform grid, Mars-like parameters. eqs. (34) and (35) are fitted over the DIFFUSION-CREEP and reduced-activation-enthalpy runs in the one-convection-cell regime, so they are NEWTONIAN fits, and the source states its own limit: 'since the scaling parameters are predicted as functions of the lid shape (flat versus steep) and dislocation creep is different in this respect from the simulations used to derive eqs (34)-(35), care should be taken upon using these relations for dislocation creep'. The source also states that the fit 'is only valid for the specific parameters given in Table 1'.
+- custody: witness
+- licence (**NOT redistributable**): Geophysical Journal International (Royal Astronomical Society, Oxford University Press), all rights reserved. NOT open access: Crossref reports the same OUP standard-publication-model licence URL, the subscription model, with no reuse grant. The copy read is the PUBLISHER'S VERSION OF RECORD as deposited in the German Aerospace Center's eLib institutional repository, and the document's own page furniture records it as a subscriber download ('Downloaded from https://academic.oup.com/gji/article-abstract/220/1/18/5571091 by Deutsches Zentrum fuer Luft- und Raumfahrt (DLR); Bibliotheks- und Informationswesen user on 05 November 2019'). An institutional deposit of a subscriber copy is not a licensed redistribution, so the bytes are not held.
+- licence evidence: https://academic.oup.com/journals/pages/access_purchase/rights_and_permissions
+- free route (institutional-repository-plus-archive): https://web.archive.org/web/20260719224847/https://elib.dlr.de/130183/1/ggz417.pdf
 - authority: `crates/physics/data/convection_scaling/manifest.toml`
 
 ### `fan_2019`
@@ -269,6 +351,9 @@ Stixrude, L. & Lithgow-Bertelloni, C., 2005, Thermodynamics of mantle minerals -
 
 - sha256: `95e1cd9b58c28874b2617e68937a61c22ad78032ba4bc2b5a2305a104dc54604`
 - archived: https://web.archive.org/web/20260718151531/https://www.perplex.ethz.ch/thermo_course/chapter_5/stixrude_GJI_05.pdf
+- licence (**NOT redistributable**): Geophysical Journal International (Royal Astronomical Society; Blackwell in 2005, now Oxford University Press), all rights reserved. BRONZE open access: free to read, no reuse grant. Identical bytes to `thermoelastic_anchors.slb_2005_mantle_minerals_i` (same sha256); see that entry.
+- licence evidence: https://academic.oup.com/journals/pages/access_purchase/rights_and_permissions
+- remediation: No bytes are tracked in the repo (citation-plus-witness, bytes in local custody), so no removal is required. Recorded here because the gate's duplicate-document check would otherwise report this twin as carrying no finding while its identical copy carries one. A second, smaller wording defect is noted rather than fixed in this lane: the gruneisen manifest's recipe calls the held file 'the open perplex.ethz.ch course copy' without recording that it is an accepted-manuscript preprint rather than the version of record, and its table anchors are therefore in the preprint's own pagination.
 - authority: `crates/physics/data/gruneisen/manifest.toml`
 
 ### `gruneisen.zha_1996_forsterite`
@@ -385,6 +470,32 @@ Speziale, S., Duffy, T.S., and Angel, R.J., 2004, Single-crystal elasticity of f
 - licence evidence: https://www.agu.org/publications/authors/policies
 - remediation: CONVERTED 2026-07-18 under the owner ruling: bytes removed from the repo, entry now citation-plus-witness. The Wayback witness was re-fetched and hashed and is BYTE-IDENTICAL to the retained sha256 receipt, so the provenance is unbroken and nothing was lost with the bytes.
 - authority: `crates/physics/data/speziale_2004/manifest.toml`
+
+### `thermoelastic_anchors.slb_2005_mantle_minerals_i`
+
+Stixrude, L. & Lithgow-Bertelloni, C., 2005, Thermodynamics of mantle minerals - I. Physical properties, Geophysical Journal International 162(2), 610-632, DOI 10.1111/j.1365-246X.2005.02642.x.
+
+- sha256: `95e1cd9b58c28874b2617e68937a61c22ad78032ba4bc2b5a2305a104dc54604`
+- archived: https://web.archive.org/web/20260718151531/https://www.perplex.ethz.ch/thermo_course/chapter_5/stixrude_GJI_05.pdf
+- scope: Ambient reference state V_0 at 300 K, 1 bar, for 31 MANTLE species in the MgO-FeO-CaO-Al2O3-SiO2-Na2O system. q is the constant exponent of gamma = gamma_0 (V/V_0)^q, valid over the upper-mantle to lower-mantle P,T range the inversion was fit across. NOT applicable to ferric phases (no Fe2O3), and the only SiO2 polymorph present is stishovite, which must never be read for quartz.
+- custody: witness
+- licence (**NOT redistributable**): Geophysical Journal International (Royal Astronomical Society; Blackwell in 2005, now Oxford University Press), all rights reserved. The article is BRONZE open access: readable without payment at the publisher, carrying no Creative Commons or other reuse grant, so redistribution of the bytes is not permitted. The held copy is in addition an ACCEPTED-MANUSCRIPT PREPRINT hosted on a university course page (perplex.ethz.ch), which is an author/institutional posting rather than a licensed redistribution.
+- licence evidence: https://academic.oup.com/journals/pages/access_purchase/rights_and_permissions
+- free route (author-manuscript-plus-archive): https://web.archive.org/web/20260718151531/https://www.perplex.ethz.ch/thermo_course/chapter_5/stixrude_GJI_05.pdf
+- authority: `crates/physics/data/thermoelastic_anchors/manifest.toml`
+
+### `thermoelastic_anchors.slb_2011_mantle_minerals_ii`
+
+Stixrude, L. & Lithgow-Bertelloni, C., 2011, Thermodynamics of mantle minerals - II. Phase equilibria, Geophysical Journal International 184(3), 1180-1213, DOI 10.1111/j.1365-246X.2010.04890.x.
+
+- sha256: `9266dc9405085d7f89dc68c84e7b2cf69dc0a5b09b576f5935dd703aa5647797`
+- archived: https://web.archive.org/web/20221029182918/https://www.homepages.ucl.ac.uk/~ucfbls0/stixrudelithgowbertelloni_11.pdf
+- scope: Ambient reference state V_0 at 300 K, 1 bar, for the mantle phase-equilibrium species set. q_0 is the constant exponent of gamma = gamma_0 (V/V_0)^q over the P,T range of the phase-equilibrium inversion. The quartz entry covers ALPHA-quartz with the alpha-beta displacive transition carried by a SEPARATE Landau term, so the quartz row does not describe the phase across that transition. No ferric phases: Fe2O3 is absent.
+- custody: witness
+- licence (**NOT redistributable**): Geophysical Journal International (Royal Astronomical Society; Wiley-Blackwell in 2011, now Oxford University Press), all rights reserved. BRONZE open access: OpenAlex reports oa_status 'bronze' with the publisher's own PDF free to read at academic.oup.com, and no Creative Commons or other reuse grant is attached, so redistribution of the bytes is not permitted. The held copy is the publisher's VERSION OF RECORD as posted on the first author's UCL homepage, an author posting rather than a licensed redistribution, and that URL now 404s.
+- licence evidence: https://academic.oup.com/journals/pages/access_purchase/rights_and_permissions
+- free route (author-posting-plus-archive): https://web.archive.org/web/20221029182918/https://www.homepages.ucl.ac.uk/~ucfbls0/stixrudelithgowbertelloni_11.pdf
+- authority: `crates/physics/data/thermoelastic_anchors/manifest.toml`
 
 ### `wachtman_1960_corundum`
 

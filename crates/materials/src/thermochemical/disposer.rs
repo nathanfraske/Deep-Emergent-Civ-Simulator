@@ -53,6 +53,7 @@ use civsim_core::Fixed;
 use civsim_physics::ionic_radii::IonicRadii;
 use civsim_physics::lattice_modulus::{lattice_energy_ionic_raw, BornExponents, PrototypeLibrary};
 use civsim_physics::periodic::PeriodicTable;
+use civsim_units::constants::SiExecutionMagnitudes;
 use std::collections::BTreeMap;
 
 /// The structure prototype the disposer seeds for a 1:1 binary ionic candidate (D1's first-cut structural
@@ -66,6 +67,8 @@ const ROCK_SALT: &str = "rock-salt";
 /// Born-Haber references) as the resolution band. The `provenance_key` and `tie_slot` are the opaque honesty-
 /// accounting handles every verdict carries (resolved against the seven-tag register in `sim`).
 pub struct ThermochemicalDisposer<'a> {
+    /// Verified access to physical constants used by the ionic energy law.
+    pub execution: &'a SiExecutionMagnitudes,
     /// The periodic-table floor (valences for the charge balance that identifies the ionic pair).
     pub table: &'a PeriodicTable,
     /// The Shannon crystal ionic radii floor (the interionic distance r0).
@@ -102,6 +105,7 @@ impl<'a> ThermochemicalDisposer<'a> {
             .map(|(symbol, count)| (symbol.clone(), *count))
             .collect();
         lattice_energy_ionic_raw(
+            self.execution,
             &comp_vec,
             ROCK_SALT,
             self.table,
@@ -189,6 +193,11 @@ mod tests {
     use crate::thermochemical::proposer::{propose_candidates, Composition};
     use civsim_physics::lattice_modulus::{ionic_energy_band_fraction, EnergyValidationSet};
 
+    fn execution() -> SiExecutionMagnitudes {
+        civsim_units::constants::canonical_si_execution_magnitudes()
+            .expect("the sealed physical floor projects")
+    }
+
     fn table() -> PeriodicTable {
         PeriodicTable::standard().expect("the periodic table loads")
     }
@@ -229,6 +238,7 @@ mod tests {
     }
 
     fn disposer<'a>(
+        execution: &'a SiExecutionMagnitudes,
         t: &'a PeriodicTable,
         r: &'a IonicRadii,
         bo: &'a BornExponents,
@@ -236,6 +246,7 @@ mod tests {
         band_fraction: Fixed,
     ) -> ThermochemicalDisposer<'a> {
         ThermochemicalDisposer {
+            execution,
             table: t,
             radii: r,
             born: bo,
@@ -248,8 +259,9 @@ mod tests {
 
     #[test]
     fn the_ionic_energy_bridges_a_compound_to_the_lattice_energy() {
+        let execution = execution();
         let (t, r, bo, pr) = (table(), radii(), born(), protos());
-        let d = disposer(&t, &r, &bo, &pr, Fixed::from_ratio(4, 100));
+        let d = disposer(&execution, &t, &r, &bo, &pr, Fixed::from_ratio(4, 100));
         // MgO bridges to about -3927 kJ/mol (the physics divalent Born-Haber energy).
         let mgo = d.ionic_energy(&binary("Mg", "O")).expect("MgO scores");
         assert!(
@@ -268,8 +280,9 @@ mod tests {
 
     #[test]
     fn a_non_rock_salt_composition_is_out_of_the_seeded_ionic_branch() {
+        let execution = execution();
         let (t, r, bo, pr) = (table(), radii(), born(), protos());
-        let d = disposer(&t, &r, &bo, &pr, Fixed::from_ratio(4, 100));
+        let d = disposer(&execution, &t, &r, &bo, &pr, Fixed::from_ratio(4, 100));
         // A 2:3 composition (corundum-type Al2O3) is not a 1:1 binary, so the seeded rock-salt prototype is out
         // of its structural domain: the disposer returns None rather than forcing a rock-salt Madelung.
         let al2o3 = Compound_of(&[("Al", 2), ("O", 3)]);
@@ -310,13 +323,14 @@ mod tests {
 
     #[test]
     fn the_disposer_decides_the_deeper_lattice_energy_when_well_separated() {
+        let execution = execution();
         // A real Verdict: over two well-characterised ionic binaries whose lattice energies are far apart (NaCl
         // about -751, MgO about -3927), the disposer DECIDES the deeper one (MgO), the single most-stable
         // candidate, with the gap far exceeding the measured band. This is the estimator's legitimate domain.
         let (t, r, bo, pr) = (table(), radii(), born(), protos());
-        let band = ionic_energy_band_fraction(&validation(), &t, &r, &bo, &pr)
+        let band = ionic_energy_band_fraction(&execution, &validation(), &t, &r, &bo, &pr)
             .expect("the measured band-fraction computes");
-        let d = disposer(&t, &r, &bo, &pr, band);
+        let d = disposer(&execution, &t, &r, &bo, &pr, band);
         let v = d.dispose_ionic(vec![binary("Na", "Cl"), binary("Mg", "O")]);
         match v {
             Verdict::Decided(decided) => {
@@ -336,8 +350,9 @@ mod tests {
 
     #[test]
     fn a_single_scorable_candidate_is_trivial_and_an_unscorable_set_escalates() {
+        let execution = execution();
         let (t, r, bo, pr) = (table(), radii(), born(), protos());
-        let d = disposer(&t, &r, &bo, &pr, Fixed::from_ratio(4, 100));
+        let d = disposer(&execution, &t, &r, &bo, &pr, Fixed::from_ratio(4, 100));
         // One scorable candidate: a trivial verdict (the physics is unambiguous), logged.
         let v = d.dispose_ionic(vec![binary("Na", "Cl")]);
         assert!(
@@ -355,6 +370,7 @@ mod tests {
 
     #[test]
     fn the_disposer_escalates_a_near_degenerate_within_class_pair() {
+        let execution = execution();
         // THE DEMONSTRATE-FAILURE, at the REAL measured band (no band inflation). KCl and RbCl are the
         // closest-spaced rock-salt binaries with noble-gas Born cores (about -676.6 and -652.4 kJ/mol, a gap of
         // about 24 kJ/mol, roughly 3.6 percent), INSIDE the estimator's measured band (about 4.1 percent times
@@ -362,9 +378,9 @@ mod tests {
         // uncertainty and ESCALATES with no winner, rather than emitting a confident ground state the model
         // cannot justify. This is the within-ionic-class near-degeneracy the measured band exists to catch.
         let (t, r, bo, pr) = (table(), radii(), born(), protos());
-        let band = ionic_energy_band_fraction(&validation(), &t, &r, &bo, &pr)
+        let band = ionic_energy_band_fraction(&execution, &validation(), &t, &r, &bo, &pr)
             .expect("the measured band computes");
-        let d = disposer(&t, &r, &bo, &pr, band);
+        let d = disposer(&execution, &t, &r, &bo, &pr, band);
         let escalated = d.dispose_ionic(vec![binary("K", "Cl"), binary("Rb", "Cl")]);
         match escalated {
             Verdict::Escalate(e) => {
@@ -395,12 +411,13 @@ mod tests {
 
     #[test]
     fn the_disposer_trait_scores_the_ionic_branch() {
+        let execution = execution();
         // The trait impl composes end to end: propose real candidates, dispose, read a verdict. The environment
         // and seed are unread by D1 (the lattice-energy term), so any values pass.
         let (t, r, bo, pr) = (table(), radii(), born(), protos());
-        let band =
-            ionic_energy_band_fraction(&validation(), &t, &r, &bo, &pr).expect("band computes");
-        let d = disposer(&t, &r, &bo, &pr, band);
+        let band = ionic_energy_band_fraction(&execution, &validation(), &t, &r, &bo, &pr)
+            .expect("band computes");
+        let d = disposer(&execution, &t, &r, &bo, &pr, band);
         let candidates = vec![binary("Na", "Cl"), binary("Mg", "O")];
         let env = crate::thermochemical::proposer::Environment::unconstrained();
         let v = Disposer::dispose(&d, candidates, &env, 0);

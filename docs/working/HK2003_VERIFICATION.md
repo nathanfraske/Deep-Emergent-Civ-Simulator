@@ -1,8 +1,8 @@
 # Hirth and Kohlstedt (2003) Table 1: verification against the primary
 
-This document is the verification step on the olivine creep anchors that `GEOTHERM_FETCHES.md` section 1 recorded through a library. That fetch declared BLOCKER 1: "Hirth and Kohlstedt (2003) Table 1 was never read." **The primary has now been read.** Table 1 and Table 2 are transcribed below at source precision, and every library-mediated digit is checked against them.
+This document is the verification step on the candidate olivine creep rows that `GEOTHERM_FETCHES.md` section 1 recorded through a library. That fetch declared BLOCKER 1: "Hirth and Kohlstedt (2003) Table 1 was never read." **The primary has now been read.** Table 1 and Table 2 are transcribed below at source precision, and every library-mediated digit is checked against them.
 
-This file is the verification record only. `GEOTHERM_FETCHES.md` is not edited here (one writer per doc); its BLOCKER 1 is answered by this file, and the owner decides what the fetch doc carries forward.
+This file is evidence custody and verification only. It resolves the source-access part of `GEOTHERM_FETCHES.md` BLOCKER 1. It does not admit a creep magnitude, authorize a caller choice, or turn the primary's pressure-conditioned spread into one value.
 
 ## How the primary was reached, and what the owner's mirror does and does not hold
 
@@ -86,13 +86,13 @@ The UWGeodynamics `ViscousRheologies.json` rows were re-read from the library it
 
 ### 3.2 What DIVERGED
 
-**n = 3.5 ± 0.5 is WRONG against the primary. Table 1 prints n = 3.5 ± 0.3.** The prior fetch listed both ± 0.3 and ± 0.5 as circulating, both SUMMARY-ONLY, and could not adjudicate. The primary adjudicates: **± 0.3**. The ± 0.5 has a traceable origin inside H&K's own text, and it is not a fitted band on the recommended value. Page 84, Experimental Background, is a sensitivity ILLUSTRATION: "Therefore, the primary limitation on accuracy comes from the relatively large extrapolation in stress. For example, by extrapolating two orders of magnitude in stress (e.g., from 100 to 1 MPa), an uncertainty in the stress exponent of ±0.5 results in ± one order of magnitude uncertainty in viscosity." That is a hypothetical about what an uncertainty of that size would cost, written before any fit is presented. Separately, several INDIVIDUAL experiment fits in the text carry ± 0.5-class bands (n = 3.3 ± 0.6, n = 3.6 ± 0.5, n = 3.4 ± 0.5, n = 3.6 ± 0.6, and Chopra and Paterson's n = 3.6 ± 0.2). The summary value Table 1 recommends is 3.5 ± 0.3. A source that attributes "3.5 ± 0.5" to Hirth and Kohlstedt (2003) has taken a number from an illustrative sentence or a single run and attached it to the table's recommendation.
+**The repository uses Table 1's n = 3.5 ± 0.3.** The prior fetch listed both ± 0.3 and ± 0.5 as circulating, both SUMMARY-ONLY, and could not distinguish their roles. The primary's Table 1 prints **± 0.3**. Page 84 separately uses ±0.5 in a sensitivity illustration about extrapolating two orders of magnitude in stress, before any fit is presented. Several individual experiment fits also carry ±0.5-class bands. Those are parallel contexts rather than the Table 1 recommendation, so they do not supply this manifest field. No claim about an external work repeating another context is authorized without the external-claim release gate.
 
-**Every band is missing from the library.** The library ships bare central values: no ± 4 on 530, no ± 40 on 520, no ± 50 or ± 75 on the diffusion rows, no ± 0.3 on n, no ± 0.4 on r. A consumer reading the library alone cannot know any of these values carries a band, and the wet dislocation E* band (± 40 kJ/mol on 520) sits inside an exponential.
+**Every band is missing from the library.** The library carries bare central values: no ± 4 on 530, no ± 40 on 520, no ± 50 or ± 75 on the diffusion rows, no ± 0.3 on n, no ± 0.4 on r. A consumer reading the library alone cannot know any of these values carries a band, and the wet dislocation E* band (± 40 kJ/mol on 520) sits inside an exponential.
 
 **The melt term is absent from the library entirely.** Table 1 prints α for all eight rows (30 for diffusion, 30-45 for dislocation and GBS). The library has no melt field. Equation (1)'s `exp(αφ)` factor therefore has no representation in the library rows at all. The primary's text (page 94) gives the domain: "For both wet and dry conditions, the data at φ < 0.12 are well described by an exponential relationship ε̇ ∝ exp(αφ), where α is a constant between 25-30 for the diffusion creep regime and between 30-45 for the dislocation creep regime." Note the text says 25-30 for diffusion where Table 1 prints the single value 30, a minor internal narrowing by the table.
 
-**Two library activation volumes are MIDPOINTS of the primary's printed ranges, shipped as point values.**
+**Two library activation volumes are MIDPOINTS of the primary's printed ranges, carried as point values.**
 
 | Row | Library V* | Primary Table 1 V* | Relation |
 | --- | --- | --- | --- |
@@ -146,10 +146,10 @@ The 6 is low **because** it was fitted over a pressure range reaching 10 GPa. Th
 
 The reference to "Table 1" is a **misprint in the published paper**. Table 1 has no pressure-range column; Table 2 does. This was checked three ways: layout-mode extraction, raw-mode extraction, and a visual read of the rendered page 93. All three read "Table 1". The sentence describes a column that exists only in Table 2, so it can only mean Table 2. Under that reading, the rows whose P range extends to 1 atm (10^-4 GPa) are the three Recovery rows: **19, 14, and 6**. H&K's own recommended set for the chord V\* therefore **still spans a factor of 3**, and the library's 6 is the lowest member of it. The primary adds, page 92: "In general both the deformation and recovery data are reasonably bracketed using the theoretical treatments", which presents the spread as bracketed rather than resolved.
 
-**Status: the band ships DECLARED. The conflict is NARROWED in understanding and OPEN as a number.**
+**Status: the source conflict is narrowed in understanding, while the candidate remains unadmitted and open as a number.**
 
 - The primary prints **no single dry-dislocation V\***. Table 1 defers, and Table 2 offers nine values from -2 to 27.
-- Neither 6 nor 13-27 is "the H&K value", because there is no such thing to be. Any consumer that ships one number here has made a selection the primary did not make.
+- Neither 6 nor 13-27 is "the H&K value", because there is no such thing to be. Any consumer that reports one number here has made a selection the primary did not make.
 - The narrowing the primary does supply: V\* is a **chord** quantity, defined over the pressure interval it was fitted across, and it decreases with pressure. Selecting a V\* therefore requires naming the pressure range it will be used over.
 
 **A conditioning-variable finding, of the class the arc already knows.** `GEOTHERM_ARC_SCOPE.md` records that a limiting isotherm is not a property of the lithosphere but a property of the lithosphere joined to an age convention, so a single number quoted without its convention is "a statistic with a HIDDEN CONDITIONING VARIABLE". **V\* is the same shape of quantity, and the hidden conditioning variable is the pressure interval.** A V\* quoted bare is a chord whose endpoints have been dropped. The primary names this outright by calling it a chord V\*. The library's 6 is a chord over 10^-4 to 10 GPa presented as a constant; Dixon's 13-27 is the set of chords over intervals at or below 2 GPa. The DEFAULTS-TAKEN discipline the scope extended to fetched rows' CONVENTIONS covers this case: a V\* row must carry its fitted pressure interval, or it is not a row.
@@ -168,7 +168,7 @@ Both halves of the contradiction were verified verbatim in Dixon's own PDF, so t
 
 **What the primary's Table 1 says that row is.** `E* = 400 kJ/mol` appears **exactly once in Table 1**, in the row labelled **`dry GBS, T<1250°C`**, whose full entry is: A = 6500, n = 3.5, p = 2, r = **-**, α = 30-45, E\* = 400^f, V\* = (see Table 2)^g.
 
-**The ruling:**
+**Evidence adjudication:**
 
 1. **The mechanism is GBS. Dixon's BODY TEXT is correct against the primary; his FIGURE 4 CAPTION is wrong.** There is no wet dislocation creep row in H&K Table 1 carrying E\* = 400. The wet dislocation rows carry 520 ± 40 and 480 ± 40. The prior fetch's instruction to "Treat the 400/14 pair as GBS until the primary's Table 1 says otherwise" was the right call, and the primary now says so.
 
@@ -180,7 +180,7 @@ Both halves of the contradiction were verified verbatim in Dixon's own PDF, so t
 
 5. **V\* = 14 is not uniquely attributable.** Table 1's GBS rows print "(see Table 2)^g", and footnote g says "The value for V\* is assumed to be the same as that for dislocation creep." Table 2 carries 14 in three separate rows (Karato and Jung [2002] at 0.3-2 GPa, Karato and Rubie [1997] at 0.3-15 GPa, Karato and Ogawa [1982] at 10^-4-2.0 GPa). A consumer cannot recover which one Dixon used from the primary alone.
 
-**Consequence for the arc.** The prior fetch's section 1.3 records "So Hirth and Kohlstedt's Table 1 carries a dislocation-accommodated grain-boundary-sliding row distinct from the four rows above." That is confirmed, and it is **two** rows, not one, split at 1250°C, and both dry. If the arc wants a GBS route, the rows are:
+**Consequence for the evidence record.** The prior fetch's section 1.3 records "So Hirth and Kohlstedt's Table 1 carries a dislocation-accommodated grain-boundary-sliding row distinct from the four rows above." That is confirmed, and it is **two** rows, not one, split at 1250°C, and both dry. Any future GBS evidence adapter must preserve these two candidate rows:
 
 | | A | n | p | r | α | E* (kJ/mol) | V* |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -206,16 +206,16 @@ The prior fetch's statement that the underlying experiments were "conducted unde
 ## 7. What could not be read, and what remains open
 
 - **Nothing in Tables 1 or 2 was unreadable.** Every cell above was read twice, by text extraction and by a visual read of the rendered page, and the two agree.
-- **A source-internal inconsistency, minor and not load-bearing.** The primary's page 92 text reads "the activation volume determined for Si self-diffusion in olivine, V\* = 1.9×10^6 ± 2.4×10^-6 m^3/mol [Bejina et al., 1997], is considerably lower than that observed for recovery", while Table 2's Bejina row prints **-2**. The printed exponent `10^6` is inconsistent with the units and with the stated conclusion (a value of 1.9×10^6 m^3/mol is not "considerably lower" than 6×10^-6). This looks like a typesetting error in the published paper. It is recorded rather than corrected, and it touches only the Si-diffusion row, which is not one of the arc's creep anchors. Under the standing rule that a source disagreeing with itself blocks the row, this row does not ship; it is not needed.
-- **The chord-V\* sentence's "Table 1" reference is a misprint** (section 4). The reading that it means Table 2 is an inference from the column it describes, sound but not something the paper states. Flagged rather than silently corrected.
+- **A source-internal difference, minor and not load-bearing.** The primary's page 92 prose prints the Bejina Si self-diffusion activation volume with a `10^6` exponent, while Table 2 prints **-2** for the corresponding row. The prose also describes that value as lower than the recovery value. These parallel source records are preserved without selecting or correcting either one. The candidate Si-diffusion row is excluded because the repository cannot derive one unique value from the source as printed.
+- **The chord-V\* prose names "Table 1"** (section 4), while the described chord-V\* column occurs in Table 2. Treating the prose as a reference to Table 2 would be an inference not stated by the source, so the repository preserves both records and does not silently substitute one table identifier for the other.
 - **Still open, and the primary is the reason it is open**: the dry dislocation V\*. The primary declines to print one. See section 4.
 - **Not verified here**: Ohuchi et al. (2015), Bürgmann and Dresen (2008), and the Kohlstedt Treatise chapter were not re-fetched; the prior fetch's values from them agree with the primary where they overlap (530 ± 4, 375 ± 50), which is corroboration of those readings. Dixon's own measurement (V\* = 15 ± 5 for dry olivine over 2-9 GPa) was not re-verified against his text in this pass.
 
 ## 8. The bottom line for BLOCKER 1
 
-Table 1 is read. The four-row parameter set the arc was going to code against is **correct in its A, n, p and E\* central values and incomplete or wrong in everything that carries uncertainty**: the bands are all absent, the melt term is absent, n's band is 0.3 rather than the 0.5 that circulates, two V\* values are undeclared midpoints of printed ranges, one V\* has no counterpart in Table 1 at all, and the wet rows are the fugacity-referenced parameterization rather than the constant-water-content one the prior fetch believed. The dry V\* conflict was never a conflict between sources: it is the primary's own unresolved spread, conditioned on a pressure interval that a bare V\* silently drops.
+Table 1 is read. Relative to it, the four-row parameter record the arc was going to use agrees on the A, n, p, and E\* central values but does not carry the printed uncertainty bands or melt term. Its n band is 0.5 rather than Table 1's 0.3, two V\* entries select undeclared midpoints of printed ranges, one V\* has no Table 1 counterpart, and the wet rows use a different water parameterization. The dry V\* material remains an unresolved source spread conditioned on pressure interval, which a bare scalar would omit.
 
-Nothing here is set. Every value above is a cited literature value read from the primary, and the reserved-versus-set question is untouched by this verification.
+Nothing here is admitted. Every value above is candidate evidence read from the primary. A canonical use must derive from the sealed floor, complete the full admission receipt for one unique residual, or refuse.
 
 **Primary citation.** Hirth, G. and Kohlstedt, D., 2003, "Rheology of the Upper Mantle and the Mantle Wedge: A View from the Experimentalists", in Inside the Subduction Factory, ed. J. Eiler, Geophysical Monograph 138, American Geophysical Union, Washington DC, pp. 83-105, DOI 10.1029/138GM06. Table 1 on p. 86; Table 2 on p. 92; equation (1) on p. 86; the chord V\* discussion on p. 93; the GBS discussion on p. 95; the melt-fraction discussion on p. 94; the extrapolation caveats on p. 84. Read from the copy at `https://www.soest.hawaii.edu/earthsciences_archive/FACULTY/smithkonter/GG631/other/HirthKohlstedt_2000.pdf` (SHA256 `d76c5905bb1cdfb8d2d62a566daa85636e5ef7120ed07c6f174a6c2a150fcba7`), whose embedded metadata carries DOI 10.1029/138GM06 and whose page-1 copyright line reads "Copyright 2003 by the American Geophysical Union".
 

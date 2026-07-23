@@ -33,17 +33,14 @@ fn the_fluids_floor_loads_onto_the_mechanical_floor() {
     // axes, so it merges onto the mechanical floor and the whole revalidates.
     let mut reg = PhysicsRegistry::load(data_path("mechanical_floor.toml")).unwrap();
     reg.extend(data_path("fluids_floor.toml")).unwrap();
-    // 39 mechanical + 24 fluids axes; 20 + 18 laws; 2 + 2 substances (the three acoustic
-    // channel-physics axes and the acoustic_absorption and tube_resonance laws are the 2026-07-03 add;
-    // fluid.moisture_content, the terrain-wetness floor identity, is the Arc 5 T4 add; the three critical-point
-    // axes chem.critical_{temperature,pressure} + chem.acentric_factor feed the transport-property derivations; plus the four volatile primitives chem.boiling_point / vaporization_enthalpy / fusion_enthalpy / triple_point_temperature for the saturation curve).
+    // 38 mechanical + 20 fluids axes; 21 + 15 laws; 1 + 2 substances.
     assert_eq!(
         reg.axis_count(),
-        67,
+        58,
         "the mechanical and fluids axes together"
     );
-    assert_eq!(reg.law_count(), 39, "the wave-1 and wave-2 fluid laws");
-    assert_eq!(reg.substance_count(), 4, "iron, oak, air, water");
+    assert_eq!(reg.law_count(), 36, "the active mechanical and fluid laws");
+    assert_eq!(reg.substance_count(), 3, "iron, air, water");
     // The load validated every cross-reference: the fluid laws read the mechanical axes, and air and
     // water carry values only on existing axes and participate only in existing laws.
     assert!(reg.axis("fluid.lift_coefficient").is_some());
@@ -52,11 +49,9 @@ fn the_fluids_floor_loads_onto_the_mechanical_floor() {
 }
 
 #[test]
-fn the_fluids_ranges_are_owner_set_and_read_back_exactly() {
-    // The owner ratified the wave-2 fluids ranges from their cited bounds (2026-07-02). A set range
-    // now reads back exactly. The only reserved axes over the mechanical-and-fluids stack are the
-    // three acoustic channel-physics axes added 2026-07-03, whose ranges are surfaced reserved-with-
-    // basis (the owner's to set, never fabricated), the reserved-value discipline.
+fn the_active_fluids_ranges_are_set_and_read_back_exactly() {
+    // The active fluid ranges read back exactly, and retired compatibility rows do not leave a
+    // range-reserved candidate on the abiotic stack.
     let mut reg = PhysicsRegistry::load(data_path("mechanical_floor.toml")).unwrap();
     reg.extend(data_path("fluids_floor.toml")).unwrap();
     let (lo, hi) = reg
@@ -67,15 +62,7 @@ fn the_fluids_ranges_are_owner_set_and_read_back_exactly() {
         .unwrap();
     assert_eq!(lo, Fixed::from_ratio(1, 100000), "0.00001 Pa*s (air)");
     assert_eq!(hi, Fixed::from_int(100), "100 Pa*s (lava end)");
-    assert_eq!(
-        reg.reserved_axis_ids(),
-        vec![
-            "acoustic.absorption_reference",
-            "acoustic.formant_frequency",
-            "acoustic.resonator_length",
-        ],
-        "exactly the three new acoustic axes are reserved-with-basis"
-    );
+    assert!(reg.reserved_axis_ids().is_empty());
 }
 
 #[test]
@@ -175,17 +162,15 @@ fn thermal_buoyancy_lifts_warm_air_and_sinks_cold() {
 
 #[test]
 fn membrane_gas_flux_takes_up_from_a_richer_medium_and_off_gasses_to_a_poorer_one() {
-    // The R-MEDIUM gas exchange: a respiratory surface exchanges the respirable species with the medium
-    // it sits in, at a rate set by the transfer coefficient, the surface area, and the concentration
-    // difference. Nothing tags the medium as air or water: only its respirable content differs, so the
-    // same surface respires a rich medium and off-gasses to a poor one (Principle 9, emergence).
+    // The generic membrane kernel follows the concentration gradient at a rate set by the transfer
+    // coefficient and area. It reads no organism or medium identity.
     let k = f(1, 100); // a transfer coefficient in range
     let area = f(1, 2); // an exchange area
-    let internal = f(1, 20); // the body's internal concentration
+    let internal = f(1, 20); // the receiving reservoir concentration
     let j_max = Fixed::from_int(1000);
 
-    let rich = f(27, 100); // an oxygen-rich medium (air-like)
-    let poor = f(1, 100); // a poor medium (below the body's internal level)
+    let rich = f(27, 100);
+    let poor = f(1, 100);
 
     let uptake = laws::membrane_gas_flux(k, area, rich, internal, j_max);
     let loss = laws::membrane_gas_flux(k, area, poor, internal, j_max);
@@ -194,7 +179,7 @@ fn membrane_gas_flux_takes_up_from_a_richer_medium_and_off_gasses_to_a_poorer_on
     assert!(uptake > Fixed::ZERO, "a richer medium drives uptake");
     assert!(
         loss < Fixed::ZERO,
-        "a poorer medium drives loss (off-gassing)"
+        "a poorer external reservoir drives outward flux"
     );
     assert_eq!(
         rest,
@@ -225,8 +210,7 @@ fn membrane_gas_flux_needs_a_surface_and_saturates_at_the_signed_cap() {
     let internal = f(1, 20);
     let j_max = Fixed::from_int(1000);
 
-    // No exchange surface (zero area or zero coefficient) means no exchange, whatever the medium: a
-    // body with no respiratory organ cannot breathe, the physical basis the sim-side reserve leans on.
+    // No interface area or transfer coefficient means no exchange, whatever the concentration gap.
     assert_eq!(
         laws::membrane_gas_flux(k, Fixed::ZERO, Fixed::ONE, internal, j_max),
         Fixed::ZERO,
@@ -337,26 +321,6 @@ fn reynolds_gates_the_regime_and_the_kernels_replay() {
     assert_eq!(a, b, "the same inputs replay bit for bit");
 }
 
-// --- Acoustic channel physics (2026-07-03): frequency-squared absorption and quarter-wave tube
-// resonance, and the non-steering divergence the perceptual-geometry read-out derives over. ---
-
-#[test]
-fn the_acoustic_laws_load_and_pass_the_graph_dimensional_check() {
-    // Load proof: the two new laws bind their kernels, their monomials close on the produced axes
-    // (alpha = beta*f^2 reduces to 1/m; c/L reduces to Hz), and the three acoustic axes are present,
-    // so the dimensional-neutrality check at load accepts both. Both read only ground axes (a reserved
-    // range is still a ground axis), so they derive to tier 1.
-    let mut reg = PhysicsRegistry::load(data_path("mechanical_floor.toml")).unwrap();
-    reg.extend(data_path("fluids_floor.toml")).unwrap();
-    assert!(reg.law("law.acoustic_absorption").is_some());
-    assert!(reg.law("law.tube_resonance").is_some());
-    assert!(reg.axis("acoustic.absorption_reference").is_some());
-    assert!(reg.axis("acoustic.resonator_length").is_some());
-    assert!(reg.axis("acoustic.formant_frequency").is_some());
-    assert_eq!(reg.derived_tier("law.acoustic_absorption"), Some(1));
-    assert_eq!(reg.derived_tier("law.tube_resonance"), Some(1));
-}
-
 #[test]
 fn a_wrong_absorption_dimension_fails_loud() {
     // The absorption monomial is checked, not asserted: wiring the reference to a plain 1/m axis (one
@@ -464,22 +428,21 @@ fn a_small_reference_absorbs_finitely_above_the_old_frequency_ceiling() {
 }
 
 #[test]
-fn resonance_rises_with_speed_and_falls_with_length_and_hits_human_formants() {
+fn resonance_rises_with_speed_and_falls_with_length_for_a_stopped_tube() {
     let freq_max = Fixed::from_int(100000);
-    let l = f(17, 100); // 0.17 m, a neutral human vocal tract
+    let l = f(17, 100); // a 0.17 m laboratory tube
     let air_c = Fixed::from_int(343);
-    // HUMAN ROW: L = 0.17 m in air (c = 343 m/s) yields the schwa formant series near 500/1500/2500 Hz,
-    // the closed-open quarter-wave odd-harmonic series (F1..F3 in the cardinal-vowel formant range).
+    // A closed-open quarter-wave tube yields the odd-harmonic series near 500, 1500, and 2500 Hz.
     let f1 = laws::tube_resonance(Fixed::from_int(1), air_c, l, freq_max).to_f64_lossy();
     let f2 = laws::tube_resonance(Fixed::from_int(2), air_c, l, freq_max).to_f64_lossy();
     let f3 = laws::tube_resonance(Fixed::from_int(3), air_c, l, freq_max).to_f64_lossy();
     assert!(
         (250.0..800.0).contains(&f1),
-        "F1 in the cardinal-vowel range, got {f1}"
+        "the fundamental is near 500 Hz, got {f1}"
     );
     assert!(
         (600.0..2300.0).contains(&f2),
-        "F2 in the cardinal-vowel range, got {f2}"
+        "the third harmonic is near 1500 Hz, got {f2}"
     );
     assert!((2200.0..2800.0).contains(&f3), "F3 near 2500, got {f3}");
     assert!(f1 < f2 && f2 < f3, "the odd-harmonic series rises");
@@ -541,11 +504,9 @@ fn the_acoustic_kernels_are_deterministic() {
 }
 
 #[test]
-fn two_media_diverge_in_formants_from_physics_alone_no_authored_table() {
-    // The non-steering divergence (Principle 9): the SAME resonator length fed through tube_resonance
-    // in two real media gives two different formant vectors, purely because each medium's sound speed
-    // differs (c from law.speed_of_sound over its floor bulk_modulus and density). No per-race
-    // confusability table, no RaceId: the derived geometry diverges from the channel physics alone.
+fn two_media_produce_different_resonance_series_from_physics() {
+    // The same tube length in two media produces different resonance series because sound speed
+    // derives from each medium's bulk modulus and density.
     let c_max = Fixed::from_int(100000);
     let freq_max = Fixed::from_int(100000);
     let air = laws::speed_of_sound(f(142, 1000), f(1225, 1000), c_max); // ~340 m/s
@@ -559,19 +520,18 @@ fn two_media_diverge_in_formants_from_physics_alone_no_authored_table() {
         .collect();
     assert_ne!(
         air_f, water_f,
-        "the same length in two media gives different formant vectors"
+        "the same length in two media gives different resonance vectors"
     );
     for (a, w) in air_f.iter().zip(&water_f) {
         assert!(
             w > a,
-            "the faster medium raises every formant, monotone in c"
+            "the faster medium raises every resonance, monotone in c"
         );
     }
-    // Neither vector is a hardcoded reference: the air F1 is the physics-derived schwa value, not a
-    // round authored 500 Hz.
+    // The vector is computed from the physical inputs rather than selected from a reference table.
     assert_ne!(
         air_f[0],
         Fixed::from_int(500),
-        "no authored reference table; the value is derived from physics"
+        "the value is derived from sound speed and tube length"
     );
 }

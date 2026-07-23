@@ -30,7 +30,7 @@
 [[radius]]
 symbol = "H"
 single_pm = 32
-tetrahedral_pm = 137
+tetrahedral_pm = "137"
 
 [[radius]]
 symbol = "He"
@@ -40,49 +40,49 @@ single_pm = 46
 symbol = "Li"
 single_pm = 133
 double_pm = 124
-tetrahedral_pm = 137
+tetrahedral_pm = "137"
 
 [[radius]]
 symbol = "Be"
 single_pm = 102
 double_pm = 90
 triple_pm = 85
-tetrahedral_pm = 106.1
+tetrahedral_pm = "106.1"
 
 [[radius]]
 symbol = "B"
 single_pm = 85
 double_pm = 78
 triple_pm = 73
-tetrahedral_pm = 88.2
+tetrahedral_pm = "88.2"
 
 [[radius]]
 symbol = "C"
 single_pm = 75
 double_pm = 67
 triple_pm = 60
-tetrahedral_pm = 77.3
+tetrahedral_pm = "77.3"
 
 [[radius]]
 symbol = "N"
 single_pm = 71
 double_pm = 60
 triple_pm = 54
-tetrahedral_pm = 68.9
+tetrahedral_pm = "68.9"
 
 [[radius]]
 symbol = "O"
 single_pm = 63
 double_pm = 57
 triple_pm = 53
-tetrahedral_pm = 67.4
+tetrahedral_pm = "67.4"
 
 [[radius]]
 symbol = "F"
 single_pm = 64
 double_pm = 59
 triple_pm = 53
-tetrahedral_pm = 57.5
+tetrahedral_pm = "57.5"
 
 [[radius]]
 symbol = "Ne"
@@ -99,42 +99,42 @@ symbol = "Mg"
 single_pm = 139
 double_pm = 132
 triple_pm = 127
-tetrahedral_pm = 141.2
+tetrahedral_pm = "141.2"
 
 [[radius]]
 symbol = "Al"
 single_pm = 126
 double_pm = 113
 triple_pm = 111
-tetrahedral_pm = 128.5
+tetrahedral_pm = "128.5"
 
 [[radius]]
 symbol = "Si"
 single_pm = 116
 double_pm = 107
 triple_pm = 102
-tetrahedral_pm = 117.6
+tetrahedral_pm = "117.6"
 
 [[radius]]
 symbol = "P"
 single_pm = 111
 double_pm = 102
 triple_pm = 94
-tetrahedral_pm = 108.4
+tetrahedral_pm = "108.4"
 
 [[radius]]
 symbol = "S"
 single_pm = 103
 double_pm = 94
 triple_pm = 95
-tetrahedral_pm = 104.2
+tetrahedral_pm = "104.2"
 
 [[radius]]
 symbol = "Cl"
 single_pm = 99
 double_pm = 95
 triple_pm = 93
-tetrahedral_pm = 107.6
+tetrahedral_pm = "107.6"
 
 [[radius]]
 symbol = "Ar"
@@ -158,7 +158,7 @@ symbol = "Sc"
 single_pm = 148
 double_pm = 116
 triple_pm = 114
-tetrahedral_pm = 138.6
+tetrahedral_pm = "138.6"
 
 [[radius]]
 symbol = "Ti"
@@ -183,21 +183,21 @@ symbol = "Mn"
 single_pm = 119
 double_pm = 105
 triple_pm = 103
-tetrahedral_pm = 140.3
+tetrahedral_pm = "140.3"
 
 [[radius]]
 symbol = "Fe"
 single_pm = 116
 double_pm = 109
 triple_pm = 102
-tetrahedral_pm = 120.9
+tetrahedral_pm = "120.9"
 
 [[radius]]
 symbol = "Co"
 single_pm = 111
 double_pm = 103
 triple_pm = 96
-tetrahedral_pm = 125.6
+tetrahedral_pm = "125.6"
 
 [[radius]]
 symbol = "Ni"
@@ -210,48 +210,48 @@ symbol = "Cu"
 single_pm = 112
 double_pm = 115
 triple_pm = 120
-tetrahedral_pm = 127.1
+tetrahedral_pm = "127.1"
 
 [[radius]]
 symbol = "Zn"
 single_pm = 118
 double_pm = 120
-tetrahedral_pm = 130.4
+tetrahedral_pm = "130.4"
 
 [[radius]]
 symbol = "Ga"
 single_pm = 124
 double_pm = 117
 triple_pm = 121
-tetrahedral_pm = 127.5
+tetrahedral_pm = "127.5"
 
 [[radius]]
 symbol = "Ge"
 single_pm = 121
 double_pm = 111
 triple_pm = 114
-tetrahedral_pm = 122.5
+tetrahedral_pm = "122.5"
 
 [[radius]]
 symbol = "As"
 single_pm = 121
 double_pm = 114
 triple_pm = 106
-tetrahedral_pm = 117.4
+tetrahedral_pm = "117.4"
 
 [[radius]]
 symbol = "Se"
 single_pm = 116
 double_pm = 107
 triple_pm = 107
-tetrahedral_pm = 114.5
+tetrahedral_pm = "114.5"
 
 [[radius]]
 symbol = "Br"
 single_pm = 114
 double_pm = 109
 triple_pm = 110
-tetrahedral_pm = 119.5
+tetrahedral_pm = "119.5"
 
 [[radius]]
 symbol = "Kr"
@@ -323,48 +323,48 @@ symbol = "Ag"
 single_pm = 128
 double_pm = 139
 triple_pm = 137
-tetrahedral_pm = 147.3
+tetrahedral_pm = "147.3"
 
 [[radius]]
 symbol = "Cd"
 single_pm = 136
 double_pm = 144
-tetrahedral_pm = 148.2
+tetrahedral_pm = "148.2"
 
 [[radius]]
 symbol = "In"
 single_pm = 142
 double_pm = 136
 triple_pm = 146
-tetrahedral_pm = 145.5
+tetrahedral_pm = "145.5"
 
 [[radius]]
 symbol = "Sn"
 single_pm = 140
 double_pm = 130
 triple_pm = 132
-tetrahedral_pm = 140.0
+tetrahedral_pm = "140.0"
 
 [[radius]]
 symbol = "Sb"
 single_pm = 140
 double_pm = 133
 triple_pm = 127
-tetrahedral_pm = 136.3
+tetrahedral_pm = "136.3"
 
 [[radius]]
 symbol = "Te"
 single_pm = 136
 double_pm = 128
 triple_pm = 121
-tetrahedral_pm = 133.5
+tetrahedral_pm = "133.5"
 
 [[radius]]
 symbol = "I"
 single_pm = 133
 double_pm = 129
 triple_pm = 125
-tetrahedral_pm = 134.5
+tetrahedral_pm = "134.5"
 
 [[radius]]
 symbol = "Xe"
@@ -515,35 +515,35 @@ triple_pm = 123
 symbol = "Hg"
 single_pm = 133
 double_pm = 142
-tetrahedral_pm = 147.8
+tetrahedral_pm = "147.8"
 
 [[radius]]
 symbol = "Tl"
 single_pm = 144
 double_pm = 142
 triple_pm = 150
-tetrahedral_pm = 138
+tetrahedral_pm = "138"
 
 [[radius]]
 symbol = "Pb"
 single_pm = 144
 double_pm = 135
 triple_pm = 137
-tetrahedral_pm = 144.1
+tetrahedral_pm = "144.1"
 
 [[radius]]
 symbol = "Bi"
 single_pm = 151
 double_pm = 141
 triple_pm = 135
-tetrahedral_pm = 146.0
+tetrahedral_pm = "146.0"
 
 [[radius]]
 symbol = "Po"
 single_pm = 145
 double_pm = 135
 triple_pm = 129
-tetrahedral_pm = 141.6
+tetrahedral_pm = "141.6"
 
 [[radius]]
 symbol = "At"

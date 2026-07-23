@@ -1,0 +1,3943 @@
+// Copyright 2026 Nathan M. Fraske
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! The interior convection-evolution subsystem (genesis-forward geology arc): it composes the merged mantle
+//! floor law-forms (`crates/physics/src/laws.rs`) into one per-step column update and drives it to a bounded
+//! steady state with C's fixed-cap iterative solver (`civsim_world::solve::fixed_cap_solve`). The floor stays
+//! a set of single physical relations; the composition into a per-step evolution lives here, the same split
+//! the productivity and matter-cycle subsystems use.
+//!
+//! One step reads a column's temperature contrast with its cold reference, forms the buoyancy source
+//! ([`laws::thermal_density_anomaly`]) and the Rayleigh number ([`laws::rayleigh_number`]), latches the
+//! convection onset ([`laws::threshold_latch`], so convection fires once the Rayleigh number crosses the
+//! derived critical value and stays on), and evolves the column temperature ([`laws::internal_heat_evolution`])
+//! under the radiogenic heat production minus the conductive surface loss (the Fourier flux
+//! [`laws::conduction`] over the column mass, so the loss grows with the contrast and gives the restoring
+//! force the steady state relaxes onto) plus, once convecting, the convective heat the buoyant flow carries
+//! out ([`laws::stokes_velocity`] feeding [`laws::heat_advection`]). No authored convection knob: the onset
+//! is the derived critical Rayleigh number, the flow the derived Stokes 2/9, the buoyancy the real material
+//! thermal expansion. Determinism holds by construction: fixed-point kernels, a monotone latch, and C's
+//! bounded integer-residual solve (never an unbounded until-converged spin), so the solve tolerance and cap
+//! are a determinism bound, not a physical knob.
+//!
+//! Byte-neutral: this subsystem is defined and unit-tested against a SYNTHETIC column state but armed by no
+//! scenario, so the canonical pins hold. The resident-field wiring (reading and writing A's `GeodynamicColumn`)
+//! and the plate-domain identity (C's `civsim_world::label` connected-components) are the follow-on slices,
+//! sequenced behind A's contract reaching main.
+
+use civsim_core::Fixed;
+use civsim_physics::laws;
+use civsim_world::geology::{GeodynamicColumn, GeodynamicField};
+use civsim_world::solve::{fixed_cap_solve, SolveOutcome};
+use civsim_world::terrain::{classify_relief, relief_datum, TerrainRelief};
+
+/// The resident state of one interior column the convection solve evolves: its temperature and whether
+/// convection has begun. The convection flag is the one-way Rayleigh-onset latch (once the Rayleigh number
+/// has crossed the critical value it stays set), so the state records that the column has entered the
+/// convecting regime, a relic the memoryless present-to-present kernels could not hold.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ColumnState {
+    /// The column temperature (K).
+    pub temperature: Fixed,
+    /// Whether convection has begun (the one-way Rayleigh-onset latch).
+    pub convecting: bool,
+}
+
+/// One interior column's fixed physical parameters for a convection step. Every field is a floor value or a
+/// per-world datum the runner would read from the resident geodynamic state; here they are supplied by the
+/// caller (the synthetic column under test, or a future `GeodynamicColumn` read). The engine bounds
+/// (`ra_max`, `v_max`, `flux_max`) are representable caps and the solve tolerance is a determinism bound,
+/// not physical knobs.
+#[derive(Clone, Copy, Debug)]
+pub struct ColumnParams {
+    /// The cold reference temperature the column loses heat toward and its buoyancy contrast is taken against.
+    pub reference_temperature: Fixed,
+    /// Bulk density (kg/m^3).
+    pub density: Fixed,
+    /// Thermal conductivity (W/(m*K)).
+    pub thermal_conductivity: Fixed,
+    /// Volumetric thermal expansion (ppm/K), the real material value.
+    pub thermal_expansion_ppm: Fixed,
+    /// Gravity (m/s^2).
+    pub gravity: Fixed,
+    /// The convecting-layer depth (representable-scaled length; raw SI mantle depth overflows Q32.32).
+    pub depth: Fixed,
+    /// The buoyant PARCEL radius, the Stokes sphere radius [`civsim_physics::laws::stokes_velocity`] takes,
+    /// NOT the planet's radius. Flagged 2026-07-18 because the fixture-cluster replacement was scoped to
+    /// derive this field from "the planet's own radius", which is a category error: `v ~ drho g r^2 / eta` is
+    /// the terminal velocity of a sphere of radius `r` settling through the fluid, so the planet's radius here
+    /// would inflate `r^2` by roughly `(R/d)^2` and overflow the linear kernel besides. The derived source
+    /// this struct already carries is the CONVECTIVE CELL scale: [`Self::ra_crit_wavenumber`] gives the
+    /// cell half-wavelength as `pi / a_c` layer depths, so the parcel radius derives from `depth` and `a_c`
+    /// and stays in the same regime as the onset threshold by construction.
+    pub radius: Fixed,
+    /// Dynamic viscosity (representable-scaled Pa*s).
+    ///
+    /// THE REPRESENTATION NOTE, measured 2026-07-18 so the next attempt does not rediscover it. A real mantle
+    /// viscosity does not fit Q32.32: the built [`civsim_physics::convective_viscosity`] solve returns
+    /// `ln(eta) ~ 53.9` for a Mars-class interior at 1600 K and 10.7 GPa, which is `eta ~ 2.5e23 Pa*s` against
+    /// a `Fixed::MAX` of `2.1e9`. That is NOT fatal to this field, because `depth` is already declared in
+    /// MEGAMETRES: the Rayleigh number is dimensionless, so a viscosity expressed in the matching `1e18 Pa*s`
+    /// unit makes the linear kernel compute the TRUE dimensionless `Ra`. Checked numerically: the scaled pair
+    /// reproduces the log-domain [`civsim_physics::laws::ln_rayleigh_number`] at `Ra ~ 1.66e4`, about ten
+    /// times the rigid-rigid critical value, so the province convects without touching the `ra_max` guard. The
+    /// blocker on this field is therefore the DIFFUSIVITY it needs as a solve input, never the representation.
+    ///
+    /// AND THE UNIT QUESTION, MEASURED AND THEN CORRECTED. Read the correction before the measurement,
+    /// because the first version of this note overturned an approved plan on a mistake.
+    ///
+    /// THE MEASUREMENT, which stands. A mantle's radiogenic heating is `~5e-12 W/kg` against a Q32.32
+    /// resolution of `2.33e-10`, so as a PER-SECOND RATE it is `0.02 ulp` and quantizes to ZERO. Carried that
+    /// way, `H` and the conductive loss both vanish and `T + ((H - L)/c) dt` never moves the temperature. At
+    /// the other end of the same kernel `eta`, `d^3`, `r^2`, `9 eta`, `eta kappa`, `eta v` and `rho d` all
+    /// overflow. A RAW-LINEAR SI kernel therefore cannot work.
+    ///
+    /// THE CORRECTION, from an independent audit of this very note. That does NOT make the ruled plan
+    /// infeasible, and the first version of this comment said it did. The plan of record was "a FULL SI/
+    /// LOG-SPACE lift", and the log-space half is exactly what rescues it: carried as per-tick ENERGY
+    /// (`H dt = 157.8 J/kg`, about `6.8e11` ulp) or as a signed logarithm, the same physics is comfortably
+    /// representable and yields `dT ~ 0.127 K` per megayear at about `5.5e8` ulp. What was refuted was
+    /// SI-seconds LINEAR, which the plan never proposed. Refuting a weaker form of a plan and reporting the
+    /// plan dead is the error recorded here so it is not repeated.
+    ///
+    /// THE LOWER-RISK ROUTE, therefore, keeps SI semantics: hold viscosity, Rayleigh, Stokes and stress in
+    /// logs (the machinery already exists in [`civsim_physics::laws::ln_rayleigh_number`] and
+    /// [`civsim_physics::laws::ln_stokes_velocity`]), and carry heat as signed per-tick energy or a signed
+    /// log until the final temperature increment. `Fixed::exp` bottoms out near `-22`, so `H` at `ln -26` is
+    /// never exponentiated; only the integrated increment is. A declared Mm/Myr kernel also works but is a
+    /// larger migration: every affected field and cap must convert consistently, and the `dt` wiring does not
+    /// do that today. Full nondimensionalization is numerically the strongest option and the biggest rewrite.
+    ///
+    /// TWO FURTHER CORRECTIONS from the same audit. The conductive loss is NOT the same magnitude as `H`: the
+    /// full-depth term is about `1.9e-13`, roughly 27 times smaller, though it still quantizes to zero. And
+    /// the velocity band `1e-9` to `3e-9 m/s` is `3.2` to `9.5 cm/yr`, not `1` to `10`.
+    pub viscosity: Fixed,
+    /// Specific heat capacity (J/(kg*K)).
+    pub specific_heat: Fixed,
+    /// Radiogenic heat production (W/kg), the source term.
+    pub heat_production: Fixed,
+    /// The derived critical Rayleigh number (marginal-stability eigenvalue), the onset threshold.
+    pub ra_crit: Fixed,
+    /// The critical WAVENUMBER a_c of the SAME marginal-stability eigenvalue as `ra_crit`: the horizontal mode
+    /// that goes unstable first, in units of inverse layer depth. It is carried alongside `ra_crit` so the two
+    /// describe ONE boundary regime by construction (a rigid-rigid layer has the pair {Ra_crit ~ 1708, a_c ~
+    /// 3.117}, a free-free layer {~657.5, ~2.221}), never a rigid `ra_crit` paired with a free-free aspect. The
+    /// convecting-cell half-wavelength is `pi / a_c` layer depths, so a downstream lateral-scale derivation
+    /// (the province cell aspect) reads `pi / a_c` rather than an independently-authored aspect. The convection
+    /// step itself does not read this field; it is the wavenumber half of the eigenvalue, kept with the number
+    /// half so a future marginal-stability solver can supply {Ra_crit, a_c, regime} jointly.
+    pub ra_crit_wavenumber: Fixed,
+    /// The representable Rayleigh cap (an engine bound).
+    pub ra_max: Fixed,
+    /// The representable velocity cap (an engine bound).
+    pub v_max: Fixed,
+    /// The representable conductive-flux cap (an engine bound).
+    pub flux_max: Fixed,
+    /// The representable convective-stress cap (an engine bound), the ceiling on the driving stress the
+    /// lid-mobilization read compares to `mat.yield_strength`.
+    pub stress_max: Fixed,
+    /// The tick duration.
+    pub dt: Fixed,
+}
+
+impl ColumnParams {
+    /// Thermal diffusivity `kappa = k / (rho * c_p)`, derived on read from this scaled compatibility
+    /// column's three source quantities. The redundant stored field was retired after it was found to
+    /// disagree with this law by twentyfold. `Fixed::MAX` is only the representation ceiling supplied to
+    /// the total floor kernel; the canonical SI path validates its material-state inputs and can refuse.
+    // @derives: the scaled compatibility column's thermal diffusivity <- its own conductivity, density and specific heat through the shared floor law
+    pub fn thermal_diffusivity(&self) -> Fixed {
+        laws::thermal_diffusivity(
+            self.thermal_conductivity,
+            self.density,
+            self.specific_heat,
+            Fixed::MAX,
+        )
+    }
+
+    /// The buoyant PARCEL radius this column's convection carries, DERIVED from the column's own convective
+    /// cell scale rather than stored as a seventh fixture.
+    ///
+    /// The marginal-stability eigenvalue pair fixes both the onset threshold and the cell geometry: the
+    /// critical wavenumber `a_c` sets a cell half-wavelength of `pi / a_c` layer depths, so a parcel rising
+    /// through a layer of thickness `d` has the scale `r = d * pi / a_c`. Reading [`Self::ra_crit_wavenumber`]
+    /// rather than a module constant is what keeps the parcel in the SAME regime as the onset threshold by
+    /// construction: a column carrying a free-free eigenvalue pair gets the free-free cell scale, with no
+    /// second place for the two to drift apart.
+    ///
+    /// This is the same geometry the viewer's province lateral scale uses (`pi / a_c`, the rigid-rigid pair
+    /// giving roughly 1.008), stated here so the relationship is visible rather than rediscovered.
+    ///
+    /// Returns `None` when the wavenumber is non-positive or the product leaves the representable window,
+    /// which is a refusal rather than a fallback radius.
+    /// THE UNIT HAZARD, named because the two depths in this file are NOT the same number. This reads
+    /// [`Self::depth`], which is the representable-SCALED depth the linear kernel runs on (megametres for a
+    /// mantle), while [`ColumnGeometry::layer_depth_m`] is SI metres. A caller that pairs
+    /// `ColumnParams.depth = 1` with `ColumnGeometry.layer_depth_m = 1_800_000` gets no complaint from
+    /// either type, and feeding THIS radius to the SI [`civsim_physics::laws::ln_stokes_velocity`] would
+    /// introduce a `1e6` radius error and a `1e12` velocity error, because the Stokes form is quadratic in
+    /// the radius. The returned value therefore carries the SAME scale as `depth` and must be consumed by
+    /// the linear kernel only. An SI consumer needs the SI depth, not this.
+    // @derives: the buoyant parcel radius <- the column's own layer depth + its critical wavenumber (cell half-wavelength)
+    pub fn parcel_radius(&self) -> Option<Fixed> {
+        if self.ra_crit_wavenumber <= Fixed::ZERO {
+            return None;
+        }
+        Fixed::PI
+            .checked_div(self.ra_crit_wavenumber)?
+            .checked_mul(self.depth)
+    }
+}
+
+/// The DERIVED thermal properties of one interior column, in SI, all of them together or none of them.
+///
+/// This type is how the atomicity ruling on thermal diffusivity stops being a comment and starts being a
+/// constraint the compiler carries: the cluster "moves as a whole or not at all", so the
+/// derivation produces every field or it refuses naming what is missing. A caller cannot take the three that
+/// derive today and leave the rest as fixtures, which is the partial replacement the ruling forbids because
+/// it would widen the declared conflict from 20x to roughly 20000x.
+///
+/// The diffusivity is deliberately ABSENT rather than stored. It is `k / (rho * c_p)` exactly, so holding it
+/// would be a fourth copy of three facts already here, which is the redundant-parameter defect the ruling was
+/// written about. [`Self::thermal_diffusivity`] computes it.
+///
+/// SI throughout, because this states the PHYSICS. What representation the kernel runs in is a separate
+/// question with a separate answer, recorded on [`ColumnParams`]: an SI-second kernel cannot work, since a
+/// mantle's radiogenic heating is `~5e-12 W/kg` against a Q32.32 resolution of `2.33e-10`, which quantizes
+/// the source term of the heat balance to ZERO. The conversion to the kernel's declared scale belongs at that
+/// boundary, stated, rather than smuggled into these values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ColumnThermalProperties {
+    /// Density (kg/m^3), from the stable assemblage's own phases and their molar volumes.
+    pub density_kg_m3: Fixed,
+    /// Lattice-plus-radiative thermal conductivity (W/(m*K)) at the column's temperature, by the two-rung
+    /// ladder over the assemblage's volume census.
+    pub thermal_conductivity_w_m_k: Fixed,
+    /// Specific heat (J/(kg*K)) by Dulong-Petit over the assemblage's own mean atomic mass.
+    pub specific_heat_j_kg_k: Fixed,
+    /// Volumetric thermal expansivity in parts per million per kelvin, the unit the kernel's
+    /// [`civsim_physics::laws::thermal_density_anomaly`] reads.
+    pub thermal_expansion_ppm_per_k: Fixed,
+    /// Dynamic viscosity as a BAND in log space (ln Pa*s), carrying its declared primary and the honest
+    /// interval around it.
+    ///
+    /// A LOGARITHM because the value cannot be represented: an interior viscosity is `~1e21 Pa*s` against a
+    /// `Fixed::MAX` of `~2.1e9`. A BAND rather than a scalar for a separate and stronger reason: the creep
+    /// row's activation volume `V*` is banked as nine determinations spanning a range the source declines to
+    /// collapse to a point, so reporting one number would author the very choice the primary refuses to make.
+    /// The band's `ln_viscosity_primary` is the declared single-figure read (the low `V*` end, the weakest the
+    /// row can be at positive pressure) and `min`/`max` are its uncertainty, never a discarded alternative.
+    pub viscosity: civsim_physics::convective_viscosity::ViscosityBand,
+}
+
+impl ColumnThermalProperties {
+    /// Thermal diffusivity `kappa = k / (rho * c_p)` (m^2/s), COMPUTED and never stored, so it cannot drift
+    /// from the three facts it is made of. `None` if the product leaves the representable window.
+    // @derives: a column's thermal diffusivity <- its own conductivity, density and specific heat
+    pub fn thermal_diffusivity(&self) -> Option<Fixed> {
+        let rho_cp = self.density_kg_m3.checked_mul(self.specific_heat_j_kg_k)?;
+        if rho_cp <= Fixed::ZERO {
+            return None;
+        }
+        self.thermal_conductivity_w_m_k.checked_div(rho_cp)
+    }
+}
+
+/// Why a column's thermal derivation refused, NAMING the join that is missing so the refusal is a work list
+/// rather than a dead end.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ColumnDerivationRefusal {
+    /// The composition reached no stable assemblage at this temperature and pressure.
+    NoAssemblage,
+    /// A quantity the assemblage should supply did not resolve; names which.
+    NoQuantity {
+        /// The quantity, for example `density` or `mean_atomic_mass`.
+        quantity: String,
+    },
+    /// The conductivity ladder refused, carrying its own reason (a phase with no banked column, no rung, or
+    /// an unplaceable cell count).
+    Conductivity(String),
+    /// The expansivity join refused, carrying its own reason (a phase with no banked gamma, bulk modulus or
+    /// registry row).
+    Expansivity(String),
+    /// The creep ladder refused, carrying its own reason (an unfeedable row, a domain violation, or a solve
+    /// that did not converge).
+    Viscosity(String),
+    /// The caller's selection pressure and the pressure the geometry implies disagree, so the bundle would
+    /// describe two thermodynamic states at once.
+    IncoherentState {
+        /// The pressure the caller selected the assemblage at (GPa).
+        requested_gpa: Fixed,
+        /// The mid-layer lithostatic pressure the geometry implies (GPa).
+        implied_gpa: Fixed,
+    },
+    /// The assemblage came back TRUNCATED: the subset enumeration hit its candidate cap, so the phases are
+    /// the best of a searched set rather than of the full one, and any property read off them is provisional.
+    TruncatedAssemblage,
+    /// A JOIN this derivation needs has no implementation yet. This is the honest frontier rather than a
+    /// data gap: the pieces exist and nothing composes them. Names the join and what it would take.
+    NoJoinYet {
+        /// The quantity that cannot be assembled.
+        quantity: String,
+        /// What composing it requires.
+        needs: String,
+    },
+}
+
+impl std::fmt::Display for ColumnDerivationRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ColumnDerivationRefusal::NoAssemblage => write!(
+                f,
+                "the composition reaches no stable assemblage at these conditions, so no column property \
+                 can be derived from it"
+            ),
+            ColumnDerivationRefusal::NoQuantity { quantity } => {
+                write!(f, "the assemblage did not resolve its {quantity}")
+            }
+            ColumnDerivationRefusal::Conductivity(reason) => {
+                write!(f, "the conductivity ladder refused: {reason}")
+            }
+            ColumnDerivationRefusal::Expansivity(reason) => {
+                write!(f, "the expansivity join refused: {reason}")
+            }
+            ColumnDerivationRefusal::Viscosity(reason) => {
+                write!(f, "the creep ladder refused: {reason}")
+            }
+            ColumnDerivationRefusal::IncoherentState {
+                requested_gpa,
+                implied_gpa,
+            } => write!(
+                f,
+                "the assemblage was selected at {} GPa while the geometry implies a mid-layer {} GPa, so \
+                 the bundle would describe two thermodynamic states at once; refused",
+                requested_gpa.to_f64_lossy(),
+                implied_gpa.to_f64_lossy()
+            ),
+            ColumnDerivationRefusal::TruncatedAssemblage => write!(
+                f,
+                "the stable assemblage hit its candidate cap and is provisional rather than minimized, so \
+                 properties derived from it would be confident and possibly wrong; refused"
+            ),
+            ColumnDerivationRefusal::NoJoinYet { quantity, needs } => write!(
+                f,
+                "{quantity} has no assembled derivation yet; it needs {needs}. Refused rather than \
+                 defaulted: a fixture here would move the cluster PARTIALLY, which the atomicity ruling \
+                 forbids because the derived and fixture halves would then span two unit systems"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ColumnDerivationRefusal {}
+
+/// The column's DYNAMICAL state, the inputs the viscosity needs and the material properties do not.
+///
+/// The split is real rather than cosmetic. Density, conductivity, specific heat and expansivity are MATERIAL
+/// properties: give a composition, a temperature and a pressure and they follow. Viscosity is a COLUMN
+/// property: the creep ladder's effective value depends on the strain rate the convection itself sets, so it
+/// reads the layer depth, the gravity and the buoyancy contrast driving the flow. Bundling them would have
+/// hidden that the seventh cluster field is a different KIND of quantity from the other six.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ColumnGeometry {
+    /// The convecting-layer depth (m).
+    pub layer_depth_m: Fixed,
+    /// Surface gravity (m/s^2).
+    pub gravity_m_s2: Fixed,
+    /// The temperature contrast driving buoyancy (K), interior against the cold reference.
+    pub temperature_contrast_k: Fixed,
+    /// `ln Ra_crit`, the onset regime's critical Rayleigh number in logs, the SAME one the boundary layer and
+    /// the convection onset read.
+    pub ln_rayleigh_critical: Fixed,
+}
+
+impl ColumnGeometry {
+    /// Build a geometry whose SI depth is DERIVED from a column's own scaled depth, so the two cannot
+    /// disagree.
+    ///
+    /// WHY THIS EXISTS RATHER THAN A WARNING. There are two depths in this file and they are not the same
+    /// number: [`ColumnParams::depth`] is the representable-SCALED depth the linear kernel runs on
+    /// (megametres for a mantle) and [`Self::layer_depth_m`] is SI metres. Supplied independently, a caller
+    /// can pair `depth = 1` with `layer_depth_m = 1_800_000` and neither type complains, while the parcel
+    /// radius comes out in the former unit and the Stokes velocity consumes the latter. Because Stokes is
+    /// QUADRATIC in the radius, that mispairing is a `1e6` radius error and a `1e12` velocity error, and it
+    /// would look like physics rather than like a bug.
+    ///
+    /// Prose could say all that, and today has been a lesson in prose warnings being dropped by exactly the
+    /// consumer they were written for. So the SI depth is derived here instead of accepted, and the wire is
+    /// expected to build its geometry this way rather than by filling the fields.
+    ///
+    /// `None` if the scaled depth is non-positive or the conversion leaves the representable window.
+    // @derives: a column's SI layer depth <- its own representable-scaled depth (megametres to metres)
+    pub fn from_scaled_column(
+        params: &ColumnParams,
+        temperature_contrast_k: Fixed,
+        ln_rayleigh_critical: Fixed,
+    ) -> Option<Self> {
+        Self::from_scaled_depth(
+            params.depth,
+            params.gravity,
+            temperature_contrast_k,
+            ln_rayleigh_critical,
+        )
+    }
+
+    /// The same invariant from the SCALED depth alone, for callers that do not yet have a
+    /// [`ColumnParams`] to read it off.
+    ///
+    /// This exists because retiring the fixture cluster created a cycle: `province_column_params` now
+    /// needs the DERIVED thermal properties, deriving them needs a geometry, and building the geometry
+    /// through [`Self::from_scaled_column`] needed the very `ColumnParams` being built. The geometry only
+    /// ever reads `depth` and `gravity`, neither of which comes from the derivation, so the cycle is
+    /// broken by taking those two directly.
+    ///
+    /// The defence is unchanged and that is the point of delegating rather than duplicating: there is
+    /// still exactly ONE place the megametre-to-metre conversion happens, so the two depths still cannot
+    /// drift apart. A second hand-written `* 1_000_000` at a call site is exactly the mispairing this
+    /// constructor was built to make unconstructible, and it would be quadratic in the Stokes radius.
+    pub fn from_scaled_depth(
+        depth_scaled_mm: Fixed,
+        gravity_m_s2: Fixed,
+        temperature_contrast_k: Fixed,
+        ln_rayleigh_critical: Fixed,
+    ) -> Option<Self> {
+        if depth_scaled_mm <= Fixed::ZERO {
+            return None;
+        }
+        let layer_depth_m = depth_scaled_mm.checked_mul(Fixed::from_int(1_000_000))?;
+        Some(Self {
+            layer_depth_m,
+            gravity_m_s2,
+            temperature_contrast_k,
+            ln_rayleigh_critical,
+        })
+    }
+}
+
+/// The banked reference tables a column derivation reads, grouped so the derivation takes ONE borrow rather
+/// than four positional ones.
+///
+/// They travel together because every one of them is consulted for every phase in a census, and a caller
+/// holding three of the four has nothing useful. Grouping them also removes the positional hazard: four
+/// same-shaped `&Table` parameters in a row are four chances to transpose two of them, and the compiler
+/// catches none of it.
+pub struct BankedTables<'a> {
+    /// The candidate-phase thermodynamic registry (compositions, molar volumes).
+    pub registry: &'a civsim_physics::petrology_data::PhaseRegistry,
+    /// The periodic table (atomic masses, valences).
+    pub periodic: &'a civsim_physics::periodic::PeriodicTable,
+    /// The cited crystallographic and `kappa_298` column.
+    pub conductivity: &'a civsim_physics::phase_conductivity::PhaseConductivityTable,
+    /// The two-rung Grueneisen table.
+    pub gruneisen: &'a civsim_physics::gruneisen::GruneisenTable,
+    /// The mineral elastic-moduli table.
+    pub moduli: &'a civsim_physics::mineral_moduli::MineralModuli,
+    /// The Mie-Grueneisen-Debye anchor column (`theta_0`, `q`, and the `V_0`/`K_0`/`K_0'` from the same
+    /// fit). What lets the expansivity be asked for AT the column's own state rather than at 300 K.
+    pub anchors: &'a civsim_physics::thermoelastic_anchors::ThermoelasticAnchors,
+}
+
+/// Derive every thermal property of an interior column from the world's OWN composition, ATOMICALLY.
+///
+/// The chain, each link a banked derivation rather than a value: the composition minimizes to a stable
+/// assemblage; one pass of the thermoelastic ladder over its volume census gives the expansivity and the
+/// compression AT the requested state; that compression carries the registry's ambient molar volumes to the
+/// state, giving the density; the mean atomic mass gives the Dulong-Petit specific heat; the same census
+/// runs the two-rung conductivity ladder; and the diffusivity falls out of those three rather than being
+/// stored beside them.
+///
+/// ALL SEVEN NOW DERIVE AT DEPTH, which is what the thermoelastic ladder was built for. They refused until
+/// 2026-07-19, and the refusal was correct rather than a placeholder: every input row was an ambient one,
+/// and reading those at 1600 K and 100 kbar had produced a number that matched measurement by CANCELLATION.
+/// Rung 3 of the ladder solves the equation of state at the requested state instead, so the bundle is
+/// computed there rather than borrowed from 300 K.
+///
+/// THE RESULT IS STILL A `Result`, because refusing remains the correct answer in three cases the wire does
+/// not remove: an assemblage that hit the subset-enumeration cap and is provisional rather than minimized; a
+/// census the ladder cannot solve whole, since renormalising over the covered phases would substitute their
+/// behaviour for the rock's; and a requested pressure that disagrees with the one the column's own density
+/// implies, which is the same state-coherence the seven fields promise, checked rather than assumed.
+///
+/// THE ONE-STATE PROMISE IS STRUCTURAL, not a comment. The expansivity and the density come from ONE ladder
+/// pass returning both, because the first version of this wire took the expansivity from the ladder and left
+/// the density on the registry's ambient volumes: two volumes for one rock, four percent apart, with nothing
+/// comparing them.
+// @derives: an interior column's thermal properties <- the world's own composition through the banked assemblage, ladder and Dulong-Petit derivations
+pub fn derive_column_thermal_properties(
+    composition: &[(String, Fixed)],
+    temperature_k: Fixed,
+    pressure_bar: Fixed,
+    geometry: &ColumnGeometry,
+    tables: &BankedTables<'_>,
+) -> Result<ColumnThermalProperties, ColumnDerivationRefusal> {
+    let missing = |q: &str| ColumnDerivationRefusal::NoQuantity {
+        quantity: q.to_string(),
+    };
+    let assemblage = civsim_physics::petrology::stable_assemblage(
+        composition,
+        temperature_k,
+        pressure_bar,
+        tables.registry,
+    )
+    .ok_or(ColumnDerivationRefusal::NoAssemblage)?;
+    // A TRUNCATED assemblage is provisional, not minimized: `stable_assemblage` sets this flag when its
+    // subset enumeration hits the candidate cap, so the returned phases are the best of a SEARCHED set
+    // rather than of the full one. Properties derived from it would be confident and possibly wrong, which
+    // is the outcome this whole derivation exists to avoid. It refuses instead. The cap is reachable: with
+    // fifteen candidate phases over five present elements the subsets of size one through five number
+    // 4,943, past the 4,096 limit, so growing the registry alone can trigger it.
+    if assemblage.truncated {
+        return Err(ColumnDerivationRefusal::TruncatedAssemblage);
+    }
+
+    // The volume census, needed before the density now because the density is state-resolved through it.
+    // Volume fractions rather than molar amounts, because both the Bruggeman conductivity mixture and the
+    // compression average weight by the volume each phase occupies.
+    let volume_census =
+        civsim_physics::petrology::assemblage_volume_fractions(&assemblage, tables.registry)
+            .ok_or_else(|| missing("volume_fractions"))?;
+
+    // ONE LADDER PASS supplies BOTH the expansivity and the compression, so the two cannot describe
+    // different volumes for the same rock. `None` means the ladder could not solve the whole census here,
+    // and every consumer below falls back to its own ambient path, which refuses out of frame on its own
+    // terms rather than answering.
+    let state = civsim_materials::thermoelastic::ThermoState {
+        temperature_k,
+        pressure_bar,
+    };
+    let pass = ladder_pass_over_census(&volume_census, state, tables);
+
+    // Density: the registry's own molar volumes and masses, in g/cm^3, lifted to kg/m^3, and then CARRIED
+    // TO THE REQUESTED STATE by the same solve the expansivity came from.
+    //
+    // The ambient value alone is wrong at depth and wrong in a way that hides: at 1600 K and 10.7 GPa
+    // forsterite's molar volume is 41.94 cm^3/mol against its 43.60 reference, so an ambient density
+    // understates the column by about 4 percent and, worse, disagrees with the volume its own expansivity
+    // was solved at. `rho(P,T) = rho_0 / sum(phi_i f_i)` follows directly from `rho = M/V` with each phase
+    // compressed by `f_i`, using the same ambient volume fractions the census carries.
+    let density_g_cm3_ambient = civsim_physics::petrology::assemblage_density(
+        &assemblage,
+        tables.registry,
+        tables.periodic,
+    )
+    .ok_or_else(|| missing("density"))?;
+    let density_g_cm3 = match &pass {
+        Some(p) if p.compression > Fixed::ZERO => density_g_cm3_ambient
+            .checked_div(p.compression)
+            .ok_or_else(|| missing("density_at_state"))?,
+        _ => density_g_cm3_ambient,
+    };
+    let density_kg_m3 = density_g_cm3
+        .checked_mul(Fixed::from_int(1000))
+        .ok_or_else(|| missing("density"))?;
+
+    // Specific heat: THE ONE THE LADDER COMPUTED ON ITS WAY TO THE EXPANSIVITY, with Dulong-Petit kept as
+    // the fallback for a census the ladder could not answer for.
+    //
+    // THE BUNDLE HELD TWO HEAT CAPACITIES FOR ONE ROCK, and this is the second half of removing that. The
+    // ladder solves a Debye `C_V` at the requested state to get `alpha`, and that value used to be dropped
+    // at the function boundary while `3R/M`, the classical high-temperature LIMIT of the same quantity,
+    // was stored under the name `c_p` beside it. The limit is temperature-blind by construction, so it
+    // runs far high where the Debye capacity has not saturated and lands within a few percent at mantle
+    // temperature: agreement by CANCELLATION at one temperature, which is verbatim the defect the
+    // thermoelastic ladder was written to end one quantity over.
+    //
+    // AND THE NAME WAS WRONG TOO. `3R/M` is a `C_V` limit, and it was stored and consumed as `c_p` with no
+    // conversion, at the one call site where the expansivity and the modulus needed to make it are both in
+    // hand. The pass converts per phase now (`C_p = C_V + T V alpha^2 K_T`), so the field's name and its
+    // contents finally agree.
+    //
+    // THE DIVISION IS BY THE DENSITY THIS SAME PASS PRODUCED, which is what keeps the two molar bases from
+    // being crossed: the pass's capacity is per unit of the assemblage's own volume, so dividing by mass
+    // per unit of that same volume gives J/(kg K) with no molar bookkeeping in between. The scale factor
+    // is the cm^3-to-m^3 one and nothing else. Divided BEFORE the scaling, per this file's standing
+    // reassociation discipline.
+    //
+    // The mean atomic mass is derived unconditionally rather than inside the fallback arm, so the
+    // Dulong-Petit path stays EXERCISED on every derivation. A fallback that only runs when the primary
+    // fails is a fallback nobody finds out is broken.
+    let mean_atomic_mass = civsim_physics::petrology::assemblage_mean_atomic_mass_kg_per_mol(
+        &assemblage,
+        tables.registry,
+        tables.periodic,
+    )
+    .ok_or_else(|| missing("mean_atomic_mass"))?;
+    let dulong_petit = civsim_physics::young_thermal::dulong_petit_specific_heat(mean_atomic_mass)
+        .ok_or_else(|| missing("specific_heat"))?;
+    let specific_heat_j_kg_k = match pass.as_ref().and_then(|p| p.c_p_j_per_cm3_k) {
+        Some(c_p_per_cm3) => c_p_per_cm3
+            .checked_div(density_kg_m3)
+            .and_then(|per_kg| per_kg.checked_mul(Fixed::from_int(1_000_000)))
+            .ok_or_else(|| missing("specific_heat_at_state"))?,
+        None => dulong_petit,
+    };
+
+    // Conductivity: the volume census through the two-rung ladder.
+    // THE EXPANSIVITY IS DERIVED BEFORE THE CONDUCTIVITY because the conductivity ladder CONSUMES it.
+    // Hofmeister's lattice form carries a factor `exp[-(4 gamma + 1/3) * integral(alpha dT)]` from the
+    // 298 K anchor to the evaluation temperature, and passing ZERO for that integral silently asserts a
+    // phase that does not expand between 298 K and 1600 K. It is not a harmless placeholder: for forsterite
+    // the omitted correction is about `exp(-0.287) = 0.751`, so the lattice conductivity came out roughly
+    // 33 percent HIGH, and the assemblage about 23 percent high. An audit caught it; the first version of
+    // this code passed `Fixed::ZERO` here and called the field "the caller's own", which was true and not
+    // an excuse for supplying a wrong value.
+    let thermal_expansion_ppm_per_k = derive_assemblage_expansivity_ppm_per_k(
+        &volume_census,
+        temperature_k,
+        pressure_bar,
+        tables,
+        pass.as_ref(),
+    )?;
+    // The integral of the expansivity from the conductivity form's 298 K anchor to the column's own
+    // temperature, EXACT where one rung spans both ends and constant-alpha where it does not.
+    //
+    // The constant-alpha form was declared here as an honest limit, and it was avoidable rather than
+    // fundamental: at fixed pressure the integral IS `ln[V(P,T)/V(P,298)]`, and the ladder returns a molar
+    // volume at any state it can answer at. So the anchor state is asked for through the same pass, over
+    // the same census, at the same pressure, and the two compressions differ by exactly that ratio. The
+    // second pass is skipped outright when the first refused, since the fallback is then the only
+    // available answer and running the ladder again would buy nothing.
+    let anchor_k = civsim_materials::conductivity::hofmeister_reference_temperature_k();
+    let anchor_pass = pass.as_ref().and_then(|_| {
+        ladder_pass_over_census(
+            &volume_census,
+            civsim_materials::thermoelastic::ThermoState {
+                temperature_k: anchor_k,
+                pressure_bar,
+            },
+            tables,
+        )
+    });
+    let expansivity_integral = expansivity_integral_from_anchor(
+        pass.as_ref(),
+        anchor_pass.as_ref(),
+        thermal_expansion_ppm_per_k,
+        temperature_k,
+        anchor_k,
+    )
+    .ok_or_else(|| missing("expansivity_integral"))?;
+
+    // THE CONDUCTIVITY MIXES THE STATE CENSUS, NOT THE AMBIENT ONE. Bruggeman is a VOLUME-fraction mix, so
+    // it has to read the phases in the proportions they occupy at this state. The phases do not compress
+    // equally, so the ambient census names a different mixture, and averaging over it describes a rock that
+    // is not the one at depth. The expansivity above now weights the same way, so the two agree by
+    // construction rather than by coincidence. Where the ladder could not answer, the ambient census is the
+    // honest fallback: it is what the registry measured, and no state-resolved alternative exists.
+    let mixing_census: &[(String, Fixed)] = match pass.as_ref() {
+        Some(p) => &p.state_census,
+        None => &volume_census,
+    };
+    let mut rows = Vec::with_capacity(mixing_census.len());
+    for (name, fraction) in mixing_census {
+        let row = civsim_materials::conductivity::phase_conductivity_from_banked(
+            name,
+            tables.conductivity,
+            tables.gruneisen,
+            Some(tables.moduli),
+            tables.registry,
+            tables.periodic,
+            expansivity_integral,
+        )
+        .map_err(|e| ColumnDerivationRefusal::Conductivity(e.to_string()))?;
+        rows.push((row, *fraction));
+    }
+    let borrowed: Vec<(&civsim_materials::conductivity::PhaseConductivity, Fixed)> =
+        rows.iter().map(|(r, f)| (r, *f)).collect();
+    let thermal_conductivity_w_m_k =
+        civsim_materials::conductivity::assemblage_conductivity(&borrowed, temperature_k)
+            .map_err(|e| ColumnDerivationRefusal::Conductivity(e.to_string()))?
+            .ok_or_else(|| missing("conductivity"))?
+            .conductivity;
+
+    // THE TWO FRONTIERS, each requested explicitly and each refusing by name. Written as calls rather than as
+    // an early return so the three derivations above are EXERCISED on every attempt: a chain that is never
+    // run is a chain that rots, and this way a break in the assemblage, ladder or Dulong-Petit path surfaces
+    // here rather than waiting for the frontier to close.
+    // The viscosity closes LAST because it consumes the other four: the diffusivity it needs is
+    // `k / (rho c_p)` and the buoyancy contrast it needs is `rho alpha dT`. That ordering is the reason the
+    // ruling called this cluster atomic rather than seven independent values.
+    // THE PRESSURE COHERENCE GATE. Two pressures enter this derivation and nothing compared them: the
+    // caller's `pressure_bar`, which selects the stable assemblage, and the mid-layer lithostatic pressure
+    // the geometry implies, which the creep ladder is evaluated at. A caller could select phases at 1 bar
+    // and evaluate viscosity near 46 GPa and get a bundle. That is the same defect the frame gate closes
+    // one level up, in its within-bundle form: the seven fields must describe ONE thermodynamic state, and
+    // atomicity does not license moving them together when they do not.
+    //
+    // THE GATE WAS DEAD FOR EVERY ROCKY MANTLE, and the ordering is why. Formed left to right as
+    // `rho g d`, the intermediate is about `2.2e10` for a Mars-class column against Q32.32's `2.1e9`
+    // ceiling, so `checked_mul` returned `None`, the `if let Some(..)` found nothing, and the gate
+    // SKIPPED rather than refusing. Measured, the surviving band is a density below 322 kg/m^3 at the Mars
+    // geometry and below 76 at Earth whole-mantle scale: no silicate mantle is within an order of magnitude
+    // of either, so the comparison never ran on any column this engine builds. A gate that fails OPEN is
+    // worse than no gate, because the passing test reads as evidence.
+    //
+    // Dividing FIRST keeps every intermediate inside the window, which is the same reassociation
+    // `derive_column_viscosity` already carries fifty lines below and the viewer carries at its own call
+    // site. An unrepresentable intermediate now REFUSES rather than vanishing.
+    let implied_gpa = implied_lithostatic_gpa(density_kg_m3, geometry)
+        .ok_or_else(|| missing("implied_lithostatic_pressure"))?;
+    let requested_gpa = pressure_bar
+        .checked_div(Fixed::from_int(10_000))
+        .ok_or_else(|| missing("requested_pressure"))?;
+    let off = if implied_gpa > requested_gpa {
+        implied_gpa - requested_gpa
+    } else {
+        requested_gpa - implied_gpa
+    };
+    // A tenth of the implied pressure, so a rounding-scale difference passes and a
+    // wrong-state pairing does not.
+    let slack = implied_gpa
+        .checked_div(Fixed::from_int(10))
+        .unwrap_or(Fixed::ZERO);
+    if off > slack {
+        return Err(ColumnDerivationRefusal::IncoherentState {
+            requested_gpa,
+            implied_gpa,
+        });
+    }
+
+    // THE CENSUS GOES IN, which is what lets the rheology know what rock it is describing. The same
+    // state-resolved mixture the conductivity averages over, so the phase the creep law is selected for is
+    // the phase that occupies the most of the column AT DEPTH rather than at the registry's ambient frame.
+    let viscosity = derive_column_viscosity(
+        mixing_census,
+        density_kg_m3,
+        thermal_conductivity_w_m_k,
+        specific_heat_j_kg_k,
+        thermal_expansion_ppm_per_k,
+        temperature_k,
+        geometry,
+    )?;
+
+    Ok(ColumnThermalProperties {
+        density_kg_m3,
+        thermal_conductivity_w_m_k,
+        specific_heat_j_kg_k,
+        thermal_expansion_ppm_per_k,
+        viscosity,
+    })
+}
+
+/// How many times the depth-pressure fixed point may iterate before it is called a failure to converge.
+///
+/// A FIXED trip count rather than a convergence-rate-dependent one, so the solve is a pure function of its
+/// inputs. Determinism does not require a constant number of steps, only one that does not depend on how
+/// fast the iterate happens to settle, and a hard cap supplies that while making non-convergence a named
+/// refusal instead of a hang.
+const DEPTH_PRESSURE_ITERATIONS: u32 = 12;
+
+/// Derive a column FROM ITS DEPTH, solving the pressure self-consistently rather than being told it.
+///
+/// # WHY THIS EXISTS, and why the caller-supplied pressure was never coherent
+///
+/// [`derive_column_thermal_properties`] takes a pressure AND a geometry. The pressure selects the stable
+/// assemblage; the geometry, once the assemblage yields a density, implies a lithostatic pressure of its
+/// own. Nothing made the two agree, and the gate that was supposed to compare them overflowed and skipped,
+/// so a caller could select phases at one pressure and evaluate the column at a depth implying another. The
+/// flagship fixture did exactly that: it asked for 10 GPa at a geometry whose own mass implies 11.17, an
+/// 11.7 percent disagreement that the dead gate never reported.
+///
+/// The disagreement is a real fixed point rather than a bad input. Density depends on the assemblage, the
+/// assemblage depends on pressure, and pressure depends on density. Choosing either number by hand authors
+/// one side of a loop the physics closes on its own. So the pressure stops being an input here: the caller
+/// supplies its depth and gravity, and the column solves for the pressure its own mass
+/// produces.
+///
+/// # THE GATE IS THE RESIDUAL
+///
+/// The iteration needs no new machinery, because [`ColumnDerivationRefusal::IncoherentState`] already
+/// carries BOTH pressures. A refusal at trial `p` reports the pressure that trial's density implies, which
+/// is exactly the next iterate. So the coherence gate doubles as the solver's residual, and a converged
+/// answer is by construction one the gate accepts rather than one that bypassed it.
+///
+/// The map contracts because density responds only weakly to pressure over a rung: a 10 percent pressure
+/// error moves the density by well under a percent, which moves the implied pressure by the same fraction
+/// again. Starting from the ambient frame it settles in a few steps.
+///
+/// # THE GATE'S SLACK IS NOT THE STOPPING CRITERION, which a first version of this got wrong
+///
+/// Iterating only until the coherence gate ACCEPTS settles at the first iterate inside its 10 percent
+/// slack rather than at the fixed point. Measured, that returned 10.286 GPa where the fixed point is
+/// 11.17: an answer determined by the starting guess and the tolerance rather than by the physics, which
+/// is the same defect as a solve whose convergence test bounds the step and not the residual. The loop
+/// below runs the map to its own fixed point and consults the gate only at the end, so the slack judges
+/// the answer instead of choosing it.
+///
+/// Returns the converged pressure in bar alongside the properties, so a caller can record the state the
+/// bundle describes rather than the one it asked for.
+// @derives: a column's self-consistent pressure and thermal properties <- its composition, temperature, depth and gravity
+pub fn solve_column_at_depth(
+    composition: &[(String, Fixed)],
+    temperature_k: Fixed,
+    geometry: &ColumnGeometry,
+    tables: &BankedTables<'_>,
+) -> Result<(Fixed, ColumnThermalProperties), ColumnDerivationRefusal> {
+    let missing = |q: &str| ColumnDerivationRefusal::NoQuantity {
+        quantity: q.to_string(),
+    };
+    // The ambient frame is the honest starting guess: it is the one state whose properties are measured
+    // rather than extrapolated, and the first step replaces it with a physically implied pressure.
+    let mut pressure_bar = Fixed::ONE;
+    for _ in 0..DEPTH_PRESSURE_ITERATIONS {
+        // The implied pressure at this trial, however the gate happens to judge the pair. A refusal
+        // already carries it; an acceptance means the density is in hand and the same helper forms it, so
+        // the two paths cannot drift on the formula.
+        let implied_gpa = match derive_column_thermal_properties(
+            composition,
+            temperature_k,
+            pressure_bar,
+            geometry,
+            tables,
+        ) {
+            Ok(properties) => implied_lithostatic_gpa(properties.density_kg_m3, geometry)
+                .ok_or_else(|| missing("implied_lithostatic_pressure"))?,
+            Err(ColumnDerivationRefusal::IncoherentState { implied_gpa, .. }) => implied_gpa,
+            Err(other) => return Err(other),
+        };
+        let next_bar = implied_gpa
+            .checked_mul(Fixed::from_int(10_000))
+            .ok_or_else(|| missing("implied_pressure_bar"))?;
+        if next_bar == pressure_bar {
+            // A bit-exact fixed point. Nothing further to extract, and the gate will accept by
+            // construction because the residual is zero.
+            break;
+        }
+        pressure_bar = next_bar;
+    }
+    // The final evaluation is GATED like any other, so a converged answer is one the coherence check
+    // passed rather than one that bypassed it. If the map failed to settle, this is where it says so.
+    let properties = derive_column_thermal_properties(
+        composition,
+        temperature_k,
+        pressure_bar,
+        geometry,
+        tables,
+    )?;
+    Ok((pressure_bar, properties))
+}
+
+/// The mid-layer lithostatic pressure a column's own mass implies, in GPa: `rho g (d/2)`.
+///
+/// ONE FORMULA, TWO CONSUMERS: the coherence gate that judges a caller's pressure and the fixed point that
+/// solves for it. Written separately they would be free to drift, and a solver converging on a residual
+/// the gate does not measure is a solver that satisfies nothing.
+///
+/// The division comes FIRST and that is load-bearing. Formed as `rho g d` the intermediate is about
+/// `2.2e10` for a Mars-class column against Q32.32's `2.1e9` ceiling, which is what made the original gate
+/// return `None` and skip on every rocky mantle.
+// @derives: the mid-layer lithostatic pressure <- the column's density, gravity and layer depth
+fn implied_lithostatic_gpa(density_kg_m3: Fixed, geometry: &ColumnGeometry) -> Option<Fixed> {
+    geometry
+        .layer_depth_m
+        .checked_div(Fixed::from_int(2_000_000_000))
+        .and_then(|x| x.checked_mul(density_kg_m3))
+        .and_then(|x| x.checked_mul(geometry.gravity_m_s2))
+}
+
+/// The assemblage's volumetric expansivity in PPM per kelvin, the unit the kernel's
+/// [`civsim_physics::laws::thermal_density_anomaly`] reads.
+///
+/// NOT CLOSED, and the earlier "FRONTIER CLOSED" note here was wrong. The join exists as
+/// [`civsim_materials::properties::ambient_assemblage_volumetric_expansivity_per_k`], which derives each phase's
+/// `alpha = gamma C_v / (K V_m)` from four banked columns and mixes them by volume. Its magnitude is checked
+/// against the MEASURED forsterite expansivity (roughly 40 ppm/K at mantle temperature) reproduced from
+/// columns never fitted to it, which is what makes that a check rather than a circular one. Worth recording
+/// as the reason to derive it: the fixture being replaced reads 30 ppm/K, and forsterite derives near 40.
+///
+/// The per-kelvin result is scaled to ppm here, at the boundary where the kernel's unit is declared, rather
+/// than inside the derivation, so the physics function returns the physical quantity and this conversion is
+/// visible at the site that needs it.
+/// What ONE pass of the thermoelastic ladder over the census yields: the state-resolved expansivity and
+/// the compression the same solve implies.
+///
+/// The two travel together BY CONSTRUCTION, and that is the point of the struct rather than two functions.
+/// A first version of this wire took the expansivity from the ladder at the column's own state and left the
+/// density reading the registry's ambient molar volumes, so a mantle column reported an expansivity solved
+/// at 41.94 cm^3/mol beside a density computed from 43.60. Two volumes for one rock, nothing comparing
+/// them, in a bundle whose entire ruling is that the seven fields describe ONE thermodynamic state. It is
+/// the diamond pattern in miniature, and returning both from one solve makes it unconstructible.
+struct LadderPass {
+    /// Volume-weighted volumetric expansivity at the requested state (per K), weighted by the STATE
+    /// fractions rather than the ambient ones.
+    alpha_per_k: Fixed,
+    /// `sum(phi_i * V_i(P,T) / V_0i)`, the census-weighted compression factor. Multiply an ambient molar
+    /// volume by this to get the state-resolved one; divide an ambient density by it for the same state.
+    compression: Fixed,
+    /// The assemblage's ISOBARIC heat capacity per unit of its own volume AT THIS STATE (J/(cm^3 K)),
+    /// `None` when any phase's rung computed no capacity.
+    ///
+    /// THIS IS THE CAPACITY THE EXPANSIVITY WAS DERIVED FROM, which is the whole reason it is here. The
+    /// ladder computes a Debye `C_V` on the way to `alpha` and used to drop it at the function boundary,
+    /// so the column reached for the Dulong-Petit `3R/M` classical limit instead and the bundle held TWO
+    /// heat capacities for one rock. Measured on the flagship forsterite column at its own solved
+    /// pressure, `3R/M` reads 1241 J/(kg K) against 999 at 400 K (24 percent HIGH, the Debye capacity
+    /// nowhere near its ceiling) and against 1267 at 1600 K (2 percent LOW, because a `C_V` limit is
+    /// standing in for a `C_p`). The near-agreement at mantle temperature is CANCELLATION between those
+    /// two errors, which is the defect the thermoelastic ladder exists to end rather than a tolerable
+    /// approximation.
+    ///
+    /// PER VOLUME rather than per mole, and that pairing is deliberate. A capacity per mole needs a molar
+    /// mass on the SAME molar basis to reach J/(kg K), and the ladder's `c_v_j_per_mol_k` is per mole of
+    /// FORMULA UNITS while the assemblage's banked mean atomic mass is per mole of ATOMS; dividing one by
+    /// the other is a silent factor of the atoms per formula unit (seven, for forsterite). Per unit volume
+    /// it pairs with the density this same pass produces, so the specific heat is one division by a number
+    /// the bundle already carries and no second mass accounting exists to drift.
+    ///
+    /// `None` rather than a partial aggregate when any phase's rung reports no capacity, for the same
+    /// reason the whole pass refuses on partial coverage: renormalising over the phases that answered
+    /// would substitute their capacity for the rock's.
+    c_p_j_per_cm3_k: Option<Fixed>,
+    /// The rung EVERY phase answered on, or `None` when they did not all answer on the same one.
+    ///
+    /// Carried so a consumer comparing two states can tell whether it is comparing one model to itself.
+    /// A quantity formed as a ratio between two states is that model's own answer only when both states
+    /// resolved through it; across a model transition the ratio is two models' answers divided, which is
+    /// nobody's. [`expansivity_integral_from_anchor`] is the consumer, and it falls back rather than
+    /// crossing a rung boundary.
+    rung: Option<civsim_materials::thermoelastic::ThermoRung>,
+    /// The census RE-WEIGHTED to the requested state and renormalised to one:
+    /// `phi_i(P,T) = phi_i0 f_i / sum_j(phi_j0 f_j)` with `f_i = V_i(P,T)/V_i0`.
+    ///
+    /// Every volume-weighted consumer must read THIS rather than the ambient census it was called with.
+    /// The phases do not compress equally, so the mixture a caller sees at depth is a different mixture by
+    /// volume than the one the registry lists at ambient, and a property averaged over the ambient
+    /// fractions describes a rock that is not the one at this state.
+    state_census: Vec<(String, Fixed)>,
+}
+
+/// Run the ladder over the whole census at one state, or report that it could not.
+///
+/// PARTIAL COVERAGE IS NOT AN ANSWER. If any phase cannot be solved here, renormalising over the rest
+/// would silently substitute the covered phases' behaviour for the whole rock, which is an authored
+/// assemblage wearing a derivation's clothes. The whole census answers or none of it does.
+fn ladder_pass_over_census(
+    volume_census: &[(String, Fixed)],
+    state: civsim_materials::thermoelastic::ThermoState,
+    tables: &BankedTables<'_>,
+) -> Option<LadderPass> {
+    // THE WEIGHT IS THE STATE FRACTION, NOT THE AMBIENT ONE, and the two are different mixtures.
+    //
+    // The census arrives as ambient volume fractions `phi_i0`. At the requested state each phase has its
+    // own volume ratio `f_i = V_i(P,T)/V_i0`, so the state fractions are `phi_i0 f_i / sum_j(phi_j0 f_j)`.
+    // An aggregate expansivity is a VOLUME average, so it must be `sum(phi_i0 f_i alpha_i) /
+    // sum(phi_i0 f_i)`. This used to compute `sum(phi_i0 alpha_i) / sum(phi_i0)`, mixing the phases in
+    // their ambient proportions while the compression beside it used `f_i` correctly. So the bundle whose
+    // whole ruling is that its fields describe ONE state contained two different mixtures, which is the
+    // same diamond the `LadderPass` struct was introduced to make unconstructible, one level down.
+    //
+    // A single-phase census cannot see this: with one phase every weighting collapses to the same number,
+    // and the flagship fixture is single-phase forsterite. The derived mantle minimizes to a multi-phase
+    // spinel-bearing assemblage, so the `f_i` do differ in production.
+    let mut alpha_weighted = Fixed::ZERO;
+    let mut state_total = Fixed::ZERO;
+    let mut covered = Fixed::ZERO;
+    // The isobaric capacity per unit STATE volume, accumulated as `sum(weight_i C_p_i / V_i(P,T))` and
+    // divided by the state total below.
+    //
+    // THE WEIGHT FOR A MOLAR QUANTITY IS THE MOLE FRACTION, NOT THE VOLUME FRACTION, and the two are not
+    // the same number. An expansivity is a per-volume quantity and mixes by volume, which is what the
+    // `alpha_weighted` line above does. A capacity in J/(mol K) is per MOLE: the rock's total capacity is
+    // `sum(n_i C_i)`, so mixing it by volume fraction would report joules per mole of a fictitious
+    // volume-weighted mole with no mass basis to divide by.
+    //
+    // `weight_i / V_i(P,T)` IS the mole weight. Substituting `weight_i = phi_i0 f_i` and
+    // `V_i(P,T) = f_i V_0i` cancels the `f_i` outright, leaving `phi_i0 / V_0i`, which is proportional to
+    // the moles of phase i present. That cancellation is the physical statement that compression moves
+    // VOLUME and not MOLES, so the state and ambient mole fractions are the same census while the state
+    // and ambient VOLUME fractions are two different mixtures.
+    //
+    // `None` from here on the first phase whose rung computed no capacity, propagated through the option
+    // rather than skipped.
+    let mut cp_weighted = Some(Fixed::ZERO);
+    let mut rung: Option<civsim_materials::thermoelastic::ThermoRung> = None;
+    let mut one_rung = true;
+    let mut state_weights: Vec<(String, Fixed)> = Vec::with_capacity(volume_census.len());
+    for (name, fraction) in volume_census {
+        let r = civsim_materials::thermoelastic::response_at(
+            name,
+            state,
+            tables.registry,
+            tables.moduli,
+            tables.gruneisen,
+            tables.anchors,
+        )
+        .ok()?;
+        // The ratio against the phase's OWN reference volume, taken from the registry the census was
+        // built from, so the compression is measured against the same basis the density uses.
+        let v0 = tables.registry.phase(name)?.molar_volume;
+        if v0 <= Fixed::ZERO {
+            return None;
+        }
+        let f = r.molar_volume_cm3.checked_div(v0)?;
+        // The phase's share of the STATE volume, before renormalising: `phi_i0 f_i`.
+        let weight = f.checked_mul(*fraction)?;
+        alpha_weighted = alpha_weighted.checked_add(r.alpha_per_k.checked_mul(weight)?)?;
+        cp_weighted = cp_weighted.and_then(|acc| {
+            let c_p = isobaric_capacity_j_per_mol_k(&r, state.temperature_k)?;
+            let per_volume = c_p.checked_div(r.molar_volume_cm3)?;
+            acc.checked_add(per_volume.checked_mul(weight)?)
+        });
+        match rung {
+            None => rung = Some(r.rung),
+            Some(seen) if seen != r.rung => one_rung = false,
+            Some(_) => {}
+        }
+        state_total = state_total.checked_add(weight)?;
+        covered = covered.checked_add(*fraction)?;
+        state_weights.push((name.clone(), weight));
+    }
+    if covered <= Fixed::ZERO || state_total <= Fixed::ZERO {
+        return None;
+    }
+    // Renormalise the state weights to one, so a consumer can use them as fractions directly.
+    let mut state_census = Vec::with_capacity(state_weights.len());
+    for (name, weight) in state_weights {
+        state_census.push((name, weight.checked_div(state_total)?));
+    }
+    Some(LadderPass {
+        // Divided by the STATE total, so numerator and denominator carry the same weighting.
+        alpha_per_k: alpha_weighted.checked_div(state_total)?,
+        // The compression is the ratio of state volume to ambient volume, so this denominator is the
+        // AMBIENT total and stays as it was. The two divisors differ on purpose.
+        compression: state_total.checked_div(covered)?,
+        // The same STATE total as the expansivity, because the accumulator above is per unit of state
+        // volume and `state_total` is the volume the ambient census expands to.
+        c_p_j_per_cm3_k: cp_weighted.and_then(|c| c.checked_div(state_total)),
+        rung: if one_rung { rung } else { None },
+        state_census,
+    })
+}
+
+/// One phase's ISOBARIC heat capacity (J/(mol K)) at the state its own response describes.
+///
+/// `C_p = C_V + T V alpha^2 K_T`, the exact thermodynamic relation, which is the same statement as the
+/// `C_p = C_V (1 + alpha gamma T)` form written with `gamma = alpha K_T V / C_V` substituted in. It is
+/// written this way for two reasons: it needs no Grueneisen parameter, which the response does not carry,
+/// and it does not divide by a capacity that could be near zero at low temperature.
+///
+/// EVERY INPUT COMES FROM ONE `ThermoResponse`, so the four quantities describe one state by construction.
+/// That matters here more than usual: the conversion is exactly where a capacity solved at depth could be
+/// married to an expansivity or a modulus from somewhere else, and the argument is a single borrow so
+/// there is no second place to reach for one.
+///
+/// THE ORDER IS LOAD-BEARING, not stylistic. Formed as `alpha^2` first, a mantle expansivity of `26e-6`
+/// squares to `6.8e-10` against Q32.32's resolution of `2.33e-10`: under three ulp, so a truncating
+/// multiply can drop up to a third of the value before the other three factors are even applied.
+/// Multiplying `alpha` into `K_T` and into `T` separately keeps both intermediates at order `1e-3` and
+/// above, where the type has room.
+///
+/// THE UNIT BRIDGE: `K_T` arrives in GPa and the volume in cm^3/mol, and `1 GPa = 1000 J/cm^3`, so the
+/// thousand converts the modulus into the volume's own energy density exactly rather than by a fudge.
+///
+/// `None` when the rung computed no capacity (the ambient rung reports none, because the `3nR` it forms
+/// internally is the classical limit rather than the capacity at a state) or when a step leaves the
+/// representable window.
+// @derives: a phase's isobaric heat capacity <- its own isochoric capacity, expansivity, bulk modulus and molar volume at one state
+fn isobaric_capacity_j_per_mol_k(
+    response: &civsim_materials::thermoelastic::ThermoResponse,
+    temperature_k: Fixed,
+) -> Option<Fixed> {
+    let c_v = response.c_v_j_per_mol_k?;
+    // `alpha K_T` is a pressure per kelvin, so the thousand takes it from GPa into the volume's own
+    // J/cm^3 and the molar volume then carries it to J/(mol K).
+    let stiffness = response
+        .alpha_per_k
+        .checked_mul(response.bulk_modulus_gpa)?
+        .checked_mul(Fixed::from_int(1000))?
+        .checked_mul(response.molar_volume_cm3)?;
+    // `alpha T`, dimensionless, which is the second alpha the relation is quadratic in.
+    let dilation = response.alpha_per_k.checked_mul(temperature_k)?;
+    c_v.checked_add(stiffness.checked_mul(dilation)?)
+}
+
+/// The integral of the volumetric expansivity from the conductivity form's own 298 K anchor up to the
+/// column's temperature, AT THE COLUMN'S OWN PRESSURE.
+///
+/// # The constant-alpha assumption was unnecessary, which is what this closes
+///
+/// The integral was `alpha(P,T) * (T - 298)`, alpha held constant across thirteen hundred kelvin. The
+/// limit was declared at the site rather than hidden, so it was honest; it was also avoidable. At fixed
+/// pressure `alpha = (1/V) dV/dT` by definition, so `integral(alpha dT)` from the anchor to the state is
+/// exactly `ln[V(P,T) / V(P,298)]`, and the ladder already returns a molar volume at any state it can
+/// answer at. Nothing new is needed: a second pass of the SAME census at the SAME pressure and the anchor
+/// temperature supplies the denominator, and the assemblage's census-weighted compression is the volume
+/// ratio the two passes differ by.
+///
+/// # Both endpoints must be one model's answer
+///
+/// The exact form is a RATIO between two states, and a ratio is a given model's own answer only when both
+/// states resolved through that model. A column at 1 bar is the live case: 298 K lands inside the ambient
+/// measured row's declared frame while 1600 K is far outside it and falls to Mie-Grueneisen-Debye, so the
+/// ratio would divide one rung's volume by another's and call the difference thermal expansion. Where the
+/// endpoints disagree on the rung, or either pass refused, the constant-alpha form is returned instead,
+/// which is the honest answer for a state where no single model spans the interval.
+///
+/// The fallback keeps its own clamp at the anchor, unchanged: below 298 K it reports no correction rather
+/// than extrapolating the state's alpha backwards. The exact branch needs no clamp, because a volume
+/// smaller than the anchor's gives a negative logarithm on its own and that sign is the physics (a lattice
+/// conducts better as it cools).
+///
+/// `None` only when the fallback's own arithmetic leaves the representable window.
+// @derives: the anchor-to-state expansivity integral <- the census's own molar volumes at the two states, or its constant expansivity where one model does not span them
+fn expansivity_integral_from_anchor(
+    state_pass: Option<&LadderPass>,
+    anchor_pass: Option<&LadderPass>,
+    thermal_expansion_ppm_per_k: Fixed,
+    temperature_k: Fixed,
+    anchor_k: Fixed,
+) -> Option<Fixed> {
+    if let (Some(hot), Some(cold)) = (state_pass, anchor_pass) {
+        // Both compressions are measured against the SAME ambient census, so the ambient volume divides
+        // out of the ratio and what remains is `V(P,T) / V(P,298)` for the assemblage.
+        let one_model = matches!((hot.rung, cold.rung), (Some(a), Some(b)) if a == b);
+        if one_model && hot.compression > Fixed::ZERO && cold.compression > Fixed::ZERO {
+            if let Some(ratio) = hot.compression.checked_div(cold.compression) {
+                if ratio > Fixed::ZERO {
+                    return Some(ratio.ln());
+                }
+            }
+        }
+    }
+    if temperature_k > anchor_k {
+        thermal_expansion_ppm_per_k
+            .checked_div(Fixed::from_int(1_000_000))
+            .and_then(|per_k| per_k.checked_mul(temperature_k - anchor_k))
+    } else {
+        Some(Fixed::ZERO)
+    }
+}
+
+/// The assemblage's volumetric expansivity in ppm/K at the requested state.
+///
+/// THE LADDER IS ASKED FIRST, AT THE COLUMN'S OWN STATE. This is the seam the thermoelastic ladder was
+/// built to close. The ambient join below is correct only inside its rows' 300 K frame, and an interior
+/// column is nowhere near it: reading it at 1600 K and 100 kbar returned a number that matched measurement
+/// by CANCELLATION, which is the defect on record. It refuses outside its frame now, so before this wire
+/// an interior column got no expansivity at all.
+fn derive_assemblage_expansivity_ppm_per_k(
+    volume_census: &[(String, Fixed)],
+    requested_temperature_k: Fixed,
+    requested_pressure_bar: Fixed,
+    tables: &BankedTables<'_>,
+    pass: Option<&LadderPass>,
+) -> Result<Fixed, ColumnDerivationRefusal> {
+    let per_k = match pass {
+        Some(p) => p.alpha_per_k,
+        // THE AMBIENT JOIN IS THE FALLBACK, and it refuses on its own terms when the state is outside its
+        // frame. Reaching it is therefore not a silent downgrade: either the query is at ambient conditions
+        // and this is the right rung, or it refuses and the column refuses with it.
+        None => civsim_materials::properties::ambient_assemblage_volumetric_expansivity_per_k(
+            volume_census,
+            requested_temperature_k,
+            requested_pressure_bar,
+            tables.registry,
+            tables.moduli,
+            tables.gruneisen,
+        )
+        .map_err(|e| ColumnDerivationRefusal::Expansivity(e.to_string()))?,
+    };
+    per_k
+        .checked_mul(Fixed::from_int(1_000_000))
+        .ok_or_else(|| ColumnDerivationRefusal::NoQuantity {
+            quantity: "thermal_expansion_ppm_per_k".to_string(),
+        })
+}
+
+/// ONE BANKED CREEP STUDY and the registry phases the study's own samples are.
+///
+/// # What this exists to make impossible
+///
+/// The candidate set was a one-element array holding the dry olivine row, built with no reference to the
+/// rock. The rheology therefore had no way to learn what it was describing, and an iron, ice, salt,
+/// carbide, metallic or molecular interior received olivine creep with no signal that it had. A pathway
+/// that assumes one chemistry where a world's rock could differ is the alien-feasibility defect, and a
+/// docstring saying "the admitted set is one row" documented it rather than gating it.
+///
+/// # Why this is a refusal gate and NOT row selection
+///
+/// The whole bank is olivine. `civsim_physics::creep_rows` banks five rows and all five are Hirth and
+/// Kohlstedt 2003, which is a study of olivine aggregates, so there is no non-olivine row to select and
+/// authoring one would be inventing a flow law. What a rock with no banked study gets is a REFUSAL NAMING
+/// ITSELF, which is a work list. The mechanism is fixed Rust and the membership is data: banking a cited
+/// study for another phase is one entry here plus its rows, and no consumer changes.
+///
+/// # The phase the source measured, and the endmember the registry carries
+///
+/// H&K's samples are San Carlos olivine, a magnesium-rich member of the `(Mg,Fe)2SiO4` solid solution near
+/// Fo90, and the registry carries the two endmembers separately. `forsterite` (the Mg endmember) is the
+/// nearest one and is listed. `fayalite` (the Fe endmember) is deliberately NOT listed: iron content
+/// changes olivine creep strength, and the source's samples are not the iron endmember, so listing it
+/// would extend a citation past what it measured. A Fe-endmember column therefore refuses by name, which
+/// is the honest state of the bank rather than a gap in this table.
+struct CreepStudy {
+    /// The study, named in the refusal so a reader learns which citation covers what.
+    source: &'static str,
+    /// The registry phase names this study's samples are.
+    phases: &'static [&'static str],
+    /// The study's candidate rows, each with the activation-volume determinations matched to it. A
+    /// function rather than a constant because the volume sets are constructed rather than static, and
+    /// owned because `CreepCandidate` borrows the volumes it brackets.
+    rows: fn() -> Vec<(
+        civsim_physics::creep_rows::CreepRow,
+        Vec<civsim_physics::creep_rows::ActivationVolume>,
+    )>,
+}
+
+/// Every creep study this engine banks, keyed by the phases its samples are.
+///
+/// ONE ENTRY TODAY, and the single entry is the finding rather than a placeholder: every banked row comes
+/// from one olivine study, so every rock that is not olivine-dominated has no rheology here at all. The
+/// list grows by citation, never by analogy.
+const BANKED_CREEP_STUDIES: &[CreepStudy] = &[CreepStudy {
+    source: "Hirth and Kohlstedt 2003 (olivine aggregates)",
+    phases: &["forsterite"],
+    rows: olivine_creep_candidates,
+}];
+
+/// The olivine study's ADMITTED rows with their matched activation volumes.
+///
+/// One row, and its four siblings' absence is theirs rather than this function's. H&K Table 1 banks five;
+/// three are WET and no water fugacity or content is derived anywhere in this engine, and the
+/// grain-boundary-sliding row needs a grain size that is derived nowhere either. `admit_candidate` refuses
+/// those on engine capability, so listing them here would only move the refusal. Dry dislocation creep is
+/// what the engine can feed, and the others retire into this set the day their substrates land.
+///
+/// The volume set is the DISLOCATION-ONLY one: `hk_dry_dislocation_activation_volumes` excludes the Si
+/// self-diffusion determination, whose chord covers exactly the deep-interior pressures where feeding it
+/// to a dislocation column would drag the primary by more than an order of magnitude.
+fn olivine_creep_candidates() -> Vec<(
+    civsim_physics::creep_rows::CreepRow,
+    Vec<civsim_physics::creep_rows::ActivationVolume>,
+)> {
+    vec![(
+        civsim_physics::creep_rows::hk_dry_dislocation(),
+        civsim_physics::creep_rows::hk_dry_dislocation_activation_volumes().to_vec(),
+    )]
+}
+
+/// The phase occupying the most of the column, by the census's own fractions.
+///
+/// THE TIE IS BROKEN BY NAME, and it is stated rather than left to slice order. The comparison is strictly
+/// greater, so the first phase in the census's canonical name order wins an exact tie; `assemble` sorts the
+/// phases by name, so that order is a property of the assemblage rather than of how a caller happened to
+/// build the census (Principle 3).
+///
+/// `None` for an empty census, which is a refusal for the caller to name rather than a phase to guess.
+fn dominant_phase(census: &[(String, Fixed)]) -> Option<(&str, Fixed)> {
+    let mut best: Option<(&str, Fixed)> = None;
+    for (name, fraction) in census {
+        match best {
+            Some((_, top)) if *fraction <= top => {}
+            _ => best = Some((name.as_str(), *fraction)),
+        }
+    }
+    best
+}
+
+/// The column's effective viscosity as a log-space BAND.
+///
+/// THE ROCK'S IDENTITY REACHES THE RHEOLOGY, which it structurally could not before. This function took no
+/// assemblage and no census, so `derive_column_thermal_properties` held a full volume census and passed
+/// only scalars, and the candidate set was a hardcoded array holding the olivine row. Every interior, of
+/// any composition a world could produce, silently received olivine creep. The census goes in now, the
+/// candidates are generated from the phase that occupies the most of it, and a rock no banked study covers
+/// refuses by name.
+///
+/// THE ADMITTED CREEP SET IS ONE ROW OF ONE STUDY, and that is a capability statement rather than a
+/// simplification. Hirth and Kohlstedt 2003 Table 1 banks five rows; three are WET and refuse because no
+/// water fugacity or content is derived anywhere in this engine, and the grain-boundary-sliding row refuses
+/// because no grain size is. Dry dislocation creep is what remains, and it is admitted because its
+/// grain-size exponent is zero and it needs no water. Those refusals are the rows' own, carried rather than
+/// worked around: the wet rows retire into the set the day a water substrate lands.
+///
+/// THE DOMINANT PHASE CARRIES THE COLUMN, which is the honest limit of keying on one phase. A rock's
+/// effective viscosity is set by its load-bearing framework, and for an assemblage one phase dominates by
+/// volume that phase is the framework. Where no phase dominates, the framework question has a real answer
+/// this engine does not derive (it needs the interconnection threshold of the weak phase), and the
+/// argmax-of-volume rule silently answers it with the largest share. That limit is stated rather than
+/// papered over with a dominance threshold, because a threshold here would be a fabricated number: the
+/// value it wants is a percolation fraction, and none is banked to read.
+///
+/// THE MID-LAYER PRESSURE is composed here as `rho g d / 2`, the lithostatic pressure at half the layer
+/// depth, which is the chord the creep ladder declares it wants. It is formed from the column's OWN derived
+/// density and its geometry rather than passed in, so it cannot disagree with the density the rest of the
+/// cluster uses.
+///
+/// THE BUOYANCY CONTRAST is `rho alpha dT` from the same derived pair, so the viscosity, the Rayleigh number
+/// and the density anomaly all read one density. Refuses rather than defaulting on any unrepresentable step.
+#[allow(clippy::too_many_arguments)]
+fn derive_column_viscosity(
+    census: &[(String, Fixed)],
+    density_kg_m3: Fixed,
+    thermal_conductivity_w_m_k: Fixed,
+    specific_heat_j_kg_k: Fixed,
+    thermal_expansion_ppm_per_k: Fixed,
+    temperature_k: Fixed,
+    geometry: &ColumnGeometry,
+) -> Result<civsim_physics::convective_viscosity::ViscosityBand, ColumnDerivationRefusal> {
+    use civsim_physics::convective_viscosity::{effective_viscosity_band, ViscosityInputs};
+    use civsim_physics::creep_rows::{select_activation_volume, CreepCandidate, VolumeConstraint};
+
+    let unrepresentable = |what: &str| ColumnDerivationRefusal::NoQuantity {
+        quantity: what.to_string(),
+    };
+    // THE RHEOLOGY GATE, run before any arithmetic so a rock with no banked flow law refuses NAMING
+    // ITSELF rather than being handed olivine's.
+    let (dominant, dominant_fraction) = dominant_phase(census).ok_or_else(|| {
+        ColumnDerivationRefusal::Viscosity(
+            "the volume census is empty, so there is no rock to select a creep law for".to_string(),
+        )
+    })?;
+    let study = BANKED_CREEP_STUDIES
+        .iter()
+        .find(|s| s.phases.contains(&dominant))
+        .ok_or_else(|| {
+            ColumnDerivationRefusal::Viscosity(format!(
+                "no banked creep study describes {dominant}, which occupies {:.0} percent of this \
+                 column and so carries it; the whole creep bank is Hirth and Kohlstedt 2003 on olivine \
+                 aggregates, and there is no non-olivine row to select. Closing this needs a CITED flow \
+                 law for {dominant}, never olivine's applied to it",
+                dominant_fraction.to_f64_lossy() * 100.0
+            ))
+        })?;
+    let rows = (study.rows)();
+    // kappa = k / (rho c_p), computed here from the same three facts the struct exposes it from, so the
+    // viscosity cannot run on a different diffusivity than the one the kernel reads.
+    let thermal_diffusivity_m2_s = density_kg_m3
+        .checked_mul(specific_heat_j_kg_k)
+        .filter(|rho_cp| *rho_cp > Fixed::ZERO)
+        .and_then(|rho_cp| thermal_conductivity_w_m_k.checked_div(rho_cp))
+        .ok_or_else(|| unrepresentable("thermal_diffusivity"))?;
+
+    // The buoyancy contrast the flow runs on, from this column's own density and expansivity.
+    let density_anomaly_kg_m3 = civsim_physics::laws::thermal_density_anomaly(
+        density_kg_m3,
+        thermal_expansion_ppm_per_k,
+        geometry.temperature_contrast_k,
+    );
+    // THE MAGNITUDE IS THE RIGHT QUANTITY HERE, and this says why rather than leaving a bare absolute value
+    // to be read as an oversight. The creep solve wants the STRESS the buoyancy contrast applies, which is
+    // set by how far the density departs from its reference and not by which way it departs: a rising light
+    // parcel and a sinking heavy one of equal contrast drive the same strain rate through the same flow law.
+    // `solve_ln_effective_viscosity` states the same convention from the other side, refusing a non-positive
+    // contrast outright.
+    //
+    // WHAT THE MAGNITUDE MUST NOT DECIDE is whether the layer convects at all, which is a question about the
+    // SIGN. That verdict lives in `ln_convection_onset` through `laws::buoyancy_drives_convection`, so a
+    // stably stratified layer and a negative-expansion mantle are settled there rather than erased here.
+    let density_anomaly_kg_m3 = if density_anomaly_kg_m3 < Fixed::ZERO {
+        Fixed::ZERO - density_anomaly_kg_m3
+    } else {
+        density_anomaly_kg_m3
+    };
+
+    // Mid-layer lithostatic pressure in GPa: rho g (d/2), then Pa to GPa.
+    // ORDER MATTERS HERE, and getting it wrong is not a style question. Formed left to right as
+    // `rho g d / 2e9`, the intermediate `rho g d` is about `2.2e10` for a Mars-class mantle and OVERFLOWS
+    // Q32.32's `2.1e9` ceiling, so the derivation refuses on a pressure it can perfectly well represent
+    // (about 11 GPa). Dividing FIRST keeps every intermediate inside the window: `d / 2e9` is `9e-4`, and
+    // the two multiplications climb back to order ten. This is the same representation discipline the
+    // Rayleigh number needs, met by reassociation rather than by a wider type.
+    let half_depth_scaled = geometry
+        .layer_depth_m
+        .checked_div(Fixed::from_int(2_000_000_000))
+        .ok_or_else(|| unrepresentable("eval_pressure_gpa"))?;
+    let eval_pressure_gpa = half_depth_scaled
+        .checked_mul(density_kg_m3)
+        .and_then(|x| x.checked_mul(geometry.gravity_m_s2))
+        .ok_or_else(|| unrepresentable("eval_pressure_gpa"))?;
+
+    // THE COVERAGE GATE, run over EVERY candidate the study supplies rather than over one hardcoded volume
+    // set. `select_activation_volume` reports whether any determination's pressure chord COVERS the
+    // requested pressure at all, and when none does it falls back to the table's own extremes and labels the
+    // result `UnconstrainedBySource`. That label is produced and then dropped: the solve returns a
+    // `ViscosityBand` carrying only numbers, so a caller receives a viscosity with no signal that the
+    // source constrains nothing there. Every dry-dislocation chord ends by 15 GPa, and an Earth-like column
+    // derives about 47 GPa, so this is not a hypothetical: the previous version returned a confident
+    // deep-mantle viscosity extrapolated past every measurement behind it. It refuses instead, which is the
+    // same discipline the frame gate applies to the ambient thermoelastic rows.
+    //
+    // The volume sets are each row's OWN, matched by the study. For the olivine row that is the
+    // dislocation-only set: the ninth determination of H&K Table 2 is a Si SELF-DIFFUSION measurement
+    // (`V* = -2 cm^3/mol`, Bejina et al. 1997), a different mechanism whose chord covers 5 to 10 GPa, and
+    // feeding it to a dislocation column at 10 GPa drags the primary from `ln(eta) 51.2` to `47.9`, a
+    // viscosity 27 times too low. Keying the volumes to the row rather than to this call site is what makes
+    // that exclusion inherited rather than rediscovered.
+    for (_, volumes) in &rows {
+        match select_activation_volume(volumes, eval_pressure_gpa) {
+            Some(bracket) if bracket.constraint() == VolumeConstraint::CoveredBySource => {}
+            Some(_) => {
+                return Err(ColumnDerivationRefusal::Viscosity(format!(
+                "no activation-volume determination in {} covers {:.1} GPa; its chords end well \
+                     short of it, so a viscosity here would be extrapolated past every measurement \
+                     behind it",
+                study.source,
+                eval_pressure_gpa.to_f64_lossy()
+            )))
+            }
+            None => {
+                return Err(ColumnDerivationRefusal::Viscosity(format!(
+                    "the activation-volume bracket did not resolve for {}",
+                    study.source
+                )))
+            }
+        }
+    }
+    let candidates: Vec<CreepCandidate<'_>> = rows
+        .iter()
+        .map(|(row, volumes)| CreepCandidate { row: *row, volumes })
+        .collect();
+    let inputs = ViscosityInputs {
+        density_anomaly_kg_m3,
+        gravity_m_s2: geometry.gravity_m_s2,
+        layer_depth_m: geometry.layer_depth_m,
+        thermal_diffusivity_m2_s,
+        // The ladder's chord is the interior POTENTIAL temperature, NOT the contrast that drives
+        // buoyancy. They are different quantities and passing the contrast here would evaluate the creep
+        // law at a few hundred kelvin instead of a few thousand.
+        eval_temperature_k: temperature_k,
+        eval_pressure_gpa,
+        ln_rayleigh_critical: geometry.ln_rayleigh_critical,
+    };
+    effective_viscosity_band(&inputs, &candidates)
+        .map_err(|e| ColumnDerivationRefusal::Viscosity(format!("{e:?}")))
+}
+
+/// One convection-evolution step: compose the merged floor law-forms into the next column state.
+// @derives[column_convection]: the interior column temperature and convection-onset state <- the merged floor law-forms (thermal_density_anomaly, rayleigh_number, threshold_latch, stokes_velocity, heat_advection, internal_heat_evolution, conduction) over the column's own physical parameters; no authored convection knob (Ra_crit is the derived marginal-stability eigenvalue, the Stokes coefficient the derived 2/9, the buoyancy the real material thermal expansion). A NEW derivation (not a retired-floor replacement), now covered by the liveness gate broadened to any derived output and any input source (task #46): the derive_gate registry carries a column_convection row (category new-derivation) whose probe perturbs the ColumnParams heat_production (a resident-field input) and asserts the stepped temperature responds.
+pub fn convection_step(state: &ColumnState, p: &ColumnParams) -> ColumnState {
+    // The column's temperature contrast with its cold reference drives buoyancy, conduction, and advection.
+    let delta_t = state.temperature - p.reference_temperature;
+
+    // Buoyancy source: the thermal density excess (negative, and rising, when the column is hotter).
+    let delta_rho = laws::thermal_density_anomaly(p.density, p.thermal_expansion_ppm, delta_t);
+
+    // The Rayleigh number and the one-way convection-onset latch (fires once Ra crosses the derived Ra_crit).
+    let rayleigh = laws::rayleigh_number(
+        delta_rho,
+        p.gravity,
+        p.depth,
+        p.viscosity,
+        p.thermal_diffusivity(),
+        p.ra_max,
+    );
+    let convecting = laws::threshold_latch(rayleigh, p.ra_crit, state.convecting);
+
+    // Conductive surface loss as specific power: the Fourier flux over the column mass per area, so the loss
+    // grows with the contrast, the restoring force the steady state relaxes onto.
+    let flux = laws::conduction(
+        p.thermal_conductivity,
+        Fixed::ONE,
+        state.temperature,
+        p.reference_temperature,
+        p.depth,
+        p.flux_max,
+    );
+    let mass_per_area = p.density.checked_mul(p.depth).unwrap_or(Fixed::MAX);
+    let conductive_loss = if mass_per_area > Fixed::ZERO {
+        flux.checked_div(mass_per_area).unwrap_or(Fixed::ZERO)
+    } else {
+        Fixed::ZERO
+    };
+
+    // Convective loss: once convecting, the buoyant flow carries heat out, augmenting conduction.
+    let convective_loss = if convecting {
+        let velocity = laws::stokes_velocity(delta_rho, p.gravity, p.radius, p.viscosity, p.v_max);
+        laws::heat_advection(velocity, p.specific_heat, delta_t, p.depth)
+    } else {
+        Fixed::ZERO
+    };
+
+    let total_loss = conductive_loss.saturating_add(convective_loss);
+    let temperature = laws::internal_heat_evolution(
+        state.temperature,
+        p.heat_production,
+        total_loss,
+        p.specific_heat,
+        p.dt,
+    );
+    ColumnState {
+        temperature,
+        convecting,
+    }
+}
+
+/// The SI operating point a log-domain convection step runs on: the linear fields the kernel can hold,
+/// plus the viscosity as a LOGARITHM because a real one cannot be held at all.
+///
+/// A Mars-class interior at 1600 K and 10.7 GPa solves to `ln(eta) ~ 54.7`, that is `eta ~ 5e23 Pa*s`
+/// against a `Fixed::MAX` of `2.1e9`. The linear [`convection_step`] therefore cannot run on SI values, and
+/// that is the whole reason its callers pass a scaled operating point with an authored fixture cluster.
+/// Nothing about the PHYSICS required that; it was a representation limit, and the log-domain law forms
+/// ([`laws::ln_rayleigh_number`], [`laws::ln_stokes_velocity`]) are the documented way out.
+#[derive(Clone, Copy, Debug)]
+pub struct LogConvectionInputs {
+    /// Density at the column's own state (kg/m^3).
+    pub density_kg_m3: Fixed,
+    /// Volumetric thermal expansivity (ppm/K).
+    pub thermal_expansion_ppm: Fixed,
+    /// Surface gravity (m/s^2).
+    pub gravity_m_s2: Fixed,
+    /// Convecting layer depth (m).
+    pub depth_m: Fixed,
+    /// The buoyant parcel scale (m), the convective cell half-wavelength.
+    pub parcel_radius_m: Fixed,
+    /// `ln(eta)` in `ln Pa*s`. Never exponentiated.
+    pub ln_viscosity: Fixed,
+    /// Thermal diffusivity (m^2/s).
+    pub thermal_diffusivity_m2_s: Fixed,
+    /// `ln(Ra_crit)`, the onset threshold in the same domain the Rayleigh number is computed in.
+    pub ln_rayleigh_critical: Fixed,
+}
+
+/// The Rayleigh number and convection-onset verdict for an SI operating point, IN LOGS.
+///
+/// Returns `(ln Ra, convecting)`. The comparison happens in the log domain on both sides, so neither `Ra`
+/// nor `Ra_crit` has to materialise, and there is no overflow guard to author: `ln Ra` for a real mantle is
+/// a small representable number near 14, and the linear form's `ra_max` clamp (a REPRESENTABILITY guard,
+/// never a physical ceiling) has nothing to guard here. `None` when an input is non-physical.
+// @derives: a column's log-domain Rayleigh number and convection onset <- its SI buoyancy, gravity, depth, log viscosity and diffusivity
+pub fn ln_convection_onset(
+    inputs: &LogConvectionInputs,
+    delta_t: Fixed,
+    latched: bool,
+) -> Option<(Fixed, bool)> {
+    let delta_rho =
+        laws::thermal_density_anomaly(inputs.density_kg_m3, inputs.thermal_expansion_ppm, delta_t);
+    let ln_ra = laws::ln_rayleigh_number(
+        delta_rho,
+        inputs.gravity_m_s2,
+        inputs.depth_m,
+        inputs.ln_viscosity,
+        inputs.thermal_diffusivity_m2_s,
+    )?;
+    // THE SIGN IS THE REGIME AND THE MAGNITUDE CANNOT SUPPLY IT. `ln_rayleigh_number` takes `|delta_rho|`,
+    // which is right for the ratio it computes and says nothing about which way the buoyancy points. Read
+    // without this gate, a stably stratified layer produces a large `ln Ra` and is declared convecting, and
+    // the more stable it is the more vigorously it appears to convect. It also governs the alien case: a
+    // negative-expansion mantle is pinned rather than overturning, and it reaches this test as a data row
+    // through the sign `thermal_density_anomaly` already composed.
+    let destabilizing = laws::buoyancy_drives_convection(delta_rho);
+    // The latch is one-way WITHIN a regime, matching the linear kernel: onset fires once and does not
+    // un-fire on a dip. A sign flip is a change of regime rather than a dip, so it does un-latch.
+    Some((
+        ln_ra,
+        destabilizing && (latched || ln_ra >= inputs.ln_rayleigh_critical),
+    ))
+}
+
+/// An SI convection column: every field in metres, kilograms, seconds and kelvin, with the two quantities
+/// that cannot be held linearly carried as logarithms.
+///
+/// # Why this exists beside [`ColumnParams`]
+///
+/// [`ColumnParams`] runs on a SCALED operating point with an authored fixture cluster (density 1,
+/// conductivity 2, specific heat 10, a diffusivity that disagrees with `k/(rho c_p)` twentyfold). That
+/// cluster is not a physics choice: it is what a linear Q32.32 kernel can hold. This type holds the real
+/// derived values instead, and the three places SI would break are handled rather than avoided.
+///
+/// # The three representation problems, each solved rather than scaled away
+///
+/// **The viscosity overflows.** A derived interior viscosity is `~5.5e23 Pa*s` against a `Fixed::MAX` of
+/// `2.1e9`. It is carried as `ln_viscosity` and never exponentiated; the Rayleigh number and the Stokes
+/// velocity are computed in logs by [`laws::ln_rayleigh_number`] and [`laws::ln_stokes_velocity`], which
+/// were built for exactly this and are twinned against their linear forms.
+///
+/// **The heat rates quantize to zero.** A radiogenic budget is `~5e-12 W/kg` and the full-depth conductive
+/// loss is `~2.4e-13 W/kg`, against a `Fixed` resolution of `2.33e-10`. Stored as per-second RATES both are
+/// zero, and a column whose production and loss are both zero never changes temperature. So the heat terms
+/// are carried as PER-TICK ENERGY (J/kg): over a 1 Myr tick the same conductive loss is `7.7 J/kg`, which
+/// is `3.3e10` ulp. [`laws::internal_heat_evolution`] then takes them with `dt = 1` and is unchanged.
+///
+/// **The tick length does not fit either.** One megayear is `3.1557e13 s` against the same `2.1e9`
+/// ceiling, so `dt` is carried as `ln_dt_s` and the per-tick conductive loss is composed in logs. This is
+/// the problem BENEATH the ordering hazard rather than the same one: `k dt` overflowing at `7.8e13` can be
+/// reordered around, but an unrepresentable input cannot be, and only the second is fixable by care.
+#[derive(Clone, Copy, Debug)]
+pub struct SiColumnParams {
+    /// The cold reference the contrast is measured against (K).
+    pub reference_temperature_k: Fixed,
+    /// Density at the column's own state (kg/m^3).
+    pub density_kg_m3: Fixed,
+    /// Thermal conductivity (W/m/K).
+    pub thermal_conductivity_w_m_k: Fixed,
+    /// Volumetric thermal expansivity (ppm/K).
+    pub thermal_expansion_ppm: Fixed,
+    /// Specific heat (J/kg/K).
+    pub specific_heat_j_kg_k: Fixed,
+    /// Thermal diffusivity (m^2/s), `k / (rho c_p)`.
+    pub thermal_diffusivity_m2_s: Fixed,
+    /// `ln(eta)` in `ln Pa*s`. Never exponentiated.
+    pub ln_viscosity: Fixed,
+    /// Surface gravity (m/s^2).
+    pub gravity_m_s2: Fixed,
+    /// Convecting layer depth (m).
+    pub depth_m: Fixed,
+    /// The buoyant parcel scale (m), the convective cell half-wavelength.
+    pub parcel_radius_m: Fixed,
+    /// Radiogenic heating as PER-TICK ENERGY (J/kg), not a rate. See the type documentation.
+    pub heat_production_j_per_kg: Fixed,
+    /// `ln(Ra_crit)`, so the onset comparison happens in the domain the Rayleigh number is computed in.
+    pub ln_rayleigh_critical: Fixed,
+    /// `ln(dt)` for the tick length in SECONDS. A logarithm because the tick itself does not fit: one
+    /// megayear is `3.1557e13 s` against a `Fixed::MAX` of `2.1e9`, so the field cannot hold `dt` at all.
+    /// `ln(dt) = 31.08` is comfortable.
+    pub ln_dt_s: Fixed,
+    /// The Nusselt PREFACTOR `a` in `Nu = a (Ra/Ra_crit)^(1/3)`, from
+    /// [`civsim_physics::convection_scaling`] (`1.0` for the single-lid planetary case), never authored
+    /// here.
+    pub nusselt_prefactor: Fixed,
+}
+
+impl SiColumnParams {
+    /// The conductive loss as PER-TICK ENERGY per kelvin of contrast: `k dt / (rho d^2)` [J/kg/K].
+    ///
+    /// COMPUTED IN LOGS, and not as a stylistic preference: the tick length does not fit. One megayear is
+    /// `3.1557e13 s` against a `Fixed::MAX` of `2.1e9`, so there is no ordering of a linear composition
+    /// that helps, because the input itself is unrepresentable before any multiply happens. An earlier
+    /// version of this method reordered the linear form to `dt/d -> /d -> *k -> /rho` and claimed the
+    /// ordering was the correctness; the ordering IS a real hazard (`k dt` alone is `7.8e13`, twenty
+    /// thousand times past the ceiling) but it is the second problem, not the first. Its own test caught
+    /// the first one by failing to construct the operating point.
+    ///
+    /// `ln_dt - 2 ln d + ln k - ln rho`, exponentiated once, has every term near unity and no hazard at
+    /// all. For the Mars-class column that is `31.083 - 28.807 + 0.901 - 8.118 = -4.941`, giving
+    /// `7.15e-3 J/kg/K`.
+    // @derives: a column's per-tick conductive loss energy per kelvin <- its conductivity, density, depth and log tick length
+    pub fn conductive_loss_energy_per_kelvin(&self) -> Option<Fixed> {
+        if self.depth_m <= Fixed::ZERO
+            || self.density_kg_m3 <= Fixed::ZERO
+            || self.thermal_conductivity_w_m_k <= Fixed::ZERO
+        {
+            return None;
+        }
+        let two_ln_d = self.depth_m.ln().checked_mul(Fixed::from_int(2))?;
+        let ln_value = self
+            .ln_dt_s
+            .checked_sub(two_ln_d)?
+            .checked_add(self.thermal_conductivity_w_m_k.ln())?
+            .checked_sub(self.density_kg_m3.ln())?;
+        Some(ln_value.exp())
+    }
+}
+
+/// One SI convection step on real derived values.
+///
+/// # The heat loss uses the repository's OWN parameterized-convection law, and finding that mattered
+///
+/// [`convection_step`] composes its convective loss from [`laws::stokes_velocity`] into
+/// [`laws::heat_advection`]: a buoyant PARCEL settling at Stokes velocity, carrying the full interior
+/// contrast across the full depth. On the fixture cluster nobody could tell whether that was right, because
+/// there was no real magnitude to check it against. On the DERIVED values it is measurably wrong.
+///
+/// THE TUPLE BELOW IS A SNAPSHOT OF THAT MEASUREMENT AND THE CLUSTER HAS MOVED SINCE, which is worth
+/// naming so a reader does not take it for a live read. The same flagship column now derives `rho =
+/// 3383.5`, `k = 2.543`, `c_p = 1267.3` and `alpha = 24.75 ppm/K` at its own solved 11.267 GPa: the
+/// density and expansivity drifted before this note was written, and the conductivity and capacity moved
+/// when the expansivity integral became exact and the heat capacity became the ladder's own. The ratio the
+/// finding turns on is a factor of 121, so a few percent on any of these does not touch it, and it has
+/// NOT been re-measured here.
+///
+/// Measured on a Mars-class column (`rho = 3354.5`, `k = 2.461`, `c_p = 1241`, `alpha = 25.9 ppm/K`,
+/// `ln eta = 54.66`, `d = 1.8e6 m`, `dT = 1300 K`), the Stokes-advection form gives `12.7 K/Myr` of
+/// cooling. The observational constraint is a Mars-class surface heat flux near `0.025 W/m^2`, which over
+/// the same column is `0.105 K/Myr`. The form overestimates by about 121 times.
+///
+/// The velocity itself is NOT the problem and is worth keeping: it comes out at `5.6e-10 m/s`, about
+/// `1.8 cm/yr`, which is a plausible mantle overturn rate and a real observable. What is wrong is treating
+/// that velocity times the FULL contrast over the FULL depth as the heat transport. A convecting mantle
+/// loses heat across the thin thermal BOUNDARY LAYER the flow maintains, which is exactly what
+/// [`laws::mantle_convective_heat_flux`] computes and what this uses instead:
+///
+/// ```text
+///   Nu = max(1, a exp((ln Ra - ln Ra_crit) / 3))      the boundary-layer enhancement
+///   loss_per_tick = Nu * k * dT * dt / (rho * d^2)    [J/kg]
+/// ```
+///
+/// `Nu >= 1` is the definition rather than a floor (convection never transports less than conduction), so
+/// the SAME expression covers the conducting and convecting cases and there is no separate conductive term
+/// to add. Double-counting them would be the error the clamp exists to prevent. The same column now gives
+/// `0.012 K/Myr`, within an order of magnitude of the observational `0.105` rather than 121 times past it,
+/// and the residual is the honest gap: this is the MOBILE-LID isoviscous instance, and a Mars-class body is
+/// stagnant-lid, whose suppression through the rheological temperature scale is the flagged follow-on
+/// recorded on that law.
+///
+/// That law was already in the tree with an owner ruling behind it and the convection step did not read it.
+/// It is the third banked-but-unread finding of this arc, after `K'` and the anchor column.
+///
+/// Returns `None` when an input is non-physical or an intermediate leaves the window. A `None` is a REFUSAL
+/// and never a silently unchanged column.
+// @derives: an SI interior column's next temperature and convection state <- its derived thermal properties, log viscosity, boundary-layer Nusselt enhancement and per-tick radiogenic energy
+pub fn convection_step_si(state: &ColumnState, p: &SiColumnParams) -> Option<ColumnState> {
+    let delta_t = state.temperature - p.reference_temperature_k;
+
+    // Onset, entirely in logs. No `ra_max` clamp exists here because none is needed: the linear form's is a
+    // REPRESENTABILITY guard, not a physical Rayleigh ceiling, and there is nothing to overflow.
+    let inputs = LogConvectionInputs {
+        density_kg_m3: p.density_kg_m3,
+        thermal_expansion_ppm: p.thermal_expansion_ppm,
+        gravity_m_s2: p.gravity_m_s2,
+        depth_m: p.depth_m,
+        parcel_radius_m: p.parcel_radius_m,
+        ln_viscosity: p.ln_viscosity,
+        thermal_diffusivity_m2_s: p.thermal_diffusivity_m2_s,
+        ln_rayleigh_critical: p.ln_rayleigh_critical,
+    };
+    // A column at its reference temperature has no buoyancy and so no Rayleigh number. That is not a
+    // failure, it is a column that is not convecting, so the latch holds and the enhancement stays at one.
+    let (ln_ra, convecting) = match ln_convection_onset(&inputs, delta_t, state.convecting) {
+        Some(v) => v,
+        None => (p.ln_rayleigh_critical, state.convecting),
+    };
+
+    // THE BOUNDARY-LAYER ENHANCEMENT, in logs so no linear Rayleigh number has to form.
+    // `Nu = a (Ra/Ra_crit)^(1/3)` is `a exp((ln Ra - ln Ra_crit)/3)`, clamped at unity by its definition.
+    let nusselt = if convecting && ln_ra > p.ln_rayleigh_critical {
+        let excess = ln_ra
+            .checked_sub(p.ln_rayleigh_critical)?
+            .checked_div(Fixed::from_int(3))?;
+        p.nusselt_prefactor
+            .checked_mul(excess.exp())?
+            .max(Fixed::ONE)
+    } else {
+        Fixed::ONE
+    };
+
+    // The loss for this tick, in J/kg. `Nu = 1` is the pure-conduction case, so this ONE expression covers
+    // both regimes and there is no second term to add.
+    //
+    // THE CONTRAST ENTERS SIGNED, and it used to enter as a magnitude. `internal_heat_evolution` subtracts
+    // this term unconditionally (`net = production - loss`), so an absolute value made a column BELOW its
+    // reference temperature cool further, away from the reference rather than toward it. Conduction reverses
+    // when the gradient does: a column colder than its surface gains heat, and the signed contrast is what
+    // says so. Byte-neutral wherever the interior sits above its reference, which is every column in the two
+    // pinned scenarios and every fixture in this file, so the correction is visible only where it matters.
+    let loss = p
+        .conductive_loss_energy_per_kelvin()?
+        .checked_mul(delta_t)?
+        .checked_mul(nusselt)?;
+
+    // `dt = 1` because the production and the loss are ALREADY per-tick energies. The law is unchanged: it
+    // divides the net energy by the heat capacity to get a temperature increment.
+    let temperature = laws::internal_heat_evolution(
+        state.temperature,
+        p.heat_production_j_per_kg,
+        loss,
+        p.specific_heat_j_kg_k,
+        Fixed::ONE,
+    );
+    Some(ColumnState {
+        temperature,
+        convecting,
+    })
+}
+
+/// The column's CONDUCTIVE LOSS COEFFICIENT `k / (rho * d^2)` (per second, per kelvin of contrast): the
+/// specific power a column sheds per kelvin it sits above its cold reference, read OFF THE COLUMN the kernel
+/// will itself run rather than restated at a caller. It is exactly the coefficient [`convection_step`]
+/// composes when it divides the Fourier flux by the column's mass per area, so a consumer that needs the
+/// conductive balance (the interior-thermostat closure, which sets the radiogenic base so a column's
+/// steady state lands on the world's own solidus) reads one home instead of carrying a second copy of the
+/// column's conductivity and density.
+///
+/// WHY IT EXISTS AS A FUNCTION. The thermostat previously restated `conductivity` and `density` at its own
+/// call site, so the SAME two facts lived in two places with nothing comparing them: the redundant-parameter
+/// diamond this repo keeps paying for, one level up from the retired stored `kappa` versus `k / (rho * c_p)`
+/// conflict. Collapsing the copies makes divergence structurally impossible
+/// rather than test-detectable, and it means the geotherm arc's replacement of the fixture cluster moves the
+/// thermostat with the kernel by construction. `the_loss_coefficient_twins_the_kernels_own_conductive_loss`
+/// is the twin that proves the composition matches the kernel's.
+///
+/// `None` when the depth or the volumetric mass is non-positive (no conductive path), or on an arithmetic
+/// overflow. Deterministic fixed-point.
+pub fn conductive_loss_coefficient(p: &ColumnParams) -> Option<Fixed> {
+    let mass_per_area = p.density.checked_mul(p.depth)?;
+    if mass_per_area <= Fixed::ZERO || p.depth <= Fixed::ZERO {
+        return None;
+    }
+    // k / (rho * d^2), composed in the kernel's own association: the Fourier flux `k * dT / d` over the mass
+    // per area `rho * d`.
+    p.thermal_conductivity
+        .checked_div(p.density.checked_mul(p.depth.checked_mul(p.depth)?)?)
+}
+
+/// The continuous interior read-outs of one column, the CONTINUOUS state the resident contract stores (gate
+/// ruling, #176): the stepped interior temperature, the Rayleigh number (the convective vigor a consumer
+/// reads to derive whether the column convects), and the convective driving stress (the lid-mobilization
+/// quantity). No discrete "convecting" flag is carried: the discrete condition is derived from the Rayleigh
+/// number against the critical value at each consumer site, so convection can begin and, on a cooling world,
+/// cease.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ColumnReadout {
+    /// The stepped interior temperature (K).
+    pub temperature: Fixed,
+    /// The Rayleigh number (dimensionless), the continuous convective vigor.
+    pub rayleigh: Fixed,
+    /// The convective driving stress (Pa) the interior flow exerts on the base of the lithosphere.
+    pub convective_stress: Fixed,
+}
+
+/// Read the continuous interior quantities of a column and its stepped temperature, composing the same floor
+/// law-forms [`convection_step`] threads, plus [`civsim_physics::laws::convective_stress`] for the
+/// lid-driving stress. The Rayleigh number and the stress are evaluated at the input state (the buoyancy the
+/// step responds to), and the temperature is the stepped result, so the three form the column's continuous
+/// state going out of the tick. Deterministic fixed-point.
+pub fn column_readout(state: &ColumnState, p: &ColumnParams) -> ColumnReadout {
+    let delta_t = state.temperature - p.reference_temperature;
+    let delta_rho = laws::thermal_density_anomaly(p.density, p.thermal_expansion_ppm, delta_t);
+    let rayleigh = laws::rayleigh_number(
+        delta_rho,
+        p.gravity,
+        p.depth,
+        p.viscosity,
+        p.thermal_diffusivity(),
+        p.ra_max,
+    );
+    let velocity = laws::stokes_velocity(delta_rho, p.gravity, p.radius, p.viscosity, p.v_max);
+    // The shear length is the thermal BOUNDARY LAYER thickness, DERIVED (gate ruling, #176): the boundary layer
+    // thins with convective vigor as `depth * (Ra_crit / Ra)^(1/3)`, so a vigorous mantle (Ra of order 1e6,
+    // against a planetary Ra_crit of 1707.762) shears over a layer about a TENTH of its depth, concentrating
+    // the driving stress. The derivation MOVED to
+    // `laws::thermal_boundary_layer` when the LID GEOTHERM became its second consumer: the driving stress and
+    // the geotherm must agree about how thick the lid is, so they read ONE law rather than two copies of the
+    // same expression. Byte-identical across the move (the same operations in the same order).
+    let length_scale = laws::thermal_boundary_layer(p.depth, rayleigh, p.ra_crit);
+    let convective_stress =
+        laws::convective_stress(p.viscosity, velocity, length_scale, p.stress_max);
+    let next = convection_step(state, p);
+    ColumnReadout {
+        temperature: next.temperature,
+        rayleigh,
+        convective_stress,
+    }
+}
+
+/// Drive the convection step to a bounded steady state with C's fixed-cap iterative solve: at most `cap`
+/// steps, stopping the moment the integer temperature-change residual falls to or below `threshold`. Both
+/// `cap` and `threshold` are determinism bounds (the solver terminates by construction, never an unbounded
+/// until-converged spin), not physical knobs. Returns the solve outcome (the final state, the iteration
+/// count, and whether the residual crossed the threshold within the cap).
+pub fn convection_solve(
+    initial: ColumnState,
+    p: &ColumnParams,
+    cap: u32,
+    threshold: u64,
+) -> SolveOutcome<ColumnState> {
+    fixed_cap_solve(
+        initial,
+        cap,
+        threshold,
+        |s| convection_step(s, p),
+        |a, b| a.temperature.to_bits().abs_diff(b.temperature.to_bits()),
+    )
+}
+
+/// A column's decaying radiogenic heat source paired with its thermal state, for the secular thermal
+/// history: over geological time the heat-producing isotope reservoir spends down (the memory primitive
+/// [`laws::radiogenic_decay`]), so the radiogenic heat production ([`laws::radiogenic_heat`] over the
+/// reservoir) falls and the interior cools, the spent-world relaxation the static-source convection step
+/// cannot express on its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SecularState {
+    /// The column's thermal state.
+    pub column: ColumnState,
+    /// The heat-producing isotope reservoir (concentration), spending down over the clock.
+    pub reservoir: Fixed,
+}
+
+/// One secular step over a world-clock tick: decay the isotope reservoir, recompute the radiogenic heat
+/// production it now supplies, and apply the convection step under that (falling) production. `decay_constant`
+/// is the isotope's per-tick decay rate and `specific_heat_production` its heat per unit reservoir; the
+/// step reuses [`convection_step`] with the recomputed heat production, so the whole convection composition
+/// (buoyancy, onset, flow, advection, conduction) runs under a source that dies over deep time.
+// @derives: the interior column's secular thermal history <- radiogenic_decay (the isotope reservoir spending down over the world clock) feeding radiogenic_heat (the falling heat production) into the convection step, so the interior warms under radiogenic heating and cools as the sources decay; no authored cooling knob, the source history is the decaying reservoir
+pub fn secular_step(
+    state: &SecularState,
+    p: &ColumnParams,
+    decay_constant: Fixed,
+    specific_heat_production: Fixed,
+) -> SecularState {
+    let reservoir = laws::radiogenic_decay(state.reservoir, decay_constant, p.dt);
+    let heat_production = laws::radiogenic_heat(reservoir, specific_heat_production);
+    let column = convection_step(
+        &state.column,
+        &ColumnParams {
+            heat_production,
+            ..*p
+        },
+    );
+    SecularState { column, reservoir }
+}
+
+/// March the secular step over `ticks` world-clock ticks, returning the interior's state after that span of
+/// geological time. Deterministic and bounded by `ticks` (never an unbounded spin), the time-marching
+/// counterpart to the fixed-`H` relaxation [`convection_solve`].
+pub fn secular_history(
+    initial: SecularState,
+    p: &ColumnParams,
+    decay_constant: Fixed,
+    specific_heat_production: Fixed,
+    ticks: u64,
+) -> SecularState {
+    let mut state = initial;
+    for _ in 0..ticks {
+        state = secular_step(&state, p, decay_constant, specific_heat_production);
+    }
+    state
+}
+
+/// Populate one column's INTERIOR fields on A's [`GeodynamicColumn`] contract from the interior chain,
+/// SNAPSHOT-APPLY (gate ruling, #176): read the start-of-tick `snapshot` column and return the end-of-tick
+/// column. The interior reads only the snapshot (its resident `temperature` and the surface lane's
+/// `crustal_density`), so whichever lane evaluates first reads the same values and the boundary is
+/// order-independent, no cross-lane evaluation order pinned. The interior writes its continuous state
+/// (`temperature`, `rayleigh`, `convective_stress`) and the `isostatic_elevation` it derives by floating the
+/// surface-written crust on the world's mantle; the surface lane's own fields pass through unchanged. A
+/// missing density or thickness yields the zero-default elevation (the absence convention), never a
+/// fabricated one.
+///
+/// `mantle_density` is DERIVED, never authored (gate ruling from the owner, #176): it is A's petrology kernel
+/// [`derive_mantle_density`] over the world's mantle COMPOSITION at the mantle's temperature and pressure, so
+/// no density is a bare per-world number. The caller passes the derived value (the derivation is threaded so
+/// the boundary stays snapshot-clean). Byte-neutral: no scenario calls this yet, so it is a dormant capability
+/// (the interior law-forms' pattern), and the arming (a scenario running it and the surface reading the
+/// result) is the separately-sequenced step.
+pub fn populate_interior_column(
+    snapshot: GeodynamicColumn,
+    p: &ColumnParams,
+    mantle_density: Fixed,
+) -> GeodynamicColumn {
+    // The resident interior state carries only the continuous temperature; the discrete convecting condition is
+    // derived inside the step from the Rayleigh number (a false prior latch makes the onset reversible, so a
+    // cooling column can stop convecting), never a stored flag.
+    let state = ColumnState {
+        temperature: snapshot.temperature,
+        convecting: false,
+    };
+    let readout = column_readout(&state, p);
+    let isostatic_elevation = civsim_physics::geodynamics::airy_isostatic_elevation(
+        snapshot.crustal_density,
+        mantle_density,
+        snapshot.crustal_thickness,
+    )
+    .unwrap_or(Fixed::ZERO);
+    GeodynamicColumn {
+        // The surface lane's fields pass through (the interior does not write them, snapshot-apply).
+        crustal_density: snapshot.crustal_density,
+        crustal_thickness: snapshot.crustal_thickness,
+        // The interior lane's writes.
+        isostatic_elevation,
+        temperature: readout.temperature,
+        convective_stress: readout.convective_stress,
+        rayleigh: readout.rayleigh,
+    }
+}
+
+/// Snapshot-apply the interior population over a whole [`GeodynamicField`]: read the start-of-tick `snapshot`
+/// field and return the end-of-tick field, each column populated against the snapshot (order-independent, gate
+/// ruling #176). The per-world interior parameters and mantle density are supplied by the caller (a future
+/// scenario). A column with no resident state is not walked, so an EMPTY field yields an empty field and the
+/// pass is byte-neutral over an unarmed geology; the walk is canonical `Coord3` order, so the fold is
+/// reproducible and thread-invariant. Called by no scenario yet.
+pub fn step_interior_field(
+    snapshot: &GeodynamicField,
+    p: &ColumnParams,
+    mantle_density: Fixed,
+) -> GeodynamicField {
+    let mut next = GeodynamicField::new();
+    for (coord, column) in snapshot.iter() {
+        next.set(coord, populate_interior_column(column, p, mantle_density));
+    }
+    next
+}
+
+/// Derive the mantle density from the world's mantle COMPOSITION, never an authored number (gate ruling from
+/// the owner, #176): A's petrology kernel ([`civsim_physics::petrology::crustal_density`], a GENERAL
+/// composition-to-density derivation despite the crust-specific name) minimizes the stable mineral assemblage
+/// of the composition at the mantle's temperature and pressure and reads its mass over volume, so the density
+/// is what the material IS under its conditions, neither a fundamental constant nor a bare per-world scalar.
+/// The mantle temperature is the interior heat chain's own thermal state (the column temperature the
+/// convection evolution carries), and the pressure is the lithostatic pressure at the mantle's depth; a
+/// reference-pressure first pass breaks the mild density-depends-on-pressure self-consistency (a short
+/// fixed-point refinement is the follow-on, both derivations, nothing authored). Returns `None` when the
+/// composition reaches no assemblage or a phase is missing from the data (fail-loud, never a fabricated
+/// density). The isostasy floats the crust on this derived mantle density.
+pub fn derive_mantle_density(
+    mantle_composition: &[(String, Fixed)],
+    mantle_temperature: Fixed,
+    reference_pressure_bar: Fixed,
+    registry: &civsim_physics::petrology_data::PhaseRegistry,
+    table: &civsim_physics::periodic::PeriodicTable,
+) -> Option<Fixed> {
+    civsim_physics::petrology::crustal_density(
+        mantle_composition,
+        mantle_temperature,
+        reference_pressure_bar,
+        registry,
+        table,
+    )
+}
+
+/// The CONVECTING-MANTLE DEPTH (metres): the silicate mantle shell thickness `R_planet - R_core`, DERIVED from the
+/// planet's own structure, never an authored layer thickness. The core is a sphere of the sinking metal-and-sulfide
+/// fraction the differentiation set; from `core_mass / planet_mass = (R_core/R_planet)^3 * (rho_core/rho_mean)` the
+/// core radius is `R_core = R_planet * cbrt(core_mass_fraction * rho_mean / rho_core)`, so the shell the interior
+/// convection evolves over is `R_planet * (1 - cbrt(core_fraction * rho_mean / rho_core))`. Every input is a
+/// capstone derivation: the radius from accretion, and the core mass fraction, the mean density, and the metal-core
+/// density from the differentiation and the bulk-density derivation. `None` on a non-physical input (a non-positive
+/// radius or density, a core fraction outside `[0, 1]`, or a core no denser than the mean, which could not have
+/// sunk) or a degenerate result (a core volume filling the whole planet leaves no mantle), fail-loud, never a
+/// fabricated depth. This is the derivation that retires the authored convecting-layer-depth fixture: the mantle
+/// thickness the convection reads is what the planet's own structure IS. (The convection kernel's `depth` is a
+/// representable-SCALED length, so the run-path wiring scales this SI metres value into the kernel's units; the
+/// physical derivation is here, the scale conversion is the units plan's job.)
+pub fn convecting_mantle_depth_m(
+    planet_radius_m: Fixed,
+    core_mass_fraction: Fixed,
+    mean_density: Fixed,
+    core_density: Fixed,
+) -> Option<Fixed> {
+    if planet_radius_m <= Fixed::ZERO
+        || mean_density <= Fixed::ZERO
+        || core_density <= Fixed::ZERO
+        || core_mass_fraction < Fixed::ZERO
+        || core_mass_fraction > Fixed::ONE
+        || core_density <= mean_density
+    {
+        // A core no denser than the whole-planet mean could not have sunk to a core (differentiation needs the
+        // metal denser than the silicate mean): not a differentiated planet, no distinct mantle shell.
+        return None;
+    }
+    // The core VOLUME fraction, core_mass_fraction * (rho_mean / rho_core). A core no denser than the mean could
+    // not be a sunk metal core, so the fraction must land in (0, 1); at the bounds there is no distinct mantle.
+    let volume_fraction = core_mass_fraction
+        .checked_mul(mean_density)?
+        .checked_div(core_density)?;
+    if volume_fraction <= Fixed::ZERO || volume_fraction >= Fixed::ONE {
+        return None;
+    }
+    let core_radius = planet_radius_m.checked_mul(volume_fraction.cbrt())?;
+    let depth = planet_radius_m.checked_sub(core_radius)?;
+    if depth <= Fixed::ZERO {
+        return None;
+    }
+    Some(depth)
+}
+
+/// The surface elevation a crust of a given COMPOSITION floats at, the composition-to-terrain wire the generated
+/// world reads (the R1 override the owner ruled: a tile's terrain DERIVES from the substrate, never fractal
+/// noise). It composes the two geology pieces already in the tree: the petrology-derived crustal density of the
+/// composition ([`civsim_physics::petrology::crustal_density`], the general composition-to-density derivation),
+/// and the Airy isostasy law against the mantle ([`civsim_physics::geodynamics::airy_isostatic_elevation`]). So a
+/// tile's elevation is what the material at that place IS, not a noise field. The mantle density and the crustal
+/// thickness are the column's own inputs (the interior lane refines the thickness). `None` when the composition
+/// reaches no assemblage (fail-loud, never a fabricated elevation) or the isostasy inputs are degenerate.
+/// Byte-neutral: no worldgen consumer is wired to it yet (the tile-axis wire is the next capstone slice); this is
+/// the derived-elevation primitive that replaces the fractal-noise axis, the visible spine's foundation.
+pub fn surface_elevation_from_composition(
+    crust_composition: &[(String, Fixed)],
+    mantle_density: Fixed,
+    crustal_thickness: Fixed,
+    temperature_k: Fixed,
+    pressure_bar: Fixed,
+    registry: &civsim_physics::petrology_data::PhaseRegistry,
+    table: &civsim_physics::periodic::PeriodicTable,
+) -> Option<Fixed> {
+    let crust_density = civsim_physics::petrology::crustal_density(
+        crust_composition,
+        temperature_k,
+        pressure_bar,
+        registry,
+        table,
+    )?;
+    civsim_physics::geodynamics::airy_isostatic_elevation(
+        crust_density,
+        mantle_density,
+        crustal_thickness,
+    )
+}
+
+/// One generated tile's DERIVED terrain: the surface elevation the geology gives it and the relief class it
+/// classifies to. The generated-world tile whose terrain is what the substrate says, never fractal noise (Slice 0,
+/// the R1 override). The surface material (the stable assemblage at the tile's composition) is the render's paired
+/// half, read from the substrate at paint time, not stored here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DerivedTile {
+    /// The derived surface elevation (metres), from the tile's crust composition through the isostasy.
+    pub elevation: Fixed,
+    /// The relief class, from crossing the derived references (the field datum and the sea-level reference).
+    pub relief: TerrainRelief,
+}
+
+/// Generate a field of DERIVED tiles from a per-tile crust composition (Slice 0, the visible spine's tile wire):
+/// each tile's elevation derives from its composition ([`surface_elevation_from_composition`]), the relief datum is
+/// the field mean ([`civsim_world::terrain::relief_datum`], a derived reference), and each tile's relief classifies
+/// by crossing that datum and the `sea_level` reference (a clearly-labelled Slice-0 fixture, retiring when the water
+/// budget derives). So the generated world's terrain is what the substrate says at each place, never fractal noise
+/// or an authored band table (the R1 override, end to end). `None` when the field is empty or any tile's composition
+/// reaches no elevation (fail-loud, never a fabricated tile). Byte-neutral: no scenario builds a world with this yet
+/// (the render and scenario arming are the next slice).
+#[allow(clippy::too_many_arguments)]
+pub fn generate_derived_tiles(
+    crust_compositions: &[Vec<(String, Fixed)>],
+    mantle_density: Fixed,
+    crustal_thickness: Fixed,
+    temperature_k: Fixed,
+    pressure_bar: Fixed,
+    sea_level: Fixed,
+    registry: &civsim_physics::petrology_data::PhaseRegistry,
+    table: &civsim_physics::periodic::PeriodicTable,
+) -> Option<Vec<DerivedTile>> {
+    if crust_compositions.is_empty() {
+        return None;
+    }
+    let mut elevations = Vec::with_capacity(crust_compositions.len());
+    for composition in crust_compositions {
+        elevations.push(surface_elevation_from_composition(
+            composition,
+            mantle_density,
+            crustal_thickness,
+            temperature_k,
+            pressure_bar,
+            registry,
+            table,
+        )?);
+    }
+    let datum = relief_datum(&elevations)?;
+    Some(
+        elevations
+            .iter()
+            .map(|&elevation| DerivedTile {
+                elevation,
+                relief: classify_relief(elevation, sea_level, datum),
+            })
+            .collect(),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A synthetic column: hot relative to a cold reference, with representable-scaled parameters (so the
+    // Rayleigh intermediates fit Q32.32). The Rayleigh onset is switched by ra_crit in each test.
+    /// THE CLUSTER REFUSES A MIXED-FRAME STATE, which is the honest behaviour and replaces an earlier test
+    /// asserting that all seven properties derive at mantle conditions.
+    ///
+    /// That earlier claim was wrong and an audit caught it. The Grueneisen rows, the bulk moduli and the
+    /// molar volumes are AMBIENT values near 300 K and 1 bar, and `gruneisen.rs` stores each row's frame
+    /// precisely "so a caller cannot silently treat an ambient aggregate as a deep-interior value". Reading
+    /// them at 1600 K and 100 kbar produced a number that agreed with measurement at one temperature by
+    /// cancellation (a high-temperature Dulong-Petit capacity against 300 K gamma, modulus and volume)
+    /// rather than by physics.
+    ///
+    /// The corrected ruling is sharper than "all seven or none": a column consumes one STATE-COHERENT
+    /// property bundle or it refuses. Atomicity does not license moving seven fields together when the
+    /// fields do not describe the same thermodynamic state. Carrying the rows to interior conditions is a
+    /// state-resolved thermoelastic provider and a real arc, not a patch.
+    #[test]
+    fn the_cluster_derives_one_coherent_state_at_depth() {
+        use civsim_physics::gruneisen::GruneisenTable;
+        use civsim_physics::mineral_moduli::MineralModuli;
+        use civsim_physics::periodic::PeriodicTable;
+        use civsim_physics::petrology_data::PhaseRegistry;
+        use civsim_physics::phase_conductivity::PhaseConductivityTable;
+
+        let registry = PhaseRegistry::standard().expect("the phase registry loads");
+        let periodic = PeriodicTable::standard().expect("the periodic table loads");
+        let conductivity = PhaseConductivityTable::standard().expect("the cited column loads");
+        let gruneisen = GruneisenTable::standard().expect("the Grueneisen table loads");
+        let moduli = MineralModuli::standard().expect("the moduli table loads");
+        let anchors_tbl = civsim_physics::thermoelastic_anchors::ThermoelasticAnchors::standard()
+            .expect("anchors");
+        let tables = BankedTables {
+            anchors: &anchors_tbl,
+            registry: &registry,
+            periodic: &periodic,
+            conductivity: &conductivity,
+            gruneisen: &gruneisen,
+            moduli: &moduli,
+        };
+        let composition = vec![
+            ("Mg".to_string(), Fixed::from_int(2)),
+            ("Si".to_string(), Fixed::ONE),
+            ("O".to_string(), Fixed::from_int(4)),
+        ];
+        let geometry = ColumnGeometry {
+            layer_depth_m: Fixed::from_int(1_800_000),
+            gravity_m_s2: Fixed::from_ratio(37, 10),
+            temperature_contrast_k: Fixed::from_int(1300),
+            ln_rayleigh_critical: crate::deeptime::RIGID_RIGID_RA_CRIT.ln(),
+        };
+
+        // A MANTLE STATE NOW DERIVES, and the whole cluster comes back state-resolved. Before the
+        // thermoelastic ladder was wired in this refused by name, which was correct and was a scoping
+        // limit rather than a destination. All seven fields now describe 1600 K and the pressure the
+        // column's own density implies at that depth.
+        //
+        // THE PRESSURE IS SOLVED RATHER THAN ASKED FOR, and that sentence above is the reason. This test
+        // used to hand in 100_000 bar (10 GPa) while asserting the fields described "the pressure the
+        // column's own density implies at that depth". They did not: the derived density implies 11.17 GPa
+        // at this geometry, an 11.7 percent disagreement past the coherence gate's own 10 percent slack.
+        // It passed because that gate was DEAD, formed as `rho g d` which overflows Q32.32 for any real
+        // mantle, so the comparison returned `None` and skipped rather than refusing. Selecting an
+        // assemblage at one pressure and evaluating the column at a depth implying another is the exact
+        // within-bundle incoherence this cluster's ruling forbids, and the test asserting coherence was
+        // the thing hiding it.
+        //
+        // The disagreement was never a bad input, it was a fixed point left open: density depends on the
+        // assemblage, the assemblage on pressure, and pressure on density. So the depth is the input now
+        // and the pressure is an output.
+        let (solved_bar, deep) =
+            solve_column_at_depth(&composition, Fixed::from_int(1600), &geometry, &tables)
+                .expect("the depth-pressure fixed point settles and the ladder answers there");
+
+        // THE SOLVED PRESSURE IS THE ONE THE COLUMN'S OWN MASS MAKES, checked here against the same
+        // `rho g d / 2` the gate forms, so the fixed point is asserted rather than assumed to have run.
+        let solved_gpa = solved_bar.to_f64_lossy() / 10_000.0;
+        let implied_gpa = deep.density_kg_m3.to_f64_lossy() * 3.7 * 1_800_000.0 / 2.0 / 1.0e9;
+        assert!(
+            (solved_gpa - implied_gpa).abs() / implied_gpa < 0.10,
+            "the solved pressure {solved_gpa:.3} GPa must agree with the density-implied \
+             {implied_gpa:.3} GPa, since that agreement is what makes the seven fields one state"
+        );
+        assert!(
+            (10.5..=12.0).contains(&solved_gpa),
+            "the fixed point lands near the 11.17 GPa this geometry and density imply, read \
+             {solved_gpa:.3} GPa"
+        );
+
+        // THE DENSITY IS CARRIED TO THE STATE, and this assertion is the one that would have caught the
+        // defect the first version of this wire shipped. That version took the expansivity from the ladder
+        // at 41.94 cm^3/mol and left the density reading the registry's ambient 43.60, so the bundle
+        // reported 3223 kg/m^3: two volumes for one rock, in a cluster whose entire ruling is that the
+        // seven fields describe ONE thermodynamic state.
+        let rho = deep.density_kg_m3.to_f64_lossy();
+        assert!(
+            (3300.0..=3420.0).contains(&rho),
+            "forsterite at 1600 K and about 11 GPa compresses to roughly 3355 kg/m^3, well above its \
+             ambient 3223; read {rho:.1}. An ambient density here would be four percent light AND would \
+             disagree with the volume its own expansivity was solved at"
+        );
+
+        // The expansivity is the one solved AT that state, not the ambient row: compression suppresses it
+        // from the ~29 ppm/K forsterite shows at 300 K and 1 bar, and heating alone would raise it.
+        let ppm = deep.thermal_expansion_ppm_per_k.to_f64_lossy();
+        assert!((18.0..=34.0).contains(&ppm), "read {ppm:.1} ppm/K at depth");
+
+        // AND THE PRESSURE THE VISCOSITY WAS EVALUATED AT AGREES WITH THAT DENSITY, which is the
+        // coherence the bundle promises: a denser column implies a higher lithostatic pressure at the same
+        // depth, and the state-resolved density moved it from 10.73 to 11.17 GPa rather than leaving the
+        // creep ladder evaluated at a pressure the density no longer supports.
+        let p_gpa = deep.viscosity.eval_pressure_gpa.to_f64_lossy();
+        let implied = rho * 3.7 * 1_800_000.0 / 2.0 / 1e9;
+        assert!(
+            (p_gpa - implied).abs() < 0.05,
+            "the creep evaluation pressure {p_gpa:.3} GPa must be the mid-layer lithostatic pressure of \
+             THIS density, {implied:.3} GPa"
+        );
+
+        // AT ITS OWN FRAME the ambient join still runs, checked against an INDEPENDENT anchor: Ye,
+        // Schwering and Smyth (2009) single-crystal XRD give forsterite `alpha(300 K) ~ 29.1 +/- 2.6
+        // ppm/K`, a different measurement from the Anderson and Isaak gamma row this derivation reads, so
+        // recovering it is a check rather than a back-solve of the source's own number.
+        let ambient =
+            civsim_materials::properties::ambient_assemblage_volumetric_expansivity_per_k(
+                &[("forsterite".to_string(), Fixed::ONE)],
+                Fixed::from_int(300),
+                Fixed::ONE,
+                &registry,
+                &moduli,
+                &gruneisen,
+            )
+            .expect("forsterite carries a complete ambient row");
+        let ppm = ambient.to_f64_lossy() * 1e6;
+        assert!(
+            (20.0..=45.0).contains(&ppm),
+            "the ambient-frame expansivity should be within reach of the independent 29.1 ppm/K anchor, \
+             read {ppm:.1}"
+        );
+    }
+
+    /// The banked tables and the Mars-class geometry every column test below reads, loaded once per test
+    /// rather than restated, so no test can be measuring a different bank from its neighbour.
+    fn banked() -> (
+        civsim_physics::petrology_data::PhaseRegistry,
+        civsim_physics::periodic::PeriodicTable,
+        civsim_physics::phase_conductivity::PhaseConductivityTable,
+        civsim_physics::gruneisen::GruneisenTable,
+        civsim_physics::mineral_moduli::MineralModuli,
+        civsim_physics::thermoelastic_anchors::ThermoelasticAnchors,
+    ) {
+        (
+            civsim_physics::petrology_data::PhaseRegistry::standard().expect("the registry loads"),
+            civsim_physics::periodic::PeriodicTable::standard().expect("the periodic table loads"),
+            civsim_physics::phase_conductivity::PhaseConductivityTable::standard()
+                .expect("the cited conductivity column loads"),
+            civsim_physics::gruneisen::GruneisenTable::standard()
+                .expect("the Grueneisen table loads"),
+            civsim_physics::mineral_moduli::MineralModuli::standard().expect("the moduli load"),
+            civsim_physics::thermoelastic_anchors::ThermoelasticAnchors::standard()
+                .expect("the anchors load"),
+        )
+    }
+
+    /// The Mars-class convecting layer the flagship column runs in.
+    fn mars_geometry() -> ColumnGeometry {
+        ColumnGeometry {
+            layer_depth_m: Fixed::from_int(1_800_000),
+            gravity_m_s2: Fixed::from_ratio(37, 10),
+            temperature_contrast_k: Fixed::from_int(1300),
+            ln_rayleigh_critical: crate::deeptime::RIGID_RIGID_RA_CRIT.ln(),
+        }
+    }
+
+    /// A pure forsterite bulk composition.
+    fn forsterite_composition() -> Vec<(String, Fixed)> {
+        vec![
+            ("Mg".to_string(), Fixed::from_int(2)),
+            ("Si".to_string(), Fixed::ONE),
+            ("O".to_string(), Fixed::from_int(4)),
+        ]
+    }
+
+    /// THE BUNDLE CARRIES ONE HEAT CAPACITY AND IT TRACES TO THE LADDER PASS THE EXPANSIVITY CAME FROM.
+    ///
+    /// It carried two. The ladder solves a Debye `C_V` at the column's own state on the way to `alpha` and
+    /// dropped it at the function boundary, and the field named `c_p` held `3R/M` instead: the classical
+    /// high-temperature LIMIT of that same capacity, on a different molar basis, with no `C_p` conversion
+    /// applied at the one call site where the expansivity and the modulus needed to make it were both in
+    /// hand. Two numbers for one property of one rock, which is the redundant-parameter defect this file
+    /// has a standing ruling about.
+    ///
+    /// THE CHECK IS AN INDEPENDENT RECOMPUTATION, not a read-back of the same field. The test asks the
+    /// ladder for forsterite's response at the solved state itself, converts with `C_p = C_V + T V alpha^2
+    /// K_T` in floating point (different arithmetic, different order, different type from the fixed-point
+    /// path under test), and divides by the molar mass the periodic table gives. Reading the pass's own
+    /// stored capacity back out would prove only that a field round-trips.
+    ///
+    /// AND IT CONVICTS THE SUBSTITUTION at both ends of the range. Dulong-Petit is 2.1 percent LOW at
+    /// mantle temperature and 24 percent HIGH at 400 K against the same rock's real capacity, so a bundle
+    /// that quietly returned to `3R/M` would pass a mantle-only tolerance and fail here.
+    #[test]
+    fn the_column_stores_one_heat_capacity_and_it_is_the_one_alpha_was_derived_from() {
+        let (registry, periodic, conductivity, gruneisen, moduli, anchors) = banked();
+        let tables = BankedTables {
+            registry: &registry,
+            periodic: &periodic,
+            conductivity: &conductivity,
+            gruneisen: &gruneisen,
+            moduli: &moduli,
+            anchors: &anchors,
+        };
+        let composition = forsterite_composition();
+        let geometry = mars_geometry();
+        let temperature = Fixed::from_int(1600);
+        let (solved_bar, deep) =
+            solve_column_at_depth(&composition, temperature, &geometry, &tables)
+                .expect("the flagship column derives");
+
+        // The ladder's own answer for this rock at this state, recomputed here in floating point.
+        let state = civsim_materials::thermoelastic::ThermoState {
+            temperature_k: temperature,
+            pressure_bar: solved_bar,
+        };
+        let r = civsim_materials::thermoelastic::response_at(
+            "forsterite",
+            state,
+            &registry,
+            &moduli,
+            &gruneisen,
+            &anchors,
+        )
+        .expect("forsterite answers at the solved state");
+        let c_v = r
+            .c_v_j_per_mol_k
+            .expect("the state-resolved rung carries a capacity")
+            .to_f64_lossy();
+        let alpha = r.alpha_per_k.to_f64_lossy();
+        let k_t = r.bulk_modulus_gpa.to_f64_lossy();
+        let v_m = r.molar_volume_cm3.to_f64_lossy();
+        // `C_p - C_V = T V alpha^2 K_T`, with the GPa-to-J/cm^3 factor of a thousand.
+        let c_p = c_v + 1000.0 * alpha * alpha * k_t * v_m * temperature.to_f64_lossy();
+        let molar_mass_kg = civsim_physics::petrology::phase_molar_mass(
+            registry.phase("forsterite").expect("forsterite is banked"),
+            &periodic,
+        )
+        .expect("its molar mass resolves")
+        .to_f64_lossy()
+            / 1000.0;
+        let expected = c_p / molar_mass_kg;
+
+        let stored = deep.specific_heat_j_kg_k.to_f64_lossy();
+        assert!(
+            (stored - expected).abs() / expected < 0.002,
+            "the stored specific heat {stored:.2} J/(kg K) must be the ladder's own capacity at this \
+             state, {expected:.2}; a gap here means the bundle is carrying a second capacity again"
+        );
+
+        // AND IT IS NOT DULONG-PETIT, which is the substitution being removed rather than a second
+        // opinion. The two agree to a couple of percent at mantle temperature and that near-agreement is
+        // the hazard: it is cancellation between a capacity below its classical ceiling and a `C_V` limit
+        // standing in for a `C_p`, not physics.
+        let mean_atomic_mass = civsim_physics::petrology::assemblage_mean_atomic_mass_kg_per_mol(
+            &civsim_physics::petrology::stable_assemblage(
+                &composition,
+                temperature,
+                solved_bar,
+                &registry,
+            )
+            .expect("the assemblage minimizes"),
+            &registry,
+            &periodic,
+        )
+        .expect("its mean atomic mass resolves");
+        let dulong_petit =
+            civsim_physics::young_thermal::dulong_petit_specific_heat(mean_atomic_mass)
+                .expect("Dulong-Petit is representable")
+                .to_f64_lossy();
+        assert!(
+            (stored - dulong_petit).abs() / dulong_petit > 0.01,
+            "the stored capacity {stored:.2} must differ from the Dulong-Petit {dulong_petit:.2} it \
+             replaced; reading them equal means the substitution came back"
+        );
+
+        // THE 400 K CASE, where the Debye capacity is nowhere near its classical ceiling and the
+        // substitution stops being a few percent. The whole column refuses at 400 K (the creep solve
+        // reports an unrepresentable stress for a mantle that cold), so the capacity is measured where the
+        // column forms it: the ladder pass over the same census, divided by the density the same pass
+        // implies, which is the production expression with its two inputs written out.
+        let cold_state = civsim_materials::thermoelastic::ThermoState {
+            temperature_k: Fixed::from_int(400),
+            pressure_bar: solved_bar,
+        };
+        let assemblage = civsim_physics::petrology::stable_assemblage(
+            &composition,
+            Fixed::from_int(400),
+            solved_bar,
+            &registry,
+        )
+        .expect("the assemblage minimizes at 400 K");
+        let census = civsim_physics::petrology::assemblage_volume_fractions(&assemblage, &registry)
+            .expect("its census resolves");
+        let cold_pass = ladder_pass_over_census(&census, cold_state, &tables)
+            .expect("the ladder answers at 400 K and depth");
+        let cold_density =
+            civsim_physics::petrology::assemblage_density(&assemblage, &registry, &periodic)
+                .expect("its ambient density resolves")
+                .to_f64_lossy()
+                * 1000.0
+                / cold_pass.compression.to_f64_lossy();
+        let cold_specific = cold_pass
+            .c_p_j_per_cm3_k
+            .expect("the pass carries a capacity")
+            .to_f64_lossy()
+            * 1.0e6
+            / cold_density;
+        assert!(
+            cold_specific < dulong_petit * 0.9,
+            "at 400 K the Debye capacity is far below its classical ceiling, so the column's own \
+             specific heat {cold_specific:.1} J/(kg K) must sit well under the Dulong-Petit \
+             {dulong_petit:.1}; reading them close means `3R/M` is being stored again"
+        );
+    }
+
+    /// A MOLAR QUANTITY IS MIXED BY MOLES, and this is the test a single-phase census cannot run.
+    ///
+    /// The pass weights the expansivity by VOLUME, correctly, because an expansivity is a per-volume
+    /// property. A heat capacity in J/(mol K) is per MOLE, and mixing it by the volume fractions sitting
+    /// right there in the same loop would report joules per mole of a volume-weighted mole with no mass
+    /// basis to divide by. The two weightings are indistinguishable on the flagship fixture, which is pure
+    /// forsterite, so the error would have shipped invisibly. This census is not: forsterite and periclase
+    /// have molar volumes near 43.6 and 11.2 cm^3/mol, so a two-thirds volume share of forsterite is a
+    /// one-third MOLE share, and weighting by the wrong one moves the answer by tens of percent.
+    ///
+    /// The reference route reads the assemblage's OWN minimized molar amounts, `sum(n C_p) / sum(n M)`,
+    /// which never passes through a volume fraction at all. So the two routes share no arithmetic beyond
+    /// the ladder response itself.
+    #[test]
+    fn the_molar_capacity_is_mixed_by_moles_and_not_by_volume() {
+        let (registry, periodic, conductivity, gruneisen, moduli, anchors) = banked();
+        let tables = BankedTables {
+            registry: &registry,
+            periodic: &periodic,
+            conductivity: &conductivity,
+            gruneisen: &gruneisen,
+            moduli: &moduli,
+            anchors: &anchors,
+        };
+        // Magnesium in excess of the forsterite stoichiometry, so the rock minimizes to forsterite plus
+        // periclase rather than to one phase.
+        let composition = vec![
+            ("Mg".to_string(), Fixed::from_int(4)),
+            ("Si".to_string(), Fixed::ONE),
+            ("O".to_string(), Fixed::from_int(6)),
+        ];
+        let temperature = Fixed::from_int(1600);
+        let pressure_bar = Fixed::from_int(112_670);
+        let assemblage = civsim_physics::petrology::stable_assemblage(
+            &composition,
+            temperature,
+            pressure_bar,
+            &registry,
+        )
+        .expect("the two-phase assemblage minimizes");
+        assert!(
+            assemblage.phases.len() > 1,
+            "this test is worthless on a single-phase census, since every weighting collapses there; \
+             read {:?}",
+            assemblage.phases
+        );
+        let census = civsim_physics::petrology::assemblage_volume_fractions(&assemblage, &registry)
+            .expect("its census resolves");
+        let state = civsim_materials::thermoelastic::ThermoState {
+            temperature_k: temperature,
+            pressure_bar,
+        };
+        let pass = ladder_pass_over_census(&census, state, &tables)
+            .expect("the ladder answers the whole two-phase census");
+
+        // The route under test: the pass's capacity per unit of the assemblage's own volume, over the
+        // density the same pass implies, exactly as the derivation forms it.
+        let density =
+            civsim_physics::petrology::assemblage_density(&assemblage, &registry, &periodic)
+                .expect("its ambient density resolves")
+                .to_f64_lossy()
+                * 1000.0
+                / pass.compression.to_f64_lossy();
+        let from_pass = pass
+            .c_p_j_per_cm3_k
+            .expect("the pass carries a capacity")
+            .to_f64_lossy()
+            * 1.0e6
+            / density;
+
+        // The reference route: the assemblage's own molar amounts, never touching a volume fraction.
+        let mut capacity = 0.0;
+        let mut mass = 0.0;
+        for (name, amount) in &assemblage.phases {
+            let r = civsim_materials::thermoelastic::response_at(
+                name, state, &registry, &moduli, &gruneisen, &anchors,
+            )
+            .expect("each phase answers at this state");
+            let c_v = r
+                .c_v_j_per_mol_k
+                .expect("on a capacity-carrying rung")
+                .to_f64_lossy();
+            let alpha = r.alpha_per_k.to_f64_lossy();
+            let c_p = c_v
+                + 1000.0
+                    * alpha
+                    * alpha
+                    * r.bulk_modulus_gpa.to_f64_lossy()
+                    * r.molar_volume_cm3.to_f64_lossy()
+                    * temperature.to_f64_lossy();
+            let n = amount.to_f64_lossy();
+            capacity += n * c_p;
+            mass += n * civsim_physics::petrology::phase_molar_mass(
+                registry.phase(name).expect("the phase is banked"),
+                &periodic,
+            )
+            .expect("its molar mass resolves")
+            .to_f64_lossy()
+                / 1000.0;
+        }
+        let by_moles = capacity / mass;
+
+        assert!(
+            (from_pass - by_moles).abs() / by_moles < 0.005,
+            "the pass's specific heat {from_pass:.2} J/(kg K) must equal the mole-weighted \
+             {by_moles:.2}; a volume-weighted molar capacity would land somewhere else entirely"
+        );
+
+        // AND THE TWO WEIGHTINGS REALLY DO DIFFER HERE, so the agreement above is evidence rather than a
+        // coincidence of a census where every weighting is the same census.
+        let mut volume_weighted_molar = 0.0;
+        for (name, fraction) in &census {
+            let r = civsim_materials::thermoelastic::response_at(
+                name, state, &registry, &moduli, &gruneisen, &anchors,
+            )
+            .expect("each phase answers");
+            volume_weighted_molar +=
+                fraction.to_f64_lossy() * r.c_v_j_per_mol_k.expect("a capacity").to_f64_lossy();
+        }
+        let mole_weighted_molar = capacity
+            / assemblage
+                .phases
+                .iter()
+                .map(|(_, n)| n.to_f64_lossy())
+                .sum::<f64>();
+        assert!(
+            (volume_weighted_molar - mole_weighted_molar).abs() / mole_weighted_molar > 0.10,
+            "this census must separate the two weightings in fact, else the test proves nothing; \
+             volume-weighted {volume_weighted_molar:.1} against mole-weighted {mole_weighted_molar:.1} \
+             J/(mol K)"
+        );
+    }
+
+    /// THE EXPANSIVITY INTEGRAL IS THE REAL ONE WHERE ONE RUNG SPANS BOTH ENDPOINTS.
+    ///
+    /// It was `alpha(P,T) * (T - 298)` with the expansivity held constant over thirteen hundred kelvin.
+    /// That limit was declared at the site rather than hidden, and it was also unnecessary: at fixed
+    /// pressure the integral IS `ln[V(P,T)/V(P,298)]`, and the ladder already returns a molar volume at
+    /// any state it answers at. Measured on the flagship column the two differ by sixteen percent of the
+    /// integral, which moves the Hofmeister lattice conductivity by about two and a half percent, so this
+    /// is a real quantity rather than a rounding.
+    ///
+    /// THE BRANCH IS PRESERVED AND TESTED, which is the other half. A ratio between two states is one
+    /// model's answer only when both states resolved through that model, and at 1 bar they do not: 298 K
+    /// lands inside the ambient measured row's own frame while 1600 K is far outside it and falls to
+    /// Mie-Grueneisen-Debye. Dividing one rung's volume by another's and calling the difference thermal
+    /// expansion is exactly the kind of quantity substitution this ladder exists to refuse, so the helper
+    /// returns the constant-alpha form there.
+    #[test]
+    fn the_expansivity_integral_is_exact_where_one_rung_spans_both_endpoints() {
+        let (registry, periodic, conductivity, gruneisen, moduli, anchors) = banked();
+        let tables = BankedTables {
+            registry: &registry,
+            periodic: &periodic,
+            conductivity: &conductivity,
+            gruneisen: &gruneisen,
+            moduli: &moduli,
+            anchors: &anchors,
+        };
+        let composition = forsterite_composition();
+        let temperature = Fixed::from_int(1600);
+        let anchor_k = civsim_materials::conductivity::hofmeister_reference_temperature_k();
+        // The pressure the flagship geometry's own mass implies, so this is the column's real operating
+        // point rather than a chosen one.
+        let (solved_bar, deep) =
+            solve_column_at_depth(&composition, temperature, &mars_geometry(), &tables)
+                .expect("the flagship column derives");
+        let assemblage = civsim_physics::petrology::stable_assemblage(
+            &composition,
+            temperature,
+            solved_bar,
+            &registry,
+        )
+        .expect("the assemblage minimizes");
+        let census = civsim_physics::petrology::assemblage_volume_fractions(&assemblage, &registry)
+            .expect("its census resolves");
+        let at = |t: Fixed, p: Fixed| {
+            ladder_pass_over_census(
+                &census,
+                civsim_materials::thermoelastic::ThermoState {
+                    temperature_k: t,
+                    pressure_bar: p,
+                },
+                &tables,
+            )
+        };
+
+        let hot = at(temperature, solved_bar).expect("the ladder answers at the column's state");
+        let cold = at(anchor_k, solved_bar).expect("and at the anchor temperature, same pressure");
+        assert_eq!(
+            hot.rung, cold.rung,
+            "this test needs both endpoints on ONE rung; that is the case it is about"
+        );
+        let exact = expansivity_integral_from_anchor(
+            Some(&hot),
+            Some(&cold),
+            deep.thermal_expansion_ppm_per_k,
+            temperature,
+            anchor_k,
+        )
+        .expect("the exact branch is representable")
+        .to_f64_lossy();
+        let constant = deep.thermal_expansion_ppm_per_k.to_f64_lossy() / 1.0e6
+            * (temperature.to_f64_lossy() - anchor_k.to_f64_lossy());
+        assert!(
+            (exact - constant).abs() / constant > 0.05,
+            "holding alpha constant across 298 K to 1600 K is a real approximation, so the exact \
+             integral {exact:.5} must depart from {constant:.5} by more than rounding; reading them \
+             equal means the exact branch never fired"
+        );
+
+        // AND THE EXACT VALUE IS THE VOLUME RATIO, recomputed here from two independent ladder queries
+        // rather than from the passes the helper read.
+        let v = |t: Fixed| {
+            civsim_materials::thermoelastic::response_at(
+                "forsterite",
+                civsim_materials::thermoelastic::ThermoState {
+                    temperature_k: t,
+                    pressure_bar: solved_bar,
+                },
+                &registry,
+                &moduli,
+                &gruneisen,
+                &anchors,
+            )
+            .expect("forsterite answers")
+            .molar_volume_cm3
+            .to_f64_lossy()
+        };
+        let by_volume = (v(temperature) / v(anchor_k)).ln();
+        assert!(
+            (exact - by_volume).abs() < 1.0e-4,
+            "the integral {exact:.6} must be ln of the phase's own volume ratio {by_volume:.6}, since \
+             that identity is the whole reason the constant-alpha limit was unnecessary"
+        );
+
+        // THE BRANCH: at 1 bar the two endpoints resolve through different rungs, and the helper falls
+        // back rather than dividing one model's volume by another's.
+        let hot_1bar = at(temperature, Fixed::ONE).expect("the ladder answers at 1 bar and 1600 K");
+        let cold_1bar = at(anchor_k, Fixed::ONE).expect("and at 1 bar and 298 K");
+        assert_ne!(
+            hot_1bar.rung, cold_1bar.rung,
+            "at 1 bar the anchor is inside the ambient row's frame and the hot end is not; that \
+             straddle is the case the branch exists for"
+        );
+        let fallback = expansivity_integral_from_anchor(
+            Some(&hot_1bar),
+            Some(&cold_1bar),
+            deep.thermal_expansion_ppm_per_k,
+            temperature,
+            anchor_k,
+        )
+        .expect("the fallback is representable");
+        assert_eq!(
+            fallback.to_f64_lossy(),
+            constant,
+            "across a rung transition the helper must return the constant-alpha form exactly, since \
+             the exact ratio is then nobody's answer"
+        );
+    }
+
+    /// THE RHEOLOGY REFUSES A ROCK NO BANKED CREEP STUDY DESCRIBES, rather than handing it olivine's.
+    ///
+    /// `derive_column_viscosity` received no assemblage and no census, so the rock's identity was
+    /// STRUCTURALLY unavailable to it and the candidate set was a hardcoded array holding the dry olivine
+    /// row. An iron, ice, salt, carbide, metallic or molecular interior received olivine creep with no
+    /// signal that it had, which is the alien-feasibility line: a pathway that assumes one chemistry where
+    /// a world's rock could differ is a defect, and a docstring disclosing it is not a gate.
+    ///
+    /// WHAT THE FIX IS NOT is row selection. Every row in the bank is Hirth and Kohlstedt 2003, an olivine
+    /// study, so there is no non-olivine row to select and authoring one would be inventing a flow law.
+    /// The honest output for a rock outside the bank is a refusal that NAMES it, which is a work list.
+    #[test]
+    fn the_rheology_refuses_a_rock_no_banked_creep_study_describes() {
+        let geometry = mars_geometry();
+        // The flagship column's own derived numbers, so only the rock's identity varies between cases.
+        let viscosity_of = |phase: &str| {
+            derive_column_viscosity(
+                &[(phase.to_string(), Fixed::ONE)],
+                Fixed::from_ratio(33835, 10),
+                Fixed::from_ratio(25429, 10000),
+                Fixed::from_ratio(12673, 10),
+                Fixed::from_ratio(2475, 100),
+                Fixed::from_int(1600),
+                &geometry,
+            )
+        };
+
+        // Olivine still answers, so the refusals below are the gate rather than a broken wire.
+        let olivine = viscosity_of("forsterite").expect("the olivine column still derives");
+        assert!(
+            olivine.ln_viscosity_primary > Fixed::ZERO,
+            "and its band is a real one"
+        );
+
+        // A rock outside the bank refuses BY NAME. `periclase` is the sharp case: it is a registry phase
+        // this engine can minimize a real mantle to, so it is a rock a world produces rather than a
+        // hypothetical, and no creep study in the bank measured it.
+        for phase in ["ice-Ih", "iron", "periclase", "quartz"] {
+            match viscosity_of(phase) {
+                Ok(band) => panic!(
+                    "{phase} has no banked creep study, so a viscosity here is olivine's applied to \
+                     something that is not olivine; read ln(eta) = {}",
+                    band.ln_viscosity_primary.to_f64_lossy()
+                ),
+                Err(refusal) => {
+                    let message = refusal.to_string();
+                    assert!(
+                        message.contains(phase),
+                        "the refusal must NAME the rock it cannot describe, so it reads as a work \
+                         list; read {message}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// THE DOMINANT PHASE IS THE ONE THE CENSUS SAYS IT IS, and a tie is broken deterministically.
+    ///
+    /// The rheology keys on the phase occupying the most of the column, so the selection has to be a pure
+    /// function of the census rather than of the order a caller built it in (Principle 3). The comparison
+    /// is strictly greater, so the first phase in the census's own order wins an exact tie, and `assemble`
+    /// sorts phases by name before any of this.
+    #[test]
+    fn the_dominant_phase_is_deterministic_under_reordering_and_ties() {
+        let a = vec![
+            ("enstatite".to_string(), Fixed::from_ratio(3, 10)),
+            ("forsterite".to_string(), Fixed::from_ratio(5, 10)),
+            ("spinel".to_string(), Fixed::from_ratio(2, 10)),
+        ];
+        let (name, share) = dominant_phase(&a).expect("a non-empty census has a dominant phase");
+        assert_eq!(name, "forsterite");
+        assert_eq!(share, Fixed::from_ratio(5, 10));
+
+        // An exact tie resolves to the first in the census's canonical order, every time.
+        let tied = vec![
+            ("enstatite".to_string(), Fixed::from_ratio(5, 10)),
+            ("forsterite".to_string(), Fixed::from_ratio(5, 10)),
+        ];
+        assert_eq!(
+            dominant_phase(&tied).map(|(n, _)| n),
+            Some("enstatite"),
+            "a tie must resolve the same way on every run, and the census's name order is what \
+             supplies that"
+        );
+        assert!(
+            dominant_phase(&[]).is_none(),
+            "an empty census has no dominant phase to guess at"
+        );
+    }
+
+    /// THE COHERENCE GATE IS LIVE AT PLANETARY SCALE, which is the property that was missing rather than
+    /// the comparison itself.
+    ///
+    /// The gate existed and read correctly; it simply never ran. Formed as `rho g d` the intermediate is
+    /// `2.2e10` at Mars scale against Q32.32's `2.1e9` ceiling, so `checked_mul` returned `None` and the
+    /// `if let Some(..)` SKIPPED. Measured, the band that survived was a density below 322 kg/m^3 at Mars
+    /// geometry and below 76 at Earth whole-mantle scale, so no silicate column ever reached the check. A
+    /// gate that fails open is worse than an absent one, because the green test reads as evidence.
+    ///
+    /// This asserts the representation directly, at both scales, so the reassociation cannot silently
+    /// regress into an ordering that overflows again.
+    #[test]
+    fn the_lithostatic_pressure_is_representable_at_mars_and_earth_scale() {
+        let mars = ColumnGeometry {
+            layer_depth_m: Fixed::from_int(1_800_000),
+            gravity_m_s2: Fixed::from_ratio(37, 10),
+            temperature_contrast_k: Fixed::from_int(1300),
+            ln_rayleigh_critical: crate::deeptime::RIGID_RIGID_RA_CRIT.ln(),
+        };
+        let earth = ColumnGeometry {
+            layer_depth_m: Fixed::from_int(2_900_000),
+            gravity_m_s2: Fixed::from_ratio(981, 100),
+            ..mars
+        };
+        let rho = Fixed::from_ratio(33545, 10);
+
+        let mars_gpa = implied_lithostatic_gpa(rho, &mars).expect(
+            "a Mars-class column's own lithostatic pressure must be representable; the old ordering \
+             overflowed here and the gate skipped",
+        );
+        let earth_gpa = implied_lithostatic_gpa(rho, &earth)
+            .expect("and so must an Earth whole-mantle column's");
+
+        let m = mars_gpa.to_f64_lossy();
+        let e = earth_gpa.to_f64_lossy();
+        assert!(
+            (11.0..=11.4).contains(&m),
+            "3354.5 * 3.7 * 1.8e6 / 2 / 1e9 = 11.17 GPa, read {m:.3}"
+        );
+        assert!(
+            (46.0..=49.0).contains(&e),
+            "3354.5 * 9.81 * 2.9e6 / 2 / 1e9 = 47.7 GPa, read {e:.3}"
+        );
+
+        // AND THE ORDER IS WHY, stated as the arithmetic rather than as a comment: the numerator the old
+        // form built first does not fit, while the answer it was reaching for fits comfortably.
+        assert!(
+            rho.checked_mul(mars.gravity_m_s2)
+                .and_then(|x| x.checked_mul(mars.layer_depth_m))
+                .is_none(),
+            "`rho g d` must still overflow, since that is the hazard the reassociation exists to avoid"
+        );
+    }
+
+    /// A Mars-class SI column built from the DERIVED cluster, the operating point every SI test uses.
+    ///
+    /// A TRANSCRIBED SNAPSHOT rather than a live read, and the difference is measurable: the flagship
+    /// column now derives `rho = 3383.5`, `k = 2.543`, `c_p = 1267.3` and `alpha = 24.75 ppm/K` against
+    /// the `3354.5`, `2.461`, `1241` and `25.9` below. The density and expansivity had already drifted;
+    /// the conductivity and capacity moved when the expansivity integral became exact and the heat
+    /// capacity became the ladder's own rather than Dulong-Petit. The gap is a few percent on each and
+    /// these tests assert representation and ordering properties that no percent-scale shift reaches, so
+    /// the snapshot is left as it is rather than re-baselined here, where re-baselining would move a dozen
+    /// assertion bands for a reason none of them is about.
+    fn mars_si_column() -> SiColumnParams {
+        let d = Fixed::from_int(1_800_000);
+        SiColumnParams {
+            reference_temperature_k: Fixed::from_int(300),
+            density_kg_m3: Fixed::from_ratio(33545, 10),
+            thermal_conductivity_w_m_k: Fixed::from_ratio(2461, 1000),
+            thermal_expansion_ppm: Fixed::from_ratio(259, 10),
+            specific_heat_j_kg_k: Fixed::from_int(1241),
+            thermal_diffusivity_m2_s: Fixed::from_ratio(59117, 100_000_000_000),
+            ln_viscosity: Fixed::from_ratio(5466, 100),
+            gravity_m_s2: Fixed::from_ratio(37, 10),
+            depth_m: d,
+            parcel_radius_m: Fixed::from_ratio(18144, 10_000)
+                .checked_mul(Fixed::from_int(1_000_000))
+                .unwrap(),
+            heat_production_j_per_kg: Fixed::ZERO,
+            ln_rayleigh_critical: crate::deeptime::RIGID_RIGID_RA_CRIT.ln(),
+            // ln(1 Myr in seconds) = ln(3.1557e13) = 31.083. The tick itself does not fit.
+            ln_dt_s: Fixed::from_ratio(31_083, 1000),
+            nusselt_prefactor: Fixed::ONE,
+        }
+    }
+
+    /// THE ORDERING IS THE CORRECTNESS, and this asserts the value the ordering exists to reach.
+    ///
+    /// `k dt / (rho d^2)` has a true value near `7.15e-3 J/kg/K`, and its natural reading forms
+    /// `k dt = 7.8e13` on the first multiply, twenty thousand times past `Fixed::MAX`. Dividing the large
+    /// `dt` down by the two depths FIRST reaches the same answer with every intermediate inside the window.
+    #[test]
+    fn the_conductive_loss_energy_survives_its_own_intermediates() {
+        let p = mars_si_column();
+        let per_k = p
+            .conductive_loss_energy_per_kelvin()
+            .expect("the ordered composition stays representable");
+        let v = per_k.to_f64_lossy();
+        assert!(
+            (7.0e-3..=7.3e-3).contains(&v),
+            "k dt / (rho d^2) = 2.461 * 3.1557e13 / (3354.5 * 3.24e12) = 7.15e-3 J/kg/K; read {v:.4e}"
+        );
+        // AND THE TICK ITSELF DOES NOT FIT, which is the problem beneath the ordering hazard: no
+        // reordering of a linear composition helps when an INPUT is unrepresentable before any multiply.
+        assert!(
+            Fixed::from_int(31_557_000)
+                .checked_mul(Fixed::from_int(1_000_000))
+                .is_none(),
+            "1 Myr in seconds is 3.1557e13 against a Fixed::MAX of 2.1e9, so dt cannot be held linearly"
+        );
+    }
+
+    /// THE COOLING RATE AGAINST THE OBSERVATIONAL CONSTRAINT, which is the check that convicted the law
+    /// the linear kernel had been using.
+    ///
+    /// A Mars-class surface heat flux is about `0.025 W/m^2`. Over this column that is
+    /// `0.025 / (3354.5 * 1.8e6) = 4.1e-12 W/kg`, which over a 1 Myr tick is `131 J/kg` and
+    /// `0.105 K/Myr`. That number comes from observation and not from anything this kernel computes, so
+    /// agreeing with it is evidence.
+    ///
+    /// The Stokes-parcel form the linear kernel uses gives `12.7 K/Myr`, 121 times past it. The
+    /// boundary-layer form gives about `0.012 K/Myr`, within an order of magnitude and on the LOW side,
+    /// which is the honest direction for a mobile-lid law applied to a stagnant-lid body.
+    #[test]
+    fn the_cooling_rate_lands_within_an_order_of_the_observational_constraint() {
+        let p = mars_si_column();
+        let state = ColumnState {
+            temperature: Fixed::from_int(1600),
+            convecting: true,
+        };
+        let next = convection_step_si(&state, &p).expect("the SI column steps");
+        let cooled = state.temperature.to_f64_lossy() - next.temperature.to_f64_lossy();
+        assert!(
+            cooled > 0.0,
+            "with no radiogenic production a hot column must COOL; it moved {cooled:+.4} K"
+        );
+        assert!(
+            (0.002..=0.20).contains(&cooled),
+            "the observational constraint is 0.105 K/Myr and the boundary-layer form gives about 0.012; \
+             read {cooled:.4} K/Myr. The Stokes-parcel form this replaced gives 12.7, which is what \
+             convicted it"
+        );
+    }
+
+    /// A COLUMN BELOW ITS REFERENCE WARMS TOWARD IT, which the magnitude form made impossible.
+    ///
+    /// `internal_heat_evolution` subtracts the loss term unconditionally (`net = production - loss`), and the
+    /// loss used to be built on `|delta_t|`. So a column COLDER than its surface reference produced a
+    /// positive loss and cooled further, away from the reference rather than toward it, and the further
+    /// below it sat the faster it ran away. Conduction reverses when the gradient does; the signed contrast
+    /// is what says so.
+    ///
+    /// This runs the same fixture from both sides of its reference, which is what makes it a twin rather
+    /// than a single-sided assertion.
+    #[test]
+    fn a_column_below_its_reference_warms_rather_than_cooling_further() {
+        let p = mars_si_column();
+        let reference = p.reference_temperature_k.to_f64_lossy();
+
+        // ABOVE the reference it cools, which is the case that already worked and must keep working.
+        let hot = ColumnState {
+            temperature: Fixed::from_int(1600),
+            convecting: true,
+        };
+        let hot_next = convection_step_si(&hot, &p).expect("a hot column steps");
+        assert!(
+            hot_next.temperature < hot.temperature,
+            "a column above its reference sheds heat, moved to {}",
+            hot_next.temperature.to_f64_lossy()
+        );
+
+        // BELOW the reference it warms. With no radiogenic production the ONLY term is the conductive one,
+        // so the direction here is that term's sign and nothing else.
+        let cold = ColumnState {
+            temperature: Fixed::from_int(100),
+            convecting: false,
+        };
+        assert!(
+            (cold.temperature.to_f64_lossy()) < reference,
+            "the cold fixture must sit below the reference for this to test anything"
+        );
+        let cold_next = convection_step_si(&cold, &p).expect("a cold column steps");
+        assert!(
+            cold_next.temperature > cold.temperature,
+            "a column below its reference gains heat by conduction, moved from {} to {}",
+            cold.temperature.to_f64_lossy(),
+            cold_next.temperature.to_f64_lossy()
+        );
+        // AND IT DOES NOT OVERSHOOT the reference in one tick, which would be a different defect.
+        assert!(
+            cold_next.temperature.to_f64_lossy() <= reference,
+            "warming toward the reference must not cross it in a single tick, reached {}",
+            cold_next.temperature.to_f64_lossy()
+        );
+    }
+
+    /// A STABLY STRATIFIED LAYER DOES NOT CONVECT AT ANY MAGNITUDE, and a negative-expansion mantle is a
+    /// data row through the same test rather than a special case.
+    ///
+    /// `ln_rayleigh_number` takes `|delta_rho|`, which is right for the dimensionless ratio it forms and
+    /// silent about the regime. Read without a sign gate, a stably stratified layer produces a large
+    /// `ln Ra` and is declared convecting, and the more stable it is the more vigorously it appears to
+    /// convect. The sign arrives already composed by `thermal_density_anomaly`, so all four rows below run
+    /// the same predicate and nothing keys on the material being alien.
+    #[test]
+    fn the_convection_verdict_reads_the_sign_of_the_buoyancy_and_not_its_size() {
+        let p = mars_si_column();
+        let inputs = LogConvectionInputs {
+            density_kg_m3: p.density_kg_m3,
+            thermal_expansion_ppm: p.thermal_expansion_ppm,
+            gravity_m_s2: p.gravity_m_s2,
+            depth_m: p.depth_m,
+            parcel_radius_m: p.parcel_radius_m,
+            ln_viscosity: p.ln_viscosity,
+            thermal_diffusivity_m2_s: p.thermal_diffusivity_m2_s,
+            ln_rayleigh_critical: p.ln_rayleigh_critical,
+        };
+        let hot = Fixed::from_int(1300);
+        let cold = Fixed::ZERO - hot;
+
+        // ORDINARY EXPANSION, INTERIOR HOTTER: heated from below, it overturns.
+        let (ln_ra_up, up) = ln_convection_onset(&inputs, hot, false).expect("a contrast resolves");
+        assert!(up, "an ordinary mantle hotter than its surface convects");
+        assert!(
+            ln_ra_up > inputs.ln_rayleigh_critical,
+            "and it is supercritical, so the verdict is the sign rather than a small Ra"
+        );
+
+        // ORDINARY EXPANSION, INTERIOR COLDER: heated from above, stable at the SAME magnitude of Ra.
+        let (ln_ra_down, down) =
+            ln_convection_onset(&inputs, cold, false).expect("a contrast resolves");
+        assert!(
+            !down,
+            "a layer heated from above is stably stratified and must not convect"
+        );
+        assert_eq!(
+            ln_ra_up, ln_ra_down,
+            "the two differ ONLY in sign, so an equal ln Ra is exactly what makes the magnitude \
+             insufficient to decide"
+        );
+
+        // NEGATIVE THERMAL EXPANSION, INTERIOR HOTTER: heating makes the parcel denser, so the buoyancy
+        // pins the layer rather than driving it. This is the alien row, and it takes no new code path.
+        let mut nte = inputs;
+        nte.thermal_expansion_ppm = Fixed::ZERO - p.thermal_expansion_ppm;
+        let (_, nte_hot) = ln_convection_onset(&nte, hot, false).expect("a contrast resolves");
+        assert!(
+            !nte_hot,
+            "a negative-expansion mantle hotter than its surface is STABLE, since heating densifies it"
+        );
+
+        // NEGATIVE EXPANSION, INTERIOR COLDER: the sign flips back and it overturns.
+        let (_, nte_cold) = ln_convection_onset(&nte, cold, false).expect("a contrast resolves");
+        assert!(
+            nte_cold,
+            "a negative-expansion mantle colder than its surface is the unstable one"
+        );
+
+        // THE LATCH DOES NOT SURVIVE A SIGN FLIP. It is one-way within a regime, and a change of regime is
+        // not a dip: a column that was convecting and becomes stably stratified stops.
+        let (_, latched_but_stable) =
+            ln_convection_onset(&inputs, cold, true).expect("a contrast resolves");
+        assert!(
+            !latched_but_stable,
+            "a one-way onset latch must not keep a stably stratified layer convecting"
+        );
+    }
+
+    /// RADIOGENIC PRODUCTION OPPOSES THE LOSS, and both are per-tick energies so neither quantizes away.
+    ///
+    /// This is the second half of the representation finding: as per-second RATES the production is
+    /// `~5e-12 W/kg` and the loss `~2.4e-13 W/kg`, against a `Fixed` resolution of `2.33e-10`. Both are
+    /// ZERO, and a column whose production and loss are both zero never changes temperature at all.
+    #[test]
+    fn the_per_tick_energy_form_keeps_heat_production_from_quantizing_to_nothing() {
+        let mut p = mars_si_column();
+        let state = ColumnState {
+            temperature: Fixed::from_int(1600),
+            convecting: true,
+        };
+        let without = convection_step_si(&state, &p).expect("steps");
+
+        // The per-tick radiogenic energy that balances the loss exactly at this contrast.
+        let balance = p
+            .conductive_loss_energy_per_kelvin()
+            .and_then(|c| c.checked_mul(Fixed::from_int(1300)))
+            .expect("representable");
+        p.heat_production_j_per_kg = balance;
+        let with = convection_step_si(&state, &p).expect("steps");
+        assert!(
+            with.temperature > without.temperature,
+            "adding radiogenic production must slow the cooling: without {} K, with {} K",
+            without.temperature.to_f64_lossy(),
+            with.temperature.to_f64_lossy()
+        );
+
+        // AS A RATE it would have vanished: the same energy over the tick is 2.4e-13 W/kg, which is
+        // 0.001 ulp and quantizes to exactly zero.
+        let as_rate = balance
+            .ln()
+            .checked_sub(p.ln_dt_s)
+            .expect("representable")
+            .exp();
+        assert_eq!(
+            as_rate,
+            Fixed::ZERO,
+            "the SAME quantity carried as a per-second rate is exactly zero, which is the whole reason \
+             the field holds energy"
+        );
+    }
+
+    /// A column below onset conducts, and the SAME expression covers it because `Nu = 1` is the definition.
+    #[test]
+    fn a_sub_critical_column_conducts_through_the_same_expression() {
+        let mut p = mars_si_column();
+        // A far stiffer interior: ln eta up by 10 is eta up by 22026x, which drops Ra below critical.
+        p.ln_viscosity += Fixed::from_int(10);
+        let state = ColumnState {
+            temperature: Fixed::from_int(1600),
+            convecting: false,
+        };
+        let next = convection_step_si(&state, &p).expect("steps");
+        assert!(
+            !next.convecting,
+            "a column 22000 times stiffer must sit below the onset"
+        );
+        let cooled = state.temperature.to_f64_lossy() - next.temperature.to_f64_lossy();
+        let pure_conduction = p
+            .conductive_loss_energy_per_kelvin()
+            .unwrap()
+            .to_f64_lossy()
+            * 1300.0
+            / 1241.0;
+        assert!(
+            (cooled - pure_conduction).abs() < 1e-6,
+            "below onset the loss must be exactly the conductive one (Nu = 1), no convective term added: \
+             stepped {cooled:.6}, conductive {pure_conduction:.6}"
+        );
+    }
+
+    /// Determinism: the same SI query returns bit-identical results.
+    #[test]
+    fn the_si_step_is_bit_reproducible() {
+        let p = mars_si_column();
+        let state = ColumnState {
+            temperature: Fixed::from_int(1600),
+            convecting: true,
+        };
+        assert_eq!(
+            convection_step_si(&state, &p),
+            convection_step_si(&state, &p),
+            "same inputs, same bits"
+        );
+    }
+
+    /// THE LOG-DOMAIN TWIN: the two Rayleigh forms must agree where BOTH can run.
+    ///
+    /// This is the test that makes the lift a migration rather than a rewrite. The linear kernel cannot run
+    /// on SI values (a real viscosity is `~5e23 Pa*s` against a `Fixed::MAX` of `2.1e9`), which is the whole
+    /// reason its callers pass a scaled operating point with an authored fixture cluster. The log form can.
+    /// But "the log form can run" is not "the log form computes the same thing", and asserting the second
+    /// from the first is exactly the class of error this arc has already paid for twice today.
+    ///
+    /// So both are run on an operating point the LINEAR one can hold, fed identical inputs, and the linear
+    /// result is compared against `exp(ln Ra)`. Where they disagree the migration is wrong, whatever the
+    /// SI-only path reports, because there is nothing to check it against there.
+    #[test]
+    fn the_log_rayleigh_form_reproduces_the_linear_one_where_both_can_run() {
+        // A scaled operating point, chosen so the LINEAR form stays inside its window.
+        let density = Fixed::from_int(3);
+        let expansion_ppm = Fixed::from_int(30);
+        let delta_t = Fixed::from_int(400);
+        let gravity = Fixed::from_ratio(37, 10);
+        let depth = Fixed::from_int(2);
+        let viscosity = Fixed::from_int(5);
+        let kappa = Fixed::from_ratio(1, 100);
+
+        let delta_rho = laws::thermal_density_anomaly(density, expansion_ppm, delta_t);
+        let linear = laws::rayleigh_number(
+            delta_rho,
+            gravity,
+            depth,
+            viscosity,
+            kappa,
+            Fixed::from_int(1_000_000),
+        );
+        let ln_form = laws::ln_rayleigh_number(delta_rho, gravity, depth, viscosity.ln(), kappa)
+            .expect("the log form answers on a physical operating point");
+        let from_log = ln_form.exp().to_f64_lossy();
+        let direct = linear.to_f64_lossy();
+        assert!(
+            direct > 0.0 && (from_log - direct).abs() / direct < 0.01,
+            "the two Rayleigh forms must agree within a percent where both run: linear {direct:.4}, \
+             exp(log) {from_log:.4}. A disagreement here means the log-domain lift changes the physics \
+             rather than the representation"
+        );
+
+        // AND THE STOKES PAIR, same discipline: the advective loss reads this one, so a drift here moves a
+        // convecting column's cooling rate while the onset verdict stays right.
+        let radius = Fixed::from_int(1);
+        let v_linear = laws::stokes_velocity(
+            delta_rho,
+            gravity,
+            radius,
+            viscosity,
+            Fixed::from_int(1_000_000),
+        )
+        .to_f64_lossy();
+        let v_log = laws::ln_stokes_velocity(delta_rho, gravity, radius, viscosity.ln())
+            .expect("the log Stokes form answers")
+            .exp()
+            .to_f64_lossy();
+        assert!(
+            v_linear > 0.0 && (v_log - v_linear).abs() / v_linear < 0.01,
+            "the two Stokes forms must agree within a percent: linear {v_linear:.6}, exp(log) {v_log:.6}"
+        );
+    }
+
+    /// THE LOG FORM RUNS WHERE THE LINEAR ONE CANNOT, which is the reason to have it.
+    ///
+    /// At the real SI operating point the derived cluster now produces (a Mars-class mantle at 1600 K with
+    /// `ln eta ~ 54.7`), the linear form falls to its overflow branch and reports a Rayleigh number of zero,
+    /// so a column that plainly convects reads as conducting. The log form answers with a mantle-scale
+    /// `ln Ra` and the onset fires. This is the defect the fixture cluster was papering over.
+    #[test]
+    fn the_linear_form_fails_at_si_where_the_log_form_answers() {
+        let inputs = LogConvectionInputs {
+            density_kg_m3: Fixed::from_int(3354),
+            thermal_expansion_ppm: Fixed::from_int(26),
+            gravity_m_s2: Fixed::from_ratio(37, 10),
+            depth_m: Fixed::from_int(1_800_000),
+            parcel_radius_m: Fixed::from_int(1_800_000),
+            ln_viscosity: Fixed::from_ratio(547, 10),
+            thermal_diffusivity_m2_s: Fixed::from_ratio(6, 10_000_000),
+            ln_rayleigh_critical: crate::deeptime::RIGID_RIGID_RA_CRIT.ln(),
+        };
+        let delta_t = Fixed::from_int(1300);
+        let (ln_ra, convecting) =
+            ln_convection_onset(&inputs, delta_t, false).expect("the log form answers at SI");
+
+        // THE VALUE IS COMPUTED HERE RATHER THAN GUESSED, because guessing it is how this assertion was
+        // wrong the first time. `drho = rho alpha dT = 3354 * 26e-6 * 1300 = 113.4 kg/m^3`, `d^3 = 5.83e18`,
+        // `eta = e^54.7 = 5.7e23`, `kappa = 6e-7`, so `Ra = 113.4 * 3.7 * 5.83e18 / (5.7e23 * 6e-7) = 7155`
+        // and `ln Ra = 8.88`. The first version of this test asserted `> 10` from intuition about what a
+        // "mantle-scale" Rayleigh number looks like and convicted correct arithmetic.
+        //
+        // It is lower than a textbook mantle `Ra ~ 1e6` for a stated reason worth carrying: the viscosity
+        // is the DERIVED dry-dislocation value at 1600 K and 11 GPa, `~5.7e23 Pa*s`, a few hundred times the
+        // `~1e21` usually quoted, and the diffusivity is the derived `6e-7 m^2/s` rather than the customary
+        // `1e-6`. Both push `Ra` down. The column still convects, at about four times critical.
+        let v = ln_ra.to_f64_lossy();
+        assert!(
+            (8.5..=9.3).contains(&v),
+            "the computed ln Ra for this operating point is 8.88, read {v:.2}"
+        );
+        let critical = inputs.ln_rayleigh_critical.to_f64_lossy();
+        assert!(
+            v > critical,
+            "and it must exceed the rigid-rigid ln(1707.76) = {critical:.2} for the onset to fire"
+        );
+        assert!(convecting, "so the latch fires at ln Ra = {v:.2}");
+
+        // THE LINEAR FORM ON THE SAME INPUTS, which is the comparison that justifies the migration. Its
+        // depth-cubed term alone is 5.8e18 against a Fixed::MAX of 2.1e9, so it cannot even form the
+        // numerator and returns its overflow value.
+        let delta_rho = laws::thermal_density_anomaly(
+            inputs.density_kg_m3,
+            inputs.thermal_expansion_ppm,
+            delta_t,
+        );
+        let linear = laws::rayleigh_number(
+            delta_rho,
+            inputs.gravity_m_s2,
+            inputs.depth_m,
+            Fixed::from_int(1),
+            inputs.thermal_diffusivity_m2_s,
+            Fixed::from_int(1_000_000),
+        );
+        assert_ne!(
+            linear.to_f64_lossy(),
+            ln_ra.exp().to_f64_lossy(),
+            "the linear form cannot reproduce the SI answer, which is why the operating point was scaled"
+        );
+    }
+
+    /// The diffusivity is COMPUTED from the three facts it is made of, never stored beside them, which is the
+    /// redundant-parameter defect the ruling was written about. Asserted against the algebra rather than a
+    /// recorded number: `kappa = k / (rho c_p)`.
+    #[test]
+    fn the_diffusivity_is_computed_from_its_three_facts_and_never_stored() {
+        let p = ColumnThermalProperties {
+            density_kg_m3: Fixed::from_int(3300),
+            thermal_conductivity_w_m_k: Fixed::from_int(4),
+            specific_heat_j_kg_k: Fixed::from_int(1200),
+            thermal_expansion_ppm_per_k: Fixed::from_int(30),
+            // The band is irrelevant to this test, which is about the three facts kappa composes from.
+            viscosity: civsim_physics::convective_viscosity::ViscosityBand {
+                ln_viscosity_min: Fixed::from_int(46),
+                ln_viscosity_max: Fixed::from_int(50),
+                ln_viscosity_primary: Fixed::from_int(48),
+                eval_temperature_k: Fixed::from_int(1600),
+                eval_pressure_gpa: Fixed::from_int(10),
+            },
+        };
+        let kappa = p.thermal_diffusivity().expect("the three facts compose");
+        let expected = 4.0 / (3300.0 * 1200.0);
+        assert!(
+            (kappa.to_f64_lossy() - expected).abs() < 1e-9,
+            "kappa = k/(rho c_p) = {expected:.3e}, read {:.3e}",
+            kappa.to_f64_lossy()
+        );
+        // A silicate mantle sits near 1e-6 m^2/s, which is the magnitude check that would catch a unit slip.
+        assert!(
+            (1e-7..=1e-5).contains(&kappa.to_f64_lossy()),
+            "a silicate diffusivity should land near 1e-6 m^2/s"
+        );
+    }
+
+    /// THE TWO DEPTHS AGREE WHEN THE GEOMETRY IS DERIVED FROM THE COLUMN, and that is the whole point of
+    /// the checked constructor. Built by hand the pair can disagree by `1e6` with no complaint from either
+    /// type; built from the column it cannot, because the SI depth is computed rather than accepted.
+    #[test]
+    fn the_derived_geometry_cannot_disagree_with_the_column_it_came_from() {
+        let (_, mut p) = column(Fixed::from_int(1000));
+        p.depth = Fixed::from_ratio(18, 10); // 1.8 Mm, the scaled kernel's unit
+        p.gravity = Fixed::from_ratio(37, 10);
+        let g = ColumnGeometry::from_scaled_column(
+            &p,
+            Fixed::from_int(1300),
+            crate::deeptime::RIGID_RIGID_RA_CRIT.ln(),
+        )
+        .expect("a positive scaled depth converts");
+        // Compared with a tolerance rather than exactly: `1.8` has no exact binary fixed-point
+        // representation, so the scaled-to-SI product lands a fraction of a metre under 1,800,000. That is
+        // a representation artifact of the conversion, not a disagreement between the two depths, and
+        // asserting exact equality here would be asserting something about binary fractions rather than
+        // about the unit coherence this test exists for.
+        let drift = (g.layer_depth_m - Fixed::from_int(1_800_000)).abs();
+        assert!(
+            drift < Fixed::ONE,
+            "the SI depth is DERIVED from the scaled one, within representation: read {}",
+            g.layer_depth_m.to_f64_lossy()
+        );
+        assert_eq!(
+            g.gravity_m_s2, p.gravity,
+            "gravity comes from the column too"
+        );
+        // A degenerate scaled depth has no SI counterpart and refuses rather than yielding zero metres.
+        p.depth = Fixed::ZERO;
+        assert!(ColumnGeometry::from_scaled_column(
+            &p,
+            Fixed::from_int(1300),
+            crate::deeptime::RIGID_RIGID_RA_CRIT.ln()
+        )
+        .is_none());
+    }
+
+    /// The parcel radius derives from the cell geometry the column already carries, so it tracks the
+    /// eigenvalue pair rather than sitting beside it. Asserted against the analytic `pi / a_c` rather than
+    /// against a recorded number, because a recorded number here would be the fixture this replaces.
+    #[test]
+    fn the_parcel_radius_derives_from_the_columns_own_cell_scale() {
+        let (_, mut p) = column(Fixed::from_int(1000));
+        p.depth = Fixed::from_int(3);
+        p.ra_crit_wavenumber = crate::deeptime::RIGID_RIGID_CRITICAL_WAVENUMBER;
+        let r = p
+            .parcel_radius()
+            .expect("a positive wavenumber yields a radius");
+        let expected = std::f64::consts::PI / p.ra_crit_wavenumber.to_f64_lossy() * 3.0;
+        assert!(
+            (r.to_f64_lossy() - expected).abs() < 1e-3,
+            "r = d * pi / a_c, expected {expected}, read {}",
+            r.to_f64_lossy()
+        );
+        // The rigid-rigid pair puts the half-wavelength near one layer depth, which is the regime check that
+        // would catch a wavenumber swapped for the free-free value (sqrt(2), giving ~1.41 depths).
+        assert!(
+            (0.9..=1.2).contains(&(r.to_f64_lossy() / 3.0)),
+            "the rigid-rigid cell is near one layer depth per parcel"
+        );
+
+        // A degenerate wavenumber has no cell scale, so it refuses rather than returning a radius.
+        p.ra_crit_wavenumber = Fixed::ZERO;
+        assert_eq!(p.parcel_radius(), None);
+    }
+
+    fn column(ra_crit: Fixed) -> (ColumnState, ColumnParams) {
+        let state = ColumnState {
+            temperature: Fixed::from_int(400),
+            convecting: false,
+        };
+        let params = ColumnParams {
+            reference_temperature: Fixed::from_int(300),
+            density: Fixed::ONE,
+            thermal_conductivity: Fixed::from_int(2),
+            thermal_expansion_ppm: Fixed::from_int(30),
+            gravity: Fixed::from_int(10),
+            depth: Fixed::ONE,
+            radius: Fixed::ONE,
+            viscosity: Fixed::ONE,
+            specific_heat: Fixed::from_int(10),
+            heat_production: Fixed::from_int(100),
+            ra_crit,
+            // The rigid-rigid critical wavenumber, the pair mate of the classical rigid Ra_crit; the convection
+            // step does not read it, so any value compiles, but the coherent rigid-rigid a_c ~ 3.117 is used.
+            ra_crit_wavenumber: Fixed::from_ratio(3117, 1000),
+            ra_max: Fixed::from_int(1_000_000),
+            v_max: Fixed::from_int(1_000_000),
+            flux_max: Fixed::from_int(1_000_000),
+            stress_max: Fixed::from_int(1_000_000),
+            dt: Fixed::ONE,
+        };
+        (state, params)
+    }
+
+    #[test]
+    fn the_loss_coefficient_twins_the_kernels_own_conductive_loss() {
+        // THE TWIN that licenses the thermostat to read one home. `conductive_loss_coefficient` claims to be
+        // the coefficient `convection_step` composes internally, so it is checked against that composition
+        // rather than against a restatement of its own formula (which would be circular). The depth is set
+        // AWAY from one, because at `d = 1` the linear and the squared depth coincide and a dropped depth
+        // factor would pass unnoticed: the test would prove nothing about the term it exists to pin.
+        let (state, mut params) = column(Fixed::from_int(1_000_000_000));
+        params.depth = Fixed::from_ratio(18, 10);
+        let delta_t = state.temperature - params.reference_temperature;
+
+        // The kernel's own composition, transcribed from `convection_step`: the Fourier flux over the
+        // column's mass per area.
+        let flux = laws::conduction(
+            params.thermal_conductivity,
+            Fixed::ONE,
+            state.temperature,
+            params.reference_temperature,
+            params.depth,
+            params.flux_max,
+        );
+        let mass_per_area = params.density.checked_mul(params.depth).unwrap();
+        let kernel_loss = flux.checked_div(mass_per_area).unwrap();
+
+        let coefficient = conductive_loss_coefficient(&params).expect("a positive column has one");
+        let from_coefficient = coefficient.checked_mul(delta_t).unwrap();
+        let gap = (kernel_loss - from_coefficient).abs();
+        assert!(
+            gap < Fixed::from_ratio(1, 1_000_000),
+            "the coefficient must reproduce the kernel's conductive loss: kernel {kernel_loss:?} against \
+             coefficient-composed {from_coefficient:?}"
+        );
+
+        // A column with no conductive path has no coefficient, refused rather than returned as zero (which a
+        // consumer would divide by).
+        let mut open = params;
+        open.depth = Fixed::ZERO;
+        assert!(
+            conductive_loss_coefficient(&open).is_none(),
+            "a zero-depth column has no conductive loss coefficient"
+        );
+    }
+
+    #[test]
+    fn a_subcritical_column_stays_conductive_and_relaxes() {
+        // Ra_crit above any Rayleigh number the column reaches: it never convects and relaxes to the
+        // conductive steady state (where radiogenic production balances the Fourier loss).
+        let (state, params) = column(Fixed::from_int(1_000_000_000));
+        let outcome = convection_solve(state, &params, 10_000, 1);
+        assert!(
+            outcome.converged,
+            "the conductive column relaxes to a steady state"
+        );
+        assert!(
+            !outcome.state.convecting,
+            "a subcritical column never enters the convecting regime"
+        );
+        // It cooled from 400 toward the reference (production below the loss at 400).
+        assert!(outcome.state.temperature < Fixed::from_int(400));
+        assert!(outcome.state.temperature > Fixed::from_int(300));
+    }
+
+    #[test]
+    fn a_supercritical_column_convects_and_relaxes_cooler() {
+        // Ra_crit at zero: the column convects immediately, so the buoyant flow adds a convective loss and
+        // the steady state is cooler than pure conduction.
+        let (state, conv_params) = column(Fixed::ZERO);
+        let convecting = convection_solve(state, &conv_params, 10_000, 1);
+        assert!(
+            convecting.state.convecting,
+            "a supercritical column convects"
+        );
+        assert!(convecting.converged);
+
+        let (state, cond_params) = column(Fixed::from_int(1_000_000_000));
+        let conductive = convection_solve(state, &cond_params, 10_000, 1);
+
+        assert!(
+            convecting.state.temperature < conductive.state.temperature,
+            "convection carries extra heat out, so the convecting steady state is cooler"
+        );
+    }
+
+    #[test]
+    fn the_convection_solve_is_deterministic() {
+        let (state, params) = column(Fixed::ZERO);
+        let a = convection_solve(state, &params, 5_000, 1);
+        let b = convection_solve(state, &params, 5_000, 1);
+        assert_eq!(
+            a.state, b.state,
+            "the same synthetic column reproduces the same outcome"
+        );
+        assert_eq!(a.iterations, b.iterations);
+    }
+
+    #[test]
+    fn the_convection_onset_latch_is_one_way() {
+        // A column already convecting stays convecting even after it has cooled below the onset contrast:
+        // the latch never un-fires, so the recorded convecting regime is stable.
+        let (_, params) = column(Fixed::from_int(1_000_000_000)); // a high Ra_crit it will not re-cross
+        let already = ColumnState {
+            temperature: Fixed::from_int(301), // barely above the reference, a tiny Rayleigh number
+            convecting: true,
+        };
+        let next = convection_step(&already, &params);
+        assert!(
+            next.convecting,
+            "the convection latch holds once set, even below the onset threshold"
+        );
+    }
+
+    #[test]
+    fn the_reservoir_decays_and_the_source_dies_over_the_thermal_history() {
+        let (column0, params) = column(Fixed::ZERO);
+        let decay = Fixed::from_ratio(1, 4); // 25% per tick, exactly representable
+        let specific_heat_production = Fixed::from_int(4);
+        let initial = SecularState {
+            column: column0,
+            reservoir: Fixed::from_int(100),
+        };
+        // One step: the reservoir spends down first-order, 100 -> 75.
+        let s1 = secular_step(&initial, &params, decay, specific_heat_production);
+        assert_eq!(
+            s1.reservoir,
+            Fixed::from_int(75),
+            "the isotope reservoir spends down first-order"
+        );
+        // It keeps falling, monotone.
+        let s2 = secular_step(&s1, &params, decay, specific_heat_production);
+        assert!(
+            s2.reservoir < s1.reservoir,
+            "the reservoir decays monotonically"
+        );
+        // Over a long history the source is spent (the reservoir approaches zero).
+        let late = secular_history(initial, &params, decay, specific_heat_production, 200);
+        assert!(
+            late.reservoir < Fixed::from_ratio(1, 100),
+            "the heat source is spent after long geological time"
+        );
+    }
+
+    #[test]
+    fn a_decaying_source_leaves_the_interior_cooler_than_a_sustained_one() {
+        // A decaying reservoir loses its heat source over time, so the interior cools below what a
+        // sustained (non-decaying) source would hold: the spent-world relaxation.
+        let (column0, params) = column(Fixed::ZERO);
+        let specific_heat_production = Fixed::from_int(4);
+        let initial = SecularState {
+            column: column0,
+            reservoir: Fixed::from_int(100),
+        };
+        let decaying = secular_history(
+            initial,
+            &params,
+            Fixed::from_ratio(1, 4),
+            specific_heat_production,
+            300,
+        );
+        // Zero decay constant: the source never spends down, so it sustains a warmer interior.
+        let sustained =
+            secular_history(initial, &params, Fixed::ZERO, specific_heat_production, 300);
+        assert!(
+            decaying.column.temperature < sustained.column.temperature,
+            "the interior with a decaying source ends cooler than one with a sustained source"
+        );
+    }
+
+    #[test]
+    fn the_secular_history_is_deterministic() {
+        let (column0, params) = column(Fixed::ZERO);
+        let initial = SecularState {
+            column: column0,
+            reservoir: Fixed::from_int(100),
+        };
+        let a = secular_history(
+            initial,
+            &params,
+            Fixed::from_ratio(1, 4),
+            Fixed::from_int(4),
+            100,
+        );
+        let b = secular_history(
+            initial,
+            &params,
+            Fixed::from_ratio(1, 4),
+            Fixed::from_int(4),
+            100,
+        );
+        assert_eq!(
+            a, b,
+            "the same synthetic thermal history reproduces the same outcome"
+        );
+    }
+
+    // --- The interior column-wiring (#176) ---
+
+    #[test]
+    fn the_readout_exposes_the_continuous_state_and_a_hot_column_convects() {
+        // A hot column (well above the reference) reaches a super-critical Rayleigh number, so the derived
+        // convecting condition (Rayleigh against the critical value) is on, and the readout carries the
+        // continuous quantities the contract stores.
+        let (mut state, params) = column(Fixed::from_int(1));
+        // The compatibility fixture now derives kappa = k/(rho*c_p) = 0.2 rather than storing the former
+        // conflicting value. Put the test state far enough above its own reference to exercise the
+        // super-critical branch under that derived diffusivity.
+        state.temperature = params.reference_temperature + Fixed::from_int(1_000);
+        let readout = column_readout(&state, &params);
+        assert!(
+            readout.rayleigh > params.ra_crit,
+            "the hot column is super-critical"
+        );
+        assert!(
+            readout.convective_stress > Fixed::ZERO,
+            "a convecting column exerts a driving stress"
+        );
+        // The stepped temperature is the convection_step result (the readout reuses it).
+        assert_eq!(
+            readout.temperature,
+            convection_step(&state, &params).temperature
+        );
+    }
+
+    #[test]
+    fn convection_is_reversible_a_cold_column_does_not_convect() {
+        // The gate's ruling: no stored convecting flag, so convection can CEASE on a cooling world. A column at
+        // the reference temperature has no buoyancy, a sub-critical Rayleigh number, and no convective stress.
+        let (_, params) = column(Fixed::from_int(1000));
+        let cold = ColumnState {
+            temperature: params.reference_temperature,
+            convecting: false,
+        };
+        let readout = column_readout(&cold, &params);
+        assert_eq!(
+            readout.rayleigh,
+            Fixed::ZERO,
+            "no contrast, no convective vigor"
+        );
+        assert_eq!(
+            readout.convective_stress,
+            Fixed::ZERO,
+            "a still interior drives no stress"
+        );
+    }
+
+    #[test]
+    fn populate_writes_the_interior_fields_and_the_snapshot_isostasy() {
+        // The interior populates its continuous fields and the isostatic elevation, reading the surface lane's
+        // crustal_density from the SNAPSHOT (snapshot-apply). The mantle density here stands in for the
+        // petrology-derived value (derive_mantle_density over the mantle composition); the test supplies it
+        // directly to isolate the wiring.
+        let (_, params) = column(Fixed::from_int(1));
+        let mantle_density = Fixed::from_ratio(33, 10); // a derived-density stand-in for the wiring test
+        let snapshot = GeodynamicColumn {
+            crustal_density: Fixed::from_ratio(265, 100), // written by the surface lane (felsic)
+            crustal_thickness: Fixed::from_int(35_000),
+            temperature: Fixed::from_int(400),
+            ..GeodynamicColumn::default()
+        };
+        let next = populate_interior_column(snapshot, &params, mantle_density);
+        // The surface field passes through unchanged (the interior does not write it).
+        assert_eq!(next.crustal_density, snapshot.crustal_density);
+        // The interior wrote its continuous state and the isostatic elevation from the snapshot crust.
+        assert!(next.rayleigh > Fixed::ZERO);
+        assert!(
+            next.isostatic_elevation > Fixed::ZERO,
+            "a felsic column floats above the reference"
+        );
+        let expected = civsim_physics::geodynamics::airy_isostatic_elevation(
+            snapshot.crustal_density,
+            mantle_density,
+            snapshot.crustal_thickness,
+        )
+        .unwrap();
+        assert_eq!(
+            next.isostatic_elevation, expected,
+            "the isostasy reads the snapshot crust and mantle"
+        );
+    }
+
+    #[test]
+    fn the_wiring_convection_is_reversible_a_cooled_column_ceases() {
+        // The latch guardrail (gate ruling, #176): the resident contract stores no convecting flag, so a column
+        // that once convected does NOT stay convecting against a fallen Rayleigh number. Populate a hot column
+        // (it convects, stress positive), then feed its result back cooled to the reference, and the re-populated
+        // column reads zero stress: the stress keys off the CURRENT Rayleigh number, reversibly, never a
+        // persisted onset latch overriding it.
+        let (_, params) = column(Fixed::from_int(1));
+        let hot = GeodynamicColumn {
+            temperature: Fixed::from_int(2000),
+            ..GeodynamicColumn::default()
+        };
+        let convecting = populate_interior_column(hot, &params, Fixed::from_ratio(33, 10));
+        assert!(
+            convecting.convective_stress > Fixed::ZERO,
+            "the hot column convects and drives a stress"
+        );
+        // Now the column has cooled to its reference (no contrast): re-populate against that snapshot.
+        let cooled = GeodynamicColumn {
+            temperature: params.reference_temperature,
+            ..convecting
+        };
+        let ceased = populate_interior_column(cooled, &params, Fixed::from_ratio(33, 10));
+        assert_eq!(
+            ceased.convective_stress,
+            Fixed::ZERO,
+            "a cooled column ceases convecting, no latch keeps the stress alive"
+        );
+        assert_eq!(
+            ceased.rayleigh,
+            Fixed::ZERO,
+            "the vigor falls with the contrast"
+        );
+    }
+
+    #[test]
+    fn the_boundary_layer_thins_with_vigor_so_a_hotter_column_drives_more_stress() {
+        // The derived boundary layer L = depth * (Ra_crit / Ra)^(1/3): a more vigorous column has a thinner layer
+        // and a higher driving stress, the derive-clean thinning (not the depth reference-pass).
+        let (_, params) = column(Fixed::from_int(1));
+        let warm = column_readout(
+            &ColumnState {
+                temperature: Fixed::from_int(600),
+                convecting: false,
+            },
+            &params,
+        );
+        let hot = column_readout(
+            &ColumnState {
+                temperature: Fixed::from_int(2000),
+                convecting: false,
+            },
+            &params,
+        );
+        assert!(
+            hot.rayleigh > warm.rayleigh,
+            "the hotter column is more vigorous"
+        );
+        assert!(
+            hot.convective_stress > warm.convective_stress,
+            "a thinner boundary layer under higher vigor concentrates more driving stress"
+        );
+    }
+
+    #[test]
+    fn an_empty_field_step_is_byte_neutral() {
+        // Snapshot-apply over an unarmed geology walks no columns, so it yields an empty field (folds nothing
+        // into state_hash), the dormant byte-neutral guarantee.
+        let (_, params) = column(Fixed::from_int(1));
+        let empty = GeodynamicField::new();
+        let next = step_interior_field(&empty, &params, Fixed::from_ratio(33, 10));
+        assert!(
+            next.is_empty(),
+            "an unarmed geology stays empty and byte-neutral"
+        );
+    }
+
+    #[test]
+    fn the_surface_elevation_derives_from_the_crust_composition() {
+        // THE R1-OVERRIDE WIRE (the capstone's visible spine, foundation): a tile's elevation is what the material
+        // at that place IS, never a noise field. The primitive composes crustal_density (composition -> density)
+        // with the Airy isostasy law, so a crust lighter than the mantle floats above the reference. A resolvable
+        // pure-silica crust (quartz, ~2.65 g/cm^3) on a synthetically denser mantle (3.3) floats positive, and the
+        // primitive equals the two-step composition exactly (no hidden path). The full basaltic-Hadean composition
+        // and the worldgen tile-axis wire are the next slice; this proves the derivation.
+        let reg = civsim_physics::petrology_data::PhaseRegistry::standard()
+            .expect("phase registry loads");
+        let table =
+            civsim_physics::periodic::PeriodicTable::standard().expect("periodic table loads");
+        let crust = [
+            ("Si".to_string(), Fixed::from_int(1)),
+            ("O".to_string(), Fixed::from_int(2)),
+        ];
+        let mantle_density = Fixed::from_ratio(33, 10); // 3.3 g/cm^3, denser than the quartz crust
+        let thickness = Fixed::from_int(30);
+        let t = Fixed::from_int(300);
+        let p = Fixed::from_int(1);
+        let crust_density = civsim_physics::petrology::crustal_density(&crust, t, p, &reg, &table)
+            .expect("the silica composition reaches a density");
+        let expected = civsim_physics::geodynamics::airy_isostatic_elevation(
+            crust_density,
+            mantle_density,
+            thickness,
+        )
+        .expect("the isostasy floats it");
+        let got = surface_elevation_from_composition(
+            &crust,
+            mantle_density,
+            thickness,
+            t,
+            p,
+            &reg,
+            &table,
+        )
+        .expect("the derived elevation wire");
+        assert_eq!(
+            got, expected,
+            "the primitive composes crustal_density + airy exactly, no hidden path"
+        );
+        assert!(
+            got > Fixed::ZERO,
+            "a crust lighter than the mantle floats above the reference (elevation positive)"
+        );
+    }
+
+    #[test]
+    fn the_derived_tile_field_classifies_relief_from_the_derived_terrain() {
+        // THE TILE WIRE (Slice 0, end to end): a two-tile field, a light quartz crust and a denser forsterite crust,
+        // derives two elevations, the field-mean datum, and the relief by crossing it. The light crust floats higher
+        // (Upland), the denser crust lower (Lowland), so the terrain is what the substrate says, not fractal noise.
+        // Raising a sea-level fixture above the low crust makes it Submarine, the ocean/land boundary emerging by
+        // crossing the derived-or-fixtured reference. All from composition, no authored terrain.
+        let reg = civsim_physics::petrology_data::PhaseRegistry::standard().expect("registry");
+        let table = civsim_physics::periodic::PeriodicTable::standard().expect("table");
+        let quartz = vec![
+            ("Si".to_string(), Fixed::from_int(1)),
+            ("O".to_string(), Fixed::from_int(2)),
+        ];
+        let forsterite = vec![
+            ("Mg".to_string(), Fixed::from_int(2)),
+            ("Si".to_string(), Fixed::from_int(1)),
+            ("O".to_string(), Fixed::from_int(4)),
+        ];
+        let field = vec![quartz, forsterite];
+        let mantle = Fixed::from_ratio(33, 10);
+        let thickness = Fixed::from_int(30);
+        let t = Fixed::from_int(300);
+        let p = Fixed::from_int(1);
+        // Sea level at 0: both crusts above it, so relief is the light-vs-dense split about the field datum.
+        let tiles =
+            generate_derived_tiles(&field, mantle, thickness, t, p, Fixed::ZERO, &reg, &table)
+                .expect("the derived tile field");
+        assert_eq!(tiles.len(), 2);
+        assert!(
+            tiles[0].elevation > tiles[1].elevation,
+            "the lighter quartz crust floats higher than the denser forsterite"
+        );
+        assert_eq!(
+            tiles[0].relief,
+            TerrainRelief::Upland,
+            "the higher crust is Upland"
+        );
+        assert_eq!(
+            tiles[1].relief,
+            TerrainRelief::Lowland,
+            "the lower crust is Lowland"
+        );
+        // Raise the sea-level fixture above the lower crust: it becomes Submarine (the ocean/land boundary crossing).
+        let sea_above_low = tiles[1].elevation.checked_add(Fixed::ONE).unwrap();
+        let flooded =
+            generate_derived_tiles(&field, mantle, thickness, t, p, sea_above_low, &reg, &table)
+                .expect("flooded field");
+        assert_eq!(
+            flooded[1].relief,
+            TerrainRelief::Submarine,
+            "raising sea level above the low crust submerges it"
+        );
+        // An empty field has no tiles (fail-loud, never a fabricated world).
+        assert!(
+            generate_derived_tiles(&[], mantle, thickness, t, p, Fixed::ZERO, &reg, &table)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn the_convecting_mantle_depth_derives_from_the_planet_structure() {
+        // An Earth-grade planet (radius 6371 km, ~32.5% core mass, mean density 5.51, metal-core density ~13)
+        // derives a silicate mantle shell of the right grade (~2500 to 3200 km), R_planet - R_core, from the core
+        // the differentiation set. Not an authored layer thickness: the mantle depth IS the planet's structure.
+        let depth = convecting_mantle_depth_m(
+            Fixed::from_int(6_371_000),
+            Fixed::from_ratio(325, 1000),
+            Fixed::from_ratio(551, 100),
+            Fixed::from_int(13),
+        )
+        .expect("an Earth-grade planet has a derived mantle shell");
+        let km = depth.to_f64_lossy() / 1000.0;
+        assert!(
+            (2500.0..=3200.0).contains(&km),
+            "the derived mantle shell is Earth-grade, got {km} km"
+        );
+        // A larger core mass fraction sinks a bigger core and thins the mantle shell, monotonically.
+        let bigger_core = convecting_mantle_depth_m(
+            Fixed::from_int(6_371_000),
+            Fixed::from_ratio(500, 1000),
+            Fixed::from_ratio(551, 100),
+            Fixed::from_int(13),
+        )
+        .expect("resolves");
+        assert!(
+            bigger_core < depth,
+            "a larger core mass fraction thins the mantle shell"
+        );
+    }
+
+    #[test]
+    fn a_non_physical_planet_has_no_derived_mantle_depth() {
+        // A core no denser than the mean could not have sunk to a core, so no distinct mantle shell (fail-loud).
+        assert!(convecting_mantle_depth_m(
+            Fixed::from_int(6_371_000),
+            Fixed::from_ratio(325, 1000),
+            Fixed::from_int(6),
+            Fixed::from_int(5),
+        )
+        .is_none());
+        // A non-positive radius and an out-of-range core fraction fail loud.
+        assert!(convecting_mantle_depth_m(
+            Fixed::ZERO,
+            Fixed::from_ratio(3, 10),
+            Fixed::from_int(5),
+            Fixed::from_int(10)
+        )
+        .is_none());
+        assert!(convecting_mantle_depth_m(
+            Fixed::from_int(6_371_000),
+            Fixed::from_int(2),
+            Fixed::from_int(5),
+            Fixed::from_int(10)
+        )
+        .is_none());
+    }
+}

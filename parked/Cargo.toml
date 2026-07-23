@@ -1,0 +1,36 @@
+[workspace]
+members = [
+    "crates/bio",
+    "crates/compose",
+    "crates/foundation",
+    "crates/gpu",
+    "crates/materials",
+    "crates/physics",
+    "crates/sim",
+    "crates/units",
+    "crates/viewer",
+    "crates/world",
+]
+resolver = "2"
+
+[workspace.package]
+authors = ["Nathan M. Fraske"]
+license = "Apache-2.0"
+edition = "2021"
+version = "0.1.0"
+repository = "https://github.com/nathanfraske/deep-emergent-civ-simulator"
+rust-version = "1.94"
+
+# Preserve the legacy workspace's arithmetic and build behavior after moving it
+# out of the root workspace. Cargo profiles do not cross workspace roots.
+[profile.release]
+overflow-checks = true
+
+[profile.dev.build-override]
+opt-level = 3
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.release.build-override]
+opt-level = 3

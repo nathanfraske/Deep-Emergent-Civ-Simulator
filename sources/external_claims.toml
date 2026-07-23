@@ -1,0 +1,43 @@
+[inventory]
+schema = 1
+rule = "docs/working/EXTERNAL_ADVERSE_CLAIM_RULE.md"
+minimum_independent_lineages = 5
+approvers_file = "sources/external_claim_approvers"
+revocations_file = "sources/external_claim_revocations.toml"
+signature_namespace = "civsim-external-claim"
+description = "Neutral pending records and exact human release receipts for external adverse claims or author contact."
+
+# Pending candidates contain neutral metadata only. A release row is invalid
+# unless both independent gates agree, five
+# independent lineages remain after conservative ancestry collapse, and the
+# owner signature verifies over the exact scoped payload.
+
+[[candidate]]
+id = "disk-arc-literature.migration-review"
+state = "internal_review"
+subject = "Neutral classification review for legacy discrepancy wording in crates/physics/data/disk_arc_literature/manifest.toml."
+
+[[candidate]]
+id = "oxide-thermochemistry.migration-review"
+state = "internal_review"
+subject = "Neutral classification review for legacy discrepancy wording in crates/physics/data/oxide_thermochemistry/manifest.toml."
+
+[[candidate]]
+id = "phase-conductivity.migration-review"
+state = "internal_review"
+subject = "Neutral classification review for legacy discrepancy wording in crates/physics/data/phase_conductivity/manifest.toml."
+
+[[candidate]]
+id = "pipeline-fetches.tafi-table-cell-review"
+state = "internal_review"
+subject = "Neutral review of the TAFI Table 1 point-load cell discussion in docs/working/PIPELINE_FETCHES.md."
+
+[[candidate]]
+id = "source-registry.migration-review"
+state = "internal_review"
+subject = "Neutral classification review for legacy discrepancy wording in sources/registry.toml and generated docs/SOURCES.md."
+
+[[candidate]]
+id = "thermoelastic-anchors.migration-review"
+state = "internal_review"
+subject = "Neutral classification review for legacy discrepancy wording in crates/physics/data/thermoelastic_anchors/manifest.toml."

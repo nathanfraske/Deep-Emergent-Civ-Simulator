@@ -16,8 +16,8 @@
 set -o pipefail
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-TOMBSTONES="$ROOT/calibration/stone0_tombstones.txt"
-EXCLUDE=':(exclude)calibration/stone0_tombstones.txt'
+TOMBSTONES="$ROOT/scripts/stone0_tombstones.txt"
+EXCLUDE=':(exclude)scripts/stone0_tombstones.txt'
 ZERO="0000000000000000000000000000000000000000"
 
 if [ ! -f "$TOMBSTONES" ]; then
@@ -44,7 +44,7 @@ fi
 # full-history re-check for that phrase. If we cannot compute the range, scan full history to be safe.
 tombstone_changed=1
 if [ "$have_range" -eq 1 ]; then
-  if git diff --name-only "$BEFORE..$AFTER" 2>/dev/null | grep -qx 'calibration/stone0_tombstones.txt'; then
+  if git diff --name-only "$BEFORE..$AFTER" 2>/dev/null | grep -qx 'scripts/stone0_tombstones.txt'; then
     tombstone_changed=1
   else
     tombstone_changed=0

@@ -36,8 +36,8 @@
 //!   `#[cube]` kernels, over the confined op set (u32 wrapping add/sub, u16*u16->u32, bitwise,
 //!   constant shifts, comparisons, branchless `select`; no native 64-bit, no divide, no float). These
 //!   reproduce `Fixed::mul`/`Fixed::div` bit-for-bit and are the load-bearing arithmetic contract,
-//!   proven bit-identical across three independent codegen paths (CUDA/NVRTC, the CPU backend/MLIR-LLVM,
-//!   and wgpu/SPIR-V) in `tests/cross_backend.rs`.
+//!   checked against independent codegen paths in the sparse CPU and Vulkan evidence lanes. Those
+//!   optional backends are not compiled into the ordinary pull-request build.
 //! - `prim` (internal): the shared i64-boundary limb primitives, the pinned multiply `q32_mul`, the
 //!   divide `q32_div`, and the 96-bit `isqrt_u96`, reproducing `Fixed::mul`/`div`/`sqrt`. The field
 //!   stencil and the transcendentals call these rather than each carrying a private copy.
@@ -53,34 +53,23 @@
 //!   the transcendental physics laws the waves deferred (Arrhenius, Clausius-Clapeyron, Beer-Lambert,
 //!   Nernst, Snell, Rayleigh, and general scaling).
 //!
-//! One module breaks the integer-only law ON PURPOSE, and is fenced off from the rest:
-//! - [`globe`]: the NON-CANON viewer globe shade, a plain `f32` kernel (design Part 14, Principle 10). It
-//!   produces an observer's FRAMEBUFFER, never canonical simulation state, so it carries no bit-identity
-//!   contract (two observers' framebuffers need not agree to the bit): the one place a float is allowed
-//!   here. It is the GPU port of `civsim_viewer`'s `render::draw_globe` per-pixel shade, kept apart from
-//!   the canonical kernels above so nothing confuses it with one.
-//!
 //! Device access is optional: the crate builds with no CUDA present, and the launchers assume a
 //! working device only when called. The gate tests self-skip unless `CIVSIM_GPU` is set.
 
-pub mod being;
 pub mod field;
-pub mod globe;
-pub mod perceive;
 mod prim;
 pub mod stage0;
 pub mod transcendental;
-pub mod worldgen;
 
-pub use being::{gpu_activate, gpu_body_thermal, gpu_metabolize, gpu_sat_mul};
 pub use field::{gpu_diffuse, gpu_diffuse_tiled, gpu_field_step, gpu_fixed_mul, FieldResident};
-pub use perceive::gpu_notice;
+#[cfg(feature = "cpu-backend")]
+pub use stage0::{cpu_client, CpuClient};
 pub use stage0::{
-    cpu_client, cuda_client, gpu_div, gpu_div_limb_u32, gpu_div_native_i64, gpu_mul,
-    gpu_mul_limb_u32, gpu_mul_native_i64, wgpu_client, CpuClient, CudaClient, Stage0Transport,
-    WgpuClient,
+    cuda_client, gpu_div, gpu_div_limb_u32, gpu_div_native_i64, gpu_mul, gpu_mul_limb_u32,
+    gpu_mul_native_i64, CudaClient, Stage0Transport,
 };
+#[cfg(feature = "vulkan-backend")]
+pub use stage0::{wgpu_client, wgpu_client_with_adapter_receipt, WgpuAdapterReceipt, WgpuClient};
 pub use transcendental::{
     gpu_asin, gpu_atan, gpu_cos, gpu_exp, gpu_ln, gpu_powf, gpu_powi, gpu_sin, gpu_sqrt,
 };
-pub use worldgen::{gpu_worldgen, gpu_worldgen_noise};

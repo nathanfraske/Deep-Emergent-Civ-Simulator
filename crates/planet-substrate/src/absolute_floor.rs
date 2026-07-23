@@ -1,0 +1,13 @@
+//! Transitional accessors that keep pre-migration planetary mechanisms on the
+//! same independently sealed physical floor as the canonical runner.
+//!
+//! Typed stage adapters will pass the execution capability directly. Until
+//! those adapters land, old private mechanisms may reach `G` only through this
+//! no-input constructor, which builds and verifies the repository floor first.
+
+use civsim_core::Fixed;
+
+pub(crate) fn ln_gravitational_constant() -> Option<Fixed> {
+    let execution = civsim_units::constants::canonical_si_execution_magnitudes().ok()?;
+    civsim_physics::saha::ln_fundamental(&execution, "G")
+}

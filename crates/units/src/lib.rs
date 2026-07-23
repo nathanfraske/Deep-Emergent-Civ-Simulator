@@ -17,37 +17,41 @@
 //! This crate is the foundation the runbook lists as buildable now and the
 //! structure the R-UNITS-PIN flag calls for. It carries the *mechanism* only:
 //!
-//! - A base-dimension registry. The set of base dimensions is data the owner and
-//!   the physics fan-out provide (R-DEEPTECH-PHYSICS), not authored here, because
-//!   the physics catalogue is the one authored layer and is the owner's to populate
-//!   (Principle 9). A [`Dimension`] is a vector of integer exponents over those base
+//! - A base-dimension registry. A [`Dimension`] is a vector of integer exponents over supplied base
 //!   dimensions, kept in a canonical sorted form, so a derived dimension (force,
 //!   energy) is a computed composition rather than an authored entry, and every
 //!   quantity mechanically reduces to base dimensions, which is the descriptor
 //!   neutrality the steering audit wants.
 //! - A quantity registry. Each quantity carries its dimension, its per-quantity
-//!   fixed-point scale, and an explicit saturate-or-wrap overflow policy. The scales
-//!   are the owner's reserved numbers, provided in data; the crate ships none.
+//!   fixed-point scale, and an explicit saturate-or-wrap overflow policy. A canonical
+//!   producer derives scales from the execution type and the quantity envelope; this
+//!   generic registry merely records the resulting representation metadata.
 //! - Deterministic integer arithmetic and conversion. Magnitudes are `i64` at a
 //!   quantity's scale. No floating point appears anywhere, so nothing here can
 //!   perturb a canonical result, and overflow follows the quantity's declared
 //!   policy rather than an accident (the discipline Part 55 requires).
 //!
-//! What this crate deliberately does not contain: any base dimension, any quantity,
-//! or any scale. Those are the authored physics catalogue and the owner's reserved
-//! values; the tests use a small fixture catalogue, clearly marked as a fixture and
-//! not the authored set. The one exception is the [`fundamentals`] module: the closed
-//! table of CODATA fundamental constants, which ARE the one authored universal layer
-//! the value-authoring line permits (distinct from any owner or per-world value).
+//! What this crate deliberately does not contain: a caller-selected physical
+//! floor, per-world quantity, or causal scale. The [`fundamentals`] module keeps
+//! exact SI representation definitions separate from measured physical
+//! invariants, and `constants` derives the execution view. The canonical planet
+//! boundary alone admits physical invariants after derive-first exhaustion.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+mod authority_watchdog;
 pub mod bignum;
+pub use authority_watchdog::AuthorityWatchdogError;
+mod certified_projection;
 pub mod compute;
-pub mod emic;
+pub mod constants;
+pub mod digest;
+pub mod dimensional_analysis;
+mod floor_admission_watchdog;
 pub mod fundamentals;
 pub mod guard;
+pub mod physics_floor;
 pub mod plan;
 pub mod tier2;
 
@@ -180,8 +184,10 @@ pub enum OverflowPolicy {
 }
 
 /// A quantity definition: its dimension, its per-quantity fixed-point scale (the
-/// number of fractional bits), and its overflow policy. The scale is the owner's
-/// reserved number, provided in data (R-UNITS-PIN); the crate authors none.
+/// number of fractional bits), and its overflow policy. The scale is representation
+/// metadata, not physical authority. Canonical producers derive it from the execution
+/// type and the quantity envelope; generic tools may supply it to model other integer
+/// formats.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct QuantityDef {
     /// Stable name within the catalogue.
@@ -409,8 +415,8 @@ pub struct DerivedScale {
     pub windowed: bool,
 }
 
-/// Derive a quantity's fixed-point scale from its declared envelope. The mechanism is fixed; the
-/// envelope and the targets are the owner's reserved numbers (R-UNITS-PIN), provided by the caller:
+/// Derive a quantity's fixed-point scale from its declared envelope. The mechanism is fixed. Its
+/// arguments describe an integer representation policy, not a physical or per-world input:
 /// `hi_log2` is the floor-base-2 logarithm of the envelope's largest bound magnitude, `lo_log2` the
 /// floor-base-2 logarithm of its smallest non-zero bound magnitude (both negative for a value below
 /// one, and computed from the physical decimal envelope by the caller, since a bound like `1e-12`
@@ -421,8 +427,9 @@ pub struct DerivedScale {
 /// `canonical_scale` when the top fits its integer field and `canonical_scale` fractional bits
 /// already resolve the bottom to `sig_target` significant bits; otherwise a wide envelope derives a
 /// scale that holds the top and gives the bottom as much significance as the sixty-three-bit budget
-/// allows, reducing the significance target (`windowed`) when even that will not fit. The crate
-/// authors no scale; it computes one from the owner's envelope and targets.
+/// allows, reducing the significance target (`windowed`) when even that will not fit. Canonical
+/// callers obtain their targets from the independently checked type-derived representation policy;
+/// this generic function remains parameterized so noncanonical tools can analyze other formats.
 pub fn derive_scale_bits(
     hi_log2: i32,
     lo_log2: i32,
@@ -487,9 +494,9 @@ impl AbsoluteQuantity {
 mod tests {
     use super::*;
 
-    // A small FIXTURE catalogue, not the authored physics set. It exists only to
-    // exercise the mechanism; the real base dimensions, quantities, and scales are
-    // data the owner provides (R-UNITS-PIN, R-DEEPTECH-PHYSICS).
+    // A small FIXTURE catalogue, not the canonical physics set. It exists only to
+    // exercise the generic mechanism; canonical definitions and scales must come
+    // from their typed derivation producers and receipts.
     fn fixture() -> (BaseDimensionRegistry, QuantityRegistry, u32, u32, u32) {
         let mut base = BaseDimensionRegistry::new();
         let length = base.register("length");

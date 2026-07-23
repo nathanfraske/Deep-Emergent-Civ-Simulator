@@ -52,7 +52,11 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 BASELINE = ROOT / "scripts" / "derives_baseline.tsv"
-SCAN_ROOTS = ["crates/physics/src", "crates/materials/src"]
+SCAN_ROOTS = [
+    "crates/physics/src",
+    "crates/materials/src",
+    "crates/planet-substrate/src",
+]
 
 # A marker may sit up to this many lines above the signature (doc comments and attributes intervene).
 MARKER_LOOKBACK = 40
@@ -101,7 +105,8 @@ def scan_public_functions(read_file):
         if not base.is_dir():
             continue
         for path in sorted(base.rglob("*.rs")):
-            rel = str(path.relative_to(ROOT))
+            # Baseline paths are repository identifiers, not host paths.
+            rel = path.relative_to(ROOT).as_posix()
             lines = read_file(path)
             # Skip test modules by BRACE DEPTH, never by a latch. A latch on the first `#[cfg(test)]`
             # leaves every line after it unscanned, so a function written below a test module would be
