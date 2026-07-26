@@ -1,4 +1,4 @@
-//! Canonical text encoding for species derivation exhaustion.
+//! Canonical text encoding for the bounded live species derivation diagnostic.
 
 use super::{validate_analysis, SpeciesDerivationAnalysisArtifact};
 use crate::canonical::transcript::canonical_text;
@@ -22,6 +22,22 @@ pub(in crate::canonical) fn write_species_derivation_analysis(
             validate_analysis(analysis).map_err(|_| fmt::Error)?;
             write_schema_bindings(f, prefix, analysis)?;
             write_floor_anchor(f, prefix, analysis)?;
+            write_physical_registry_frontier(f, prefix, analysis)?;
+            writeln!(
+                f,
+                "{prefix}.frontier.source={}",
+                canonical_text(analysis.frontier_source_id)
+            )?;
+            writeln!(
+                f,
+                "{prefix}.frontier.scope={}",
+                canonical_text(analysis.frontier_scope_id)
+            )?;
+            writeln!(
+                f,
+                "{prefix}.frontier.completeness_claim={}",
+                analysis.frontier_completeness_claim
+            )?;
             writeln!(
                 f,
                 "{prefix}.candidate_member_count={}",
@@ -55,6 +71,245 @@ pub(in crate::canonical) fn write_species_derivation_analysis(
             Ok(())
         }
     }
+}
+
+fn write_physical_registry_frontier(
+    f: &mut fmt::Formatter<'_>,
+    prefix: &str,
+    analysis: &super::SpeciesDerivationAnalysis,
+) -> fmt::Result {
+    let frontier = &analysis.physical_registry_frontier;
+    let frontier_prefix = format!("{prefix}.physical_registry_frontier");
+    for (field, value) in [
+        ("registry_schema", frontier.registry_schema_id),
+        ("proof_graph_schema", frontier.proof_graph_schema_id),
+        ("root_receipt_schema", frontier.root_receipt_schema_id),
+        ("root_claim_id", frontier.root_claim_id),
+        ("root_producer_id", frontier.root_producer_id),
+        ("root_watchdog_id", frontier.root_watchdog_id),
+        ("root_canary_suite_id", frontier.root_canary_suite_id),
+        ("root_decision_id", frontier.root_decision_id),
+        (
+            "vocabulary_receipt_schema",
+            frontier.vocabulary_receipt_schema_id.as_str(),
+        ),
+        ("vocabulary_claim_id", frontier.vocabulary_claim_id.as_str()),
+        (
+            "vocabulary_producer_id",
+            frontier.vocabulary_producer_id.as_str(),
+        ),
+        (
+            "vocabulary_watchdog_id",
+            frontier.vocabulary_watchdog_id.as_str(),
+        ),
+        ("registry_refusal_code", frontier.registry_refusal_code),
+        (
+            "registry_authority_effect",
+            frontier.registry_authority_effect,
+        ),
+    ] {
+        writeln!(f, "{frontier_prefix}.{field}={}", canonical_text(value))?;
+    }
+    for (field, digest) in [
+        ("root_input.sha256", frontier.root_input_sha256),
+        ("root_result.sha256", frontier.root_result_sha256),
+        (
+            "root_producer_result.sha256",
+            frontier.root_producer_result_sha256,
+        ),
+        (
+            "root_watchdog_result.sha256",
+            frontier.root_watchdog_result_sha256,
+        ),
+        (
+            "root_producer_resource.sha256",
+            frontier.root_producer_resource_sha256,
+        ),
+        (
+            "root_watchdog_resource.sha256",
+            frontier.root_watchdog_resource_sha256,
+        ),
+        ("root_canary.sha256", frontier.root_canary_sha256),
+        ("root_receipt.sha256", frontier.root_receipt_sha256),
+        (
+            "vocabulary_producer_result.sha256",
+            frontier.vocabulary_producer_result_sha256,
+        ),
+        (
+            "vocabulary_watchdog_result.sha256",
+            frontier.vocabulary_watchdog_result_sha256,
+        ),
+        (
+            "vocabulary_producer_resource.sha256",
+            frontier.vocabulary_producer_resource_sha256,
+        ),
+        (
+            "vocabulary_watchdog_resource.sha256",
+            frontier.vocabulary_watchdog_resource_sha256,
+        ),
+        (
+            "vocabulary_receipt.sha256",
+            frontier.vocabulary_receipt_sha256,
+        ),
+    ] {
+        write_digest(f, &frontier_prefix, field, digest)?;
+    }
+    writeln!(
+        f,
+        "{frontier_prefix}.scalar_coordinate_count={}",
+        frontier.scalar_coordinate_count
+    )?;
+    writeln!(
+        f,
+        "{frontier_prefix}.membership_neutral_mass_projection_count={}",
+        frontier.membership_neutral_mass_projection_count
+    )?;
+    writeln!(
+        f,
+        "{frontier_prefix}.admitted_root_count={}",
+        frontier.admitted_root_count
+    )?;
+    writeln!(
+        f,
+        "{frontier_prefix}.root_admission_count={}",
+        frontier.root_admission_census.len()
+    )?;
+    for (index, admission) in frontier.root_admission_census.iter().enumerate() {
+        let admission_prefix = format!("{frontier_prefix}.root_admission.{index:04}");
+        write_digest(
+            f,
+            &admission_prefix,
+            "identity.sha256",
+            admission.identity_sha256,
+        )?;
+        writeln!(
+            f,
+            "{admission_prefix}.tier={}",
+            canonical_text(admission.tier_id)
+        )?;
+        writeln!(
+            f,
+            "{admission_prefix}.provenance={}",
+            canonical_text(admission.provenance_tag)
+        )?;
+        writeln!(
+            f,
+            "{admission_prefix}.route={}",
+            canonical_text(admission.route_id)
+        )?;
+    }
+    writeln!(
+        f,
+        "{frontier_prefix}.membership_authority={}",
+        frontier.membership_authority
+    )?;
+    writeln!(
+        f,
+        "{frontier_prefix}.vocabulary.root_count={}",
+        frontier.vocabulary_root_count
+    )?;
+    writeln!(
+        f,
+        "{frontier_prefix}.vocabulary.descriptor_role_count={}",
+        frontier.vocabulary_descriptor_role_count
+    )?;
+    for (index, identity) in frontier
+        .vocabulary_descriptor_role_identities
+        .iter()
+        .enumerate()
+    {
+        write_digest(
+            f,
+            &frontier_prefix,
+            &format!("vocabulary.descriptor_role.{index:04}.sha256"),
+            *identity,
+        )?;
+    }
+    writeln!(
+        f,
+        "{frontier_prefix}.vocabulary.relation_target_count={}",
+        frontier.vocabulary_relation_target_count
+    )?;
+    for (index, identity) in frontier
+        .vocabulary_relation_target_identities
+        .iter()
+        .enumerate()
+    {
+        write_digest(
+            f,
+            &frontier_prefix,
+            &format!("vocabulary.relation_target.{index:04}.sha256"),
+            *identity,
+        )?;
+    }
+    writeln!(
+        f,
+        "{frontier_prefix}.vocabulary.constraint_law_count={}",
+        frontier.vocabulary_constraint_law_count
+    )?;
+    for (index, identity) in frontier
+        .vocabulary_constraint_law_identities
+        .iter()
+        .enumerate()
+    {
+        write_digest(
+            f,
+            &frontier_prefix,
+            &format!("vocabulary.constraint_law.{index:04}.sha256"),
+            *identity,
+        )?;
+    }
+    writeln!(
+        f,
+        "{frontier_prefix}.vocabulary.current_input_partition_complete={}",
+        frontier.vocabulary_current_input_partition_complete
+    )?;
+    writeln!(
+        f,
+        "{frontier_prefix}.vocabulary.global_coverage={}",
+        frontier.vocabulary_global_coverage
+    )?;
+    writeln!(
+        f,
+        "{frontier_prefix}.vocabulary.membership_authority={}",
+        frontier.vocabulary_membership_authority
+    )?;
+    writeln!(
+        f,
+        "{frontier_prefix}.registry_member_count={}",
+        frontier.registry_member_count
+    )?;
+    writeln!(
+        f,
+        "{frontier_prefix}.registry_coverage_claim={}",
+        frontier.registry_coverage_claim
+    )?;
+    writeln!(
+        f,
+        "{frontier_prefix}.open_obligation_count={}",
+        frontier.open_obligations.len()
+    )?;
+    for (index, obligation) in frontier.open_obligations.iter().enumerate() {
+        writeln!(
+            f,
+            "{frontier_prefix}.open_obligation.{index:04}={}",
+            canonical_text(obligation)
+        )?;
+    }
+    Ok(())
+}
+
+fn write_digest(
+    f: &mut fmt::Formatter<'_>,
+    prefix: &str,
+    field: &str,
+    digest: [u8; 32],
+) -> fmt::Result {
+    write!(f, "{prefix}.{field}=")?;
+    for byte in digest {
+        write!(f, "{byte:02x}")?;
+    }
+    writeln!(f)
 }
 
 fn write_schema_bindings(

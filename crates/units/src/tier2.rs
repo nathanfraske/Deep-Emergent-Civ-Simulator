@@ -90,21 +90,45 @@ fn fit_i64(value: i128) -> Option<i64> {
     }
 }
 
+fn exact_shl_i128(value: i128, shift: u32) -> Option<i128> {
+    if value == 0 {
+        return Some(0);
+    }
+    value
+        .checked_shl(shift)
+        .filter(|shifted| (*shifted >> shift) == value)
+}
+
+fn rescale_i128_to_i64(value: i128, from_scale: u32, to_scale: u32) -> Option<i64> {
+    let scaled = if to_scale >= from_scale {
+        exact_shl_i128(value, to_scale - from_scale)?
+    } else {
+        round_half_even_shr(value, from_scale - to_scale)
+    };
+    fit_i64(scaled)
+}
+
 /// Multiply two scaled mantissas to a target scale, rounded ONCE. `a` at scale `s_a` times `b` at scale
 /// `s_b`, delivered at scale `s_r`: `round_half_even(a*b / 2^(s_a + s_b - s_r))`. The product of two `i64`
 /// mantissas fits `i128`; a result that does not fit `i64` (or a negative net shift whose left shift would
 /// overflow `i128`) returns `None`, the signal to widen.
 pub fn mul(a: i64, s_a: u32, b: i64, s_b: u32, s_r: u32) -> Option<i64> {
+    if a == 0 || b == 0 {
+        return Some(0);
+    }
     let product = (a as i128) * (b as i128);
     let net = s_a as i64 + s_b as i64 - s_r as i64;
     let scaled = if net >= 0 {
-        round_half_even_shr(product, net as u32)
+        let Ok(shift) = u32::try_from(net) else {
+            // The product carries at most 126 magnitude bits. A right shift
+            // larger than u32::MAX therefore rounds exactly to zero.
+            return Some(0);
+        };
+        round_half_even_shr(product, shift)
     } else {
         // The result scale is finer than the inputs': an exact left shift, checked for i128 overflow.
-        product.checked_shl((-net) as u32).filter(|v| {
-            // checked_shl only guards the shift amount, not value overflow; verify the shift is exact.
-            (v >> (-net) as u32) == product
-        })?
+        let shift = u32::try_from(net.unsigned_abs()).ok()?;
+        exact_shl_i128(product, shift)?
     };
     fit_i64(scaled)
 }
@@ -116,18 +140,22 @@ pub fn div(a: i64, s_a: u32, b: i64, s_b: u32, s_r: u32) -> Option<i64> {
     if b == 0 {
         return None;
     }
+    if a == 0 {
+        return Some(0);
+    }
     let neg = (a < 0) ^ (b < 0);
     let mut num = (a as i128).unsigned_abs(); // fits u128, well within range for an i64 magnitude
     let mut den = (b as i128).unsigned_abs();
     let shift = s_b as i64 + s_r as i64 - s_a as i64;
     if shift >= 0 {
-        num = num
-            .checked_shl(shift as u32)
-            .filter(|v| (v >> shift as u32) == num)?;
+        let shift = u32::try_from(shift).ok()?;
+        num = num.checked_shl(shift).filter(|v| (v >> shift) == num)?;
     } else {
-        den = den
-            .checked_shl((-shift) as u32)
-            .filter(|v| (v >> (-shift) as u32) == den)?;
+        let shift = u32::try_from(shift.unsigned_abs()).ok()?;
+        if shift >= 64 {
+            return Some(0);
+        }
+        den = den.checked_shl(shift).filter(|v| (v >> shift) == den)?;
     }
     // round-half-to-even of num/den with both positive, then reapply the sign. The shift-aligned numerator or
     // denominator can land in [2^127, 2^128), fitting u128 but not signed i128; a raw `as i128` cast would wrap
@@ -179,10 +207,14 @@ fn floor_isqrt(n: u128) -> u128 {
 /// root over a shifted argument. The quarter-power consumer `(P/(c*K))^(1/4)` is two of these, avoiding a
 /// transcendental. Requires `bits >= 0`; returns `None` on a negative argument, a non-negative-shift the
 /// planner did not provide (result scale too coarse, widen `s_out`), or an argument that exceeds the
-/// intermediate (widen signal).
+/// intermediate (widen signal). Zero returns zero at every input/output scale pair because no shifted
+/// radicand needs to be represented.
 pub fn isqrt(bits: i64, s_in: u32, s_out: u32) -> Option<i64> {
     if bits < 0 {
         return None;
+    }
+    if bits == 0 {
+        return Some(0);
     }
     let shift = 2 * s_out as i64 - s_in as i64;
     if shift < 0 {
@@ -190,9 +222,10 @@ pub fn isqrt(bits: i64, s_in: u32, s_out: u32) -> Option<i64> {
         // s_out. Signalled rather than silently truncated.
         return None;
     }
+    let shift = u32::try_from(shift).ok()?;
     let arg = (bits as u128)
-        .checked_shl(shift as u32)
-        .filter(|v| (v >> shift as u32) == bits as u128)?;
+        .checked_shl(shift)
+        .filter(|v| (v >> shift) == bits as u128)?;
     let r = floor_isqrt(arg);
     // Round to nearest: step up when the argument is past the midpoint r^2 + r (no exact tie occurs for an
     // integer argument and a half-integer root).
@@ -201,21 +234,28 @@ pub fn isqrt(bits: i64, s_in: u32, s_out: u32) -> Option<i64> {
 }
 
 fn sum_signed(a: i64, s_a: u32, b: i64, s_b: u32, s_r: u32, subtract: bool) -> Option<i64> {
+    if a == 0 {
+        let b = if subtract { -(b as i128) } else { b as i128 };
+        return rescale_i128_to_i64(b, s_b, s_r);
+    }
+    if b == 0 {
+        return rescale_i128_to_i64(a as i128, s_a, s_r);
+    }
+
     let common = s_a.max(s_b);
     // Shift the coarser mantissa up to the common (finer) scale, exact; the finer one's shift is zero.
-    let a_common = (a as i128)
-        .checked_shl(common - s_a)
-        .filter(|v| (v >> (common - s_a)) == a as i128)?;
-    let b_raw = (b as i128)
-        .checked_shl(common - s_b)
-        .filter(|v| (v >> (common - s_b)) == b as i128)?;
-    let b_common = if subtract { -b_raw } else { b_raw };
+    let a_common = exact_shl_i128(a as i128, common - s_a)?;
+    let b_raw = exact_shl_i128(b as i128, common - s_b)?;
+    let b_common = if subtract {
+        b_raw.checked_neg()?
+    } else {
+        b_raw
+    };
     let sum = a_common.checked_add(b_common)?;
     let scaled = if common >= s_r {
         round_half_even_shr(sum, common - s_r)
     } else {
-        sum.checked_shl(s_r - common)
-            .filter(|v| (v >> (s_r - common)) == sum)?
+        exact_shl_i128(sum, s_r - common)?
     };
     fit_i64(scaled)
 }
@@ -609,6 +649,17 @@ mod tests {
         // add/sub share the helper: a coarse target scale with a 128+ net shift rounds, does not panic.
         assert_eq!(add(1, 130, 1, 130, 0), Some(0));
         assert_eq!(sub(1, 130, 1, 130, 0), Some(0));
+        assert_eq!(mul(1, u32::MAX, 1, u32::MAX, 0), Some(0));
+        assert_eq!(mul(0, 0, 1, 0, u32::MAX), Some(0));
+        assert_eq!(add(0, 0, 1, u32::MAX, u32::MAX), Some(1));
+        assert_eq!(sub(0, 0, 1, u32::MAX, u32::MAX), Some(-1));
+        assert_eq!(add(1, u32::MAX, 0, 0, 0), Some(0));
+        assert_eq!(add(0, 0, 0, 0, u32::MAX), Some(0));
+        assert_eq!(add(1, 0, 0, u32::MAX, 0), Some(1));
+        assert_eq!(sub(1, 0, 0, u32::MAX, 0), Some(1));
+        assert_eq!(add(0, u32::MAX, 1, 0, 0), Some(1));
+        assert_eq!(sub(0, u32::MAX, 1, 0, 0), Some(-1));
+        assert_eq!(sub(1, 64, i64::MIN, 0, 0), None);
     }
 
     #[test]
@@ -620,6 +671,9 @@ mod tests {
             div(4403335111641285598, 27, 6005818356516761817, 61, 32),
             None
         );
+        assert_eq!(div(1, 0, 1, u32::MAX, u32::MAX), None);
+        assert_eq!(div(0, 0, 1, u32::MAX, u32::MAX), Some(0));
+        assert_eq!(div(1, u32::MAX, 1, 0, 0), Some(0));
     }
 
     #[test]
@@ -702,6 +756,9 @@ mod tests {
         // A negative argument or a too-coarse result scale is a widen signal, not a wrong value.
         assert_eq!(isqrt(-1, 0, 0), None);
         assert_eq!(isqrt(4, 40, 0), None); // 2*0 - 40 < 0
+        assert_eq!(isqrt(0, 0, u32::MAX), Some(0));
+        assert_eq!(isqrt(0, u32::MAX, 0), Some(0));
+        assert_eq!(isqrt(1, 0, u32::MAX), None);
     }
 
     #[test]

@@ -1,6 +1,10 @@
-//! Independent semantic checker for the species derivation frontier.
+//! Consistency checker for the live species derivation refusal.
+//!
+//! This path re-queries the physical registry and checks faithful propagation.
+//! It does not certify completeness of the registry's diagnostic vocabulary.
 
 use super::{AnalysisBuildError, AnalysisProgress, SpeciesDerivationAnalysis};
+use crate::canonical::stellar_birth_species::physical_registry::repository_physical_registry_frontier;
 use crate::canonical::{
     floor_magnitudes::AuditedFloorView, stellar_birth_structure::stellar_birth_structure_schema,
 };
@@ -11,49 +15,10 @@ const CHECKED_FLOOR_ANCHOR_ID: &str = "fundamental.m_e";
 const CHECKED_FLOOR_ANCHOR_SYMBOL: &str = "m_e";
 const CHECKED_FLOOR_ANCHOR_ROLE: &str = "mass_coordinate_anchor_only";
 const CHECKED_REDUCER_LAW_ID: &str = "candidate.composition_weighted_particle_mass";
-
-struct CheckedAttempt {
-    id: &'static str,
-    input_ids: &'static [&'static str],
-    open_proof_ids: &'static [&'static str],
-}
-
-// This semantic specification is intentionally independent of producer.rs.
-// It states the exact non-admitting frontier in reviewable form instead of
-// importing a producer list or merely checking the producer's own checksum.
-const CHECKED_ATTEMPTS: &[CheckedAttempt] = &[
-    CheckedAttempt {
-        id: "stellar_birth.species_derivation.complete_registry",
-        input_ids: &["fundamental.alpha", "fundamental.G", "fundamental.m_e"],
-        open_proof_ids: &[
-            "canonical_species_state_descriptor_checker_unavailable",
-            "charge_state_sector_validity_proof_unavailable",
-            "physical_species_membership_derivation_unavailable",
-            "rest_mass_dimension_and_ancestry_proof_unavailable",
-        ],
-    },
-    CheckedAttempt {
-        id: "stellar_birth.species_derivation.complete_conditioned_support",
-        input_ids: &[
-            "stellar_birth.composition.species_number_fraction_field",
-            "stellar_birth.species_state_registry",
-        ],
-        open_proof_ids: &[
-            "conditioned_zero_or_sparse_support_semantics_unavailable",
-            "finite_exact_resource_domain_unavailable",
-            "joint_measure_support_binding_unavailable",
-        ],
-    },
-    CheckedAttempt {
-        id: "stellar_birth.species_derivation.exact_mean_mass_projection",
-        input_ids: &["stellar_birth.conditioned_species_state_support"],
-        open_proof_ids: &[
-            "finite_exact_resource_domain_unavailable",
-            "integer_projection_schema_unavailable",
-            "joint_measure_support_binding_unavailable",
-        ],
-    },
-];
+const CHECKED_FRONTIER_SOURCE_ID: &str = "repository_physical_registry_live_refusal";
+const CHECKED_FRONTIER_SCOPE_ID: &str = "first_executable_refusal_only";
+const CHECKED_LIVE_ATTEMPT_ID: &str =
+    "stellar_birth.species_derivation.live_physical_registry_refusal";
 
 pub(super) fn validate_analysis(
     analysis: &SpeciesDerivationAnalysis,
@@ -61,6 +26,8 @@ pub(super) fn validate_analysis(
     let binding = sealed_physical_floor_authority_binding()
         .map_err(|error| AnalysisBuildError::FloorAuthority(error.to_string()))?;
     let structure = stellar_birth_structure_schema()?;
+    let expected_physical_frontier = repository_physical_registry_frontier()
+        .map_err(|error| AnalysisBuildError::PhysicalRegistryFrontier(error.code.to_owned()))?;
     let floor = crate::canonical::sealed_absolute_physics_floor()
         .map_err(|error| AnalysisBuildError::FloorAuthority(error.to_string()))?;
     let floor_view = AuditedFloorView::from_floor(&floor)
@@ -103,7 +70,20 @@ pub(super) fn validate_analysis(
     {
         return invariant("floor mass anchor gained species authority or changed identity");
     }
-    if analysis.candidate_member_count != 0
+    if analysis.physical_registry_frontier != expected_physical_frontier {
+        return invariant("physical-registry frontier differs from its live authority result");
+    }
+    if analysis.frontier_source_id != CHECKED_FRONTIER_SOURCE_ID
+        || analysis.frontier_scope_id != CHECKED_FRONTIER_SCOPE_ID
+        || analysis.frontier_completeness_claim
+    {
+        return invariant("diagnostic frontier gained unsupported scope or completeness");
+    }
+    if analysis.candidate_member_count
+        != usize::try_from(expected_physical_frontier.registry_member_count).map_err(|_| {
+            AnalysisBuildError::InternalInvariant("member count overflow".to_owned())
+        })?
+        || analysis.candidate_member_count != 0
         || analysis.verified_support_member_count != 0
         || analysis.value_payload_present
         || analysis.residual_slot_claim
@@ -117,51 +97,47 @@ pub(super) fn validate_analysis(
     {
         return invariant("non-admitting derivation state changed");
     }
-    if analysis.attempts.is_empty() || analysis.open_proof_ids.is_empty() {
-        return invariant("open derivation frontier became empty");
+    if expected_physical_frontier.open_obligations.is_empty() {
+        return invariant("live physical-registry refusal has no diagnostic obligations");
     }
-    let attempt_ids = analysis
-        .attempts
+    let live_proofs = expected_physical_frontier
+        .open_obligations
         .iter()
-        .map(|attempt| attempt.id)
+        .copied()
         .collect::<BTreeSet<_>>();
-    if attempt_ids.len() != analysis.attempts.len()
-        || analysis.attempts.iter().any(|attempt| {
-            attempt.status != AnalysisProgress::BlockedOpenProofs
-                || attempt.input_ids.is_empty()
-                || attempt.open_proof_ids.is_empty()
-        })
+    if live_proofs.len() != expected_physical_frontier.open_obligations.len() {
+        return invariant("live physical-registry obligations are duplicated");
+    }
+    let [attempt] = analysis.attempts.as_slice() else {
+        return invariant("diagnostic frontier is not the single live executable refusal");
+    };
+    if attempt.id != CHECKED_LIVE_ATTEMPT_ID
+        || attempt.status != AnalysisProgress::BlockedOpenProofs
+        || attempt.input_ids.as_slice()
+            != [
+                expected_physical_frontier.root_claim_id,
+                expected_physical_frontier.vocabulary_claim_id.as_str(),
+            ]
+        || !matches_strings(
+            &attempt.open_proof_ids,
+            &expected_physical_frontier.open_obligations,
+        )
     {
-        return invariant("derivation attempts are duplicated or no longer fail closed");
+        return invariant("diagnostic attempt differs from the live physical-registry refusal");
     }
-    let proof_union = analysis
-        .attempts
-        .iter()
-        .flat_map(|attempt| attempt.open_proof_ids.iter().cloned())
-        .collect::<BTreeSet<_>>();
     let declared_proofs = analysis
         .open_proof_ids
         .iter()
-        .cloned()
+        .map(String::as_str)
         .collect::<BTreeSet<_>>();
-    if proof_union != declared_proofs || declared_proofs.len() != analysis.open_proof_ids.len() {
-        return invariant("open-proof union differs from the declared frontier");
-    }
-    if analysis.attempts.len() != CHECKED_ATTEMPTS.len()
+    if declared_proofs != live_proofs
+        || declared_proofs.len() != analysis.open_proof_ids.len()
         || analysis
-            .attempts
-            .iter()
-            .zip(CHECKED_ATTEMPTS)
-            .any(|(found, expected)| {
-                found.id != expected.id
-                    || found.status != AnalysisProgress::BlockedOpenProofs
-                    || !matches_strings(&found.input_ids, expected.input_ids)
-                    || !matches_strings(&found.open_proof_ids, expected.open_proof_ids)
-            })
+            .open_proof_ids
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
     {
-        return invariant(
-            "derivation frontier differs from the independent semantic specification",
-        );
+        return invariant("declared proof frontier differs from the live refusal");
     }
     Ok(())
 }

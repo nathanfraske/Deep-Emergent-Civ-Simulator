@@ -418,8 +418,54 @@ impl Ledger {
 
     /// Effective provenance after the transitive worst-case join.
     pub fn effective_provenance(&self, id: &str) -> Option<Provenance> {
-        let mut path = BTreeSet::new();
-        self.effective_inner(id, &mut path)
+        let entry = self.entries.get(id)?;
+        if entry.provenance != Provenance::Derived {
+            return Some(entry.provenance);
+        }
+
+        let mut complete = BTreeMap::<String, Provenance>::new();
+        let mut visiting = BTreeSet::from([id.to_owned()]);
+        let mut stack = vec![(id.to_owned(), 0usize, entry.provenance)];
+        while let Some((current_id, next_input, worst)) = stack.last_mut() {
+            let current = &self.entries[current_id];
+            if *next_input == current.inputs.len() {
+                let result = *worst;
+                let completed_id = current_id.clone();
+                stack.pop();
+                visiting.remove(&completed_id);
+                complete.insert(completed_id, result);
+                if let Some((_, _, parent_worst)) = stack.last_mut() {
+                    if result.rank() < parent_worst.rank() {
+                        *parent_worst = result;
+                    }
+                } else {
+                    return Some(result);
+                }
+                continue;
+            }
+
+            let input_id = current.inputs[*next_input].clone();
+            *next_input += 1;
+            if let Some(candidate) = complete.get(&input_id).copied() {
+                if candidate.rank() < worst.rank() {
+                    *worst = candidate;
+                }
+                continue;
+            }
+            let input = self.entries.get(&input_id)?;
+            if input.provenance != Provenance::Derived {
+                if input.provenance.rank() < worst.rank() {
+                    *worst = input.provenance;
+                }
+            } else if !visiting.insert(input_id.clone()) {
+                if Provenance::Unclassified.rank() < worst.rank() {
+                    *worst = Provenance::Unclassified;
+                }
+            } else {
+                stack.push((input_id, 0, input.provenance));
+            }
+        }
+        None
     }
 
     /// Entries whose effective provenance rests on authored or closure inputs.
@@ -434,50 +480,34 @@ impl Ledger {
             .collect()
     }
 
-    fn effective_inner(&self, id: &str, path: &mut BTreeSet<String>) -> Option<Provenance> {
-        let entry = self.entries.get(id)?;
-        if entry.provenance != Provenance::Derived {
-            return Some(entry.provenance);
-        }
-        if !path.insert(id.to_owned()) {
-            return Some(Provenance::Unclassified);
-        }
-        let mut worst = entry.provenance;
-        for input in &entry.inputs {
-            let candidate = self.effective_inner(input, path)?;
-            if candidate.rank() < worst.rank() {
-                worst = candidate;
-            }
-        }
-        path.remove(id);
-        Some(worst)
-    }
-
     fn validate_acyclic(&self) -> Result<(), LedgerError> {
-        fn visit(
-            ledger: &Ledger,
-            id: &str,
-            visiting: &mut BTreeSet<String>,
-            complete: &mut BTreeSet<String>,
-        ) -> Result<(), LedgerError> {
-            if complete.contains(id) {
-                return Ok(());
-            }
-            if !visiting.insert(id.to_owned()) {
-                return Err(LedgerError::Cycle(id.to_owned()));
-            }
-            for input in &ledger.entries[id].inputs {
-                visit(ledger, input, visiting, complete)?;
-            }
-            visiting.remove(id);
-            complete.insert(id.to_owned());
-            Ok(())
-        }
-
-        let mut visiting = BTreeSet::new();
         let mut complete = BTreeSet::new();
-        for id in &self.order {
-            visit(self, id, &mut visiting, &mut complete)?;
+        for root in &self.order {
+            if complete.contains(root) {
+                continue;
+            }
+            let mut visiting = BTreeSet::from([root.clone()]);
+            let mut stack = vec![(root.clone(), 0usize)];
+            while let Some((id, next_input)) = stack.last_mut() {
+                let entry = &self.entries[id];
+                if *next_input == entry.inputs.len() {
+                    let completed_id = id.clone();
+                    stack.pop();
+                    visiting.remove(&completed_id);
+                    complete.insert(completed_id);
+                    continue;
+                }
+
+                let input = entry.inputs[*next_input].clone();
+                *next_input += 1;
+                if complete.contains(&input) {
+                    continue;
+                }
+                if !visiting.insert(input.clone()) {
+                    return Err(LedgerError::Cycle(input));
+                }
+                stack.push((input, 0));
+            }
         }
         Ok(())
     }
@@ -584,6 +614,22 @@ mod tests {
             inputs: vec!["fixture.absent".into()],
         }]);
         assert!(matches!(missing, Err(LedgerError::MissingInput { .. })));
+
+        let cycle = Ledger::build([
+            Entry {
+                id: "fixture.a".into(),
+                tier: Tier::Universal,
+                provenance: Provenance::Derived,
+                inputs: vec!["fixture.b".into()],
+            },
+            Entry {
+                id: "fixture.b".into(),
+                tier: Tier::Universal,
+                provenance: Provenance::Derived,
+                inputs: vec!["fixture.a".into()],
+            },
+        ]);
+        assert!(matches!(cycle, Err(LedgerError::Cycle(_))));
     }
 
     #[test]

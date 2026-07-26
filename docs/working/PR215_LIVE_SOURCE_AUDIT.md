@@ -1,7 +1,7 @@
 # PR #215 live-source audit
 
 Status: implementation audit for the canonical integration on PR #215 branch
-`claude/thermoelastic-rung3`, updated 2026-07-23.
+`claude/thermoelastic-rung3`, updated 2026-07-26.
 
 This record covers the integration worktree that normalizes the physical floor,
 separates SI representation from causal information, gives the open
@@ -207,12 +207,13 @@ the causal bitstream.
     pin.** The value-opaque singleton checked independent value and receipt
     registries, but a coordinated edit to both static tables could project
     without proving the final binding. `verify_absolute_physics_floor` now
-    requires `civsim.units.physical-floor-authority-binding.v3` before comparing
-    or exposing execution magnitudes. The v3 seal binds tier and provenance for
+    requires `civsim.units.physical-floor-authority-binding.v5` before comparing
+    or exposing execution magnitudes. The v5 seal binds tier and provenance for
     every physical admission, the independent
-    `civsim.units.floor-catalog-admission-pair.v1` receipt, and the paired exact
-    fixed-math table receipt. The capability remains private and does not accept
-    caller values.
+    `civsim.units.floor-catalog-admission-pair.v3` receipt, the independent
+    `civsim.units.codata-2018-floor-evidence-pair.v2` custody receipt, and the
+    paired exact fixed-math table receipt. The capability remains private and
+    does not accept caller values.
 28. **Build-gate authority failures could be overrideable or skipped.** Stone 0
     now treats a missing runner, unavailable interpreter, runner crash,
     unrecognized exit, caller-selected override trust path, and every unmarked
@@ -270,7 +271,7 @@ the causal bitstream.
     separately implemented fraction-free integer checker. Their receipt binds
     the ordered matrices, phenomenon membership, residual slots, declared
     budgets, ranks, nullity, bases, algorithm identities, and mutation
-    canaries. The physical-floor v3 authority binding includes that agreement.
+    canaries. The physical-floor v5 authority binding includes that agreement.
 34. **Mechanical checkers could still define the claims they checked.** A
     closed authority inventory now distinguishes active paired authority,
     blocked authority, and non-authoritative diagnostics. A schema-first
@@ -397,6 +398,289 @@ the causal bitstream.
     and the resulting physical-floor authority digest is
     `fa324850646f2bf2d0c4d30951ce68b1c1867662673676af1fec6bbb0e8d931e`.
     No Q32.32 table bit or physical magnitude changed.
+49. **CODATA canary hashes proved outcomes but not the exact mutations.** Cases
+    that reached the same error text could be substituted without changing the
+    earlier canary digest. Canary execution v2 now constructs concrete changed
+    bytes, rejects a candidate equal to its baseline, and binds a
+    domain-separated mutation digest plus detector-specific refusal code for
+    each of 13 producer and 14 watchdog cases. The mandatory offline route
+    executes those transcripts; the explicit online audit remains the distinct
+    live-and-archive source-byte check.
+50. **Stone 0 trusted a PATH-selected Python process to report its own
+    success.** An exit-zero shim could skip every authority script, and the
+    first receipt repair disclosed its token in the shim's arguments. The
+    supported Linux and WSL route now accepts only fixed absolute Python
+    candidates under a root-owned, non-group-writable, non-world-writable
+    ancestry, rejects set-id interpreters, scrubs import and dynamic-loader
+    injection, disables both site paths, and requires one wrapper-completion
+    receipt. A replaying PATH shim writes a sentinel; success requires that the
+    sentinel remain absent. The nested Rust path is bound to the external Cargo
+    toolchain that launched Stone 0. Native Windows fails closed and uses WSL.
+51. **Future physical-registry artifacts could present receipt-shaped data as
+    authority.** The live zero-member path was safe, but any non-root
+    activation could have supplied distinct nonzero digests without proving
+    their roles. Production artifacts now require a private opaque
+    `VerifiedAdmissionCapability`. Only the verified repository-root pair can
+    mint the current capability, which binds artifact identity, exact
+    admission, and pair receipt. Both validators independently reject drift.
+    Future non-root mints remain blocked on their own claim-specific authority
+    pairs.
+52. **One retained plasma fold rounded before an unproved square root.** The
+    prior path certified a Q32.32 radicand and then called `Fixed::sqrt`, so
+    activation would have combined double rounding with a blocked kernel. A
+    recursive-descent producer now selects the terminal positive-square-root
+    floor cell from the complete exact radicand interval. The shunting-yard
+    watchdog independently proves the candidate's squared cell against both
+    intervals. The production bits remain `5043327366`; the later
+    state-dependent carrier-density square root remains a separate blocked
+    kernel-authority question.
+53. **The physical-root agreement receipt did not bind its source ancestry.**
+    The escaped artifacts carried ancestry, but the producer and watchdog pair
+    receipt could be reconstructed from ancestry-neutral semantic projection
+    bytes. Producer and watchdog now construct separate canonical ancestry
+    manifests over candidate kind, source identity and tier, artifact
+    identity, and ancestry digest. Receipt v5 binds both equal nonzero manifest
+    digests, both checker claims bind the same ancestry fields, and a sixth
+    post-projection canary proves that a coordinated ancestry and capability
+    substitution loses authority even when semantic projection bytes remain
+    unchanged.
+54. **Floor-admission canaries collapsed different refusal meanings into one
+    outcome.** A semantic defect and a structurally valid alternate canonical
+    claim both reported only `checker.refused`. Canary execution v2 now pins
+    three stable classes: malformed input, semantic validation, and canonical
+    input custody. Provenance and receipt-semantic defects exercise semantic
+    validation; alternate tier, member, and receipt-authority claims exercise
+    custody only after their structure remains valid.
+55. **Floor arrival order could steer transcript construction.** The admission
+    pair correctly canonicalized an order permutation, but transcript
+    construction zipped the admitted entries positionally against the three
+    expected physical coordinates. The transcript now joins each sealed
+    structural entry to its typed audited magnitude by exact identity. A
+    differential test reverses the admitted floor and proves identical run
+    receipts and observer bytes.
+56. **Direct mandatory Stone 0 detections were owner-override eligible.**
+    Ordinary provenance findings and direct mandatory authority commands fed
+    one overrideable collection, so a valid owner token could suppress a
+    mandatory authority detection. Stone 0 now separates ordinary
+    override-eligible detections from non-overridable operational and direct
+    mandatory failures. Its self-test proves direct semantic and operational
+    failures remain hard while the ordinary owner boundary is preserved.
+57. **The Stone 0 build guard selected its authority root through ambient
+    `git`.** The build anchor derived the real workspace root from
+    `CARGO_MANIFEST_DIR` for rerun inputs, then called a rootless gate entry
+    point that accepted `git rev-parse --show-toplevel` from `PATH`. A shim
+    could therefore redirect every mandatory check to a decoy tree while Cargo
+    compiled the real workspace. The anchor now passes its manifest-derived
+    root explicitly. Stone 0 canonicalizes it, validates repository identity,
+    and requires equality with the top level returned by a root-owned absolute
+    Git executable under a cleared environment. CLI discovery walks filesystem
+    ancestry and then applies the same validation. A fake-`PATH` Git sentinel
+    proves ambient redirection is ignored. Independent review then found that
+    the first wiring repair observed only the call site, so deletion of the
+    trusted-Git equality could still receive a green wiring receipt and
+    self-test. The wiring pair now includes and independently scans the Stone 0
+    library boundary, and a shaped decoy repository that passes file identity
+    checks must still refuse because it is not the trusted Git top level.
+58. **Conflicting Stone 0 command-line modes could suppress the CI scan.**
+    Argument selection preferred `--self-test` whenever it appeared and ignored
+    extra arguments, so `--ci --self-test` ran only the self-test. The binary
+    now accepts exactly no argument, `--ci`, or `--self-test`. Unknown,
+    duplicate, conflicting, and positional arguments return usage status 2
+    before any gate mode runs.
+59. **Repository-root canary agreement did not bind the mutations or observed
+    outputs.** Packet entries hashed only the canary label and expected refusal
+    code, while post-projection entries hashed only a label and fixed expected
+    phrase. One implementation could therefore replace an uncertainty mutation
+    with a different mutation that produced the same refusal and retain the
+    paired digest. Canary suite v5 independently encodes every exact packet
+    mutant and full observed checker result through separate producer and
+    watchdog codecs. A second paired transcript encodes every
+    post-projection mutant, complete receipt, admitted artifact, and opaque
+    capability binding plus the observed verifier result. Only that
+    transcript's own digest field is excluded to avoid self-reference. Both
+    final verifiers recompute it. Same-code packet and projection falsifiers
+    now produce distinct preimages and distinct observation transcripts.
+60. **A structurally consistent refusal receipt could author its own
+    evidence.** The parent physical-registry consumer called a verifier that
+    checked identities, stage consistency, field relationships, and
+    self-digest, but never replayed the current sealed pair. A parent-visible
+    constructed receipt could therefore pass without representing the current
+    decision. Structural verification and synthetic receipt construction are
+    now private to the root module. The production boundary first checks that
+    structure, reruns `decide_repository_roots()` over the current sealed
+    inputs, and requires the fresh decision to be the exact same refusal.
+    Tests prove an internally consistent synthetic refusal remains useful for
+    mutation coverage but cannot verify as current production evidence.
+61. **Both root projectors shared the dimension reconstruction that selected
+    pure mass.** Producer and watchdog called the same SI-exponent mapper and
+    compared against the same mass constant. Their apparent pure-mass mutation
+    changed the sealed packet first, so it observed only a seal mismatch and
+    never reached the classification predicate. The v6 implementations now
+    construct the seven current SI mappings through distinct traversals and
+    build separate pure-mass expectations from the domain-separated mass axis.
+    The seal mutation remains under an accurate binding name. A separate
+    non-admitting v6 canary binds exact positive dimensionless and pure-mass
+    source inputs to each live classification predicate and requires zero
+    versus one mass projection. It cannot mint an artifact or capability.
+62. **Formula producer and watchdog shared terminal cell decisions.** Both
+    paths used the same rational rounding helper, and significance mode also
+    used the same `floor_log2` helper to select its magnitude cell and target
+    exponent. The v4 watchdog now derives quotient, remainder, midpoint,
+    parity, sign, signed range, and the exact power-of-two cell from raw
+    rational components without calling either producer-side selector. Exact
+    midpoint, negative parity, positive-exponent, signed-boundary,
+    power-of-two-boundary, forged-certificate, and overflow falsifiers cover
+    the terminal decisions. Its Pi path uses independent dyadic floor and ceil
+    operations, direct signed enclosure tests, and a runtime containment
+    assertion.
+63. **A post-projection canary failure produced a refusal its verifier
+    rejected.** The live finalization branch labeled `CanaryFailure` as
+    `ProjectionReceipt`, while the refusal verifier allowed only
+    `ReceiptInvalid` there. Debug builds could panic and release builds could
+    emit an unverifiable refusal. Refusal receipt v5 permits
+    `CanaryFailure` at that stage only when the pre-projection canary digest is
+    present, resource contracts match, and the projected pair agrees. A
+    private production-used stage mapper and its direct test prevent the live
+    branch from drifting back to the earlier `Canary` stage.
+64. **Representation failure re-entered the same failed projection.**
+    `RunReceipt::refused` constructed an empty transcript through
+    `RepresentationReceipt::sealed().expect(...)`, so the recovery path could
+    repeat the cached error and panic. The pipeline now attempts noncausal
+    representation before constructing the audited execution view. Failure
+    becomes one closed V10 transcript carrying the V1
+    `representation_unavailable` status, a stable reason, zero representation,
+    floor, or derived values, no snapshot, and one terminal refusal event. If
+    structural refusals were already known, they remain in canonical order
+    beside the representation refusal. The successful V10 wire remains
+    unchanged; complete representation fields imply availability, and the V1
+    status fields appear only for the unavailable variant.
+65. **The first viewer projection exposed a non-observer planet status
+    type.** The receipt was immutable, but exporting the planet enum through
+    `civsim-viewer` broadened the mechanically enforced observation boundary.
+    The viewer now maps the borrowed receipt into its own local scene status.
+    The planet boundary gate confirms that the viewer remains an immutable
+    observation leaf.
+66. **The common raw decimal parser still has no shared admission cap.**
+    Canonical certified ingress already bounds source bytes, significant
+    digits, net powers, and coordinate shifts before large-integer expansion.
+    Other raw text or TOML loaders can still reach the common parser without
+    one cross-loader contract. This is recorded as
+    `P-BOUNDED-DECIMAL-ADMISSION`, not repaired incidentally in a root audit.
+    No caller-authored decimal or raw loader enters the current canonical
+    planet path.
+67. **SI representation-scale authority remains explicitly blocked.** Formula
+    producer and watchdog agreement proves the requested arithmetic cell, not
+    that the table-wide scale policy chose the physically lawful request.
+    `units.si-representation-policy` remains blocked with no readiness effect.
+    The new unavailable state prevents a failed policy projection from
+    fabricating values; it does not promote the policy to an active authority.
+68. **The affected replay packet has bounded source limits.** Raw CODATA bytes
+    remain outside the packet because the repository holds factual-row
+    receipts rather than redistributable source bytes; the explicit online
+    audit is the separate custody proof. GPU kernel source and several Python
+    gate implementations are also outside this three-lens root/formula/refusal
+    projection. Those omissions limit the verdicts that may be claimed from
+    this packet and are not silently treated as passes.
+69. **Formula parsers assigned different precedence to unary signs and
+    exponentiation.** The recursive-descent producer applied a leading sign
+    before a following power, while the shunting-yard watchdog bound the power
+    first. A lawful positive formula such as `5 + -2^2` therefore selected 9 in
+    one path and 1 in the other. Recursive producer v5 now parses
+    term, unary, power, then primary while the independently retained watchdog
+    v6 continues to apply its precedence table and independently requires each
+    exponent operand to be exactly one unsigned integer literal. Grouped
+    negative bases, explicit grouping, signed multiplicative operands, and
+    chained signs all certify the same terminal integer through both paths.
+    Signed, grouped, decimal, and chained exponent operands refuse in both
+    paths.
+70. **The physical-registry producer could reject a power that fit the
+    declared component bound.** It multiplied the base bit length by the
+    exponent before computing the result. That estimate rejects `4^10` under a
+    25-bit component cap even though the exact result has 21 bits and the
+    complete mass expression remains in range. Physical-registry producer v5
+    now uses its own left-to-right bounded exponentiation and checks each
+    materialized product. Watchdog v4 retains its separate right-to-left
+    rational exponentiation. A direct unfamiliar-input canary proves both
+    validators accept and byte-agree on the counterexample. This repair grants
+    no species authority; the live registry still has no admitted derivation
+    rule.
+71. **Variable-cardinality dimensional analysis could materialize an
+    unbounded quadratic basis.** A large set of unique dimensionless columns
+    has rank zero and one dense vector per free column, so the public analyzer
+    could reach allocator failure without a typed refusal. Analysis now checks
+    the worst-case augmented dense-basis cell count before matrix or basis
+    construction and returns `BasisCellCapacityExceeded` above 1,048,576
+    cells. The limit is an execution-resource contract, not a seven-axis or
+    familiar-physics assumption. Larger lawful censuses require a partitioned
+    or sparse authority path instead of silently changing the physical
+    verdict.
+72. **Formula certificates did not attest that their declared canaries ran on
+    the production implementations.** Producer and watchdog now own separate
+    nonrecursive, cached production suites with distinct fixture construction,
+    encoders, transcript domains, and more than 40 cases each. Fixed-scale,
+    significant, and positive-square-root issuance retrieves both successful
+    attestations before emitting a certificate. Each issued certificate and its
+    receipt digest bind each suite's schema, identity, case count, and complete
+    transcript digest.
+    The suites live in separate child modules so the active parser and
+    evaluator files do not become a second shared canary oracle.
+73. **The physical-registry validators inherited one shared resource oracle.**
+    The v5 producer and v4 watchdog now own separate production cap tables,
+    resource-contract constructors, work constants, and digest encoders. Each
+    refuses an advertised input contract that differs from its local contract,
+    and the pair refuses unless both independently reproduced resource digests
+    agree. Resource-contract v2 binds the limits, semantic-work profile,
+    operation weights, power formula, and closure formula rather than sealing
+    caps alone.
+74. **Algorithm-local work meters could turn lawful bounded input into checker
+    disagreement.** On the minimal power fixture, producer charged 146 units
+    and watchdog 152; on an elementary closure graph they charged 1 and 3.
+    Semantic-work profile v1 now meters canonical wire bytes, expression nodes
+    and edges, executed operations, rational work, identities, hashes, and
+    registry emission independently of traversal helpers. Both paths accept the
+    exact evaluation boundary at 149 and refuse at 148. Closure preflights
+    `2V + 2E + D`; producer uses a linear indegree elimination while watchdog
+    retains DFS, reverse tracing, and a forward worklist. Exact-boundary,
+    permutation, multibyte-rational, negative-power, and digest-substitution
+    canaries cover the contract.
+75. **Power multiplication could allocate one over-limit temporary before
+    refusing it.** The prior behavior did not breach the exact-value bit cap and
+    was therefore not a verdict defect, but it left allocator work outside the
+    preflight contract. Producer and watchdog now independently divide the
+    maximum allowed value by opposite operands before multiplication. A product
+    that cannot fit refuses without materializing the oversized temporary.
+76. **The floor's reviewed prose pins did not express the complete irreducible
+    admission route as a distinct owner capability.** Floor-catalog admission
+    v3 now domain-separates derivation exhaustion, Buckingham Pi, Gap Law, the
+    typed Chaos Protocol branch, Residual Law, and the unique residual slot for
+    every leaf. An explicit owner-admission record pins each exact six-receipt
+    tuple. The producer reconstructs those records from typed receipts; the
+    independent byte parser reconstructs them from the canonical claim and
+    rejects missing, changed, or mismatched owner decisions. Changed receipt
+    prose or identity can no longer remain structurally admitted without a
+    separate reviewed owner-admission change. The public sealed view exposes
+    all six receipts, the owner receipt, and the independent watchdog receipt
+    per identity. These repository pins are durable claim-scoped review
+    capabilities; they do not claim cryptographic proof of the human reviewer.
+77. **Formula projection shared exact arithmetic below its independent parser
+    and rounding paths without production known-answer coverage at large
+    widths.** Producer canary suite v2 now binds the frozen
+    `round(pi * 2^96)` result and a separate 192-bit rational identity.
+    Watchdog suite v2 independently binds `round(pi * 2^80)` and a different
+    240-bit rational identity. Every issued formula certificate already binds
+    both suite identities, case counts, and transcript digests, so a shared
+    multi-limb defect or duplicated Pi specification must now disagree with at
+    least one external frozen result before production issuance.
+
+Two panel objections did not justify code changes. Shared exact `BigRat` and
+`BigUint` operations are declared low-level primitives in the authority
+contract; producer and watchdog still choose terminal quotient, midpoint,
+parity, sign, magnitude, and rounding cells independently. The sealed-packet
+mutation suite claims exact custody and input binding, while the separately
+named positive dimensionless versus pure-mass canary reaches the live
+classification predicate below the seal. Neither objection demonstrated a
+claim violation. The absence of raw historical CODATA endpoint bodies remains
+the explicit online-audit limit recorded in finding 68.
 
 The resulting projected composite values are replayable from the transcript:
 
@@ -418,21 +702,38 @@ values to the later CODATA adjustment.
 
 Live NIST bytes matched their archived witnesses. The source registry carries
 the identifiers, hashes, archives, scope, and extract anchors. No source bytes
-were added because redistribution rights were not established. Custody proves
-what was consulted; it does not admit a physical value.
+were added because redistribution rights were not established. The repository
+does hold the three reviewed row facts under
+`civsim.units.codata-2018-floor-facts.v1`, SHA-256
+`c0839f9c3497724f04522b70699c969d225db62baad5507638162f274259da11`,
+and the independent fixed-column producer plus record-scan watchdog receipt
+under `civsim.units.codata-2018-floor-evidence-pair.v2`. The receipt file has
+SHA-256
+`08c67f6d6e4543e7cb35be383f08aa1bbe7361878ff78bbc8567d08104f97983`
+and binds pair digest
+`7aef3108ee63e017d739be0fd9b229a7d1fac675f35e81fbdfaa7a7844696ee0`.
+The resulting physical-floor authority digest is
+`75a20e5b22cd52dadb1beb44cba1a1b16bbaf45a353b32510c67753403932933`.
+Those repository bytes are custody facts and receipts, not redistributed NIST
+source bytes. Custody proves what was consulted; it does not admit a physical
+value.
 
-## Canonical runner receipt
+## Previous canonical runner receipt
 
-Two direct no-argument runs produced:
+Before findings 72 through 75, two direct no-argument runs produced:
 
 - exit code `2` on both runs;
 - zero stderr bytes;
 - six transcript events;
 - no `[W]`, no `[X]`, and no snapshot;
-- byte-identical stdout of `367,628` bytes, SHA-256
-  `b677189984cf34ec59d01f16d43d135420ef8b8b33c731ea814978d3666e4531`;
-- receipt `civsim.planet.run.v11` and transcript schema major `9`;
+- byte-identical stdout of `373,048` bytes, SHA-256
+  `3bb77971d7e61793356654366979b6df31e1c14139c5c4a3245f3ca9099a63c1`;
+- receipt `civsim.planet.run.v12` and transcript schema major `10`;
 - refusal `stellar_birth.realization_measure` at Stage 1.
+
+The `--readiness` front-door alias returns the same exit, stdout, stderr, and
+digest as the no-argument run. It does not produce a separate readiness result
+or supply readiness evidence.
 
 The umbrella refusal has two unresolved leaves:
 `stellar_birth.joint_physical_measure` and
@@ -446,12 +747,26 @@ contracts, six shared domains, eleven carrier schemas, and the composed open
 stellar-state contract with coordinate, dimension-basis, interaction-sector,
 physical-regime, and classification registries. Its status is `computed`, its
 `closure_effect` is `none`, and its `coverage_claim` is `false`. The second is
-the v1 species derivation analysis. It binds the floor digest and exact mass
-anchor to the validated open schemas while reporting zero candidate members,
-zero verified support, no value payload, no residual slot, and eight ordered
-open proofs. Its status is `open_dependencies`, its `closure_effect` is `none`,
-and its `coverage_claim` is `false`. Gap Law, Chaos Protocol, and Residual Law
-remain not reached. The open coordinate-law leaf carries analysis count zero.
+the v3 species derivation analysis under its v4 watchdog. It binds the floor
+digest, exact mass
+anchor, live root-pair claim, paired receipt, and physical-registry refusal to
+the validated open schemas. The root frontier contains three exact scalar
+coordinates and one membership-neutral pure-mass expression, then reports zero
+candidate members, zero verified support, no value payload, no residual slot,
+and the open obligations emitted by the first live physical-registry refusal.
+The earlier producer and watchdog repeated the same authored three-path list,
+so their agreement could not support a completeness reading. The repaired
+checker compares the one reached attempt to a fresh registry frontier and
+rejects omitted live obligations. Unreached downstream paths are absent rather
+than predicted. The receipt states
+`frontier.scope=first_executable_refusal_only` and
+`frontier.completeness_claim=false`. Its status is `open_dependencies`, its
+`closure_effect` is `none`, and its `coverage_claim` is `false`. Gap Law, Chaos
+Protocol, and Residual Law remain not reached. The open coordinate-law leaf
+carries analysis count zero. The viewer borrows the same diagnostic contract
+and cannot use it to choose or alter an outcome. The checker proves propagation
+of the current refusal, not completeness of the registry's own diagnostic
+vocabulary.
 
 ## Verified reachability
 
@@ -469,24 +784,28 @@ civilization, authored world generation, and the old causal viewer remain in
 
 ## Validation
 
-Focused warnings-denied Clippy, 71 planet library tests, eight CLI tests, three
-viewer tests, and doctests cover the typed views, duplicated refusal wire,
-deterministic output, canonical versions, input refusal, observer projection,
-and the non-admitting species frontier. Formatting, diff hygiene, and the
-strengthened planet boundary self-test are clean. After the independent
-authority, fixed-math, external-claim, process-lock, and Stone 0 wiring repairs,
-the complete Linux `check-pr` parity recipe passes in 1,178.5 seconds under
-concurrent external routing load. It includes hooks and canaries, all 29
-declarative gates, ledger regeneration, the all-target suite, deterministic GPU
-integer and no-float checks, available-backend parity, warnings-denied Clippy,
-Rustdoc, and doctests. A warm `check-fast` passes in 78.3 seconds. A fresh
-isolated Cargo target proves exactly one shared Stone 0 anchor invocation and
-one lightweight sentinel for each guarded consumer.
+The 2026-07-23 baseline had 71 planet library tests, eight CLI tests, three
+viewer tests, a 1,178.5-second complete Linux `check-pr`, and a 78.3-second warm
+`check-fast`. Those timings and counts describe that earlier candidate, not the
+current root-verifier repair.
 
-Clean and hostile-environment direct binary runs confirm exit `2`, zero stderr
-bytes, `367,628` stdout bytes, byte equality, and SHA-256
-`b677189984cf34ec59d01f16d43d135420ef8b8b33c731ea814978d3666e4531`.
-No earlier receipt or inventory pin is evidence for the v11 result.
+Current focused repair evidence includes all 159 units library tests, five
+units determinism tests, the units i256 integration test, and 21 selected
+physical-registry tests. The physical set covers independently encoded
+resource profiles, exact evaluation and closure boundaries, rule-order
+invariance, multibyte rationals, negative powers, preallocation refusal, and
+unfamiliar dimension axes. The earlier candidate's broader crate and replay
+results below predate findings 72 through 75. A fresh full planet run,
+warnings-denied Clippy, bounded panel, merge-grade `check-pr`, direct replay,
+and exact Stop hook remain publication checks until recorded here.
+
+Two v12 direct binary runs after the v5 root-agreement, v5 refusal, CODATA
+custody, variable-axis, and paired final-verifier repairs produced exit `2`,
+empty stderr, `373,048` stdout bytes, byte equality, and SHA-256
+`3bb77971d7e61793356654366979b6df31e1c14139c5c4a3245f3ca9099a63c1`.
+That is a pre-findings-72-through-75 receipt and is retained only as historical
+evidence. It will not be promoted as the current bitstream until a fresh direct
+replay produces a new byte-for-byte result.
 
 One bounded blind-generalizer pass over the species-analysis and observation
 slice found one live observer-provenance defect. The public outcome enum could
@@ -650,19 +969,121 @@ length make the sequence self-delimiting; it does not promise a separate
 element-count word. Adding one would change canonical identities without
 closing a real ambiguity.
 
-The repaired pair gives no production authority clearance. Synthetic
+The repaired pair gives no production species authority clearance. Synthetic
 unfamiliar and massless graphs prove bounded validator agreement only. The
-repository supplies no admitted roots, returns
-`no_admitted_species_derivation_roots`, exposes no reducer, support, ledger,
-transcript, Stage 1, or viewer path, and leaves
+current v4 registry and proof graph encode bounded variable-cardinality
+dimensions over domain-separated axis identities. Seven SI axes describe the
+current floor, but the type, arithmetic, and wire do not close the physical
+basis at seven; focused tests admit and cancel unfamiliar axes. The
+repository now supplies three exact scalar coordinates and one
+membership-neutral pure-mass projection derived from the sealed floor. It has
+no admitted species-forming rules and returns
+`no_admitted_species_derivation_rules`, with zero members, no coverage claim,
+and no authority effect. The live analysis serializes that exact frontier and
+the viewer borrows it read-only. It exposes no reducer, conditioned support,
+ledger effect, Stage 1 proof, or causal viewer path, and leaves
 `planet.species-state-support` blocked.
+
+## Physical-root pair hostile audit and repair
+
+A subsequent hostile audit confirmed seven defects or incomplete claims before
+the coordinate bridge could be treated as active:
+
+1. A common adapter performed the sole floor lookup and source association, so
+   both checkers could agree on the same mislabeled packet.
+2. Receipt v1 omitted separate checker results and resources, claim identity,
+   executable canary binding, decision state, and refusal evidence.
+3. Downstream validators treated generic receipt strings as proof-shaped data
+   and did not yet revalidate a root capability against its exact scope.
+4. The root pair existed only in tests and did not enter the live Stage 1
+   refusal.
+5. The claim promised ordered leaves while both paths normalized source order.
+6. The declared canary list exceeded executable mutation coverage.
+7. The authority row omitted live floor, ledger, catalog, and adapter
+   dependencies from semantic closure.
+
+### Verified repair note, 2026-07-25
+
+The follow-up source pass confirms a live `TranscriptSchema::V10` selector for
+the v10 transcript contract and preserves `TranscriptSchema::V9` as a distinct
+v9 selector. Producer and watchdog independently canonicalize source arrival
+order by semantic coordinate identity, so a sealed source reorder is
+nonphysical and produces the same result. A coordinated entry-id and symbol
+rename that retains the old receipt returns the typed
+`sealed_source_binding_mismatch` refusal from each implementation.
+
+The post-projection canaries call both production verifiers over a private
+candidate manifest. The executable v6 suite catches artifact omission,
+artifact duplication, `MembershipNeutral` to `SpeciesRestMass` scope
+escalation, canonical projection byte drift, admission-receipt substitution,
+and coordinated ancestry plus capability substitution. Producer and watchdog
+also construct separate ancestry manifests over every source identity, tier,
+artifact, and ancestry digest, and receipt v5 binds both equal nonzero
+digests. Each final verifier first re-extracts and reprojects its current
+sealed packet, exact-matches the manifest, canonical bytes, counts, and
+ancestry, reconnects both receipt resource digests to its local resource
+contract, and recomputes its own packet-canary execution digest. A
+self-consistent unsealed projection therefore fails the final boundary. Each
+packet-canary transcript entry binds the complete exact mutant and observed
+checker result. A second paired transcript binds every post-projection mutant,
+receipt, admission, opaque capability, and observed verifier result except its
+own digest field. Both final verifiers recompute it. A production refusal must
+also exact-match a fresh current sealed-decision replay; structural synthetic
+receipts remain test-only. The generic alien-coordinate projector remains
+test-only inspection output and cannot mint an admission receipt or root
+capability.
+
+The root success receipt is
+`civsim.planet.stellar-birth-repository-physical-root-receipt.v5`; the refusal
+receipt is
+`civsim.planet.stellar-birth-repository-physical-root-refusal-receipt.v5`; the
+canary suite is v6. The root packet and projection remain v5; the producer and
+watchdog implementations are v6; coordinate content is v3. The active
+authority profile hash is
+`7963fbd5fb857fb2516e11579e76409c5bdfc3cc53d172b15251016b87d80750`.
+This repairs the downstream verification gap without granting scientific
+sufficiency to the floor. Every species-forming field, operator, state, sector,
+validity, constraint, excitation, bound-state, mass-uncertainty, and
+massless-law root remains open. The live result remains zero members, no
+coverage claim, and no authority effect.
+
+### Bounded live vocabulary audit and repair, 2026-07-26
+
+One read-only audit of the newly bound physical-vocabulary path found two
+material generality defects. First, the repository frontier accepted only
+`no_admitted_species_derivation_rules`, so the next lawful
+`physical_vocabulary_coverage_incomplete` refusal would have been reclassified
+as an internal error. Second, the frontier required every root to be
+Universal `[D]` through the derived route and serialized one aggregate label,
+even though the admission and vocabulary validators already accept lawful
+irreducible and unfamiliar roots.
+
+The live frontier now accepts exactly those two scientific refusals and still
+rejects checker, binding, resource, and integrity failures. It derives a sorted
+identity-keyed census over every admitted root, recording the exact ledger
+tier, canonical provenance tag, and derived, irreducible, or evidence-custody
+route. Duplicate identities or noncanonical provenance refuse. Species
+analysis v4, watchdog v5, the canonical wire, typed planet view, and
+observer-only viewer carry the same rows without a causal return edge.
+Focused tests cover both accepted refusal codes, rejection of checker
+disagreement, the current four Universal `[D]` derived rows, and one unfamiliar
+Residue `[M]` irreducible row.
+
+The independently classified current vocabulary remains exactly zero
+descriptor roles, four relation targets, and zero constraint laws.
+`current_input_partition_complete=true` is scoped to those four roots;
+`global_physical_vocabulary_coverage=false`,
+`membership_authority=false`, zero registry members, and no authority effect
+remain unchanged. No repeat audit packet or semantic smoke loop was run after
+the two confirmed fixes.
 
 ## Remaining audit debt
 
-- Admission structures still carry human-readable receipt strings. The current
-  three receipts are independently sealed and exact-matched, but future leaves
-  at any tier must replace prose-only proofs with typed, machine-resolvable
-  artifacts before they can become live.
+- Admission structures still carry human-readable receipt strings as evidence.
+  Those strings cannot mint production authority: the current root pair mints
+  one private capability bound to exact admission data and its pair receipt.
+  Future leaves at any tier still need typed, machine-resolvable artifacts and
+  a claim-specific capability mint before they can become live.
 - `AbsolutePhysicsFloor` is a value-opaque singleton capability rather than a
   caller-populated coordinate container. Its identities and receipts select the
   one private coordinate registry only after execution verification requires
@@ -699,14 +1120,30 @@ transcript, Stage 1, or viewer path, and leaves
   collision, symmetry, topology-label, permutation, and capacity-refusal
   implementations plus a multiplicity phenomenon. Structural rule identifiers
   alone cannot validate a realized graph.
+- The variable-cardinality dimension encoding accepts unfamiliar nonzero axis
+  identities and does not close the basis at seven SI axes. Before unfamiliar
+  axes can enter a production artifact, a repository-owned basis registry and
+  independent admission pair must prove each axis identity and semantics. The
+  current sealed input contains only the seven domain-separated SI identities,
+  so this is activation debt rather than a live selector.
 - Species and index-domain schemas still need repository-owned admitted field,
-  operator, state, sector, validity, constraint-law, and mass-projection roots,
-  plus a production registry authority and replay binding. The conditional
-  physical pair now checks content identity, exact dimensions and mass,
-  dependency closure, and typed capacity refusals when such roots are supplied,
-  but synthetic agreement is not evidence that an unfamiliar system is
-  physically admitted. Derived chart and time-reference handling, convergence
-  control, conditioned support, and joint-measure applicability remain open.
+  operator, state, sector, validity, constraint-law, excitation, bound-state,
+  mass-uncertainty, and massless-law roots, plus a production registry authority
+  and replay binding. The four live floor-derived roots are coordinate
+  capabilities only. The production adapter now lets the physical registry
+  consume them only after both final verifiers independently bind artifact
+  identity, floor authority, paired result, canonical bytes, admission receipt,
+  and membership-neutral scope. The conditional
+  physical pair checks content identity, exact dimensions and mass, dependency
+  closure, and typed capacity refusals when synthetic roots are supplied, but
+  synthetic agreement is not evidence that an unfamiliar system is physically
+  admitted. Derived chart and time-reference handling, convergence control,
+  conditioned support, and joint-measure applicability remain open.
+- The retained state-dependent carrier-density fold still calls
+  `Fixed::sqrt`. The complete-expression plasma constant is independently
+  certified, but this later dynamic kernel remains under the blocked
+  deterministic-kernel authority claim and cannot enter canonical state until
+  its domain and CPU or GPU parity are independently certified.
 - Material histories still need derived position and velocity state, local
   frame semantics, multicenter binding, translation and rotation invariance,
   flux topology, and conservation before a shell reduction or disk state can
@@ -729,12 +1166,18 @@ the repaired stellar-state packet.
 
 1. Extend the partial machine-readable census from its landed registry, domain,
    and carrier contracts to complete physical coverage while preserving one
-   correlation-carrying joint measure.
-2. Derive or fully admit the repository-owned field, operator, state, sector,
-   validity, constraint-law, and mass-projection roots consumed by the landed
-   physical registry pair. Bind the resulting complete registry to a separate
-   production authority and replay identity, then close conditioned joint
-   support. Only then activate the landed exact weighted reducer.
+   correlation-carrying joint measure. Before activating any unfamiliar
+   dimension axis, close its semantic identity and algebra through a
+   repository-owned basis registry and independent admission pair.
+2. Preserve the four membership-neutral floor-coordinate capabilities, then
+   derive or fully admit the repository-owned field, operator, state, sector,
+   validity, constraint-law, excitation, bound-state, species
+   mass-uncertainty, and massless-law roots consumed by the landed physical
+   registry pair. Every non-root admission needs a claim-specific capability
+   mint backed by its own independent authority pair. Bind the resulting
+   complete registry to a separate production authority and replay identity,
+   then close conditioned joint support. Only then activate the landed exact
+   weighted reducer.
 3. Derive coupled gas and dust thermal balance with a proved residual bracket,
    then equation-of-state closure, collapse flow, material mass and position
    histories, local-frame angular-momentum transport, multicenter binding, and

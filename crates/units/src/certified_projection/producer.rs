@@ -1,7 +1,12 @@
+mod canary;
+
 use super::{
-    formula_digest, input_digest, ProjectionCertificate, ProjectionInput, CERTIFICATE_SCHEMA_ID,
-    FACTORED_CERTIFICATE_SCHEMA_ID, FACTORED_PRODUCER_IMPLEMENTATION_ID,
-    FACTORED_WATCHDOG_IMPLEMENTATION_ID, PRODUCER_IMPLEMENTATION_ID, WATCHDOG_IMPLEMENTATION_ID,
+    formula_digest, input_digest, CanaryAttestation, ProjectionCertificate, ProjectionCoordinate,
+    ProjectionInput, ProjectionRequest, CERTIFICATE_SCHEMA_ID, FACTORED_CERTIFICATE_SCHEMA_ID,
+    FACTORED_PRODUCER_IMPLEMENTATION_ID, FACTORED_WATCHDOG_IMPLEMENTATION_ID,
+    POSITIVE_SQRT_CERTIFICATE_SCHEMA_ID, POSITIVE_SQRT_PRODUCER_IMPLEMENTATION_ID,
+    POSITIVE_SQRT_WATCHDOG_IMPLEMENTATION_ID, PRODUCER_IMPLEMENTATION_ID,
+    WATCHDOG_IMPLEMENTATION_ID,
 };
 use crate::bignum::{BigRat, BigUint};
 use sha2::{Digest, Sha256};
@@ -29,7 +34,6 @@ const MAX_INTERMEDIATE_COMPONENT_BITS: u64 = 65_536;
 // evaluation. The grid is far finer than any signed-i128 projection this API
 // can emit, and widening by one unit on each side preserves the proof.
 const PI_DYADIC_ENCLOSURE_BITS: u32 = 120;
-
 #[derive(Clone, Debug)]
 enum Expr {
     Number(BigRat),
@@ -74,7 +78,13 @@ pub(super) fn produce(
     inputs: &[ProjectionInput],
     target_scale_bits: u32,
 ) -> Result<ProjectionCertificate, String> {
-    produce_for_request(formula, inputs, ScaleRequest::Fixed(target_scale_bits))
+    produce_for_request(
+        formula,
+        inputs,
+        ProjectionRequest::FixedScale {
+            scale_bits: target_scale_bits,
+        },
+    )
 }
 
 pub(super) fn produce_significant(
@@ -87,21 +97,94 @@ pub(super) fn produce_significant(
             "certified coefficient significance must be from 1 through 120 bits".to_owned(),
         );
     }
-    produce_for_request(formula, inputs, ScaleRequest::Significant(significant_bits))
+    produce_for_request(
+        formula,
+        inputs,
+        ProjectionRequest::Significant {
+            bits: significant_bits,
+        },
+    )
 }
 
-#[derive(Clone, Copy)]
-enum ScaleRequest {
-    Fixed(u32),
-    Significant(u32),
+pub(super) fn produce_positive_sqrt(
+    radicand_formula: &str,
+    inputs: &[ProjectionInput],
+    target_scale_bits: u32,
+) -> Result<ProjectionCertificate, String> {
+    let request = ProjectionRequest::FixedScale {
+        scale_bits: target_scale_bits,
+    };
+    validate_projection_resources(radicand_formula, inputs, request)?;
+    let tokens = lex(radicand_formula)?;
+    if tokens.len() > MAX_TOKENS {
+        return Err("square-root formula exceeds the certified token resource cap".to_owned());
+    }
+    let mut parser = Parser::new(&tokens);
+    let expression = parser.expression()?;
+    if parser.position != tokens.len() {
+        return Err("producer parser found trailing square-root formula tokens".to_owned());
+    }
+    if parser.nodes > MAX_AST_NODES {
+        return Err("square-root formula exceeds the certified AST resource cap".to_owned());
+    }
+    let target_binary_exponent2 = i32::try_from(target_scale_bits)
+        .ok()
+        .and_then(i32::checked_neg)
+        .ok_or_else(|| "square-root projection scale exceeds signed exponent range".to_owned())?;
+    let steps: &[u32] = if expression.contains_pi() {
+        &TERM_STEPS
+    } else {
+        &[0]
+    };
+    for &pi_terms in steps {
+        let interval = evaluate(&expression, inputs, pi_terms)?;
+        let zero = BigRat::from_i64(0);
+        if interval.lower.cmp_rat(&zero) != Ordering::Greater
+            || interval.upper.cmp_rat(&zero) != Ordering::Greater
+        {
+            continue;
+        }
+        let lower_magnitude_log2 = interval.lower.floor_log2().div_euclid(2);
+        let upper_magnitude_log2 = interval.upper.floor_log2().div_euclid(2);
+        if lower_magnitude_log2 != upper_magnitude_log2 {
+            continue;
+        }
+        let lower_bits = positive_sqrt_floor_bits(&interval.lower, target_scale_bits)?;
+        let upper_bits = positive_sqrt_floor_bits(&interval.upper, target_scale_bits)?;
+        if lower_bits != upper_bits {
+            continue;
+        }
+        return Ok(ProjectionCertificate {
+            schema_id: POSITIVE_SQRT_CERTIFICATE_SCHEMA_ID,
+            producer_implementation_id: POSITIVE_SQRT_PRODUCER_IMPLEMENTATION_ID,
+            watchdog_implementation_id: POSITIVE_SQRT_WATCHDOG_IMPLEMENTATION_ID,
+            formula_sha256: formula_digest(radicand_formula),
+            inputs_sha256: input_digest(inputs),
+            request,
+            target_binary_exponent2,
+            pi_terms,
+            magnitude_log2: lower_magnitude_log2,
+            lower: interval.lower,
+            upper: interval.upper,
+            producer_bits: lower_bits,
+            watchdog_bits: 0,
+            producer_canary_attestation: CanaryAttestation::UNATTESTED,
+            watchdog_canary_attestation: CanaryAttestation::UNATTESTED,
+            receipt_sha256: [0; 32],
+        });
+    }
+    Err(
+        "positive square-root formula did not certify one magnitude bracket and terminal root cell within the Pi resource cap"
+            .to_owned(),
+    )
 }
 
 fn produce_for_request(
     formula: &str,
     inputs: &[ProjectionInput],
-    scale_request: ScaleRequest,
+    request: ProjectionRequest,
 ) -> Result<ProjectionCertificate, String> {
-    validate_projection_resources(formula, inputs, scale_request)?;
+    validate_projection_resources(formula, inputs, request)?;
     let tokens = lex(formula)?;
     if tokens.len() > MAX_TOKENS {
         return Err("formula exceeds the certified token resource cap".to_owned());
@@ -132,12 +215,12 @@ fn produce_for_request(
         if lower_log2 != upper_log2 {
             continue;
         }
-        let target_binary_exponent2 = match scale_request {
-            ScaleRequest::Fixed(scale) => i32::try_from(scale)
+        let target_binary_exponent2 = match request {
+            ProjectionRequest::FixedScale { scale_bits } => i32::try_from(scale_bits)
                 .ok()
                 .and_then(i32::checked_neg)
                 .ok_or_else(|| "fixed projection scale exceeds signed exponent range".to_owned())?,
-            ScaleRequest::Significant(bits) => {
+            ProjectionRequest::Significant { bits } => {
                 let exponent = lower_log2
                     .checked_sub(i64::from(bits) - 1)
                     .ok_or_else(|| "derived coefficient exponent overflows i64".to_owned())?;
@@ -171,6 +254,7 @@ fn produce_for_request(
             watchdog_implementation_id: WATCHDOG_IMPLEMENTATION_ID,
             formula_sha256: formula_digest(formula),
             inputs_sha256: input_digest(inputs),
+            request,
             target_binary_exponent2,
             pi_terms,
             magnitude_log2: lower_log2,
@@ -178,6 +262,8 @@ fn produce_for_request(
             upper: interval.upper,
             producer_bits: lower_bits,
             watchdog_bits: 0,
+            producer_canary_attestation: CanaryAttestation::UNATTESTED,
+            watchdog_canary_attestation: CanaryAttestation::UNATTESTED,
             receipt_sha256: [0; 32],
         });
     }
@@ -187,7 +273,7 @@ fn produce_for_request(
 fn validate_projection_resources(
     formula: &str,
     inputs: &[ProjectionInput],
-    scale_request: ScaleRequest,
+    request: ProjectionRequest,
 ) -> Result<(), String> {
     if formula.len() > MAX_FORMULA_BYTES {
         return Err("formula exceeds the certified byte resource cap".to_owned());
@@ -195,7 +281,8 @@ fn validate_projection_resources(
     if inputs.len() > MAX_INPUTS {
         return Err("projection input count exceeds the certified resource cap".to_owned());
     }
-    if matches!(scale_request, ScaleRequest::Fixed(scale) if scale > MAX_NORMALIZATION_SHIFT_BITS) {
+    if matches!(request, ProjectionRequest::FixedScale { scale_bits } if scale_bits > MAX_NORMALIZATION_SHIFT_BITS)
+    {
         return Err("fixed projection scale exceeds the normalization resource cap".to_owned());
     }
     for (index, input) in inputs.iter().enumerate() {
@@ -304,6 +391,9 @@ fn validate_decimal_resource(value: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub(super) fn production_canary_attestation() -> Result<CanaryAttestation, String> {
+    canary::production_canary_attestation()
+}
 #[allow(clippy::too_many_arguments)]
 pub(super) fn factored_receipt_digest(
     coefficient_receipt_sha256: [u8; 32],
@@ -464,6 +554,42 @@ fn ensure_add_fits(left: &BigRat, right: &BigRat) -> Result<(), String> {
         return Err("formula exceeds the certified intermediate resource cap".to_owned());
     }
     Ok(())
+}
+
+fn positive_sqrt_floor_bits(value: &BigRat, scale_bits: u32) -> Result<i128, String> {
+    if value.cmp_rat(&BigRat::from_i64(0)) != Ordering::Greater {
+        return Err("positive square-root radicand is not positive".to_owned());
+    }
+    let maximum = i128::MAX as u128;
+    let mut lower = 0_u128;
+    let mut upper = maximum + 1;
+    if positive_scaled_square(upper, scale_bits)?.cmp_rat(value) != Ordering::Greater {
+        return Err("positive square-root projection exceeds i128".to_owned());
+    }
+    while lower + 1 < upper {
+        let middle = lower + (upper - lower) / 2;
+        if positive_scaled_square(middle, scale_bits)?.cmp_rat(value) != Ordering::Greater {
+            lower = middle;
+        } else {
+            upper = middle;
+        }
+    }
+    i128::try_from(lower).map_err(|_| "positive square-root projection exceeds i128".to_owned())
+}
+
+fn positive_scaled_square(bits: u128, scale_bits: u32) -> Result<BigRat, String> {
+    let doubled_scale = scale_bits
+        .checked_mul(2)
+        .ok_or_else(|| "square-root projection scale arithmetic overflows".to_owned())?;
+    if doubled_scale > MAX_INTERMEDIATE_COMPONENT_BITS as u32 {
+        return Err("square-root cell exceeds the certified intermediate resource cap".to_owned());
+    }
+    let magnitude = BigUint::from_u128(bits);
+    Ok(BigRat::new(
+        false,
+        magnitude.mul(&magnitude),
+        BigUint::from_u64(1).shl_bits(doubled_scale),
+    ))
 }
 
 fn evaluate(
@@ -750,17 +876,17 @@ impl<'a> Parser<'a> {
     }
 
     fn term(&mut self) -> Result<Expr, String> {
-        let mut value = self.power()?;
+        let mut value = self.unary()?;
         loop {
             match self.tokens.get(self.position) {
                 Some(Token::Star) => {
                     self.position += 1;
-                    let right = self.power()?;
+                    let right = self.unary()?;
                     value = self.node(Expr::Mul(Box::new(value), Box::new(right)))?;
                 }
                 Some(Token::Slash) => {
                     self.position += 1;
-                    let right = self.power()?;
+                    let right = self.unary()?;
                     value = self.node(Expr::Div(Box::new(value), Box::new(right)))?;
                 }
                 _ => return Ok(value),
@@ -769,7 +895,7 @@ impl<'a> Parser<'a> {
     }
 
     fn power(&mut self) -> Result<Expr, String> {
-        let mut value = self.unary()?;
+        let mut value = self.primary()?;
         if matches!(self.tokens.get(self.position), Some(Token::Caret)) {
             self.position += 1;
             let Some(Token::Number(raw)) = self.tokens.get(self.position) else {
@@ -800,7 +926,7 @@ impl<'a> Parser<'a> {
             self.position += 1;
             return self.unary();
         }
-        self.primary()
+        self.power()
     }
 
     fn primary(&mut self) -> Result<Expr, String> {

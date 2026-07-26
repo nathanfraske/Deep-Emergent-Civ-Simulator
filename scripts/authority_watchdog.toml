@@ -39,17 +39,34 @@ id = "floor.catalog-admission"
 kind = "authority"
 domain = "scientific"
 status = "active"
-claim = "Only the exact repository-owned ordered floor catalog, tier/provenance classifications, and complete exhaustion-receipt bytes can authorize physical-floor magnitudes."
-producer_path = "crates/ledger/src/admission.rs"
-producer_implementation = "civsim.ledger.generic-floor-admission.v1"
+claim = "Only the exact repository-owned identity-keyed floor catalog, tier/provenance classifications, complete identity-to-exhaustion-receipt mapping, and explicit owner-admission record for every full typed irreducible route can authorize physical-floor magnitudes. Each route separately binds derivation exhaustion, Buckingham Pi, Gap Law, Chaos Protocol, Residual Law, and its residual slot. Entry, input, receipt, and owner-admission arrival order is canonicalized before either implementation evaluates the claim."
+producer_path = "crates/units/src/physics_floor.rs"
+producer_implementation = "civsim.units.canonical-floor-irreducible-admission.v3"
 checker_path = "crates/units/src/floor_admission_watchdog.rs"
-checker_implementation = "civsim.units.floor-catalog-admission-watchdog.v1"
-receipt_schema = "civsim.units.floor-catalog-admission-pair.v1"
+checker_implementation = "civsim.units.canonical-floor-admission-watchdog.v3"
+receipt_schema = "civsim.units.floor-catalog-admission-pair.v3"
 shared_semantic_helpers = []
 shared_primitives = ["canonical length-prefixed input bytes", "UTF-8", "SHA-256"]
-canaries = ["changed tier", "changed provenance", "changed catalog member", "missing receipt semantics", "changed nonempty receipt authority"]
-owner_boundary = "The pair proves exact repository membership, classification, receipt structure, and byte identity. Scientific sufficiency of derive-first exhaustion, Gap Law, Chaos Protocol, and Residual Law evidence remains owner-reviewed."
+canaries = ["arrival-order permutation remains admitted", "changed tier reports canonical-input custody", "changed provenance reports semantic validation refusal", "changed catalog member without a matching owner admission reports semantic validation refusal", "missing receipt semantics reports semantic validation refusal", "changed nonempty receipt authority without a matching owner admission reports semantic validation refusal", "changed owner-admission digest reports semantic validation refusal"]
+owner_boundary = "The pair proves exact repository membership, classification, complete typed irreducible routes, explicit owner-admission records, canonical arrival-order neutrality, receipt structure, and byte identity. Its mutation transcript distinguishes malformed bytes, semantic validation refusal, and rejection of a structurally valid alternate claim by the canonical-input custody pin. The owner-admission pins are durable claim-scoped review capabilities, not a cryptographic proof of the human signer's identity. Scientific sufficiency of derive-first exhaustion, Buckingham-Pi variable completeness, Gap Law, Chaos Protocol, and Residual Law evidence remains owner-reviewed."
 semantic_closure = ["crates/ledger/src/admission.rs", "crates/units/src/floor_admission_watchdog.rs", "crates/units/src/physics_floor.rs"]
+
+[[mechanism]]
+id = "floor.codata-factual-row-binding"
+kind = "authority"
+domain = "scientific"
+status = "active"
+claim = "The alpha, G, and electron-mass measured floor declarations equal the normalized values, absolute standard uncertainties, source identities, SI dimensions, and exact row-span identities independently reconstructed from the pinned NIST CODATA 2018 ASCII source. The checked pair receipt binds byte-identical live and archived source audits to the factual witness, and the Rust floor seal binds both repository evidence files before any measured magnitude is available."
+producer_path = "scripts/codata_floor_evidence_gate.py"
+producer_implementation = "civsim.units.codata-fixed-column-producer.v2"
+checker_path = "scripts/codata_floor_evidence_watchdog.py"
+checker_implementation = "civsim.units.codata-record-scan-watchdog.v2"
+receipt_schema = "civsim.units.codata-2018-floor-evidence-pair.v2"
+shared_semantic_helpers = []
+shared_primitives = ["ASCII source bytes", "NIST source SHA-256 and byte count", "exact decimal normalization", "SI base-dimension order", "canonical JSON", "SHA-256"]
+canaries = ["producer executes facts schema, source identity, source digest, row count, row order, column, row-digest format, dimension format, fixed-column length, decimal, unit, and carriage-return mutations; each observation binds the domain-separated exact mutated input digest and stable refusal code", "watchdog executes facts schema, source digest, row count, row order, source-line, offset, span digest, value, uncertainty, unit, dimension, symbol, and carriage-return mutations; each observation binds the domain-separated exact mutated input digest and stable refusal code", "explicit online audit enforces source SHA-256, byte length, text contract, row presence, row uniqueness, row spans, row content, and live/archive equality"]
+owner_boundary = "The pair proves a checked witness of an explicit live and archived byte audit plus exact transcription of three factual rows into the runtime floor seal. The mandatory offline route executes and binds both independent mutation transcripts, including exact changed inputs and detector-specific refusal codes, but does not re-fetch the restricted source. It does not prove that CODATA's adjustment is scientifically true, current, independent of its input data, complete for a universe, or sufficient beyond the declared derive-first seam."
+semantic_closure = ["scripts/codata_floor_evidence_gate.py", "scripts/codata_floor_evidence_watchdog.py", "crates/units/data/codata_2018_floor_facts.tsv", "crates/units/data/codata_2018_floor_evidence_receipt.json", "crates/units/src/fundamentals.rs", "crates/units/src/physics_floor.rs", "crates/units/src/physics_floor_source_evidence.rs", "sources/registry.toml", "docs/working/VENDORING_CHECKLIST.md"]
 
 [[mechanism]]
 id = "floor.pi-budget"
@@ -107,7 +124,7 @@ id = "governance.stone0-build-wiring"
 kind = "authority"
 domain = "governance"
 status = "active"
-claim = "Every guarded canonical Cargo graph executes one shared fail-closed Stone 0 build owner before either planet consumer can compile."
+claim = "Every guarded canonical Cargo graph executes one shared fail-closed Stone 0 build owner against the exact repository root derived from the anchor manifest before either planet consumer can compile."
 producer_path = "scripts/stone0_build_wiring_gate.py"
 producer_implementation = "civsim.stone0.toml-graph-producer.v1"
 checker_path = "scripts/stone0_build_wiring_watchdog.py"
@@ -115,8 +132,8 @@ checker_implementation = "civsim.stone0.section-scan-watchdog.v1"
 receipt_schema = "civsim.stone0.build-wiring-pair.v1"
 shared_semantic_helpers = []
 shared_primitives = ["canonical repository file bytes", "Cargo manifest syntax", "UTF-8", "SHA-256", "canonical JSON receipt bytes"]
-canaries = ["workspace member substitution", "anchor dependency substitution", "guard-result bypass", "marker environment substitution", "consumer sentinel substitution", "receipt disagreement"]
-owner_boundary = "The pair proves the reviewed Cargo topology and generated-marker order. Cargo remains responsible for build-unit scheduling and freshness, while the owner reviews changes to the bootstrap files."
+canaries = ["workspace member substitution", "anchor dependency substitution", "explicit repository-root substitution", "trusted Git acquisition substitution", "trusted Git equality refusal substitution", "Git environment-clear substitution", "guard-result bypass", "marker environment substitution", "consumer sentinel substitution", "receipt disagreement"]
+owner_boundary = "The pair proves the reviewed Cargo topology, manifest-derived root binding, independently rooted Git route, exact Git-top-level equality refusal, and generated-marker order. Cargo remains responsible for build-unit scheduling and freshness, while the owner reviews changes to the bootstrap files."
 semantic_closure = ["scripts/stone0_build_wiring_gate.py", "scripts/stone0_build_wiring_watchdog.py", "scripts/gates.toml", "scripts/gate_runner.py", "Cargo.toml", "justfile", "crates/stone0-build/Cargo.toml", "crates/stone0-build/build.rs", "crates/stone0-build/src/lib.rs", "crates/stone0/src/lib.rs", "crates/planet/Cargo.toml", "crates/planet/build.rs", "crates/planet-substrate/Cargo.toml", "crates/planet-substrate/build.rs"]
 
 [[mechanism]]
@@ -124,30 +141,119 @@ id = "planet.completed-snapshot"
 kind = "authority"
 domain = "scientific"
 status = "blocked"
-claim = "A completed immutable snapshot is authorized only by independent replay agreement over a fully closed seven-stage transcript."
+claim = "A completed immutable snapshot is authorized only by independent replay agreement over a sealed route receipt whose applicable causal obligations are fully closed."
 producer_path = "crates/planet/src/canonical/receipt.rs"
 refusal_path = "crates/planet/src/canonical/snapshot.rs"
-activation_guard = "PlanetSnapshot::from_complete returns None for the current refusal and no production completion path is reachable."
-open_cross_checker_requirements = ["independent declarative transcript replay", "stage artifact digest coverage", "completion mutation canaries"]
-owner_boundary = "The owner reviews whether the seven-stage completion obligations cover every causal artifact required for observation."
+activation_guard = "PlanetSnapshot::from_complete returns None for the current refusal and no production completion path is reachable. The fixed seven-stage Solar-system route is not universal completion authority."
+open_cross_checker_requirements = ["independent declarative transcript replay", "sealed route identity and route-selection receipt", "complete applicability decisions for generic causal obligations", "typed not-applicable evidence and alternate-origin substitutions", "stage and route artifact digest coverage", "mutation canaries for omitted obligations, false applicability, route substitution, and alternate-origin drift"]
+owner_boundary = "The current seven stages are one Solar-system route, not the universe-wide completion vocabulary. Before activation, the owner reviews the generic obligation catalog, every applicability decision, and whether each admitted route or alternate origin closes every causal artifact required for observation."
 semantic_closure = ["crates/planet/src/canonical/receipt.rs", "crates/planet/src/canonical/snapshot.rs", "crates/planet/src/canonical/transcript.rs", "crates/planet/src/canonical/pipeline.rs", "crates/planet/src/canonical/observation.rs", "crates/planet/src/canonical/stage.rs"]
+
+[[mechanism]]
+id = "planet.physical-vocabulary-partition"
+kind = "diagnostic"
+status = "diagnostic"
+observation = "Two independent bounded classifiers derive descriptor-role identities from PhysicalDescriptor payloads, relation-target identities from every admitted root, and constraint-law identities from ConstraintLaw payloads. Their exact canonical partition and receipt are bound into the live physical-registry input and downstream refusal bitstream. The registry frontier separately preserves an identity-keyed tier, provenance, and admission-route census instead of projecting one familiar aggregate label. The current repository result is zero descriptor roles, four relation targets, and zero constraint laws."
+authority_effect = "none"
+diagnostic_producer_path = "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/producer.rs"
+diagnostic_producer_implementation = "civsim.planet.stellar-birth-physical-vocabulary-producer.v1"
+diagnostic_checker_path = "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/watchdog.rs"
+diagnostic_checker_implementation = "civsim.planet.stellar-birth-physical-vocabulary-watchdog.v1"
+diagnostic_schema = "civsim.planet.stellar-birth-physical-vocabulary-agreement.v1"
+shared_material = ["capability-bearing admitted physical-root artifacts", "content-derived artifact identities and open ArtifactPayload variants", "bounded resource contract", "SHA-256", "canonical big-endian tagged framing"]
+canaries = ["unfamiliar descriptor and constraint payloads", "heterogeneous tier, provenance, and irreducible admission-route census", "root arrival-order permutation", "duplicate root identity", "evidence-custody substitution", "admission-capability substitution", "root-count limit", "partition-identity limit", "work limit", "canonical-byte limit", "partition identity mutation", "global-coverage escalation", "membership-authority escalation", "checker-result substitution", "resource-contract substitution", "receipt substitution"]
+non_authority_guard = "The receipt proves an exact partition of only its admitted input roots. It carries current_input_partition_complete=true, global_physical_vocabulary_coverage=false, membership_authority=false, and cannot admit a root, species, support member, or completion claim."
+owner_boundary = "The owner reviews any future claim that a physical vocabulary is globally complete. Payload kinds and unfamiliar identities remain data-defined; this diagnostic may not turn the current partition into a closed class list."
+semantic_closure = [
+    "crates/ledger/src/admission.rs",
+    "crates/ledger/src/lib.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/model.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/model.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/producer/canary.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/watchdog.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/watchdog/canary.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/model.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/tests.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/watchdog.rs",
+]
 
 [[mechanism]]
 id = "planet.species-derivation-frontier"
 kind = "diagnostic"
 status = "diagnostic"
-observation = "Two separately coded traversals report the current open species proof frontier, but both consume repository-authored frontier material and therefore provide a checked diagnostic rather than independent scientific authority."
+observation = "The producer reports only the first executable live physical-registry refusal, and the checker independently re-queries that registry frontier to verify faithful propagation. The pair binds the floor, structure, root receipt, exact identity-keyed root admission census, bounded physical-vocabulary receipt and partitions, and live obligations while making no global vocabulary or frontier-completeness claim. Either no admitted species-forming rules or incomplete global physical-vocabulary coverage remains an honest live scientific refusal; integrity failures do not enter this route."
 authority_effect = "none"
 diagnostic_producer_path = "crates/planet/src/canonical/stellar_birth_species/authority_analysis/producer.rs"
-diagnostic_producer_implementation = "civsim.planet.stellar-birth-species-frontier-producer.v1"
+diagnostic_producer_implementation = "civsim.planet.stellar-birth-species-frontier-producer.v4"
 diagnostic_checker_path = "crates/planet/src/canonical/stellar_birth_species/authority_analysis/watchdog.rs"
-diagnostic_checker_implementation = "civsim.planet.stellar-birth-species-derivation-watchdog.v2"
-diagnostic_schema = "civsim.planet.stellar-birth-species-derivation-analysis.v1"
-shared_material = ["audited floor view", "canonical structure schema", "ordered proof identifiers", "repository-authored open frontier"]
-canaries = ["changed floor anchor", "changed derivation attempt", "changed open proof", "changed non-admitting status"]
-non_authority_guard = "The analysis carries closure_effect=none, coverage_claim=false, zero members, zero value payloads, and no residual slot; its agreement cannot mint a proof token or close Stage 1."
+diagnostic_checker_implementation = "civsim.planet.stellar-birth-species-derivation-watchdog.v5"
+diagnostic_schema = "civsim.planet.stellar-birth-species-derivation-analysis.v4"
+shared_material = ["sealed physical-floor authority and audited execution view", "canonical structure schema", "live physical-root pair receipt and identity-keyed admission census", "bounded physical-vocabulary agreement receipt and exact partitions", "exact physical-registry refusal and open obligations", "ordered proof identifiers"]
+canaries = ["omitted live obligation", "injected authored downstream path", "frontier completeness escalation", "unfamiliar live obligation", "changed floor authority or anchor", "changed root-pair schema, implementation identity, receipt, or paired result", "changed root identity, tier, provenance, admission route, or membership-neutral scope", "changed vocabulary schema, implementation identity, receipt, partition, scope, or checker digest", "changed physical-registry scientific refusal", "integrity failure substituted for a scientific refusal", "changed non-admitting status"]
+non_authority_guard = "The analysis carries closure_effect=none, coverage_claim=false, frontier.completeness_claim=false, vocabulary.global_coverage=false, vocabulary.membership_authority=false, zero members, zero value payloads, and no residual slot; its agreement cannot mint a proof token or close Stage 1."
 owner_boundary = "The diagnostic reports a refusal frontier only. Physical species membership and completeness require a future authority pair over independently derived inputs."
-semantic_closure = ["crates/planet/src/canonical/stellar_birth_species/authority_analysis/producer.rs", "crates/planet/src/canonical/stellar_birth_species/authority_analysis/watchdog.rs", "crates/planet/src/canonical/stellar_birth_species/authority_analysis/mod.rs", "crates/planet/src/canonical/stellar_birth_species/authority_analysis/wire.rs", "crates/planet/src/canonical/stellar_birth_species.rs", "crates/planet/src/canonical/stellar_birth_measure.rs", "crates/planet/src/canonical/stellar_birth_artifacts.rs", "crates/planet/src/canonical/stellar_birth_structure/mod.rs"]
+semantic_closure = [
+    "crates/ledger/src/admission.rs",
+    "crates/ledger/src/lib.rs",
+    "crates/planet/src/canonical/catalog.rs",
+    "crates/planet/src/canonical/floor_magnitudes.rs",
+    "crates/planet/src/canonical/mod.rs",
+    "crates/planet/src/canonical/preflight.rs",
+    "crates/planet/src/canonical/receipt.rs",
+    "crates/planet/src/canonical/requirement_analysis.rs",
+    "crates/planet/src/canonical/stellar_birth_artifacts.rs",
+    "crates/planet/src/canonical/stellar_birth_measure.rs",
+    "crates/planet/src/canonical/stellar_birth_species.rs",
+    "crates/planet/src/canonical/stellar_birth_species/authority_analysis/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/authority_analysis/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/authority_analysis/view.rs",
+    "crates/planet/src/canonical/stellar_birth_species/authority_analysis/watchdog.rs",
+    "crates/planet/src/canonical/stellar_birth_species/authority_analysis/wire.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/model.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/producer/resource.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/tests.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/watchdog.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/watchdog/resource.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/model.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/producer/canary.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/tests.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/watchdog.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/watchdog/canary.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/model.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/tests.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/watchdog.rs",
+    "crates/planet/src/canonical/stellar_birth_structure/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_structure/species_registry.rs",
+    "crates/planet/src/canonical/stellar_birth_structure/stellar_state.rs",
+    "crates/planet/src/canonical/transcript.rs",
+    "crates/units/data/fixed_math_authority_receipt.json",
+    "crates/units/src/authority_watchdog.rs",
+    "crates/units/src/bignum.rs",
+    "crates/units/src/certified_projection/mod.rs",
+    "crates/units/src/certified_projection/producer.rs",
+    "crates/units/src/certified_projection/producer/canary.rs",
+    "crates/units/src/certified_projection/watchdog.rs",
+    "crates/units/src/certified_projection/watchdog/canary.rs",
+    "crates/units/src/compute.rs",
+    "crates/units/src/constants.rs",
+    "crates/units/src/digest.rs",
+    "crates/units/src/dimensional_analysis.rs",
+    "crates/units/src/floor_admission_watchdog.rs",
+    "crates/units/src/fundamentals.rs",
+    "crates/units/src/lib.rs",
+    "crates/units/src/physics_floor.rs",
+]
 
 [[mechanism]]
 id = "planet.species-state-support"
@@ -157,10 +263,62 @@ status = "blocked"
 claim = "A species-state support registry is complete, physically admitted, normalized, and valid for the selected stellar state."
 producer_path = "crates/planet/src/canonical/stellar_birth_species.rs"
 refusal_path = "crates/planet/src/canonical/stellar_birth_measure.rs"
-activation_guard = "The physical pair returns no admitted species derivation roots, the conditioned-support verifier is unreachable from production, and the joint-measure leaf remains open."
-open_cross_checker_requirements = ["repository-owned admitted field, operator, state, sector, validity, and mass-projection roots", "production-scoped physical registry authority receipt", "independent conditioned-measure authority", "joint-measure applicability and normalization proof"]
+activation_guard = "The active floor-coordinate pair supplies only scalar coordinates and membership-neutral mass projections. The bounded physical-vocabulary receipt covers its current input but explicitly denies global coverage and membership authority. The physical pair returns no admitted species derivation rules, the conditioned-support verifier is unreachable from production, and the joint-measure leaf remains open."
+open_cross_checker_requirements = ["repository-owned admitted field, operator, state, sector, validity, constraint-law, and species-authorized mass-projection or massless-law roots", "owner-reviewed global physical-vocabulary coverage authority that remains open to unfamiliar payload identities", "production-scoped physical registry closure authority receipt", "claim-specific independent capability mint and verifier for every non-root admission, binding exact artifact identity, admission content, proof ancestry, pair receipt, and scope with substitution canaries", "independent conditioned-measure authority", "joint-measure applicability and normalization proof"]
 owner_boundary = "The owner reviews physical species membership, state coverage, and admitted evidence ancestry."
-semantic_closure = ["crates/planet/src/canonical/stellar_birth_species.rs", "crates/planet/src/canonical/stellar_birth_species/physical_registry/mod.rs", "crates/planet/src/canonical/stellar_birth_species/physical_registry/model.rs", "crates/planet/src/canonical/stellar_birth_species/physical_registry/producer.rs", "crates/planet/src/canonical/stellar_birth_species/physical_registry/watchdog.rs", "crates/planet/src/canonical/stellar_birth_species/physical_registry/tests.rs", "crates/planet/src/canonical/stellar_birth_species/support_packet/mod.rs", "crates/planet/src/canonical/stellar_birth_species/support_packet/model.rs", "crates/planet/src/canonical/stellar_birth_species/support_packet/producer.rs", "crates/planet/src/canonical/stellar_birth_species/support_packet/watchdog.rs", "crates/planet/src/canonical/stellar_birth_species/support_packet/tests.rs", "crates/planet/src/canonical/stellar_birth_measure.rs", "crates/planet/src/canonical/stellar_birth_structure/mod.rs", "crates/planet/src/canonical/stellar_birth_structure/species_registry.rs", "crates/planet/src/canonical/stellar_birth_structure/stellar_state.rs", "crates/units/src/digest.rs", "crates/units/src/lib.rs"]
+semantic_closure = [
+    "crates/ledger/src/admission.rs",
+    "crates/ledger/src/lib.rs",
+    "crates/planet/src/canonical/catalog.rs",
+    "crates/planet/src/canonical/floor_magnitudes.rs",
+    "crates/planet/src/canonical/mod.rs",
+    "crates/planet/src/canonical/preflight.rs",
+    "crates/planet/src/canonical/stellar_birth_measure.rs",
+    "crates/planet/src/canonical/stellar_birth_species.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/model.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/producer/resource.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/tests.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/watchdog.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/watchdog/resource.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/model.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/producer/canary.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/tests.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/watchdog.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/watchdog/canary.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/model.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/tests.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/watchdog.rs",
+    "crates/planet/src/canonical/stellar_birth_species/support_packet/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/support_packet/model.rs",
+    "crates/planet/src/canonical/stellar_birth_species/support_packet/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/support_packet/tests.rs",
+    "crates/planet/src/canonical/stellar_birth_species/support_packet/watchdog.rs",
+    "crates/planet/src/canonical/stellar_birth_structure/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_structure/species_registry.rs",
+    "crates/planet/src/canonical/stellar_birth_structure/stellar_state.rs",
+    "crates/units/data/fixed_math_authority_receipt.json",
+    "crates/units/src/authority_watchdog.rs",
+    "crates/units/src/bignum.rs",
+    "crates/units/src/certified_projection/mod.rs",
+    "crates/units/src/certified_projection/producer.rs",
+    "crates/units/src/certified_projection/producer/canary.rs",
+    "crates/units/src/certified_projection/watchdog.rs",
+    "crates/units/src/certified_projection/watchdog/canary.rs",
+    "crates/units/src/compute.rs",
+    "crates/units/src/constants.rs",
+    "crates/units/src/digest.rs",
+    "crates/units/src/dimensional_analysis.rs",
+    "crates/units/src/floor_admission_watchdog.rs",
+    "crates/units/src/fundamentals.rs",
+    "crates/units/src/lib.rs",
+    "crates/units/src/physics_floor.rs",
+]
 
 [[mechanism]]
 id = "planet.stage1-dimensional-census"
@@ -189,21 +347,80 @@ owner_boundary = "The owner reviews measure support, coordinate neutrality, and 
 semantic_closure = ["crates/planet/src/canonical/stellar_birth_artifacts.rs", "crates/planet/src/canonical/stellar_birth_measure.rs", "crates/planet/src/canonical/star_disk_system.rs", "crates/planet/src/canonical/pipeline.rs", "crates/planet/src/canonical/requirement_analysis.rs"]
 
 [[mechanism]]
+id = "planet.stellar-species-floor-coordinate-projection"
+kind = "authority"
+domain = "scientific"
+status = "active"
+claim = "For the exact physical-invariant leaves that two independent bounded implementations reconstruct through distinct sealed-floor ledger, definition or audited-execution, dimension, authority-binding, and leaf-receipt traversals, each implementation validates the complete identity-to-receipt mapping without treating source arrival order as physical. Producer and watchdog separately reconstruct the current SI dimension vectors and their pure-mass expectation, then canonicalize sources by semantic coordinate identity, exact rational value and uncertainty, uncertainty kind, and a bounded variable-cardinality dimension sequence over domain-separated axis identities before input and projection encoding. The seven current SI axis identities derive by SHA-256 from stable `civsim.dimension-axis.si.<axis>.v1` domains; the representation does not close the physical basis at seven axes. Presentation spellings, provenance accounting, and receipt details remain in ancestry evidence. The pair then derives byte-identical exact rational SI scalar-coordinate artifacts and, only for positive pure-mass coordinates, membership-neutral identity mass projections. Producer and watchdog separately encode a canonical ancestry manifest over every candidate kind, source identity and tier, artifact identity, and ancestry digest. On success, the v5 agreement receipt binds the semantic input, both equal ancestry-manifest digests, ancestry-bearing admitted roots, both checker claims, resource contracts, the v6 exact packet-canary transcript, and the paired result. Each packet-canary entry binds the complete mutant preimage and observed checker result through independent codecs. Separate non-admitting below-seal canaries bind exact positive dimensionless and pure-mass source inputs to the real classification predicate and require zero versus one mass projection. The inner physical-registry producer v6 and watchdog v5 own separate production cap tables, work schedules, encoders, and checks of the downstream bounded physical-vocabulary receipt; reject any advertised input contract that differs from their local contract; and independently compute, validate, and compare resource digests over caps, semantic-work identity and weights, power work, and closure work. They meter canonical rational bytes, expression nodes and edges, executed operations, identities, hashes, registry emission, bounded integer powers, and `2V + 2E + D` closure through one algorithm-neutral semantic contract while retaining distinct traversal algorithms. A private candidate manifest lets two independently encoded final-projection verifiers re-extract and reproject its current sealed packet, exact-match input, candidates, canonical bytes and counts, reconnect both root-pair receipt resource digests to the verifier-local resource contract, recompute the verifier-local packet-canary execution digest, require a bijection with admitted roots, recompute both checker receipts, and run six post-projection mutations through a recursion-free core before the physical registry consumes the roots. A separately paired private transcript binds every post-projection mutant, complete receipt, admitted artifact and opaque capability binding, and observed verifier result; only its own digest field is excluded to avoid self-reference, and both final verifiers recompute it. On refusal, the v5 refusal receipt binds both packet observations, checker outcomes, resource-contract outcomes, the fixed canary suite and stage-correct digest availability, the exact authoritative stage and refusal code, the refusal decision, false membership authority, and the receipt digest. A post-projection canary failure is valid only at the projection-receipt stage with the prior canary digest, matching resource contracts, and an agreeing projected pair. Structural consistency alone grants no production authority: the parent consumer replays the current sealed decision and requires an exact refusal match. The generic alien-coordinate projector is test-only and returns checker output without an admission receipt or root capability. Neither receipt authorizes a field, operator, species member, support, or species-rest-mass proof."
+producer_path = "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/producer.rs"
+producer_implementation = "civsim.planet.stellar-birth-repository-physical-root-producer.v6"
+checker_path = "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/watchdog.rs"
+checker_implementation = "civsim.planet.stellar-birth-repository-physical-root-watchdog.v6"
+receipt_schema = "civsim.planet.stellar-birth-repository-physical-root-receipt.v5; civsim.planet.stellar-birth-repository-physical-root-refusal-receipt.v5"
+shared_semantic_helpers = []
+shared_primitives = ["independently traversed sealed physical-floor ledger, definition, audited-execution, dimension, authority-binding, and leaf-receipt views", "civsim-ledger tier and provenance enums", "bounded BigUint integer arithmetic", "SHA-256", "physical-registry model types", "private checker-candidate manifest retained only for final-projection replay", "separate producer-owned and watchdog-owned packet and projection canary encoders with no shared mutation helper", "typed success-or-refusal decision model with capability-bearing output confined to success", "stage-indexed refusal consistency rules over packet observations, checker outcomes, resource contracts, and canary availability", "canonical big-endian u16-tag and u64-length framing"]
+canaries = ["decimal digit mutation", "decimal sign mutation", "decimal exponent mutation", "sealed SI dimension binding mutation", "source order permutation", "source membership mutation", "coordinated identity rename with old receipt", "tier mutation", "provenance mutation", "uncertainty mutation", "leaf receipt-fingerprint mutation", "floor-authority mutation", "membership-authority mutation", "duplicated source mutation", "sealed positive-pure-mass dimension binding mutation", "positive dimensionless versus pure-mass classification semantic falsifier", "sealed-source role substitution", "source-capacity substitution", "same-refusal-code distinct packet preimages", "omitted artifact", "duplicated artifact", "membership-neutral to species-rest-mass substitution", "canonical projection byte mutation", "admission receipt substitution", "coordinated candidate and admitted-artifact ancestry substitution", "same-refusal-code distinct projection preimages", "post-projection transcript substitution", "post-projection canary-failure stage consistency", "implementation substitution", "paired-result substitution", "schema substitution", "resource-bound substitution", "independent physical-resource table substitution", "semantic-work profile substitution", "rational semantic-work exact boundary", "integer-power semantic-work boundary", "closure semantic-work exact boundary and rule permutation", "ambiguous product preallocation boundary", "receipt substitution", "refusal schema substitution", "refusal claim substitution", "refusal implementation-identity substitution", "refusal packet-observation substitution", "refusal checker-outcome substitution", "refusal resource-contract outcome substitution", "refusal canary-suite substitution", "pre-canary digest graft", "post-canary digest removal", "refusal stage substitution", "refusal code substitution", "refusal decision substitution", "refusal membership-authority graft", "outer refusal-code substitution", "refusal receipt substitution", "structurally valid noncurrent refusal"]
+owner_boundary = "A success receipt plus paired final-projection verification proves faithful exact projection and complete binding to the already admitted floor. A refusal receipt proves structural capability-free non-admission at its encoded stage; only a fresh exact replay against the current sealed decision makes it production-current evidence. The test-only generic projector proves representation generality without admitting its packet. None of these mechanisms prove floor scientific sufficiency, attribute any coordinate to a species, transport source uncertainty into a species rest-mass law, admit a field or operator, or establish species-support completeness."
+semantic_closure = [
+    "crates/ledger/src/admission.rs",
+    "crates/ledger/src/lib.rs",
+    "crates/planet/src/canonical/catalog.rs",
+    "crates/planet/src/canonical/floor_magnitudes.rs",
+    "crates/planet/src/canonical/mod.rs",
+    "crates/planet/src/canonical/preflight.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/model.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/producer/resource.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/tests.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/watchdog.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/watchdog/resource.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/model.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/producer/canary.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/tests.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/watchdog.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/watchdog/canary.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/model.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/tests.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/watchdog.rs",
+    "crates/units/data/fixed_math_authority_receipt.json",
+    "crates/units/src/authority_watchdog.rs",
+    "crates/units/src/bignum.rs",
+    "crates/units/src/certified_projection/mod.rs",
+    "crates/units/src/certified_projection/producer.rs",
+    "crates/units/src/certified_projection/producer/canary.rs",
+    "crates/units/src/certified_projection/watchdog.rs",
+    "crates/units/src/certified_projection/watchdog/canary.rs",
+    "crates/units/src/compute.rs",
+    "crates/units/src/constants.rs",
+    "crates/units/src/digest.rs",
+    "crates/units/src/dimensional_analysis.rs",
+    "crates/units/src/floor_admission_watchdog.rs",
+    "crates/units/src/fundamentals.rs",
+    "crates/units/src/lib.rs",
+    "crates/units/src/physics_floor.rs",
+]
+
+[[mechanism]]
 id = "units.certified-formula-projection"
 kind = "authority"
 domain = "scientific"
 status = "active"
-claim = "For one resource-bounded canonical formula, exact ordered point or closed-interval coordinates, and one bounded target binary scale, two independent interval evaluators authorize only one round-half-even integer; an opaque normalized invariant factor may affect production only when its entire certified cell selects that same terminal integer and two independent outer-binding implementations agree."
+claim = "For one resource-bounded canonical formula, exact ordered point or closed-interval coordinates, and one caller request for either a fixed binary scale or bounded significance, two independent interval evaluators authorize only one round-half-even integer. The canonical grammar binds unsigned-integer exponentiation more tightly than unary signs and admits exactly one unsigned decimal integer literal as the exponent operand; both parsers independently reproduce that grammar. The watchdog receives the request separately, derives its target exponent from the independent interval, and rejects a certificate for another request even when the selected integer happens to match. For a strictly positive complete radicand formula and fixed scale, a recursive-descent producer independently selects the terminal square-root floor cell while a shunting-yard watchdog proves the candidate's exact squared cell against both evaluated intervals. Before any fixed-scale, significant, or positive-square-root certificate is issued, both separate nonrecursive production canary suites have completed successfully and their cached attestations are attached. Each suite executes its own parser, evaluator, resource, mutation, root-cell, and factored-binding paths. The issued certificate and receipt bind each suite's schema, identity, case count, and complete transcript digest. An opaque normalized invariant factor may affect production only when its entire certified cell selects one terminal integer and two independent outer-binding implementations agree."
 producer_path = "crates/units/src/certified_projection/producer.rs"
-producer_implementation = "civsim.units.recursive-descent-alternating-interval.v2; civsim.units.factored-binding-stream.v1"
+producer_implementation = "civsim.units.recursive-descent-alternating-interval.v5; civsim.units.recursive-descent-binary-search-root-floor.v2; civsim.units.factored-binding-stream.v1; civsim.units.formula-canary-suite.recursive-descent-producer.v2"
 checker_path = "crates/units/src/certified_projection/watchdog.rs"
-checker_implementation = "civsim.units.shunting-yard-consecutive-interval.v2; civsim.units.factored-binding-frame.v1"
-receipt_schema = "civsim.units.certified-formula-projection.v3; civsim.units.certified-factored-formula-projection.v2"
+checker_implementation = "civsim.units.shunting-yard-consecutive-interval.v6; civsim.units.shunting-yard-squared-root-cell.v2; civsim.units.factored-binding-frame.v1; civsim.units.formula-canary-suite.shunting-yard-watchdog.v2"
+receipt_schema = "civsim.units.certified-formula-projection.v5; civsim.units.certified-positive-sqrt-formula-projection.v2; civsim.units.certified-factored-formula-projection.v2"
 shared_semantic_helpers = []
-shared_primitives = ["canonical formula and point-or-interval input bytes", "closed representation-resource envelope", "exact BigRat arithmetic", "round-half-even", "SHA-256"]
-canaries = ["formula substitution", "input-bit substitution", "input-interval substitution", "target-scale substitution", "signed-exponent substitution", "endpoint substitution", "result substitution", "outer-binding field substitution", "rounding midpoint", "cancellation", "reciprocal", "pi fifth power", "coefficient-cell boundary", "zero-crossing denominator", "oversized formula", "oversized decimal", "oversized coordinate exponent", "oversized power exponent", "oversized intermediate", "grouping-depth overflow", "unary-depth overflow", "opaque-factor formatting"]
-owner_boundary = "The pair proves one arithmetic projection over supplied exact coordinates and can prove a terminal result for every value in a certified factor cell. It does not admit those coordinates, expose the normalized factor as a physical output, prove a formula is physically correct, select a table-wide representation policy, or prove a table is complete. The planet boundary gate forbids the raw arithmetic API in canonical planet source."
-semantic_closure = ["crates/units/src/certified_projection/producer.rs", "crates/units/src/certified_projection/watchdog.rs", "crates/units/src/certified_projection/mod.rs", "crates/units/src/bignum.rs", "crates/units/src/compute.rs"]
+shared_primitives = ["canonical formula and point-or-interval input bytes", "closed representation-resource envelope", "exact BigRat and BigUint arithmetic", "raw rational sign and magnitude components", "canary-attestation record shape only", "SHA-256"]
+canaries = ["formula substitution", "input-bit substitution", "input-interval substitution", "projection-request-kind substitution", "fixed-scale request substitution", "significance request substitution", "independently derived target-exponent substitution", "unary-sign and power precedence", "grouped negative base", "signed multiplicative operand", "chained unary signs", "signed exponent refusal", "grouped exponent refusal", "decimal exponent refusal", "chained exponent refusal", "power-of-two magnitude cell below, exact, and above boundary", "forged magnitude and target-exponent substitution", "endpoint substitution", "result substitution", "outer-binding field substitution", "exact midpoint false-selection", "negative midpoint parity", "positive binary-exponent midpoint sides and parity", "signed i128 boundary and positive overflow", "Pi dyadic exact and nondyadic signed outward enclosure", "runtime Pi interval containment", "producer frozen Pi scale-96 known answer", "producer frozen multi-limb rational identity", "watchdog frozen Pi scale-80 known answer", "watchdog frozen multi-limb rational identity", "cancellation", "reciprocal", "pi fifth power", "coefficient-cell boundary", "zero-crossing denominator", "positive-square-root exact square", "positive-square-root double-rounding discriminator", "nonpositive radicand", "root-cell boundary crossing", "root endpoint substitution", "root scale substitution", "root result substitution", "root formula substitution", "root input substitution", "root schema substitution", "oversized formula", "oversized decimal", "oversized coordinate exponent", "oversized power exponent", "oversized intermediate", "grouping-depth overflow", "unary-depth overflow", "producer runtime-canary transcript attachment", "watchdog runtime-canary transcript attachment", "canary-attestation schema, identity, count, and digest substitution", "opaque-factor formatting"]
+owner_boundary = "The pair proves one arithmetic projection over supplied exact coordinates, including the terminal floor cell of a strictly positive complete square-root expression, and can prove a terminal result for every value in a certified factor cell. It does not admit those coordinates, expose the normalized factor as a physical output, prove a formula is physically correct, authorize a later state-dependent square-root kernel, select a table-wide representation policy, or prove a table is complete. The planet boundary gate forbids the raw arithmetic API in canonical planet source."
+semantic_closure = ["crates/units/src/certified_projection/producer.rs", "crates/units/src/certified_projection/producer/canary.rs", "crates/units/src/certified_projection/watchdog.rs", "crates/units/src/certified_projection/watchdog/canary.rs", "crates/units/src/certified_projection/mod.rs", "crates/units/src/bignum.rs", "crates/units/src/compute.rs"]
 
 [[mechanism]]
 id = "units.si-execution-table"
@@ -216,7 +433,7 @@ refusal_path = "crates/units/src/constants.rs"
 activation_guard = "Per-formula certificates exist, but no independent inventory authority pins complete row coverage, formula-to-symbol mapping, floor ancestry, scale selection, and aggregate table receipt semantics."
 open_cross_checker_requirements = ["independent closed identity and formula inventory", "independent sealed-floor ancestry verification for every physical row", "independent per-row scale and integer projection replay", "aggregate receipt binding row order, identity, formula, input ancestry, scale, projection receipt, and implementation identities", "missing-row, extra-row, formula-swap, ancestry-swap, scale-swap, and aggregate-reordering canaries"]
 owner_boundary = "The pair may prove table membership and projection ancestry. The owner reviews whether the identity set and formulas are the physically sufficient SI interface for canonical consumers."
-semantic_closure = ["crates/units/src/constants.rs", "crates/units/src/fundamentals.rs", "crates/units/src/physics_floor.rs", "crates/units/src/compute.rs", "crates/units/src/certified_projection/mod.rs", "crates/units/src/certified_projection/producer.rs", "crates/units/src/certified_projection/watchdog.rs", "crates/units/src/bignum.rs", "crates/units/src/lib.rs"]
+semantic_closure = ["crates/units/src/constants.rs", "crates/units/src/fundamentals.rs", "crates/units/src/physics_floor.rs", "crates/units/src/compute.rs", "crates/units/src/certified_projection/mod.rs", "crates/units/src/certified_projection/producer.rs", "crates/units/src/certified_projection/producer/canary.rs", "crates/units/src/certified_projection/watchdog.rs", "crates/units/src/certified_projection/watchdog/canary.rs", "crates/units/src/bignum.rs", "crates/units/src/lib.rs"]
 
 [[mechanism]]
 id = "units.si-representation-policy"
@@ -226,10 +443,10 @@ status = "blocked"
 claim = "SI execution scale selection and every transcendental projection are authorized only by a whole-expression exact interval that selects one magnitude bracket and one round-half-even integer."
 producer_path = "crates/units/src/constants.rs"
 refusal_path = "crates/units/src/constants.rs"
-activation_guard = "The formula pair certifies a caller-selected target scale, while the magnitude-to-scale policy and source-decimal precision rule are selected in the same implementation that consumes them."
-open_cross_checker_requirements = ["independent derivation of the magnitude bracket from certified interval endpoints", "independent source-decimal resolution and headroom policy", "proof that selected scales cover the complete i128 domain without overflow or silent coarsening", "policy receipt bound separately from every formula projection receipt", "boundary canaries at magnitude, source-ULP, i128-capacity, and minimum-scale transitions"]
+activation_guard = "The formula pair now binds a separately supplied fixed-scale or significance request and independently derives its target exponent. The consumer still selects the request mode, source-decimal resolution, significance, and headroom policy without a separate policy authority."
+open_cross_checker_requirements = ["independent derivation of the representation request from source resolution and execution bounds", "independent source-decimal resolution and headroom policy", "proof that selected requests cover the complete i128 domain without overflow or silent coarsening", "policy receipt bound separately from every formula projection receipt", "boundary canaries at magnitude, source-ULP, i128-capacity, and minimum-scale transitions"]
 owner_boundary = "This policy governs deterministic engine representation only. It cannot admit a physical value or turn SI coordinates into causal law authority."
-semantic_closure = ["crates/units/src/constants.rs", "crates/units/src/fundamentals.rs", "crates/units/src/bignum.rs", "crates/units/src/certified_projection/mod.rs", "crates/units/src/certified_projection/producer.rs", "crates/units/src/certified_projection/watchdog.rs", "crates/units/src/compute.rs"]
+semantic_closure = ["crates/units/src/constants.rs", "crates/units/src/fundamentals.rs", "crates/units/src/bignum.rs", "crates/units/src/certified_projection/mod.rs", "crates/units/src/certified_projection/producer.rs", "crates/units/src/certified_projection/producer/canary.rs", "crates/units/src/certified_projection/watchdog.rs", "crates/units/src/certified_projection/watchdog/canary.rs", "crates/units/src/compute.rs"]
 
 [[mechanism]]
 id = "units.wide-integer-arithmetic"

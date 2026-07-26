@@ -462,6 +462,15 @@ mod tests {
             .expect("the joint leaf carries its species derivation frontier");
         assert_eq!(species.candidate_member_count(), Some(0));
         assert_eq!(species.verified_support_member_count(), Some(0));
+        assert_eq!(species.physical_registry_admitted_root_count(), Some(4));
+        assert_eq!(
+            species.physical_registry_refusal_code(),
+            Some("no_admitted_species_derivation_rules")
+        );
+        assert_eq!(
+            species.physical_registry_membership_authority(),
+            Some(false)
+        );
         assert_eq!(species.value_payload_present(), Some(false));
         assert_eq!(species.residual_slot_claim(), Some(false));
         assert!(coordinate.analyses().is_empty());

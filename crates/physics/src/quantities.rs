@@ -62,6 +62,7 @@ pub fn units_dimension(d: &Dimension) -> UnitsDimension {
         (3, d.temperature),
         (4, d.current),
     ])
+    .expect("five bounded physics-axis exponents must fit the units dimension representation")
 }
 
 /// `floor(log2(|value|))` for a non-zero `Fixed`, in the value domain (negative for a value below

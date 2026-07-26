@@ -1,6 +1,7 @@
 //! Producer for the non-admitting species derivation frontier.
 
-use super::{AnalysisProgress, SpeciesDerivationAttempt};
+use super::{AnalysisProgress, SpeciesDerivationAttempt, LIVE_PHYSICAL_REGISTRY_ATTEMPT_ID};
+use crate::canonical::stellar_birth_species::physical_registry::RepositoryPhysicalRegistryFrontier;
 use std::collections::BTreeSet;
 
 pub(super) struct ProducedFrontier {
@@ -18,47 +19,24 @@ pub(super) struct ProducedFrontier {
     pub(super) unique_residual_slot_status: AnalysisProgress,
 }
 
-fn strings(values: &[&str]) -> Vec<String> {
-    values.iter().map(|value| (*value).to_owned()).collect()
-}
-
-pub(super) fn produce_frontier() -> ProducedFrontier {
-    let attempts = vec![
-        SpeciesDerivationAttempt {
-            id: "stellar_birth.species_derivation.complete_registry",
-            status: AnalysisProgress::BlockedOpenProofs,
-            input_ids: strings(&["fundamental.alpha", "fundamental.G", "fundamental.m_e"]),
-            open_proof_ids: strings(&[
-                "canonical_species_state_descriptor_checker_unavailable",
-                "charge_state_sector_validity_proof_unavailable",
-                "physical_species_membership_derivation_unavailable",
-                "rest_mass_dimension_and_ancestry_proof_unavailable",
-            ]),
-        },
-        SpeciesDerivationAttempt {
-            id: "stellar_birth.species_derivation.complete_conditioned_support",
-            status: AnalysisProgress::BlockedOpenProofs,
-            input_ids: strings(&[
-                "stellar_birth.composition.species_number_fraction_field",
-                "stellar_birth.species_state_registry",
-            ]),
-            open_proof_ids: strings(&[
-                "conditioned_zero_or_sparse_support_semantics_unavailable",
-                "finite_exact_resource_domain_unavailable",
-                "joint_measure_support_binding_unavailable",
-            ]),
-        },
-        SpeciesDerivationAttempt {
-            id: "stellar_birth.species_derivation.exact_mean_mass_projection",
-            status: AnalysisProgress::BlockedOpenProofs,
-            input_ids: strings(&["stellar_birth.conditioned_species_state_support"]),
-            open_proof_ids: strings(&[
-                "finite_exact_resource_domain_unavailable",
-                "integer_projection_schema_unavailable",
-                "joint_measure_support_binding_unavailable",
-            ]),
-        },
-    ];
+pub(super) fn produce_frontier(physical: &RepositoryPhysicalRegistryFrontier) -> ProducedFrontier {
+    // Report only the first executable refusal reached by the repository.
+    // Downstream support and reduction paths are not attempted while the
+    // physical registry refuses, so listing their authored proof guesses here
+    // would imply coverage that the live run has not established.
+    let attempts = vec![SpeciesDerivationAttempt {
+        id: LIVE_PHYSICAL_REGISTRY_ATTEMPT_ID,
+        status: AnalysisProgress::BlockedOpenProofs,
+        input_ids: vec![
+            physical.root_claim_id.to_owned(),
+            physical.vocabulary_claim_id.clone(),
+        ],
+        open_proof_ids: physical
+            .open_obligations
+            .iter()
+            .map(|obligation| (*obligation).to_owned())
+            .collect(),
+    }];
     let open_proof_ids = attempts
         .iter()
         .flat_map(|attempt| attempt.open_proof_ids.iter().cloned())

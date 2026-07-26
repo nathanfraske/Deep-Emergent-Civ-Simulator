@@ -41,7 +41,14 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "authority",
         "scientific",
         "active",
-        "1f04f54954ab30f9709553bc4922ec9a2b8759f8f4b72fb2d2db1d7cbcceb389",
+        "e1b8cfd716ffaa4a184aa4656b5f9aa1553e5452d19009593099b525daabc0b8",
+    ),
+    (
+        "floor.codata-factual-row-binding",
+        "authority",
+        "scientific",
+        "active",
+        "3151bd9388f1bed1601724c421a4cdcd1e0a8c7de06d6127aeec4af48bbadd1b",
     ),
     (
         "floor.pi-budget",
@@ -69,28 +76,35 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "authority",
         "governance",
         "active",
-        "69ffca7a6ad2d2654df9af89a6f50bddb7fb550d682aff2d85df90220bdaf92e",
+        "ff8dc217d4473b4264bc1a15ed6ad541e78455e0e95dedae5b3fdd89aba197c8",
     ),
     (
         "planet.completed-snapshot",
         "authority",
         "scientific",
         "blocked",
-        "dd72abfaa771ff707b884d66340830b4d3ba5378a36097dac3f13c11d94246ee",
+        "5c09a8d95b7de145110a9f97f773bb0e0a63d6d6dc0f964eeb8beb62efff5575",
+    ),
+    (
+        "planet.physical-vocabulary-partition",
+        "diagnostic",
+        None,
+        "diagnostic",
+        "fcd35a3c4997fde2be067a86172894a7b1f1d983afd21abddf1b130feac33f0d",
     ),
     (
         "planet.species-derivation-frontier",
         "diagnostic",
         None,
         "diagnostic",
-        "7991ef98a413bd1ac4893bcc30b8cc2c9746a52b126d1a8864c5c6d1332f8d60",
+        "44fb171f11d42aaa2be122891aff3374c6f0ad56a3de0cb07058f6170f0d2f92",
     ),
     (
         "planet.species-state-support",
         "authority",
         "scientific",
         "blocked",
-        "2513182235eef6be7e340322dc465dc2570f9b295053ce355c4ba40623e21240",
+        "3ff574bcd1a9e19f95bfaafb3fcd472422531d4a2ac2dcc7655943c93a9d34f0",
     ),
     (
         "planet.stage1-dimensional-census",
@@ -107,25 +121,32 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "68f58f019ab4f620194133e673c64240d4ad066f97404698ba0bfbf8b96935d1",
     ),
     (
+        "planet.stellar-species-floor-coordinate-projection",
+        "authority",
+        "scientific",
+        "active",
+        "7963fbd5fb857fb2516e11579e76409c5bdfc3cc53d172b15251016b87d80750",
+    ),
+    (
         "units.certified-formula-projection",
         "authority",
         "scientific",
         "active",
-        "c1317c9000d82dc8507537120ce3c44a4a87886839a56d880c2d347a22266ff4",
+        "7ee2a9a60f102d0ea34bc5700d2070b079390c050d10c2d685e1525a0f091005",
     ),
     (
         "units.si-execution-table",
         "authority",
         "scientific",
         "blocked",
-        "cfdc61ffea91745443c5e9b170198caf15c1a118ec92d645de68053193dcd8ae",
+        "2eca0ae6da0ad4483e3038e5aa6bbf1cd3d158bf3ca49df78aab7224b8927d5e",
     ),
     (
         "units.si-representation-policy",
         "authority",
         "scientific",
         "blocked",
-        "71d0b118afc0a88007ea19267e2277e89d4252f5654241182f22ab2663e51ce8",
+        "db7449a52dbf7f56b598828fe3888d0505e833c170c89de99a6b390a8057698b",
     ),
     (
         "units.wide-integer-arithmetic",
@@ -135,7 +156,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "3bfb94aa0c3f507ad8ba9762e91ca9009284becc9d9752d7b7b896cb9a26ca7d",
     ),
 )
-EXPECTED_COUNTS = (7, 8, 1, 16)
+EXPECTED_COUNTS = (9, 8, 2, 19)
 
 META_EXPECTATIONS = (
     ("producer_path", "scripts/authority_watchdog_gate.py"),
@@ -692,10 +713,25 @@ def _mandatory_corruptions(
         "receipt_schema"
     ] = "civsim.units.replacement-schema.v1"
 
+    root_refusal_schema_missing = copy.deepcopy(document)
+    root_refusal_schema_missing["mechanism"][
+        positions["planet.stellar-species-floor-coordinate-projection"]
+    ]["receipt_schema"] = (
+        "civsim.planet.stellar-birth-repository-physical-root-receipt.v5"
+    )
+
     canary = copy.deepcopy(document)
     canary["mechanism"][positions["units.certified-formula-projection"]][
         "canaries"
     ][-1] = "replacement canary"
+
+    root_refusal_canary = copy.deepcopy(document)
+    root_refusal_canaries = root_refusal_canary["mechanism"][
+        positions["planet.stellar-species-floor-coordinate-projection"]
+    ]["canaries"]
+    root_refusal_canaries[
+        root_refusal_canaries.index("refusal stage substitution")
+    ] = "replacement refusal-stage check"
 
     owner = copy.deepcopy(document)
     owner["mechanism"][positions["floor.pi-budget"]]["owner_boundary"] = (
@@ -712,6 +748,25 @@ def _mandatory_corruptions(
         "open_cross_checker_requirements"
     ][-1] = "a replacement requirement"
 
+    root_capability_requirement = copy.deepcopy(document)
+    root_capability_requirements = root_capability_requirement["mechanism"][
+        positions["planet.species-state-support"]
+    ]["open_cross_checker_requirements"]
+    root_capability_matches = [
+        number
+        for number, value in enumerate(root_capability_requirements)
+        if "claim-specific independent capability" in value
+        and "non-root admission" in value
+    ]
+    if len(root_capability_matches) != 1:
+        raise AssertionError(
+            "species-state support must carry exactly one non-root capability requirement"
+        )
+    root_capability_position = root_capability_matches[0]
+    root_capability_requirements[root_capability_position] = (
+        "a replacement downstream root-capability check"
+    )
+
     observation = copy.deepcopy(document)
     observation["mechanism"][positions["planet.species-derivation-frontier"]][
         "observation"
@@ -726,6 +781,13 @@ def _mandatory_corruptions(
     adapter_missing["mechanism"][
         positions["units.certified-formula-projection"]
     ]["semantic_closure"].remove("crates/units/src/compute.rs")
+
+    live_root_missing = copy.deepcopy(document)
+    live_root_missing["mechanism"][
+        positions["planet.species-derivation-frontier"]
+    ]["semantic_closure"].remove(
+        "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/mod.rs"
+    )
 
     orchestrator_changed = copy.deepcopy(document)
     meta_closure = orchestrator_changed["mechanism"][
@@ -748,13 +810,17 @@ def _mandatory_corruptions(
         ("claim broadening", broad),
         ("implementation substitution", implementation),
         ("schema substitution", schema),
+        ("root refusal receipt schema omission", root_refusal_schema_missing),
         ("canary substitution", canary),
+        ("root refusal canary substitution", root_refusal_canary),
         ("owner boundary substitution", owner),
         ("activation guard substitution", guard),
         ("activation requirement substitution", requirement),
+        ("species root-capability requirement substitution", root_capability_requirement),
         ("diagnostic observation substitution", observation),
         ("shared material substitution", material),
         ("semantic closure adapter omission", adapter_missing),
+        ("live species frontier root omission", live_root_missing),
         ("semantic closure orchestrator substitution", orchestrator_changed),
         ("inventory header substitution", header),
     )

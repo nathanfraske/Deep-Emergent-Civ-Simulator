@@ -23,6 +23,13 @@
 use crate::fundamentals::{SiDimension, SI_BASE_DIMENSION_IDS};
 use std::{collections::BTreeSet, fmt};
 
+/// Maximum dense basis cells materialized by one SI dimension analysis.
+///
+/// This is an execution-resource bound, not a limit on the physical basis.
+/// Callers needing a larger census must partition it or use a sparse authority
+/// path instead of turning allocator failure into a scientific verdict.
+pub const MAX_DIMENSION_ANALYSIS_BASIS_CELLS: usize = 1_048_576;
+
 /// One exact rational exponent in a dimensional relation.
 ///
 /// The denominator is positive and the pair is always reduced. The SI matrix
@@ -225,6 +232,7 @@ pub struct SiDimensionAnalysis {
 impl SiDimensionAnalysis {
     /// Analyze the supplied columns in their declared order.
     pub fn analyze(columns: &[SiDimensionColumn]) -> Result<Self, DimensionAnalysisError> {
+        ensure_basis_resource_bound(columns.len())?;
         validate_columns(columns)?;
         let rref = rref(
             &columns
@@ -325,9 +333,16 @@ impl SiDimensionAnalysis {
 pub enum DimensionAnalysisError {
     EmptyColumnId,
     DuplicateColumnId(String),
+    BasisCellCapacityExceeded {
+        column_count: usize,
+        max_basis_cells: usize,
+    },
     ZeroDenominator,
     ArithmeticOverflow,
-    CoefficientCountMismatch { expected: usize, found: usize },
+    CoefficientCountMismatch {
+        expected: usize,
+        found: usize,
+    },
     ProjectionInvariantViolation,
 }
 
@@ -338,6 +353,14 @@ impl fmt::Display for DimensionAnalysisError {
             Self::DuplicateColumnId(id) => {
                 write!(f, "duplicate SI dimension column identity '{id}'")
             }
+            Self::BasisCellCapacityExceeded {
+                column_count,
+                max_basis_cells,
+            } => write!(
+                f,
+                "SI dimension analysis for {column_count} column(s) exceeds the \
+                 {max_basis_cells}-cell dense basis resource bound"
+            ),
             Self::ZeroDenominator => f.write_str("exact dimension exponent has zero denominator"),
             Self::ArithmeticOverflow => {
                 f.write_str("exact SI dimension elimination exceeded the checked i128 domain")
@@ -354,6 +377,21 @@ impl fmt::Display for DimensionAnalysisError {
 }
 
 impl std::error::Error for DimensionAnalysisError {}
+
+fn ensure_basis_resource_bound(column_count: usize) -> Result<(), DimensionAnalysisError> {
+    let capacity_error = || DimensionAnalysisError::BasisCellCapacityExceeded {
+        column_count,
+        max_basis_cells: MAX_DIMENSION_ANALYSIS_BASIS_CELLS,
+    };
+    let augmented_columns = column_count.checked_add(1).ok_or_else(capacity_error)?;
+    let basis_cells = augmented_columns
+        .checked_mul(augmented_columns)
+        .ok_or_else(capacity_error)?;
+    if basis_cells > MAX_DIMENSION_ANALYSIS_BASIS_CELLS {
+        return Err(capacity_error());
+    }
+    Ok(())
+}
 
 fn validate_columns(columns: &[SiDimensionColumn]) -> Result<(), DimensionAnalysisError> {
     let mut seen = BTreeSet::new();
@@ -633,6 +671,25 @@ mod tests {
         assert_eq!(
             SiDimensionAnalysis::analyze(&duplicate),
             Err(DimensionAnalysisError::DuplicateColumnId("same".into()))
+        );
+    }
+
+    #[test]
+    fn an_oversized_dense_basis_refuses_before_quadratic_materialization() {
+        let columns = (0..1_024)
+            .map(|index| {
+                SiDimensionColumn::new(
+                    &format!("dimensionless-{index}"),
+                    SiDimension::DIMENSIONLESS,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            SiDimensionAnalysis::analyze(&columns),
+            Err(DimensionAnalysisError::BasisCellCapacityExceeded {
+                column_count: columns.len(),
+                max_basis_cells: MAX_DIMENSION_ANALYSIS_BASIS_CELLS,
+            })
         );
     }
 }

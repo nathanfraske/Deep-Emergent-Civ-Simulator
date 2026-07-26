@@ -4,18 +4,19 @@ use super::{
     stellar_birth_species::write_species_derivation_analysis,
     stellar_birth_structure::write_stellar_birth_structure,
     transcript::canonical_text,
-    EventId, RealizationId, RunEventKind, RunTranscript, Stage, TranscriptError,
+    EventId, RealizationId, RepresentationStatus, RunEventKind, RunTranscript, Stage,
+    TranscriptError,
 };
 use std::{cmp::Ordering, fmt};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RefusalCode {
-    AbsoluteFloorRequired,
     FloorCatalogMismatch,
     FloorMagnitudeUnavailable,
     MissingStageRequirement,
     PipelineIncomplete,
     TranscriptInvariantViolation,
+    RepresentationUnavailable,
 }
 
 /// One unresolved proof leaf and its canonical ordered closure obligations.
@@ -64,12 +65,12 @@ impl OpenRequirement {
 impl RefusalCode {
     pub const fn id(self) -> &'static str {
         match self {
-            Self::AbsoluteFloorRequired => "absolute_floor_required",
             Self::FloorCatalogMismatch => "floor_catalog_mismatch",
             Self::FloorMagnitudeUnavailable => "floor_magnitude_unavailable",
             Self::MissingStageRequirement => "missing_stage_requirement",
             Self::PipelineIncomplete => "pipeline_incomplete",
             Self::TranscriptInvariantViolation => "transcript_invariant_violation",
+            Self::RepresentationUnavailable => "representation_unavailable",
         }
     }
 }
@@ -89,16 +90,6 @@ pub struct Refusal {
 }
 
 impl Refusal {
-    pub(crate) fn absolute_floor_required() -> Self {
-        Self {
-            code: RefusalCode::AbsoluteFloorRequired,
-            stage: None,
-            requirement_id: Some("absolute_physics_floor".into()),
-            open_requirements: Vec::new(),
-            detail: "run_planet requires a validated absolute physics floor".into(),
-        }
-    }
-
     pub(crate) fn floor_catalog_mismatch(detail: String) -> Self {
         Self {
             code: RefusalCode::FloorCatalogMismatch,
@@ -166,6 +157,16 @@ impl Refusal {
             code: RefusalCode::TranscriptInvariantViolation,
             stage: None,
             requirement_id: Some("canonical.run_transcript".into()),
+            open_requirements: Vec::new(),
+            detail,
+        }
+    }
+
+    pub(crate) fn representation_unavailable(detail: String) -> Self {
+        Self {
+            code: RefusalCode::RepresentationUnavailable,
+            stage: None,
+            requirement_id: Some("repository.si_representation_projection".into()),
             open_requirements: Vec::new(),
             detail,
         }
@@ -266,11 +267,52 @@ pub struct RunReceipt {
 
 impl RunReceipt {
     pub(crate) fn refused(absolute_floor_entries: usize, refusals: Vec<Refusal>) -> Self {
-        let mut transcript = RunTranscript::empty(absolute_floor_entries);
-        transcript
-            .refuse(None, refusals)
-            .expect("a nonempty preflight refusal closes an empty transcript");
-        Self::from_transcript(absolute_floor_entries, transcript)
+        let transcript = RunTranscript::empty(absolute_floor_entries);
+        Self::refused_after_transcript_initialization(absolute_floor_entries, transcript, refusals)
+    }
+
+    fn refused_after_transcript_initialization(
+        absolute_floor_entries: usize,
+        transcript: Result<RunTranscript, TranscriptError>,
+        refusals: Vec<Refusal>,
+    ) -> Self {
+        match transcript {
+            Ok(mut transcript) => {
+                transcript
+                    .refuse(None, refusals)
+                    .expect("a nonempty preflight refusal closes an empty transcript");
+                Self::from_transcript(absolute_floor_entries, transcript)
+            }
+            Err(error) => Self::representation_unavailable_with_refusals(
+                absolute_floor_entries,
+                error.to_string(),
+                refusals,
+            ),
+        }
+    }
+
+    /// Terminal receipt for a failed SI representation projection. It never
+    /// re-enters projection or carries any projected physical value.
+    pub(crate) fn representation_unavailable(
+        absolute_floor_entries: usize,
+        detail: String,
+    ) -> Self {
+        Self::representation_unavailable_with_refusals(absolute_floor_entries, detail, Vec::new())
+    }
+
+    fn representation_unavailable_with_refusals(
+        absolute_floor_entries: usize,
+        detail: String,
+        refusals: Vec<Refusal>,
+    ) -> Self {
+        Self::from_transcript(
+            absolute_floor_entries,
+            RunTranscript::representation_unavailable_with_refusals(
+                absolute_floor_entries,
+                detail,
+                refusals,
+            ),
+        )
     }
 
     /// Build a refusal after the canonical run has entered one physical stage.
@@ -280,7 +322,12 @@ impl RunReceipt {
         stage: Stage,
         refusals: Vec<Refusal>,
     ) -> Self {
-        let mut transcript = RunTranscript::empty(absolute_floor_entries);
+        let mut transcript = match RunTranscript::empty(absolute_floor_entries) {
+            Ok(transcript) => transcript,
+            Err(error) => {
+                return Self::representation_unavailable(absolute_floor_entries, error.to_string());
+            }
+        };
         for prior in Stage::ALL {
             transcript
                 .enter_stage(prior)
@@ -376,7 +423,8 @@ impl RunReceipt {
     }
 
     pub fn is_complete(&self) -> bool {
-        self.refusals.is_empty()
+        self.transcript.representation().status() == RepresentationStatus::Available
+            && self.refusals.is_empty()
             && self
                 .stages
                 .iter()
@@ -393,7 +441,7 @@ fn stage_index(stage: Stage) -> usize {
 
 impl fmt::Display for RunReceipt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "receipt=civsim.planet.run.v11")?;
+        writeln!(f, "receipt=civsim.planet.run.v12")?;
         writeln!(f, "complete={}", self.is_complete())?;
         writeln!(
             f,
@@ -799,5 +847,110 @@ mod tests {
                 .count(),
             5
         );
+    }
+
+    #[test]
+    fn unavailable_representation_is_a_stable_visible_value_free_refusal() {
+        let detail = "SI representation projection failed: injected receipt failure";
+        let first = RunReceipt::representation_unavailable(3, detail.to_owned());
+        let second = RunReceipt::representation_unavailable(3, detail.to_owned());
+
+        assert_eq!(first, second);
+        assert_eq!(first.to_string(), second.to_string());
+        assert!(!first.is_complete());
+        assert_eq!(first.refusals().len(), 1);
+        assert_eq!(
+            first.refusals()[0].code(),
+            RefusalCode::RepresentationUnavailable
+        );
+        assert_eq!(
+            first.refusals()[0].requirement_id(),
+            Some("repository.si_representation_projection")
+        );
+        assert_eq!(first.refusals()[0].detail(), detail);
+        assert_eq!(
+            first.transcript().representation().status(),
+            RepresentationStatus::RepresentationUnavailable
+        );
+        assert!(first.transcript().representation().values().is_empty());
+        assert_eq!(first.transcript().events().len(), 1);
+        assert!(matches!(
+            first.transcript().events()[0].kind(),
+            RunEventKind::Refused {
+                stage: None,
+                refusals,
+            } if refusals.as_slice() == first.refusals()
+        ));
+
+        let text = first.to_string();
+        assert!(text.contains("refusal.0000.code=representation_unavailable\n"));
+        assert!(text.contains(
+            "refusal.0000.detail=\"SI representation projection failed: injected receipt failure\"\n"
+        ));
+        assert!(text.contains(
+            "event.0000.reason.0000.detail=\"SI representation projection failed: injected receipt failure\"\n"
+        ));
+        assert!(text.contains(
+            "representation.error=\"SI representation projection failed: injected receipt failure\"\n"
+        ));
+        assert!(!text.contains("representation.value.0000"));
+        assert!(!text.contains(".kind=floor_value\n"));
+    }
+
+    #[test]
+    fn unavailable_representation_preserves_known_structural_refusals() {
+        let representation_detail =
+            "SI representation projection failed: injected receipt initialization failure";
+        let structural_detail = "injected absolute-floor catalog mismatch";
+        let build = || {
+            RunReceipt::refused_after_transcript_initialization(
+                3,
+                Err(TranscriptError::RepresentationUnavailable {
+                    detail: representation_detail.to_owned(),
+                }),
+                vec![Refusal::floor_catalog_mismatch(
+                    structural_detail.to_owned(),
+                )],
+            )
+        };
+
+        let first = build();
+        let second = build();
+        assert_eq!(first, second);
+        assert_eq!(
+            first
+                .refusals()
+                .iter()
+                .map(Refusal::code)
+                .collect::<Vec<_>>(),
+            vec![
+                RefusalCode::FloorCatalogMismatch,
+                RefusalCode::RepresentationUnavailable,
+            ]
+        );
+        assert_eq!(first.refusals()[0].detail(), structural_detail);
+        assert_eq!(first.refusals()[1].detail(), representation_detail);
+        assert_eq!(first.transcript().events().len(), 1);
+        assert!(matches!(
+            first.transcript().events()[0].kind(),
+            RunEventKind::Refused {
+                stage: None,
+                refusals,
+            } if refusals.as_slice() == first.refusals()
+        ));
+        assert!(first.transcript().representation().values().is_empty());
+        assert!(first.transcript().events().iter().all(|event| !matches!(
+            event.kind(),
+            RunEventKind::FloorValue(_) | RunEventKind::DerivedValue(_)
+        )));
+
+        let text = first.to_string();
+        assert!(text.contains("refusal_count=2\n"));
+        assert!(text.contains("refusal.0000.code=floor_catalog_mismatch\n"));
+        assert!(text.contains("refusal.0001.code=representation_unavailable\n"));
+        assert!(text.contains("event.0000.reason.0000.code=floor_catalog_mismatch\n"));
+        assert!(text.contains("event.0000.reason.0001.code=representation_unavailable\n"));
+        assert!(text.contains("representation.value_count=0\n"));
+        assert!(!text.contains("representation.value.0000"));
     }
 }

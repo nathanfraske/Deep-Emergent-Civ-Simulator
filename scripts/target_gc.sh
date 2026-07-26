@@ -364,12 +364,18 @@ add_tomb() {
     return 0
   fi
   marker="$candidate/.civsim-gc-tomb-v1"
-  lines=$(wc -l < "$marker" 2>/dev/null) || lines=0
+  lines=$(awk 'END { print NR }' "$marker" 2>/dev/null) || lines=0
   origin=$(sed -n 's/^origin=//p' "$marker" 2>/dev/null)
   expected_prefix="$(dirname "$origin")/.civsim-gc-$(basename "$origin")-"
   if [ "$lines" != 2 ] || ! grep -qx 'schema=1' "$marker" 2>/dev/null || \
     [ -z "$origin" ] || [[ "$candidate" != "$expected_prefix"* ]] || \
     ! tomb_origin_safe "$candidate" "$origin"; then
+    # Another collector may finish deleting a valid tomb after the glob found
+    # it but before these reads. A vanished candidate needs no verdict. Any
+    # candidate that still exists remains fail-closed on its marker.
+    if [ ! -e "$candidate" ] && [ ! -L "$candidate" ]; then
+      return 0
+    fi
     echo "target_gc: preserving unmarked or invalid tomb lookalike $candidate" >&2
     DISCOVERY_ERROR=1
     return 0

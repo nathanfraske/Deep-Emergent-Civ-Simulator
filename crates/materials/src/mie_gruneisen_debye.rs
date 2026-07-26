@@ -88,8 +88,22 @@ pub struct MgdAnchors {
     pub atoms_per_formula_unit: u32,
 }
 
+/// Why the scalar banked-anchor adapter refused.
+///
+/// The family-aware [`MgdAnchors::families`] API remains the authoritative route when more than one
+/// nonidentical source inversion survives. A scalar adapter may return an anchor set only when the bank
+/// resolves to zero or one distinct determination.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MgdAnchorSelectionRefusal {
+    /// More than one nonidentical source family survived assembly, so selecting one would erase the gap.
+    UncollapsedSourceFamilyGap {
+        /// The surviving source families, in the order declared by the banked row.
+        source_families: Vec<String>,
+    },
+}
+
 impl MgdAnchors {
-    /// Assemble the six anchors for a phase from the banked columns, or refuse.
+    /// Assemble one unambiguous set of six anchors from the banked columns, or refuse.
     ///
     /// # The gamma this reads, and the one it must not
     ///
@@ -110,16 +124,25 @@ impl MgdAnchors {
     /// were estimated from systematics, or whose fit does not reproduce the banked `gamma_0`, is refused
     /// rather than assembled: the parameters of a joint inversion are meaningful together and not
     /// individually.
+    ///
+    /// # More than one surviving family is not a scalar
+    ///
+    /// Distinct source families are retained by [`Self::families`]. This adapter refuses when more than one
+    /// survives instead of selecting the first family in declaration order. Byte-identical families have
+    /// already collapsed into one determination before this check, with the other names retained as
+    /// concurrence.
     pub fn from_banked(
         phase: &str,
         gruneisen: &civsim_physics::gruneisen::GruneisenTable,
         anchors: &civsim_physics::thermoelastic_anchors::ThermoelasticAnchors,
-    ) -> Option<Self> {
-        Self::families(phase, gruneisen, anchors)
-            .0
-            .into_iter()
-            .next()
-            .map(|f| f.anchors)
+    ) -> Result<Option<Self>, MgdAnchorSelectionRefusal> {
+        let (mut families, _) = Self::families(phase, gruneisen, anchors);
+        if families.len() > 1 {
+            return Err(MgdAnchorSelectionRefusal::UncollapsedSourceFamilyGap {
+                source_families: families.into_iter().map(|family| family.family).collect(),
+            });
+        }
+        Ok(families.pop().map(|family| family.anchors))
     }
 
     /// EVERY source inversion the row transcribes, assembled separately and tagged, with the families that
@@ -1520,6 +1543,23 @@ mod tests {
                 band * 100.0
             );
         }
+    }
+
+    /// THE SCALAR ADAPTER CANNOT TURN THAT GAP BACK INTO A POINT.
+    #[test]
+    fn the_scalar_banked_adapter_refuses_two_surviving_source_families() {
+        let anc = ThermoelasticAnchors::standard().expect("anchors");
+        let gr = civsim_physics::gruneisen::GruneisenTable::standard().expect("gruneisen");
+
+        let refusal = MgdAnchors::from_banked("enstatite", &gr, &anc)
+            .expect_err("two nonidentical families have no scalar selection authority");
+        assert_eq!(
+            refusal,
+            MgdAnchorSelectionRefusal::UncollapsedSourceFamilyGap {
+                source_families: vec!["slb2005".to_string(), "slb2011".to_string()],
+            },
+            "the refusal must retain both families in banked order so the missing choice is visible"
+        );
     }
 
     /// AND THE ENSEMBLE IS ABSENT WHERE THE DATA HOLDS NO DISAGREEMENT.

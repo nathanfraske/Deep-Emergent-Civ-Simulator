@@ -30,6 +30,15 @@ pub struct RepresentationValueScene {
     scale_bits: u32,
 }
 
+/// Observer-side availability of the noncausal SI representation receipt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepresentationStatusScene {
+    /// The sealed receipt carries its complete representation values.
+    Available,
+    /// Projection refused and the receipt carries no representation values.
+    Unavailable,
+}
+
 impl RepresentationValueScene {
     /// Whether this is an exact definition or a derived definition.
     pub const fn kind_id(self) -> &'static str {
@@ -145,12 +154,44 @@ impl<'a> TranscriptScene<'a> {
         self.receipt.transcript().is_closed()
     }
 
+    /// Typed availability of the noncausal SI representation receipt.
+    pub fn representation_status(self) -> RepresentationStatusScene {
+        if self
+            .receipt
+            .transcript()
+            .representation()
+            .unavailable_reason()
+            .is_some()
+        {
+            RepresentationStatusScene::Unavailable
+        } else {
+            RepresentationStatusScene::Available
+        }
+    }
+
+    /// Schema governing the representation availability state.
+    pub const fn representation_status_schema_id(self) -> &'static str {
+        self.receipt
+            .transcript()
+            .representation()
+            .status_schema_id()
+    }
+
+    /// Stable reason recorded when the representation has no projected values.
+    pub fn representation_unavailable_reason(self) -> Option<&'a str> {
+        self.receipt
+            .transcript()
+            .representation()
+            .unavailable_reason()
+    }
+
     /// Noncausal SI representation schema identity.
     pub const fn representation_schema_id(self) -> &'static str {
         self.receipt.transcript().representation().schema_id()
     }
 
-    /// Exact SI representation values in their sealed order.
+    /// Exact SI representation values in their sealed order, or no values when
+    /// [`Self::representation_status`] is unavailable.
     pub fn representation_values(
         self,
     ) -> impl ExactSizeIterator<Item = RepresentationValueScene> + 'a {
@@ -219,5 +260,20 @@ mod tests {
             provenance.value_payload_visibility(),
             ValuePayloadVisibility::OpaqueAtViewerBoundary
         );
+    }
+
+    #[test]
+    fn representation_unavailability_has_a_typed_borrowed_scene_surface() {
+        fn status<'a>(scene: TranscriptScene<'a>) -> RepresentationStatusScene {
+            scene.representation_status()
+        }
+
+        fn reason<'a>(scene: TranscriptScene<'a>) -> Option<&'a str> {
+            scene.representation_unavailable_reason()
+        }
+
+        let status_surface: for<'a> fn(TranscriptScene<'a>) -> RepresentationStatusScene = status;
+        let reason_surface: for<'a> fn(TranscriptScene<'a>) -> Option<&'a str> = reason;
+        let _ = (status_surface, reason_surface);
     }
 }

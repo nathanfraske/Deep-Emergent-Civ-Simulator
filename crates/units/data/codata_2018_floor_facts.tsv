@@ -1,0 +1,9 @@
+schema	civsim.units.codata-2018-floor-facts.v1
+source_id	nist_codata_2018_ascii
+source_sha256	8c47c05db62c4d314a5244db51a47b4831616e55a8d357ced373a8620ff43be1
+source_bytes	40689
+source_line_endings	LF
+columns	symbol	source_line	byte_offset	byte_length	row_sha256	source_anchor	normalized_value	absolute_uncertainty	source_unit	si_dimension
+row	alpha	135	14391	110	e8a9302a81c562198cc75c33f9fc8824685fdf1aafb1e25416417257dee6882f	fine-structure constant	7.2973525693e-3	1.1e-12	1	0,0,0,0,0,0,0
+row	G	263	28935	124	1d28f15a0fda0e5df2a023367b72bbd14a412cacf497e508fa77592b11a32304	Newtonian constant of gravitation	6.67430e-11	1.5e-15	m^3 kg^-1 s^-2	3,-1,-2,0,0,0,0
+row	m_e	106	11120	112	c1cf07efdb813c1162a5d4ed19e93c7a48c5dbccacf4030ef88b05ed39c3f039	electron mass	9.1093837015e-31	2.8e-40	kg	0,1,0,0,0,0,0

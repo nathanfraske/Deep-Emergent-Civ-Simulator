@@ -351,8 +351,8 @@ crosses one of their present boundaries.
 | `stellar_birth_artifacts.rs` | Sealed proof-capability carriers and repository resolver. | Compile-time seal plus measure tests. | Keep private; production resolver remains empty until verified artifacts exist. |
 | `stellar_birth_structure/` | Value-free open registry and stellar-state schemas with private validation and read-only views. | 12 focused tests across facade and wire, including mutation and unfamiliar-state checks. | Preserve child boundaries and schema id `civsim.planet.stellar-birth-structure.v2`. A schema rule is not a realized member or physical value. |
 | `stellar_birth_species.rs` | Exact complete-support verification and mean-particle-mass reduction over sealed candidates. | 6 unit tests, including permutation and unfamiliar-state behavior. | Keep the reducer cohesive. Production returns no support and no packet path may construct its seals. |
-| `stellar_birth_species/authority_analysis/` | Permanently non-admitting analysis bound to the floor and open proof frontier. | 3 unit tests plus typed read-only views. | Keep separate from the future admitting authority. Analysis success cannot mint support. |
-| `stellar_birth_species/physical_registry/` | Conditional admitted-artifact proof graph, exact mass and dimension validation, and complete species closure by bottom-up producer and top-down watchdog. | 11 focused tests cover the exact repository refusal, unfamiliar and massless graphs, admission routes, closure and dependency defects, order invariance, exact arithmetic, depth, resource caps, and non-authority reachability. | Keep separate from conditioned support and the reducer. Repository production has no roots, agreement has no authority effect, and synthetic validation cannot mint membership. |
+| `stellar_birth_species/authority_analysis/` | Permanently non-admitting analysis bound to the floor, live physical-root pair, identity-keyed admission census, exact physical-vocabulary partition, and first executable refusal. | Focused unit tests plus typed read-only views, canonical CLI coverage, and a viewer projection test cover both live scientific-refusal codes and heterogeneous root metadata. | Keep separate from the future admitting authority. Analysis success, root-pair agreement, or current-input vocabulary coverage cannot mint support or claim global frontier completeness. |
+| `stellar_birth_species/physical_registry/` | Conditional admitted-artifact proof graph, independent sealed-floor root projection, bounded three-way physical-vocabulary classification, exact mass and dimension validation, and complete species closure. | Root-pair and focused physical-registry tests cover independent floor extraction, exact rational vectors, source order and identity binding, resource and canary reconnection, unfamiliar and massless graphs, derived and irreducible routes, exact identity-keyed tier and provenance census, closure defects, exact arithmetic, depth, resource caps, and non-authority reachability. | Keep root projection, vocabulary classification, registry closure, conditioned support, and the reducer in their existing child boundaries. The repository currently returns `no_admitted_species_derivation_rules`; a future incomplete global vocabulary returns its own typed scientific refusal, while integrity failures remain hard errors. Neither result has authority effect. |
 | `stellar_birth_species/support_packet/` | Bounded canonical species descriptors and conditioned-support packet validation by independent structural algorithms. | Focused synthetic unfamiliar, massless, mutation, coverage, canonical-order, and resource-refusal tests. | Keep separate from the reducer and physical authority. Packet agreement binds bytes only and cannot prove membership, mass ancestry, support, or closure. |
 | `requirement_analysis.rs` | Read-only projections over non-admitting census and species analysis. | Exercised by measure, receipt, and CLI tests. | Keep construction private. New viewer needs should add narrow getters rather than expose payload constructors. |
 
@@ -371,8 +371,8 @@ thermal, history, topology, and spectral proofs the census reports as open.
 event and record models, validation and closure, and deterministic wire writers
 under a parent facade. Writer modules should follow semantic record groups,
 rather than one helper per field. The pure-move acceptance is unusually strict:
-schema id `civsim.planet.transcript.v9`, event order, escaping, receipt text,
-367,628-byte direct CLI output, and its pinned SHA-256 all remain exact.
+schema id `civsim.planet.transcript.v10`, event order, escaping, receipt text,
+and the repinned direct CLI length and SHA-256 all remain exact.
 
 The complete canonical stellar slice has 8 direct CLI tests in
 `crates/planet/tests/canonical_cli.rs`. Those tests pin refusal exit status,
@@ -386,6 +386,13 @@ unit suite.
 - The joint physical measure and realization-coordinate law remain absent.
 - The realized species registry contains zero members and verified support is
   absent; the dormant reducer cannot supply a value.
+- The four live physical roots are coordinate capabilities only. Each future
+  species-forming rule remains blocked until downstream validators independently
+  revalidate species attribution, complete closure, and membership scope. The
+  current projection-to-registry boundary already re-extracts and reprojects
+  the sealed floor, then exact-matches the root receipt, private candidate
+  manifest, artifact identity, paired result, and canonical bytes. A stale
+  receipt cannot authorize a scope substitution.
 - Dimensional reachability and structure schemas are discovery and validation
   artifacts with `closure_effect=none`. They do not prove a physical law.
 - Named classes such as Population III, magnetar, Terran, or thaumic remain
@@ -417,11 +424,15 @@ search are later layers in `DERIVATION_AND_VIEWER_PIPELINE.md`. They should not
 be stubbed into the current crate as causal-looking placeholders.
 
 The first scene slice now exposes transcript order, exact noncausal SI
-representation integers, stage reachability, the refusal frontier, and its
-non-admitting analyses. Floor quantity identity, exact value bits, tier, and
-provenance are explicitly opaque at the viewer boundary. The planet-owned
-public-API evidence test inspects those value records directly; the viewer does
-not duplicate the ledger taxonomy or guess it from event identities.
+representation integers, stage reachability, the refusal frontier, its
+non-admitting analyses, and the complete physical-root agreement frontier.
+The root scene borrows schemas, checker and resource digests, canary binding,
+neutral counts, refusal, and obligations from the planet-owned view. It has no
+constructor or return edge into canonical physics. Floor quantity identity,
+exact value bits, tier, and provenance are explicitly opaque where the viewer
+boundary has no typed value-record view. The planet-owned public-API evidence
+test inspects those value records directly; the viewer does not duplicate the
+ledger taxonomy or guess it from event identities.
 
 The viewer boundary gate is intentionally narrow. It rejects grouped and
 aliased planet imports, non-observer planet APIs, owned snapshot and receipt

@@ -158,19 +158,44 @@ impl Fixed {
                 .parse::<i128>()
                 .map_err(|e| format!("bad integer part: {e}"))?
         };
-        let mut bits: i128 = int_val << FRAC_BITS;
+        let mut bits = int_val
+            .checked_shl(FRAC_BITS)
+            .filter(|shifted| (*shifted >> FRAC_BITS) == int_val)
+            .ok_or_else(|| "value out of Q32.32 range".to_string())?;
         if !frac_str.is_empty() {
             let digits: i128 = frac_str
                 .parse::<i128>()
                 .map_err(|e| format!("bad fractional part: {e}"))?;
             let mut den: i128 = 1;
             for _ in 0..frac_str.len() {
-                den *= 10;
+                den = den
+                    .checked_mul(10)
+                    .ok_or_else(|| "too many fractional digits".to_string())?;
             }
-            bits += (digits << FRAC_BITS) / den;
+            // `digits < den`, but `digits << FRAC_BITS` need not fit `i128`
+            // for a permitted thirty-digit fraction. Long division produces
+            // the same truncated Q32 fraction without that overflowing
+            // intermediate.
+            let mut remainder = digits;
+            let mut fractional_bits = 0i128;
+            for _ in 0..FRAC_BITS {
+                remainder = remainder
+                    .checked_mul(2)
+                    .ok_or_else(|| "fractional value out of range".to_string())?;
+                fractional_bits <<= 1;
+                if remainder >= den {
+                    remainder -= den;
+                    fractional_bits |= 1;
+                }
+            }
+            bits = bits
+                .checked_add(fractional_bits)
+                .ok_or_else(|| "value out of Q32.32 range".to_string())?;
         }
         if neg {
-            bits = -bits;
+            bits = bits
+                .checked_neg()
+                .ok_or_else(|| "value out of Q32.32 range".to_string())?;
         }
         if bits < i64::MIN as i128 || bits > i64::MAX as i128 {
             return Err("value out of Q32.32 range".to_string());
@@ -1110,6 +1135,24 @@ mod tests {
         for i in [-1000i32, -1, 0, 1, 7, 1000, i32::MAX, i32::MIN] {
             assert_eq!(Fixed::from_int(i).to_int(), i);
         }
+    }
+
+    #[test]
+    fn long_fractional_decimal_uses_bounded_long_division() {
+        assert_eq!(
+            Fixed::from_decimal_str("0.999999999999999999999999999999").unwrap(),
+            Fixed::from_bits((1i64 << FRAC_BITS) - 1)
+        );
+        assert_eq!(
+            Fixed::from_decimal_str("-0.999999999999999999999999999999").unwrap(),
+            Fixed::from_bits(-((1i64 << FRAC_BITS) - 1))
+        );
+    }
+
+    #[test]
+    fn decimal_parser_refuses_out_of_range_intermediates() {
+        assert!(Fixed::from_decimal_str("170141183460469231731687303715884105727").is_err());
+        assert!(Fixed::from_decimal_str("-170141183460469231731687303715884105728").is_err());
     }
 
     #[test]

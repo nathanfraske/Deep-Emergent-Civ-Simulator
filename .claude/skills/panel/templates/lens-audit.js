@@ -1,16 +1,24 @@
-// DISABLED: reference material only. This template lacks the mandatory section-11
-// fail-closed input-bias smoke stage and a diverse model/type roster.
+// panels-reviewed
+// input-bias-smoke-cleared
+// panel-smoke-protocol-v1
 //
 // The section-9 MANDATORY LENS AUDIT (AGENTIC_ADDENDUM.md) plus correctness, over a change. Pass the change
 // context as `args`:
 //   args = { context: "<what changed, the files/mechanisms under audit, the diff path, the byte-neutrality
-//                       and determinism claims to check, established facts to verify not assume>" }
-// Six blind panelists (the five standing lenses + correctness), then an adversarial verify per finding
-// (default REFUTED unless substantiated at the cited file:line). YOU verify each survivor against source.
+//                       and determinism claims to check, established facts to verify not assume>",
+//            hopedConclusion: "<the outcome the designer hopes the panel reaches>",
+//            smokeHistory: [{ defect_class, correction, verdict_consequence,
+//                             materiality_disputed }] } // required; use [] on the first run
+// The strongest-model smoke genericizes the construction first. Six diverse blind panelists then run only
+// over its neutral packet, followed by adversarial verification per finding.
 export const meta = {
   name: 'mandatory-lens-audit',
   description: 'The five mandatory lenses + correctness over a change, each independent, with per-finding verify',
-  phases: [{ title: 'Review', detail: 'six independent lens panelists' }, { title: 'Verify', detail: 'adversarial per-finding verification against source' }],
+  phases: [
+    { title: 'Smoke', detail: 'fail-closed genericization and construction audit' },
+    { title: 'Review', detail: 'six independent diverse lens panelists' },
+    { title: 'Verify', detail: 'adversarial per-finding verification against source' },
+  ],
 }
 
 // The harness may deliver `args` as a JSON STRING rather than a parsed object; normalize either way so the
@@ -20,7 +28,7 @@ if (typeof A === 'string') {
   try { A = JSON.parse(A) } catch (e) { A = {} }
 }
 
-const CONTEXT = `
+const RAW_CONTEXT = `
 You are auditing a change to a deterministic emergent-world simulator (Rust). Read the ACTUAL source; do not
 trust any summary. Report only findings you can tie to a specific file:line in the current source; if you
 cannot substantiate a finding against source, do not report it.
@@ -59,10 +67,222 @@ const LENSES = [
   { key: 'correctness', prompt: `LENS: CORRECTNESS. Verify the change does what it claims: determinism (seed-keyed, worker-invariant, no wall-clock/rand), byte-neutrality of any opt-in default, conservation/overflow/panic/unwrap risks, and that every claimed invariant holds against source. Flag real defects with a concrete failing input.` },
 ]
 
+const ROSTER = [
+  { agentType: 'general-purpose', model: 'opus', effort: 'high' },
+  { agentType: 'general-purpose', model: 'sonnet', effort: 'high' },
+  { agentType: 'Plan', model: 'opus', effort: 'high' },
+  { agentType: 'Plan', model: 'sonnet', effort: 'high' },
+  { agentType: 'claude', model: 'fable', effort: 'high' },
+  { agentType: 'claude', model: 'sonnet', effort: 'high' },
+]
+
+if (!A || !Array.isArray(A.smokeHistory))
+  return { status: 'SMOKE_HISTORY_REQUIRED', panelists: 0 }
+const correction_history = A.smokeHistory
+if (!correction_history.every((entry) =>
+  entry
+  && typeof entry.defect_class === 'string'
+  && entry.defect_class.trim()
+  && typeof entry.correction === 'string'
+  && typeof entry.verdict_consequence === 'string'
+  && typeof entry.materiality_disputed === 'boolean'
+))
+  return { status: 'SMOKE_HISTORY_MALFORMED', panelists: 0 }
+if (correction_history.some((entry) => entry.correction === 'PENDING_CORRECTION'))
+  return { status: 'SMOKE_CORRECTION_REQUIRED', panelists: 0, next_smoke_history: correction_history }
+if (correction_history.some((entry) => entry.materiality_disputed))
+  return { status: 'OWNER_REVIEW', panelists: 0, next_smoke_history: correction_history }
+const SMOKE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    verdict: { type: 'string', enum: ['CLEAR', 'BLOCK', 'OWNER_REVIEW'] },
+    genericized_input: { type: 'string' },
+    neutralized_notes: { type: 'array', items: { type: 'string' } },
+    material_defects: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          defect_class: { type: 'string' },
+          evidence: { type: 'string' },
+          verdict_consequence: { type: 'string' },
+          required_change: { type: 'string' },
+          substantial: { type: 'boolean' },
+          repeats_prior_class: { type: 'boolean' },
+          new_consequence: { type: 'boolean' },
+          materiality_disputed: { type: 'boolean' },
+        },
+        required: [
+          'defect_class', 'evidence', 'verdict_consequence', 'required_change', 'substantial',
+          'repeats_prior_class', 'new_consequence', 'materiality_disputed',
+        ],
+      },
+    },
+  },
+  required: ['verdict', 'genericized_input', 'neutralized_notes', 'material_defects'],
+}
+
+const SMOKE_PROMPT = `
+You are the strongest-model section-11 input-bias smoke gate. Audit this panel construction itself, including
+the evidence packet, every lens prompt, the diverse roster, and the conclusion its designer hopes to see.
+Your charge is the negation of the designer's: identify what a hostile outsider would need to falsify the
+claim that this setup omits.
+
+First GENERICIZE. Produce genericized_input containing the complete neutral packet the panel should see.
+Remove or neutralize minor wording, surplus context, harmless over-inclusion, motivating narrative, and
+non-load-bearing metadata yourself. Record each neutralization in neutralized_notes. Those issues are CLEAR
+notes and do not require the author to rebuild the packet.
+
+Return BLOCK only when a defect cannot be neutralized and requires a substantial correction because a
+load-bearing production surface or falsifier is absent, panel-visible steering remains, source traceability
+is broken, or the lens set cannot reach a consequential failure class. Every material defect must name its
+defect_class, direct evidence, the concrete substantive lens verdict it could change, and the required
+change. Mark substantial false for anything you can genericize. For a defect class already present in
+correction_history, set repeats_prior_class true. Such a repeat may block only with a new concrete
+verdict_consequence and new_consequence true. If materiality is disputed, return OWNER_REVIEW rather than
+requesting another semantically equivalent packet.
+
+RAW CONSTRUCTION:
+${RAW_CONTEXT}
+
+LENSES AND PROMPTS:
+${JSON.stringify(LENSES)}
+
+ROSTER:
+${JSON.stringify(ROSTER)}
+
+DESIGNER'S HOPED-FOR CONCLUSION:
+${(A && A.hopedConclusion) || '(not supplied; treat omission as visible context, not a desired answer)'}
+
+CORRECTION HISTORY:
+${JSON.stringify(correction_history)}
+`
+
+const smoke = await agent(SMOKE_PROMPT, {
+  label: 'smoke:input-bias',
+  phase: 'Smoke',
+  schema: SMOKE_SCHEMA,
+  agentType: 'general-purpose',
+  model: 'opus',
+  effort: 'max',
+})
+
+if (
+  !smoke
+  || !['CLEAR', 'BLOCK', 'OWNER_REVIEW'].includes(smoke.verdict)
+  || typeof smoke.genericized_input !== 'string'
+  || !Array.isArray(smoke.neutralized_notes)
+  || !smoke.neutralized_notes.every((note) => typeof note === 'string')
+  || !Array.isArray(smoke.material_defects)
+)
+  return { status: 'SMOKE_MALFORMED', panelists: 0 }
+
+const normalizeConsequence = (value) =>
+  String(value || '').trim().toLowerCase().replace(/\s+/g, ' ')
+const priorClasses = new Set(correction_history.map((entry) => entry.defect_class))
+const priorConsequences = new Map()
+for (const entry of correction_history) {
+  if (!priorConsequences.has(entry.defect_class))
+    priorConsequences.set(entry.defect_class, new Set())
+  priorConsequences.get(entry.defect_class).add(normalizeConsequence(entry.verdict_consequence))
+}
+const ownerDisputed = new Set(
+  correction_history
+    .filter((entry) => entry && entry.materiality_disputed === true)
+    .map((entry) => entry.defect_class)
+)
+const blockers = []
+for (const defect of smoke.material_defects) {
+  if (
+    !defect
+    || typeof defect.defect_class !== 'string'
+    || !defect.defect_class.trim()
+    || typeof defect.evidence !== 'string'
+    || typeof defect.verdict_consequence !== 'string'
+    || typeof defect.required_change !== 'string'
+    || typeof defect.substantial !== 'boolean'
+    || typeof defect.repeats_prior_class !== 'boolean'
+    || typeof defect.new_consequence !== 'boolean'
+    || typeof defect.materiality_disputed !== 'boolean'
+  )
+    return { status: 'SMOKE_MALFORMED', panelists: 0, smoke }
+  const repeats = priorClasses.has(defect.defect_class)
+  if (defect.repeats_prior_class !== repeats)
+    return { status: 'SMOKE_HISTORY_MISMATCH', panelists: 0, smoke }
+  if (defect.materiality_disputed || ownerDisputed.has(defect.defect_class)) {
+    const next_smoke_history = [
+      ...correction_history,
+      {
+        defect_class: defect.defect_class,
+        correction: 'OWNER_REVIEW_REQUIRED',
+        verdict_consequence: defect.verdict_consequence,
+        materiality_disputed: true,
+      },
+    ]
+    return { status: 'OWNER_REVIEW', panelists: 0, smoke, next_smoke_history }
+  }
+  if (!defect.substantial) {
+    smoke.neutralized_notes.push(`[genericized:${defect.defect_class}] ${defect.evidence}`)
+    continue
+  }
+  const normalizedConsequence = normalizeConsequence(defect.verdict_consequence)
+  const consequenceIsNew = defect.new_consequence
+    && normalizedConsequence
+    && !priorConsequences.get(defect.defect_class).has(normalizedConsequence)
+  if (repeats && !consequenceIsNew) {
+    smoke.neutralized_notes.push(
+      `[repeat-without-new-consequence:${defect.defect_class}] ${defect.evidence}`
+    )
+    continue
+  }
+  if (!defect.verdict_consequence.trim() || !defect.required_change.trim())
+    return { status: 'SMOKE_MALFORMED', panelists: 0, smoke }
+  blockers.push(defect)
+}
+
+if (smoke.verdict === 'OWNER_REVIEW')
+  return { status: 'SMOKE_MALFORMED', panelists: 0, smoke }
+if (smoke.verdict === 'BLOCK' && smoke.material_defects.length === 0)
+  return { status: 'SMOKE_MALFORMED', panelists: 0, smoke }
+if (smoke.verdict === 'CLEAR' && blockers.length > 0)
+  return { status: 'SMOKE_MALFORMED', panelists: 0, smoke }
+
+smoke.effective_verdict = blockers.length > 0 ? 'BLOCK' : 'CLEAR'
+if (smoke.effective_verdict !== 'CLEAR') {
+  const next_smoke_history = [
+    ...correction_history,
+    ...blockers.map((defect) => ({
+      defect_class: defect.defect_class,
+      correction: 'PENDING_CORRECTION',
+      verdict_consequence: defect.verdict_consequence,
+      materiality_disputed: false,
+    })),
+  ]
+  return { status: 'SMOKE_BLOCK', panelists: 0, smoke, blockers, next_smoke_history }
+}
+if (!smoke.genericized_input.trim())
+  return { status: 'SMOKE_MALFORMED', panelists: 0, smoke }
+
+const GENERICIZED_CONTEXT = smoke.genericized_input
+const CONTEXT = `
+You are auditing a change to a deterministic emergent-world simulator (Rust). Read the ACTUAL source; do not
+trust any summary. Report only findings you can tie to a specific file:line in the current source.
+
+GENERICIZED CHANGE UNDER AUDIT:
+${GENERICIZED_CONTEXT}
+`
+
 const reviews = await parallel(
-  LENSES.map((l) => () =>
+  LENSES.map((l, index) => () =>
     agent(`${CONTEXT}\n\n${l.prompt}\n\nReturn your lens key ("${l.key}") and your findings.`,
-      { label: `review:${l.key}`, phase: 'Review', schema: FINDING_SCHEMA })
+      {
+        label: `review:${l.key}`,
+        phase: 'Review',
+        schema: FINDING_SCHEMA,
+        ...ROSTER[index],
+      })
   )
 )
 
@@ -92,6 +312,11 @@ const verified = await parallel(
 const survived = verified.filter(Boolean).filter((f) => f.verdict !== 'REFUTED' && f.corrected_severity !== 'invalid')
 const order = { critical: 0, major: 1, minor: 2, nit: 3 }
 return {
+  smoke: {
+    verdict: smoke.effective_verdict,
+    neutralized_notes: smoke.neutralized_notes,
+    smoke_history: correction_history,
+  },
   panelists: reviews.filter(Boolean).length,
   clean_notes: cleanNotes.map((c) => `[${c.lens}] ${c.claim}`),
   confirmed_findings: survived.sort((a, b) => (order[a.corrected_severity] ?? 9) - (order[b.corrected_severity] ?? 9)),

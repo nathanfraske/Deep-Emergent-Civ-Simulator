@@ -4,12 +4,14 @@ mod frontier;
 mod transcript;
 
 pub use frontier::{
-    AnalysisScene, DimensionalCensusScene, OpenRequirementScene, RefusalReasonScene, RefusalScene,
-    SpeciesAttemptScene, SpeciesDerivationScene, StageScene,
+    AnalysisScene, DimensionalCensusScene, OpenRequirementScene, PhysicalRootAdmissionScene,
+    PhysicalVocabularyCheckerDigests, PhysicalVocabularyPartitions, RefusalReasonScene,
+    RefusalScene, RepositoryPhysicalRegistryFrontierScene, SpeciesAttemptScene,
+    SpeciesDerivationScene, StageScene,
 };
 pub use transcript::{
-    FloorEventScene, FloorScene, ProvenanceScene, RepresentationValueScene, TranscriptEventScene,
-    TranscriptScene, ValuePayloadVisibility,
+    FloorEventScene, FloorScene, ProvenanceScene, RepresentationStatusScene,
+    RepresentationValueScene, TranscriptEventScene, TranscriptScene, ValuePayloadVisibility,
 };
 
 use crate::{ObservationView, SnapshotView};

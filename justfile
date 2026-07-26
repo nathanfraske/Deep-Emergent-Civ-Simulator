@@ -27,7 +27,7 @@ run *args:
 run-derived:
     {{cargo_dev}} run -p civsim-planet --bin run_planet
 
-# Report the missing-floor boundary without entering a physical stage. An incomplete receipt exits non-zero.
+# Alias the ordinary canonical run. It emits the same receipt and cannot bypass a physical stage.
 readiness:
     {{cargo_dev}} run -p civsim-planet --bin run_planet -- --readiness
 
@@ -89,6 +89,8 @@ hooks-check:
     fi
     test -x scripts/githooks/pre-push
     test -x scripts/stone0-pre-push-hook.sh
+    test -x .claude/hooks/workflow-panel-reminder.sh
+    bash .claude/hooks/workflow-panel-reminder.sh --self-test
     printf 'Stone 0 pre-push hook: installed (%s)\n' "$configured"
 
 # Print one tier's ordered structural gate ids from the declarative authority.
@@ -102,6 +104,14 @@ gates-run tier="pr":
 # Run every declared self-test available in one structural gate tier.
 gates-self-tests tier="canonical":
     python3 scripts/gate_runner.py self-tests --tier {{tier}}
+
+# Verify the checked CODATA floor-row evidence without network access.
+floor-source-evidence-check:
+    python3 scripts/codata_floor_evidence_gate.py
+
+# Re-fetch the live and archived CODATA table and replay both independent parsers.
+floor-source-evidence-audit:
+    python3 scripts/codata_floor_evidence_gate.py --audit-online
 
 # Verify developer setup, both workspace manifests, generated registries, and canonical boundaries without waiving owner gates.
 doctor:

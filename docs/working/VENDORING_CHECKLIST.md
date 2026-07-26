@@ -33,6 +33,40 @@ The `*_provenance_test.py` battery then checks each artifact offline, with no ne
 
 Three are worth rebuilding as genuine validation, and are recorded rather than quietly left: the ice correlation against IAPWS R14-08(2011) over 130 to 220 K; the Slater applicability classification against held-out thermodynamic gamma measurements instead of the row's own flag; and the non-analytic Rayleigh eigenvalues against an independent neutral-stability solver.
 
+### Restricted measured-floor witness: CODATA 2018
+
+The NIST CODATA 2018 ASCII table is a citation-plus-witness source because
+redistribution permission for Standard Reference Database 121 was not
+established. The repository therefore holds the source identity, exact byte
+count and SHA-256, public archive, row spans, row-span hashes, normalized
+values, uncertainties, units, and dimensions without committing the table
+bytes. The factual rows live in
+`crates/units/data/codata_2018_floor_facts.tsv`; the independently checked pair
+receipt lives beside it as `codata_2018_floor_evidence_receipt.json`.
+
+`scripts/codata_floor_evidence_gate.py` parses the source by fixed columns.
+`scripts/codata_floor_evidence_watchdog.py` scans records by whitespace
+boundaries and carries a separately reviewed row profile. The routine offline
+gate verifies the checked facts and receipt, then executes 13 producer
+mutations and 14 watchdog mutations. Every observation binds its canary
+identity, exact concrete mutated bytes through a domain-separated SHA-256, and
+one detector-specific refusal code. Each candidate must differ from its
+baseline before the detector runs. Equal error messages therefore cannot hide
+a copied or substituted mutation. The checked pair uses
+`civsim.units.codata-2018-floor-evidence-pair.v2`; its current receipt is 1,800
+bytes at SHA-256
+`08c67f6d6e4543e7cb35be383f08aa1bbe7361878ff78bbc8567d08104f97983`
+and binds pair SHA-256
+`7aef3108ee63e017d739be0fd9b229a7d1fac675f35e81fbdfaa7a7844696ee0`.
+
+`just floor-source-evidence-audit` or
+`make floor-source-evidence-audit` explicitly fetches both the live NIST table
+and its pinned archive and requires byte equality before replaying both
+parsers. The routine build intentionally remains offline under the
+citation-plus-witness licence carveout. These checks establish custody and
+transcription. They do not prove that the source is scientifically correct,
+grant floor admission, or authorize an update to a later CODATA adjustment.
+
 ---
 
 ## Vendored artifacts

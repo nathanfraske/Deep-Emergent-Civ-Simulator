@@ -32,6 +32,7 @@ FILES = (
     "crates/stone0-build/Cargo.toml",
     "crates/stone0-build/build.rs",
     "crates/stone0-build/src/lib.rs",
+    "crates/stone0/src/lib.rs",
     "crates/planet/Cargo.toml",
     "crates/planet/build.rs",
     "crates/planet-substrate/Cargo.toml",
@@ -66,11 +67,89 @@ def _manifest(root: pathlib.Path, relative: str) -> dict[str, Any]:
     return parsed
 
 
+def _rust_function_section(source: str, signature: str) -> str:
+    if source.count(signature) != 1:
+        raise WiringError(f"Stone 0 source must contain one {signature!r}")
+    start = source.index(signature)
+    following = source.find("\nfn ", start + len(signature))
+    following_public = source.find("\npub fn ", start + len(signature))
+    ends = [position for position in (following, following_public) if position >= 0]
+    end = min(ends) if ends else len(source)
+    return source[start:end]
+
+
+def _validate_stone0_root_binding(root: pathlib.Path) -> None:
+    source = _regular(root, "crates/stone0/src/lib.rs").read_text(encoding="utf-8")
+    explicit_route = _rust_function_section(
+        source, "pub fn run_at_repository_root("
+    )
+    validator = _rust_function_section(
+        source, "fn canonicalize_and_validate_repository_root("
+    )
+    git_top_level = _rust_function_section(source, "fn trusted_git_top_level(")
+    git_command = _rust_function_section(source, "fn trusted_git_command(")
+
+    explicit_call = "canonicalize_and_validate_repository_root(repo_root)"
+    if explicit_route.count(explicit_call) != 1:
+        raise WiringError("explicit-root entry point does not call the root validator once")
+
+    trusted_call = "let git_root = trusted_git_top_level(&canonical)?;"
+    inequality = "if git_root != canonical {"
+    success = "Ok(canonical)"
+    trusted_position = validator.find(trusted_call)
+    inequality_position = validator.find(inequality)
+    refusal_position = validator.find("return Err(format!(", inequality_position)
+    success_position = validator.find(success, inequality_position)
+    if (
+        any(
+            position < 0
+            for position in (
+                trusted_position,
+                inequality_position,
+                refusal_position,
+                success_position,
+            )
+        )
+        or not (
+            trusted_position
+            < inequality_position
+            < refusal_position
+            < success_position
+        )
+        or validator.count(trusted_call) != 1
+        or validator.count(inequality) != 1
+    ):
+        raise WiringError(
+            "repository-root validator lost its trusted-Git inequality refusal route"
+        )
+
+    if git_top_level.count("let mut command = trusted_git_command(root)?;") != 1:
+        raise WiringError("trusted Git top-level query bypasses the trusted command route")
+
+    command_steps = (
+        "let git = trusted_git_executable()?;",
+        "let mut command = Command::new(git);",
+        ".env_clear()",
+        '.env("PATH", "/usr/bin:/bin")',
+    )
+    command_positions = [git_command.find(step) for step in command_steps]
+    if (
+        any(position < 0 for position in command_positions)
+        or command_positions != sorted(command_positions)
+        or any(git_command.count(step) != 1 for step in command_steps)
+    ):
+        raise WiringError(
+            "trusted Git command lost its rooted executable, cleared environment, or fixed PATH"
+        )
+
+
 def _validate_anchor_sources(root: pathlib.Path) -> None:
     build = _regular(root, f"{ANCHOR}/build.rs").read_text(encoding="utf-8")
     ordered = (
+        'let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");',
+        "civsim_stone0::emit_cargo_rerun_inputs(&repo_root);",
         "std::fs::remove_file(&marker)",
-        "civsim_stone0::run(civsim_stone0::Mode::Local)",
+        "civsim_stone0::run_at_repository_root(civsim_stone0::Mode::Local, &repo_root)",
         "if code != 0",
         "std::fs::write(&marker, MARKER_SOURCE)",
         "cargo:rustc-env=CIVSIM_STONE0_GUARD_MARKER",
@@ -82,8 +161,11 @@ def _validate_anchor_sources(root: pathlib.Path) -> None:
         positions.append(build.index(needle))
     if positions != sorted(positions):
         raise WiringError("anchor marker may be emitted only after a clean Stone 0 run")
+    if "civsim_stone0::run(civsim_stone0::Mode::Local)" in build:
+        raise WiringError("anchor retained the ambient repository-root runner")
     if MARKER_TOKEN not in build:
         raise WiringError("anchor build script changed its linkage token")
+    _validate_stone0_root_binding(root)
 
     library = _regular(root, f"{ANCHOR}/src/lib.rs").read_text(encoding="utf-8")
     for needle in (
@@ -188,6 +270,26 @@ def self_test() -> None:
         mutations = (
             ("Cargo.toml", ANCHOR, "crates/stone0-build-missing"),
             (f"{ANCHOR}/Cargo.toml", "../stone0", "../not-stone0"),
+            (
+                f"{ANCHOR}/build.rs",
+                "Mode::Local, &repo_root)",
+                'Mode::Local, &Path::new("."))',
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                "let git_root = trusted_git_top_level(&canonical)?;",
+                "let git_root = canonical.clone();",
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                "if git_root != canonical {",
+                "",
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                ".env_clear()",
+                '.env_remove("GIT_DIR")',
+            ),
             (f"{ANCHOR}/build.rs", "if code != 0", "if false"),
             (f"{ANCHOR}/src/lib.rs", MARKER_ENV, "UNBOUND_MARKER"),
             ("crates/planet/build.rs", "assert_guard_linked", "guard_was_skipped"),

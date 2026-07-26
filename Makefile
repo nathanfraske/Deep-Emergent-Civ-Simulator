@@ -1,6 +1,6 @@
 # Thin development aliases. The Just recipes and scripts remain the command source of truth.
 
-.PHONY: help hooks-install hooks-check doctor gates-list gates-run gates-self-tests run run-derived readiness run-dawn-legacy run-living-legacy view view-gpu view-living-legacy view-living-gpu-legacy ledger-inventory ledger-inventory-check verify check-fast check check-pr check-full check-nightly check-legacy ci ci-local ci-list ci-legacy ci-list-legacy test test-gpu-cpu-sparse test-gpu-vulkan-sparse test-gpu-cuda-cpu-cross test-legacy test-legacy-routine audit-parked fmt fmt-check fmt-legacy fmt-check-legacy lint lint-legacy pins-dawn-legacy stop-gate cache-info gc gc-dry trim-wsl
+.PHONY: help hooks-install hooks-check doctor gates-list gates-run gates-self-tests floor-source-evidence-check floor-source-evidence-audit run run-derived readiness run-dawn-legacy run-living-legacy view view-gpu view-living-legacy view-living-gpu-legacy ledger-inventory ledger-inventory-check verify check-fast check check-pr check-full check-nightly check-legacy ci ci-local ci-list ci-legacy ci-list-legacy test test-gpu-cpu-sparse test-gpu-vulkan-sparse test-gpu-cuda-cpu-cross test-legacy test-legacy-routine audit-parked fmt fmt-check fmt-legacy fmt-check-legacy lint lint-legacy pins-dawn-legacy stop-gate cache-info gc gc-dry trim-wsl
 
 GATE_TIER ?= pr
 
@@ -12,6 +12,8 @@ DOCTOR_CMD := $(DEV) doctor
 GATES_LIST_CMD := $(DEV) gates-list $(GATE_TIER)
 GATES_RUN_CMD := $(DEV) gates-run $(GATE_TIER)
 GATES_SELF_TESTS_CMD := $(DEV) gates-self-tests $(GATE_TIER)
+FLOOR_SOURCE_EVIDENCE_CHECK_CMD := $(DEV) floor-source-evidence-check
+FLOOR_SOURCE_EVIDENCE_AUDIT_CMD := $(DEV) floor-source-evidence-audit
 VERIFY_CMD := $(DEV) verify
 CHECK_FAST_CMD := $(DEV) check-fast
 CHECK_CMD := $(DEV) check
@@ -61,6 +63,8 @@ DOCTOR_CMD := just doctor
 GATES_LIST_CMD := just gates-list $(GATE_TIER)
 GATES_RUN_CMD := just gates-run $(GATE_TIER)
 GATES_SELF_TESTS_CMD := just gates-self-tests $(GATE_TIER)
+FLOOR_SOURCE_EVIDENCE_CHECK_CMD := just floor-source-evidence-check
+FLOOR_SOURCE_EVIDENCE_AUDIT_CMD := just floor-source-evidence-audit
 VERIFY_CMD := just verify
 CHECK_FAST_CMD := just check-fast
 CHECK_CMD := just check-pr
@@ -113,9 +117,11 @@ help:
 	  'make gates-list GATE_TIER=pr print ordered declarative gate ids' \
 	  'make gates-run GATE_TIER=pr run one declarative structural tier' \
 	  'make gates-self-tests GATE_TIER=canonical run declared detector self-tests' \
+	  'make floor-source-evidence-check verify checked CODATA row evidence offline' \
+	  'make floor-source-evidence-audit re-fetch and audit live plus archived CODATA bytes' \
 	  'make run RUN_ARGS=... canonical planet run or structured refusal' \
 	  'make run-derived       floor-only alias for the former derived view' \
-	  'make readiness        canonical planet readiness receipt' \
+	  'make readiness        alias of the canonical planet run receipt' \
 	  'make run-dawn-legacy  parked dawn development fixture' \
 	  'make run-living-legacy parked living-world fixture' \
 	  'make view             snapshot-only viewer or visible refusal' \
@@ -178,6 +184,12 @@ gates-run:
 
 gates-self-tests:
 	@$(GATES_SELF_TESTS_CMD)
+
+floor-source-evidence-check:
+	@$(FLOOR_SOURCE_EVIDENCE_CHECK_CMD)
+
+floor-source-evidence-audit:
+	@$(FLOOR_SOURCE_EVIDENCE_AUDIT_CMD)
 
 run-dawn-legacy:
 	@$(RUN_DAWN_LEGACY_CMD)

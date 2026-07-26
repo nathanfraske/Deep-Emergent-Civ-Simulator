@@ -7,6 +7,8 @@
 //! independently decoded rationals. The shared surface is limited to the model
 //! and SHA-256 primitive.
 
+mod resource;
+
 use super::super::SpeciesContentIdentity;
 use super::model::*;
 use crate::canonical::stellar_birth_structure::stellar_birth_structure_schema;
@@ -18,11 +20,11 @@ use std::{
     collections::{BTreeMap, BTreeSet},
 };
 
-const ARTIFACT_DOMAIN: &[u8] = b"civsim.physical-species.artifact.v1";
-const MEMBER_DOMAIN: &[u8] = b"civsim.physical-species.member.v1";
+const ARTIFACT_DOMAIN: &[u8] = b"civsim.physical-species.artifact.v3";
+const MEMBER_DOMAIN: &[u8] = b"civsim.physical-species.member.v2";
 const EXPRESSION_DOMAIN: &[u8] = b"civsim.physical-species.expression.v1";
 const EXPRESSION_NODE_DOMAIN: &[u8] = b"civsim.physical-species.expression-node.v1";
-const REGISTRY_DOMAIN: &[u8] = b"civsim.physical-species.registry.v1";
+const REGISTRY_DOMAIN: &[u8] = b"civsim.physical-species.registry.v4";
 
 #[derive(Debug, Clone)]
 struct Rational {
@@ -39,7 +41,6 @@ struct Scalar {
 
 #[derive(Debug, Clone)]
 struct TracedRule {
-    route: DerivationRoute,
     member: VerifiedPhysicalMember,
     prerequisites: Vec<SpeciesContentIdentity>,
 }
@@ -127,19 +128,19 @@ impl WireRecord {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ExpectedArtifactKind {
-    Field,
-    Operator,
-    State,
-    Sector,
-    Validity,
+pub(super) fn resource_contract_sha256() -> [u8; 32] {
+    resource::contract_sha256()
+}
+
+#[cfg(test)]
+pub(super) fn resource_contract_sha256_with_profile_for_test(work_profile_id: &[u8]) -> [u8; 32] {
+    resource::contract_sha256_with_profile_for_test(work_profile_id)
 }
 
 pub(super) fn validate_and_encode(
     input: &PhysicalRegistryInput,
 ) -> Result<ValidatedRegistry, PhysicalRegistryRefusalCode> {
-    validate_and_encode_with_caps(input, ValidationCaps::PRODUCTION)
+    validate_and_encode_with_caps(input, resource::PRODUCTION_CAPS)
 }
 
 pub(super) fn validate_and_encode_with_caps(
@@ -151,15 +152,44 @@ pub(super) fn validate_and_encode_with_caps(
 
     let mut budget = Budget::new(caps);
     let artifacts = validate_artifact_inventory(input, caps, &mut budget)?;
+    if artifacts.is_empty() {
+        return Err(PhysicalRegistryRefusalCode::NoAdmittedSpeciesDerivationRoots);
+    }
+    let production_vocabulary_binding = input.admitted_artifacts.iter().any(|artifact| {
+        artifact.admission_capability_kind() == AdmissionCapabilityKind::RepositoryRoot
+    });
+    if production_vocabulary_binding
+        && !super::vocabulary::watchdog_accepts_binding(
+            &input.admitted_artifacts,
+            &input.vocabulary_binding,
+        )
+    {
+        return Err(PhysicalRegistryRefusalCode::PhysicalVocabularyBindingMismatch);
+    }
     let rules = derive_rule_inventory(&artifacts, caps, &mut budget)?;
     if rules.is_empty() {
-        return Err(PhysicalRegistryRefusalCode::NoAdmittedSpeciesDerivationRoots);
+        return Err(PhysicalRegistryRefusalCode::NoAdmittedSpeciesDerivationRules);
+    }
+    if production_vocabulary_binding
+        && !input.vocabulary_binding.global_physical_vocabulary_coverage
+    {
+        return Err(PhysicalRegistryRefusalCode::PhysicalVocabularyCoverageIncomplete);
     }
 
     let declared = normalize_declared_members(&input.declared_members, caps)?;
-    detect_derivation_cycles(&rules, &mut budget)?;
-    reverse_trace_declared_members(&declared, &rules, &mut budget)?;
-    let members = forward_worklist_closure(&rules, &mut budget)?;
+    let dependency_count = rules.values().try_fold(0_usize, |total, rule| {
+        total
+            .checked_add(rule.prerequisites.len())
+            .ok_or(PhysicalRegistryRefusalCode::ClosureStepLimitExceeded)
+    })?;
+    budget.closure(resource::closure_work_units(
+        rules.len(),
+        dependency_count,
+        declared.len(),
+    )?)?;
+    detect_derivation_cycles(&rules)?;
+    reverse_trace_declared_members(&declared, &rules)?;
+    let members = forward_worklist_closure(&rules)?;
     if members.is_empty() {
         return Err(PhysicalRegistryRefusalCode::EmptyRegistryIsNotClosure);
     }
@@ -172,14 +202,12 @@ pub(super) fn validate_and_encode_with_caps(
     Ok(ValidatedRegistry {
         members,
         canonical_bytes,
+        resource_contract_sha256: resource_contract_sha256(),
     })
 }
 
 fn validate_profile(input: &PhysicalRegistryInput) -> Result<(), PhysicalRegistryRefusalCode> {
-    if MASS_DIMENSION != DimensionVector([0, 1, 0, 0, 0, 0, 0]) {
-        return Err(PhysicalRegistryRefusalCode::MassDimensionMismatch);
-    }
-    if input.resources != PhysicalRegistryResourceContract::PRODUCTION {
+    if input.resources != resource::PRODUCTION_RESOURCE_CONTRACT {
         return Err(PhysicalRegistryRefusalCode::ResourceContractMismatch);
     }
 
@@ -297,9 +325,97 @@ fn validate_artifact_inventory<'a>(
         if identity != artifact.claimed_identity {
             return Err(PhysicalRegistryRefusalCode::ArtifactIdentityMismatch);
         }
+        verify_admission_capability(artifact)?;
         inventory.insert(artifact.claimed_identity, artifact);
     }
     Ok(inventory)
+}
+
+fn verify_admission_capability(
+    artifact: &AdmittedArtifact,
+) -> Result<(), PhysicalRegistryRefusalCode> {
+    let bound = artifact.capability_admission();
+    if artifact
+        .capability_claimed_identity()
+        .0
+        .iter()
+        .zip(artifact.claimed_identity.0)
+        .any(|(left, right)| *left != right)
+        || bound.tier != artifact.admission.tier
+        || bound.provenance != artifact.admission.provenance
+        || !same_admission_route(&bound.route, &artifact.admission.route)
+    {
+        return Err(PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch);
+    }
+    match artifact.admission_capability_kind() {
+        AdmissionCapabilityKind::RepositoryRoot => {
+            let Some(receipt_sha256) = artifact.repository_root_pair_receipt_sha256() else {
+                return Err(PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch);
+            };
+            if receipt_sha256.iter().all(|byte| *byte == 0) {
+                return Err(PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch);
+            }
+        }
+        #[cfg(test)]
+        AdmissionCapabilityKind::ExactTest => {
+            if artifact.repository_root_pair_receipt_sha256().is_some() {
+                return Err(PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn same_admission_route(left: &AdmissionRoute, right: &AdmissionRoute) -> bool {
+    match (left, right) {
+        (AdmissionRoute::Derived(left), AdmissionRoute::Derived(right)) => {
+            same_receipt(
+                &left.independent_watchdog_receipt,
+                &right.independent_watchdog_receipt,
+            ) && same_receipt(
+                &left.semantic_checker_receipt,
+                &right.semantic_checker_receipt,
+            ) && same_receipt(&left.ancestry_receipt, &right.ancestry_receipt)
+        }
+        (AdmissionRoute::Irreducible(left), AdmissionRoute::Irreducible(right)) => {
+            left.residual_slot_id.as_bytes() == right.residual_slot_id.as_bytes()
+                && same_receipt(
+                    &left.independent_watchdog_receipt,
+                    &right.independent_watchdog_receipt,
+                )
+                && same_receipt(
+                    &left.owner_admission_receipt,
+                    &right.owner_admission_receipt,
+                )
+                && same_receipt(&left.residual_slot_receipt, &right.residual_slot_receipt)
+                && same_receipt(&left.residual_law_receipt, &right.residual_law_receipt)
+                && same_receipt(&left.chaos_protocol_receipt, &right.chaos_protocol_receipt)
+                && same_receipt(&left.gap_law_receipt, &right.gap_law_receipt)
+                && same_receipt(&left.buckingham_pi_receipt, &right.buckingham_pi_receipt)
+                && same_receipt(
+                    &left.derivation_exhaustion_receipt,
+                    &right.derivation_exhaustion_receipt,
+                )
+        }
+        (
+            AdmissionRoute::EvidenceCustodyOnly {
+                source_receipt: left,
+            },
+            AdmissionRoute::EvidenceCustodyOnly {
+                source_receipt: right,
+            },
+        ) => same_receipt(left, right),
+        _ => false,
+    }
+}
+
+fn same_receipt(left: &ReceiptBinding, right: &ReceiptBinding) -> bool {
+    left.schema_id.as_bytes() == right.schema_id.as_bytes()
+        && left
+            .digest_sha256
+            .iter()
+            .zip(right.digest_sha256)
+            .all(|(left, right)| left == &right)
 }
 
 fn validate_root_admission(
@@ -423,15 +539,8 @@ fn count_artifact_references(
     payload: &ArtifactPayload,
 ) -> Result<u32, PhysicalRegistryRefusalCode> {
     let count = match payload {
-        ArtifactPayload::ScalarCoordinate(_)
-        | ArtifactPayload::FieldContent(_)
-        | ArtifactPayload::Operator(_)
-        | ArtifactPayload::StateCoordinate(_)
-        | ArtifactPayload::InteractionSector(_)
-        | ArtifactPayload::ValidityRegime(_) => 0,
-        ArtifactPayload::StabilityLaw(law) | ArtifactPayload::TransitionLaw(law) => {
-            count_requirements(&law.requirements)?
-        }
+        ArtifactPayload::ScalarCoordinate(_) | ArtifactPayload::PhysicalDescriptor(_) => 0,
+        ArtifactPayload::ConstraintLaw(law) => count_requirements(&law.requirements)?,
         ArtifactPayload::MassProjection(projection) => {
             let mut total = 0_u32;
             for node in &projection.expression.nodes {
@@ -445,21 +554,12 @@ fn count_artifact_references(
             }
             total
         }
-        ArtifactPayload::ExactMasslessLaw(law) => checked_lengths(&[
-            law.state_coordinates.len(),
-            law.active_sectors.len(),
-            law.validity_regimes.len(),
-        ])?,
-        ArtifactPayload::DirectFloorSpecies(rule) => count_member_references(&rule.output)?,
-        ArtifactPayload::ElementaryExcitation(rule) => checked_lengths(&[
-            rule.fields.len(),
-            rule.operators.len(),
-            usize::try_from(count_member_references(&rule.output)?)
+        ArtifactPayload::ExactMasslessLaw(law) => count_requirements(&law.requirements)?,
+        ArtifactPayload::SpeciesDerivation(rule) => checked_lengths(&[
+            1,
+            usize::try_from(count_relation_references(&rule.artifact_inputs)?)
                 .map_err(|_| PhysicalRegistryRefusalCode::ReferenceCapacityExceeded)?,
-        ])?,
-        ArtifactPayload::CompositeBoundState(rule) => checked_lengths(&[
             rule.constituents.len(),
-            rule.operators.len(),
             usize::try_from(count_member_references(&rule.output)?)
                 .map_err(|_| PhysicalRegistryRefusalCode::ReferenceCapacityExceeded)?,
         ])?,
@@ -469,16 +569,26 @@ fn count_artifact_references(
 
 fn count_requirements(requirements: &RequirementSet) -> Result<u32, PhysicalRegistryRefusalCode> {
     checked_lengths(&[
-        requirements.state_coordinates.len(),
-        requirements.active_sectors.len(),
-        requirements.validity_regimes.len(),
+        usize::try_from(count_relation_references(&requirements.artifact_relations)?)
+            .map_err(|_| PhysicalRegistryRefusalCode::ReferenceCapacityExceeded)?,
         requirements.species_dependencies.len(),
     ])
 }
 
 fn count_member_references(member: &MemberBlueprint) -> Result<u32, PhysicalRegistryRefusalCode> {
+    let constraint_references = count_relation_references(&member.constraint_laws)?;
     count_requirements(&member.requirements)?
-        .checked_add(3)
+        .checked_add(1)
+        .and_then(|count| count.checked_add(constraint_references))
+        .ok_or(PhysicalRegistryRefusalCode::ReferenceCapacityExceeded)
+}
+
+fn count_relation_references(
+    relations: &[ArtifactRelation],
+) -> Result<u32, PhysicalRegistryRefusalCode> {
+    u32::try_from(relations.len())
+        .ok()
+        .and_then(|count| count.checked_mul(2))
         .ok_or(PhysicalRegistryRefusalCode::ReferenceCapacityExceeded)
 }
 
@@ -497,7 +607,7 @@ fn recompute_artifact_identity(
     caps: ValidationCaps,
     budget: &mut Budget,
 ) -> Result<ArtifactIdentity, PhysicalRegistryRefusalCode> {
-    budget.evaluation(1)?;
+    budget.evaluation(resource::artifact_identity_work_units())?;
     Ok(ArtifactIdentity(sha256(&write_artifact_payload(
         payload, caps, budget,
     )?)))
@@ -510,71 +620,24 @@ fn derive_rule_inventory(
 ) -> Result<BTreeMap<SpeciesContentIdentity, TracedRule>, PhysicalRegistryRefusalCode> {
     let mut rules = BTreeMap::new();
     for artifact in artifacts.values().rev() {
-        let (route, blueprint, prerequisites) = match &artifact.payload {
-            ArtifactPayload::DirectFloorSpecies(rule) => (
-                DerivationRoute::DirectFloorProperty,
-                &rule.output,
-                Vec::new(),
-            ),
-            ArtifactPayload::ElementaryExcitation(rule) => {
-                validate_typed_artifacts(
-                    &rule.operators,
-                    ExpectedArtifactKind::Operator,
-                    artifacts,
-                    caps,
-                )?;
-                validate_typed_artifacts(
-                    &rule.fields,
-                    ExpectedArtifactKind::Field,
-                    artifacts,
-                    caps,
-                )?;
-                if rule.operators.is_empty() || rule.fields.is_empty() {
-                    return Err(PhysicalRegistryRefusalCode::RequirementSetEmpty);
-                }
-                (
-                    DerivationRoute::ElementaryExcitation,
-                    &rule.output,
-                    Vec::new(),
-                )
-            }
-            ArtifactPayload::CompositeBoundState(rule) => {
-                validate_typed_artifacts(
-                    &rule.operators,
-                    ExpectedArtifactKind::Operator,
-                    artifacts,
-                    caps,
-                )?;
-                if rule.operators.is_empty() || rule.constituents.is_empty() {
-                    return Err(PhysicalRegistryRefusalCode::RequirementSetEmpty);
-                }
-                (
-                    DerivationRoute::CompositeBoundState,
-                    &rule.output,
-                    normalize_species_ids(&rule.constituents, caps)?,
-                )
-            }
-            _ => continue,
+        let ArtifactPayload::SpeciesDerivation(rule) = &artifact.payload else {
+            continue;
         };
-
-        let member = validate_member_blueprint(blueprint, route, artifacts, caps, budget)?;
-        match route {
-            DerivationRoute::DirectFloorProperty | DerivationRoute::ElementaryExcitation => {
-                if !member.requirements.species_dependencies.is_empty() {
-                    return Err(PhysicalRegistryRefusalCode::DependencyMismatch);
-                }
-            }
-            DerivationRoute::CompositeBoundState => {
-                if member.requirements.species_dependencies != prerequisites {
-                    return Err(PhysicalRegistryRefusalCode::DependencyMismatch);
-                }
-            }
+        validate_descriptor(rule.derivation_kind, artifacts)?;
+        let inputs = validate_relations(&rule.artifact_inputs, artifacts, caps, |_| true)?;
+        if inputs.is_empty() {
+            return Err(PhysicalRegistryRefusalCode::RequirementSetEmpty);
+        }
+        let prerequisites = normalize_species_ids(&rule.constituents, caps)?;
+        let member =
+            validate_member_blueprint(&rule.output, rule.derivation_kind, artifacts, caps, budget)?;
+        if member.requirements.species_dependencies != prerequisites {
+            return Err(PhysicalRegistryRefusalCode::DependencyMismatch);
         }
         if rules
             .insert(
                 member.identity,
                 TracedRule {
-                    route,
                     member,
                     prerequisites,
                 },
@@ -598,51 +661,32 @@ fn derive_rule_inventory(
 
 fn validate_member_blueprint(
     blueprint: &MemberBlueprint,
-    route: DerivationRoute,
+    derivation_kind: ArtifactIdentity,
     artifacts: &BTreeMap<ArtifactIdentity, &AdmittedArtifact>,
     caps: ValidationCaps,
     budget: &mut Budget,
 ) -> Result<VerifiedPhysicalMember, PhysicalRegistryRefusalCode> {
     validate_content(&blueprint.physical_content, caps)?;
+    validate_descriptor(derivation_kind, artifacts)?;
     let requirements = normalize_requirements(&blueprint.requirements, caps)?;
+    validate_relations(&requirements.artifact_relations, artifacts, caps, |_| true)?;
 
-    validate_typed_artifacts(
-        &requirements.validity_regimes,
-        ExpectedArtifactKind::Validity,
-        artifacts,
-        caps,
-    )?;
-    validate_typed_artifacts(
-        &requirements.active_sectors,
-        ExpectedArtifactKind::Sector,
-        artifacts,
-        caps,
-    )?;
-    validate_typed_artifacts(
-        &requirements.state_coordinates,
-        ExpectedArtifactKind::State,
-        artifacts,
-        caps,
-    )?;
-
-    let transition = artifacts
-        .get(&blueprint.transition_law)
-        .ok_or(PhysicalRegistryRefusalCode::UnknownArtifactReference)?;
-    let ArtifactPayload::TransitionLaw(transition_law) = &transition.payload else {
-        return Err(PhysicalRegistryRefusalCode::ArtifactKindMismatch);
-    };
-    if normalize_requirements(&transition_law.requirements, caps)? != requirements {
-        return Err(PhysicalRegistryRefusalCode::DependencyMismatch);
+    let constraints = validate_relations(&blueprint.constraint_laws, artifacts, caps, |payload| {
+        matches!(payload, ArtifactPayload::ConstraintLaw(_))
+    })?;
+    if constraints.is_empty() {
+        return Err(PhysicalRegistryRefusalCode::RequirementSetEmpty);
     }
-
-    let stability = artifacts
-        .get(&blueprint.stability_law)
-        .ok_or(PhysicalRegistryRefusalCode::UnknownArtifactReference)?;
-    let ArtifactPayload::StabilityLaw(stability_law) = &stability.payload else {
-        return Err(PhysicalRegistryRefusalCode::ArtifactKindMismatch);
-    };
-    if normalize_requirements(&stability_law.requirements, caps)? != requirements {
-        return Err(PhysicalRegistryRefusalCode::DependencyMismatch);
+    for relation in constraints.iter().rev() {
+        let law = artifacts
+            .get(&relation.target)
+            .ok_or(PhysicalRegistryRefusalCode::UnknownArtifactReference)?;
+        let ArtifactPayload::ConstraintLaw(law) = &law.payload else {
+            return Err(PhysicalRegistryRefusalCode::ArtifactKindMismatch);
+        };
+        if normalize_requirements(&law.requirements, caps)? != requirements {
+            return Err(PhysicalRegistryRefusalCode::DependencyMismatch);
+        }
     }
 
     let (rest_mass_si, mass_dimension) = match blueprint.mass_proof {
@@ -653,6 +697,9 @@ fn validate_member_blueprint(
             let ArtifactPayload::MassProjection(projection) = &artifact.payload else {
                 return Err(PhysicalRegistryRefusalCode::ArtifactKindMismatch);
             };
+            if projection.scope != MassProjectionScope::SpeciesRestMass {
+                return Err(PhysicalRegistryRefusalCode::MassProjectionNotAuthorizedForMember);
+            }
             let mass =
                 evaluate_expression_postorder(&projection.expression, artifacts, caps, budget)?;
             if mass.dimension != MASS_DIMENSION {
@@ -670,13 +717,7 @@ fn validate_member_blueprint(
             let ArtifactPayload::ExactMasslessLaw(law) = &artifact.payload else {
                 return Err(PhysicalRegistryRefusalCode::UnprovedExactZero);
             };
-            let state = normalize_artifact_ids(&law.state_coordinates, caps)?;
-            let sectors = normalize_artifact_ids(&law.active_sectors, caps)?;
-            let validity = normalize_artifact_ids(&law.validity_regimes, caps)?;
-            if state != requirements.state_coordinates
-                || sectors != requirements.active_sectors
-                || validity != requirements.validity_regimes
-            {
+            if normalize_requirements(&law.requirements, caps)? != requirements {
                 return Err(PhysicalRegistryRefusalCode::UnprovedExactZero);
             }
             (
@@ -690,14 +731,14 @@ fn validate_member_blueprint(
         }
     };
 
-    budget.evaluation(1)?;
+    budget.evaluation(resource::member_identity_work_units())?;
     let identity = SpeciesContentIdentity(sha256(&write_member_blueprint(blueprint, caps)?));
     Ok(VerifiedPhysicalMember {
         identity,
         physical_content: blueprint.physical_content.clone(),
         rest_mass_si,
         mass_dimension,
-        route,
+        derivation_kind,
         requirements,
     })
 }
@@ -707,33 +748,29 @@ fn normalize_requirements(
     caps: ValidationCaps,
 ) -> Result<RequirementSet, PhysicalRegistryRefusalCode> {
     let normalized = RequirementSet {
-        state_coordinates: normalize_artifact_ids(&requirements.state_coordinates, caps)?,
-        active_sectors: normalize_artifact_ids(&requirements.active_sectors, caps)?,
-        validity_regimes: normalize_artifact_ids(&requirements.validity_regimes, caps)?,
+        artifact_relations: normalize_relations(&requirements.artifact_relations, caps)?,
         species_dependencies: normalize_species_ids(&requirements.species_dependencies, caps)?,
     };
-    if normalized.state_coordinates.is_empty()
-        || normalized.active_sectors.is_empty()
-        || normalized.validity_regimes.is_empty()
-    {
+    if normalized.artifact_relations.is_empty() {
         return Err(PhysicalRegistryRefusalCode::RequirementSetEmpty);
     }
     Ok(normalized)
 }
 
-fn normalize_artifact_ids(
-    identities: &[ArtifactIdentity],
+fn normalize_relations(
+    relations: &[ArtifactRelation],
     caps: ValidationCaps,
-) -> Result<Vec<ArtifactIdentity>, PhysicalRegistryRefusalCode> {
-    if u32::try_from(identities.len()).map_or(true, |count| count > caps.references_per_artifact) {
+) -> Result<Vec<ArtifactRelation>, PhysicalRegistryRefusalCode> {
+    if u32::try_from(relations.len()).map_or(true, |count| count > caps.references_per_artifact) {
         return Err(PhysicalRegistryRefusalCode::ReferenceCapacityExceeded);
     }
-    let mut normalized = identities.to_vec();
-    normalized.sort_unstable();
-    if normalized.windows(2).any(|pair| pair[0] == pair[1]) {
-        return Err(PhysicalRegistryRefusalCode::DuplicateRequirement);
+    let mut unique = BTreeSet::new();
+    for relation in relations.iter().rev() {
+        if !unique.insert(relation.clone()) {
+            return Err(PhysicalRegistryRefusalCode::DuplicateRequirement);
+        }
     }
-    Ok(normalized)
+    Ok(unique.into_iter().collect())
 }
 
 fn normalize_species_ids(
@@ -751,38 +788,39 @@ fn normalize_species_ids(
     Ok(normalized)
 }
 
-fn validate_typed_artifacts(
-    identities: &[ArtifactIdentity],
-    expected: ExpectedArtifactKind,
+fn validate_descriptor(
+    identity: ArtifactIdentity,
+    artifacts: &BTreeMap<ArtifactIdentity, &AdmittedArtifact>,
+) -> Result<(), PhysicalRegistryRefusalCode> {
+    let artifact = artifacts
+        .get(&identity)
+        .ok_or(PhysicalRegistryRefusalCode::UnknownArtifactReference)?;
+    if !matches!(artifact.payload, ArtifactPayload::PhysicalDescriptor(_)) {
+        return Err(PhysicalRegistryRefusalCode::ArtifactKindMismatch);
+    }
+    Ok(())
+}
+
+fn validate_relations<F>(
+    relations: &[ArtifactRelation],
     artifacts: &BTreeMap<ArtifactIdentity, &AdmittedArtifact>,
     caps: ValidationCaps,
-) -> Result<(), PhysicalRegistryRefusalCode> {
-    for identity in normalize_artifact_ids(identities, caps)? {
-        let artifact = artifacts
-            .get(&identity)
+    target_matches: F,
+) -> Result<Vec<ArtifactRelation>, PhysicalRegistryRefusalCode>
+where
+    F: Fn(&ArtifactPayload) -> bool,
+{
+    let relations = normalize_relations(relations, caps)?;
+    for relation in relations.iter().rev() {
+        validate_descriptor(relation.role, artifacts)?;
+        let target = artifacts
+            .get(&relation.target)
             .ok_or(PhysicalRegistryRefusalCode::UnknownArtifactReference)?;
-        let matches = match expected {
-            ExpectedArtifactKind::Field => {
-                matches!(artifact.payload, ArtifactPayload::FieldContent(_))
-            }
-            ExpectedArtifactKind::Operator => {
-                matches!(artifact.payload, ArtifactPayload::Operator(_))
-            }
-            ExpectedArtifactKind::State => {
-                matches!(artifact.payload, ArtifactPayload::StateCoordinate(_))
-            }
-            ExpectedArtifactKind::Sector => {
-                matches!(artifact.payload, ArtifactPayload::InteractionSector(_))
-            }
-            ExpectedArtifactKind::Validity => {
-                matches!(artifact.payload, ArtifactPayload::ValidityRegime(_))
-            }
-        };
-        if !matches {
+        if !target_matches(&target.payload) {
             return Err(PhysicalRegistryRefusalCode::ArtifactKindMismatch);
         }
     }
-    Ok(())
+    Ok(relations)
 }
 
 fn normalize_declared_members(
@@ -802,11 +840,9 @@ fn normalize_declared_members(
 
 fn detect_derivation_cycles(
     rules: &BTreeMap<SpeciesContentIdentity, TracedRule>,
-    budget: &mut Budget,
 ) -> Result<(), PhysicalRegistryRefusalCode> {
     let mut colors = BTreeMap::<SpeciesContentIdentity, u8>::new();
     for start in rules.keys().copied() {
-        budget.closure(1)?;
         if colors.get(&start).copied() == Some(2) {
             continue;
         }
@@ -827,7 +863,6 @@ fn detect_derivation_cycles(
                 .ok_or(PhysicalRegistryRefusalCode::DerivationCycle)?
                 .1 += 1;
             let prerequisite = rule.prerequisites[next_prerequisite];
-            budget.closure(1)?;
             match colors.get(&prerequisite).copied().unwrap_or(0) {
                 2 => continue,
                 1 => return Err(PhysicalRegistryRefusalCode::DerivationCycle),
@@ -849,14 +884,12 @@ fn detect_derivation_cycles(
 fn reverse_trace_declared_members(
     declared: &[SpeciesContentIdentity],
     rules: &BTreeMap<SpeciesContentIdentity, TracedRule>,
-    budget: &mut Budget,
 ) -> Result<(), PhysicalRegistryRefusalCode> {
     let mut complete = BTreeSet::new();
     for start in declared.iter().rev().copied() {
         if complete.contains(&start) {
             continue;
         }
-        budget.closure(1)?;
         if !rules.contains_key(&start) {
             return Err(PhysicalRegistryRefusalCode::ExtraClosureMember);
         }
@@ -879,7 +912,6 @@ fn reverse_trace_declared_members(
             if complete.contains(&prerequisite) {
                 continue;
             }
-            budget.closure(1)?;
             if !rules.contains_key(&prerequisite) {
                 return Err(PhysicalRegistryRefusalCode::UnknownSpeciesDependency);
             }
@@ -897,22 +929,17 @@ fn reverse_trace_declared_members(
 
 fn forward_worklist_closure(
     rules: &BTreeMap<SpeciesContentIdentity, TracedRule>,
-    budget: &mut Budget,
 ) -> Result<Vec<VerifiedPhysicalMember>, PhysicalRegistryRefusalCode> {
     let mut remaining = BTreeMap::<SpeciesContentIdentity, usize>::new();
     let mut consumers = BTreeMap::<SpeciesContentIdentity, Vec<SpeciesContentIdentity>>::new();
     let mut ready = BTreeSet::new();
     for (identity, rule) in rules {
-        match rule.route {
-            DerivationRoute::DirectFloorProperty | DerivationRoute::ElementaryExcitation => {
-                ready.insert(*identity);
-                remaining.insert(*identity, 0);
-            }
-            DerivationRoute::CompositeBoundState => {
-                remaining.insert(*identity, rule.prerequisites.len());
-                for prerequisite in &rule.prerequisites {
-                    consumers.entry(*prerequisite).or_default().push(*identity);
-                }
+        remaining.insert(*identity, rule.prerequisites.len());
+        if rule.prerequisites.is_empty() {
+            ready.insert(*identity);
+        } else {
+            for prerequisite in &rule.prerequisites {
+                consumers.entry(*prerequisite).or_default().push(*identity);
             }
         }
     }
@@ -923,7 +950,6 @@ fn forward_worklist_closure(
 
     let mut closed = BTreeMap::<SpeciesContentIdentity, VerifiedPhysicalMember>::new();
     while let Some(identity) = ready.pop_first() {
-        budget.closure(1)?;
         let rule = rules
             .get(&identity)
             .ok_or(PhysicalRegistryRefusalCode::ExtraClosureMember)?;
@@ -932,7 +958,6 @@ fn forward_worklist_closure(
         }
         if let Some(dependents) = consumers.get(&identity) {
             for dependent in dependents {
-                budget.closure(1)?;
                 let counter = remaining
                     .get_mut(dependent)
                     .ok_or(PhysicalRegistryRefusalCode::DependencyMismatch)?;
@@ -986,7 +1011,7 @@ fn evaluate_expression_postorder(
     let analysis = analyze_expression_shape(expression, caps, budget)?;
     let mut values = vec![None::<Scalar>; expression.nodes.len()];
     for index in analysis.postorder.iter().copied() {
-        budget.evaluation(1)?;
+        budget.evaluation(resource::expression_node_execution_work_units())?;
         let value = match &expression.nodes[index] {
             ExactExpressionNode::Coordinate(identity) => {
                 let artifact = artifacts
@@ -1128,6 +1153,9 @@ fn analyze_expression_shape(
     if edge_count > caps.expression_edge_count {
         return Err(PhysicalRegistryRefusalCode::ExpressionEdgeCapacityExceeded);
     }
+    let node_count = u32::try_from(expression.nodes.len())
+        .map_err(|_| PhysicalRegistryRefusalCode::ExpressionNodeCapacityExceeded)?;
+    budget.evaluation(resource::expression_work_units(node_count, edge_count)?)?;
 
     let mut colors = vec![0_u8; expression.nodes.len()];
     let mut depths = vec![0_u32; expression.nodes.len()];
@@ -1157,7 +1185,6 @@ fn analyze_expression_shape(
             return Err(PhysicalRegistryRefusalCode::ExpressionDepthExceeded);
         }
         colors[index] = 1;
-        budget.evaluation(1)?;
         stack.push((index, true, path_depth));
         let child_depth = path_depth
             .checked_add(1)
@@ -1336,9 +1363,9 @@ fn decode_big_endian_from_right(
     bytes: &[u8],
     budget: &mut Budget,
 ) -> Result<BigUint, PhysicalRegistryRefusalCode> {
+    budget.evaluation(resource::component_decode_work_units(bytes.len())?)?;
     let mut value = BigUint::zero();
     for (position, byte) in bytes.iter().rev().enumerate() {
-        budget.evaluation(2)?;
         if *byte == 0 {
             continue;
         }
@@ -1358,7 +1385,7 @@ fn add_rationals(
     caps: ValidationCaps,
     budget: &mut Budget,
 ) -> Result<Rational, PhysicalRegistryRefusalCode> {
-    budget.evaluation(4)?;
+    budget.evaluation(resource::additive_rational_core_work_units())?;
     let common_denominator = left.denominator.gcd(&right.denominator);
     let (left_factor, _) = right.denominator.divmod(&common_denominator);
     let (right_factor, _) = left.denominator.divmod(&common_denominator);
@@ -1392,7 +1419,7 @@ fn multiply_rationals(
     caps: ValidationCaps,
     budget: &mut Budget,
 ) -> Result<Rational, PhysicalRegistryRefusalCode> {
-    budget.evaluation(6)?;
+    budget.evaluation(resource::multiplicative_rational_core_work_units())?;
     let cross_left = left.numerator.gcd(&right.denominator);
     let cross_right = right.numerator.gcd(&left.denominator);
     let (left_numerator, _) = left.numerator.divmod(&cross_left);
@@ -1437,6 +1464,7 @@ fn power_rational(
         return Err(PhysicalRegistryRefusalCode::DivisionByZero);
     }
     let mut power = u32::from(exponent.unsigned_abs());
+    budget.evaluation(watchdog_power_work_units(power)?)?;
     let mut factor = if exponent < 0 {
         Rational {
             negative: value.negative,
@@ -1452,16 +1480,52 @@ fn power_rational(
         denominator: BigUint::from_u64(1),
     };
     while power != 0 {
-        budget.evaluation(1)?;
         if power & 1 == 1 {
-            result = multiply_rationals(&result, &factor, caps, budget)?;
+            result = multiply_rationals_for_power(&result, &factor, caps)?;
         }
         power >>= 1;
         if power != 0 {
-            factor = multiply_rationals(&factor, &factor, caps, budget)?;
+            factor = multiply_rationals_for_power(&factor, &factor, caps)?;
         }
     }
     Ok(result)
+}
+
+fn watchdog_power_work_units(exponent: u32) -> Result<u64, PhysicalRegistryRefusalCode> {
+    resource::power_work_units(exponent)
+}
+
+#[cfg(test)]
+pub(super) fn power_work_units_for_test(exponent: u32) -> Result<u64, PhysicalRegistryRefusalCode> {
+    watchdog_power_work_units(exponent)
+}
+
+fn multiply_rationals_for_power(
+    left: &Rational,
+    right: &Rational,
+    caps: ValidationCaps,
+) -> Result<Rational, PhysicalRegistryRefusalCode> {
+    let left_cross = left.numerator.gcd(&right.denominator);
+    let right_cross = right.numerator.gcd(&left.denominator);
+    let (left_numerator, left_remainder) = left.numerator.divmod(&left_cross);
+    let (right_denominator, right_denominator_remainder) = right.denominator.divmod(&left_cross);
+    let (right_numerator, right_remainder) = right.numerator.divmod(&right_cross);
+    let (left_denominator, left_denominator_remainder) = left.denominator.divmod(&right_cross);
+    if !left_remainder.is_zero()
+        || !right_denominator_remainder.is_zero()
+        || !right_remainder.is_zero()
+        || !left_denominator_remainder.is_zero()
+    {
+        return Err(PhysicalRegistryRefusalCode::RationalEncodingInvalid);
+    }
+    reduce_rational_for_power(
+        Rational {
+            negative: left.negative ^ right.negative,
+            numerator: bounded_product_value(&left_numerator, &right_numerator, caps)?,
+            denominator: bounded_product_value(&left_denominator, &right_denominator, caps)?,
+        },
+        caps,
+    )
 }
 
 fn bounded_product(
@@ -1470,21 +1534,36 @@ fn bounded_product(
     caps: ValidationCaps,
     budget: &mut Budget,
 ) -> Result<BigUint, PhysicalRegistryRefusalCode> {
-    budget.evaluation(1)?;
-    if !left.is_zero() && !right.is_zero() {
-        let guaranteed = left
-            .bit_len()
-            .saturating_add(right.bit_len())
-            .saturating_sub(1);
-        if guaranteed > caps.intermediate_component_bits {
-            return Err(PhysicalRegistryRefusalCode::IntermediateComponentLimitExceeded);
-        }
+    budget.evaluation(resource::bounded_product_work_units())?;
+    bounded_product_value(left, right, caps)
+}
+
+fn bounded_product_value(
+    left: &BigUint,
+    right: &BigUint,
+    caps: ValidationCaps,
+) -> Result<BigUint, PhysicalRegistryRefusalCode> {
+    if !watchdog_product_fits_component_cap(left, right, caps.intermediate_component_bits) {
+        return Err(PhysicalRegistryRefusalCode::IntermediateComponentLimitExceeded);
     }
     let product = left.mul(right);
     if product.bit_len() > caps.intermediate_component_bits {
         return Err(PhysicalRegistryRefusalCode::IntermediateComponentLimitExceeded);
     }
     Ok(product)
+}
+
+fn watchdog_product_fits_component_cap(left: &BigUint, right: &BigUint, cap: u32) -> bool {
+    resource::product_fits_component_cap(left, right, cap)
+}
+
+#[cfg(test)]
+pub(super) fn product_fits_component_cap_for_test(
+    left: &BigUint,
+    right: &BigUint,
+    cap: u32,
+) -> bool {
+    watchdog_product_fits_component_cap(left, right, cap)
 }
 
 fn reduce_rational(
@@ -1495,12 +1574,38 @@ fn reduce_rational(
     if value.denominator.is_zero() {
         return Err(PhysicalRegistryRefusalCode::DivisionByZero);
     }
+    budget.evaluation(resource::rational_reduction_work_units(
+        value.numerator.is_zero(),
+    ))?;
     if value.numerator.is_zero() {
         value.negative = false;
         value.denominator = BigUint::from_u64(1);
         return Ok(value);
     }
-    budget.evaluation(3)?;
+    let common = value.numerator.gcd(&value.denominator);
+    let (numerator, numerator_remainder) = value.numerator.divmod(&common);
+    let (denominator, denominator_remainder) = value.denominator.divmod(&common);
+    if !numerator_remainder.is_zero() || !denominator_remainder.is_zero() {
+        return Err(PhysicalRegistryRefusalCode::RationalEncodingInvalid);
+    }
+    value.numerator = numerator;
+    value.denominator = denominator;
+    check_rational_size(&value, caps)?;
+    Ok(value)
+}
+
+fn reduce_rational_for_power(
+    mut value: Rational,
+    caps: ValidationCaps,
+) -> Result<Rational, PhysicalRegistryRefusalCode> {
+    if value.denominator.is_zero() {
+        return Err(PhysicalRegistryRefusalCode::DivisionByZero);
+    }
+    if value.numerator.is_zero() {
+        value.negative = false;
+        value.denominator = BigUint::from_u64(1);
+        return Ok(value);
+    }
     let common = value.numerator.gcd(&value.denominator);
     let (numerator, numerator_remainder) = value.numerator.divmod(&common);
     let (denominator, denominator_remainder) = value.denominator.divmod(&common);
@@ -1566,10 +1671,15 @@ fn checked_dimension(
     dimension: DimensionVector,
     caps: ValidationCaps,
 ) -> Result<DimensionVector, PhysicalRegistryRefusalCode> {
+    if u32::try_from(dimension.terms().len())
+        .map_or(true, |count| count > caps.dimension_term_count)
+    {
+        return Err(PhysicalRegistryRefusalCode::DimensionTermCapacityExceeded);
+    }
     if dimension
-        .0
+        .terms()
         .iter()
-        .any(|exponent| i32::from(*exponent).abs() > caps.dimension_abs_exponent)
+        .any(|term| i32::from(term.exponent).abs() > caps.dimension_abs_exponent)
     {
         return Err(PhysicalRegistryRefusalCode::DimensionExponentLimitExceeded);
     }
@@ -1582,23 +1692,61 @@ fn combine_dimensions(
     subtract_right: bool,
     caps: ValidationCaps,
 ) -> Result<DimensionVector, PhysicalRegistryRefusalCode> {
-    let mut result = [0_i16; 7];
-    for index in (0..7).rev() {
-        let right = if subtract_right {
-            -i32::from(right.0[index])
+    let mut result = Vec::new();
+    let mut left_index = 0;
+    let mut right_index = 0;
+    while left_index < left.terms().len() || right_index < right.terms().len() {
+        let (axis, left_exponent, right_exponent) =
+            match (left.terms().get(left_index), right.terms().get(right_index)) {
+                (Some(left_term), Some(right_term)) => match left_term.axis.cmp(&right_term.axis) {
+                    Ordering::Less => {
+                        left_index += 1;
+                        (left_term.axis, i32::from(left_term.exponent), 0)
+                    }
+                    Ordering::Greater => {
+                        right_index += 1;
+                        (right_term.axis, 0, i32::from(right_term.exponent))
+                    }
+                    Ordering::Equal => {
+                        left_index += 1;
+                        right_index += 1;
+                        (
+                            left_term.axis,
+                            i32::from(left_term.exponent),
+                            i32::from(right_term.exponent),
+                        )
+                    }
+                },
+                (Some(left_term), None) => {
+                    left_index += 1;
+                    (left_term.axis, i32::from(left_term.exponent), 0)
+                }
+                (None, Some(right_term)) => {
+                    right_index += 1;
+                    (right_term.axis, 0, i32::from(right_term.exponent))
+                }
+                (None, None) => break,
+            };
+        let signed_right = if subtract_right {
+            -right_exponent
         } else {
-            i32::from(right.0[index])
+            right_exponent
         };
-        let value = i32::from(left.0[index])
-            .checked_add(right)
+        let value = left_exponent
+            .checked_add(signed_right)
             .ok_or(PhysicalRegistryRefusalCode::DimensionExponentLimitExceeded)?;
         if value.abs() > caps.dimension_abs_exponent {
             return Err(PhysicalRegistryRefusalCode::DimensionExponentLimitExceeded);
         }
-        result[index] = i16::try_from(value)
-            .map_err(|_| PhysicalRegistryRefusalCode::DimensionExponentLimitExceeded)?;
+        if value != 0 {
+            result.push(DimensionTerm {
+                axis,
+                exponent: i16::try_from(value)
+                    .map_err(|_| PhysicalRegistryRefusalCode::DimensionExponentLimitExceeded)?,
+            });
+        }
     }
-    Ok(DimensionVector(result))
+    DimensionVector::from_terms(result)
 }
 
 fn power_dimension(
@@ -1606,18 +1754,24 @@ fn power_dimension(
     exponent: i16,
     caps: ValidationCaps,
 ) -> Result<DimensionVector, PhysicalRegistryRefusalCode> {
-    let mut result = [0_i16; 7];
-    for index in (0..7).rev() {
-        let value = i32::from(dimension.0[index])
+    if exponent == 0 {
+        return Ok(DimensionVector::dimensionless());
+    }
+    let mut result = Vec::with_capacity(dimension.terms().len());
+    for term in dimension.terms().iter().rev() {
+        let value = i32::from(term.exponent)
             .checked_mul(i32::from(exponent))
             .ok_or(PhysicalRegistryRefusalCode::DimensionExponentLimitExceeded)?;
         if value.abs() > caps.dimension_abs_exponent {
             return Err(PhysicalRegistryRefusalCode::DimensionExponentLimitExceeded);
         }
-        result[index] = i16::try_from(value)
-            .map_err(|_| PhysicalRegistryRefusalCode::DimensionExponentLimitExceeded)?;
+        result.push(DimensionTerm {
+            axis: term.axis,
+            exponent: i16::try_from(value)
+                .map_err(|_| PhysicalRegistryRefusalCode::DimensionExponentLimitExceeded)?,
+        });
     }
-    Ok(DimensionVector(result))
+    DimensionVector::from_terms(result)
 }
 
 fn write_artifact_payload(
@@ -1636,59 +1790,29 @@ fn write_artifact_payload(
             record.push(3, &write_rational(&coordinate.exact_value, caps)?)?;
             record.push(4, &write_dimension(coordinate.dimension))?;
         }
-        ArtifactPayload::FieldContent(content) => {
-            record.push(1, b"field-content")?;
+        ArtifactPayload::PhysicalDescriptor(content) => {
+            record.push(1, b"physical-descriptor")?;
             record.push(2, &write_content(content, caps)?)?;
         }
-        ArtifactPayload::Operator(content) => {
-            record.push(1, b"operator")?;
-            record.push(2, &write_content(content, caps)?)?;
-        }
-        ArtifactPayload::StateCoordinate(content) => {
-            record.push(1, b"state-coordinate")?;
-            record.push(2, &write_content(content, caps)?)?;
-        }
-        ArtifactPayload::InteractionSector(content) => {
-            record.push(1, b"interaction-sector")?;
-            record.push(2, &write_content(content, caps)?)?;
-        }
-        ArtifactPayload::ValidityRegime(content) => {
-            record.push(1, b"validity-regime")?;
-            record.push(2, &write_content(content, caps)?)?;
-        }
-        ArtifactPayload::StabilityLaw(law) => {
-            record.push(1, b"stability-law")?;
-            record.push(2, &write_requirements(&law.requirements, caps)?)?;
-        }
-        ArtifactPayload::TransitionLaw(law) => {
-            record.push(1, b"transition-law")?;
+        ArtifactPayload::ConstraintLaw(law) => {
+            record.push(1, b"constraint-law")?;
             record.push(2, &write_requirements(&law.requirements, caps)?)?;
         }
         ArtifactPayload::MassProjection(projection) => {
             record.push(1, b"mass-projection")?;
             record.push(2, &write_expression(&projection.expression, caps, budget)?)?;
+            record.push(3, projection.scope.id().as_bytes())?;
         }
         ArtifactPayload::ExactMasslessLaw(law) => {
             record.push(1, b"exact-massless-law")?;
-            record.push(2, &write_artifact_list(&law.state_coordinates, caps)?)?;
-            record.push(3, &write_artifact_list(&law.active_sectors, caps)?)?;
-            record.push(4, &write_artifact_list(&law.validity_regimes, caps)?)?;
+            record.push(2, &write_requirements(&law.requirements, caps)?)?;
         }
-        ArtifactPayload::DirectFloorSpecies(rule) => {
-            record.push(1, b"direct-floor-species")?;
-            record.push(2, &write_member_blueprint(&rule.output, caps)?)?;
-        }
-        ArtifactPayload::ElementaryExcitation(rule) => {
-            record.push(1, b"elementary-excitation")?;
-            record.push(2, &write_artifact_list(&rule.fields, caps)?)?;
-            record.push(3, &write_artifact_list(&rule.operators, caps)?)?;
-            record.push(4, &write_member_blueprint(&rule.output, caps)?)?;
-        }
-        ArtifactPayload::CompositeBoundState(rule) => {
-            record.push(1, b"composite-bound-state")?;
-            record.push(2, &write_member_list(&rule.constituents, caps)?)?;
-            record.push(3, &write_artifact_list(&rule.operators, caps)?)?;
-            record.push(4, &write_member_blueprint(&rule.output, caps)?)?;
+        ArtifactPayload::SpeciesDerivation(rule) => {
+            record.push(1, b"species-derivation")?;
+            record.push(2, &rule.derivation_kind.0)?;
+            record.push(3, &write_relations(&rule.artifact_inputs, caps)?)?;
+            record.push(4, &write_member_list(&rule.constituents, caps)?)?;
+            record.push(5, &write_member_blueprint(&rule.output, caps)?)?;
         }
     }
     Ok(record.finish())
@@ -1803,8 +1927,7 @@ fn write_member_blueprint(
             record.push(4, &identity.0)?;
         }
     }
-    record.push(5, &member.stability_law.0)?;
-    record.push(6, &member.transition_law.0)?;
+    record.push(5, &write_relations(&member.constraint_laws, caps)?)?;
     Ok(record.finish())
 }
 
@@ -1813,31 +1936,25 @@ fn write_requirements(
     caps: ValidationCaps,
 ) -> Result<Vec<u8>, PhysicalRegistryRefusalCode> {
     let mut record = WireRecord::start(b"civsim.physical-species.requirements.v1", caps)?;
+    record.push(1, &write_relations(&requirements.artifact_relations, caps)?)?;
     record.push(
-        1,
-        &write_artifact_list(&requirements.state_coordinates, caps)?,
-    )?;
-    record.push(2, &write_artifact_list(&requirements.active_sectors, caps)?)?;
-    record.push(
-        3,
-        &write_artifact_list(&requirements.validity_regimes, caps)?,
-    )?;
-    record.push(
-        4,
+        2,
         &write_member_list(&requirements.species_dependencies, caps)?,
     )?;
     Ok(record.finish())
 }
 
-fn write_artifact_list(
-    values: &[ArtifactIdentity],
+fn write_relations(
+    relations: &[ArtifactRelation],
     caps: ValidationCaps,
 ) -> Result<Vec<u8>, PhysicalRegistryRefusalCode> {
-    let mut ordered = values.to_vec();
-    ordered.sort_unstable();
-    let mut record = WireRecord::start(b"civsim.physical-species.artifact-list.v1", caps)?;
-    for identity in ordered {
-        record.push(1, &identity.0)?;
+    let ordered = normalize_relations(relations, caps)?;
+    let mut record = WireRecord::start(b"civsim.physical-species.relations.v1", caps)?;
+    for relation in ordered {
+        let mut edge = WireRecord::start(b"civsim.physical-species.relation.v1", caps)?;
+        edge.push(1, &relation.role.0)?;
+        edge.push(2, &relation.target.0)?;
+        record.push(1, &edge.finish())?;
     }
     Ok(record.finish())
 }
@@ -1867,9 +1984,15 @@ fn write_rational(
 }
 
 fn write_dimension(dimension: DimensionVector) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(14);
-    for exponent in dimension.0 {
-        bytes.extend_from_slice(&exponent.to_be_bytes());
+    let mut bytes = Vec::with_capacity(4 + dimension.terms().len() * 34);
+    bytes.extend_from_slice(
+        &u32::try_from(dimension.terms().len())
+            .expect("dimension term storage fits u32")
+            .to_be_bytes(),
+    );
+    for term in dimension.terms() {
+        bytes.extend_from_slice(&term.axis.0);
+        bytes.extend_from_slice(&term.exponent.to_be_bytes());
     }
     bytes
 }
@@ -1892,6 +2015,7 @@ fn write_resources(
             .to_be_bytes()
             .to_vec(),
         resources.max_dimension_abs_exponent.to_be_bytes().to_vec(),
+        resources.max_dimension_term_count.to_be_bytes().to_vec(),
         resources.max_evaluation_steps.to_be_bytes().to_vec(),
         resources.max_closure_steps.to_be_bytes().to_vec(),
         resources.max_canonical_bytes.to_be_bytes().to_vec(),
@@ -1903,6 +2027,51 @@ fn write_resources(
         let tag = u16::try_from(index + 1)
             .map_err(|_| PhysicalRegistryRefusalCode::CanonicalByteLimitExceeded)?;
         record.push(tag, payload)?;
+    }
+    Ok(record.finish())
+}
+
+fn write_vocabulary_binding(
+    binding: &PhysicalVocabularyBinding,
+    caps: ValidationCaps,
+) -> Result<Vec<u8>, PhysicalRegistryRefusalCode> {
+    let mut record = WireRecord::start(b"civsim.physical-species.vocabulary-binding.v1", caps)?;
+    let text_fields = [
+        binding.schema_id.as_bytes(),
+        binding.claim_id.as_bytes(),
+        binding.producer_id.as_bytes(),
+        binding.watchdog_id.as_bytes(),
+    ];
+    for (index, value) in text_fields.iter().enumerate() {
+        let tag = u16::try_from(index + 1)
+            .map_err(|_| PhysicalRegistryRefusalCode::CanonicalByteLimitExceeded)?;
+        record.push(tag, value)?;
+    }
+    record.push(5, &binding.root_count.to_be_bytes())?;
+    for (tag, identities) in [
+        (6, binding.descriptor_role_identities.as_slice()),
+        (7, binding.relation_target_identities.as_slice()),
+        (8, binding.constraint_law_identities.as_slice()),
+    ] {
+        for identity in identities {
+            record.push(tag, &identity.0)?;
+        }
+    }
+    for (tag, flag) in [
+        (9, binding.current_input_partition_complete),
+        (10, binding.global_physical_vocabulary_coverage),
+        (11, binding.membership_authority),
+    ] {
+        record.push(tag, &[u8::from(flag)])?;
+    }
+    for (tag, digest) in [
+        (12, binding.producer_result_sha256),
+        (13, binding.watchdog_result_sha256),
+        (14, binding.producer_resource_contract_sha256),
+        (15, binding.watchdog_resource_contract_sha256),
+        (16, binding.receipt_sha256),
+    ] {
+        record.push(tag, &digest)?;
     }
     Ok(record.finish())
 }
@@ -1954,14 +2123,18 @@ fn write_registry(
     registry.push(10, input.checker_pair.producer_id.as_bytes())?;
     registry.push(11, input.checker_pair.watchdog_id.as_bytes())?;
     registry.push(12, &write_resources(input.resources, caps)?)?;
+    registry.push(
+        13,
+        &write_vocabulary_binding(&input.vocabulary_binding, caps)?,
+    )?;
 
     for artifact in artifacts.values() {
-        budget.evaluation(1)?;
+        budget.evaluation(resource::registry_artifact_work_units())?;
         let mut record = WireRecord::start(b"civsim.physical-species.admitted-artifact.v1", caps)?;
         record.push(1, &artifact.claimed_identity.0)?;
         record.push(2, &write_admission(&artifact.admission, caps)?)?;
         record.push(3, &write_artifact_payload(&artifact.payload, caps, budget)?)?;
-        registry.push(13, &record.finish())?;
+        registry.push(14, &record.finish())?;
     }
     for member in members {
         let mut record = WireRecord::start(b"civsim.physical-species.verified-member.v1", caps)?;
@@ -1969,9 +2142,9 @@ fn write_registry(
         record.push(2, &write_content(&member.physical_content, caps)?)?;
         record.push(3, &write_rational(&member.rest_mass_si, caps)?)?;
         record.push(4, &write_dimension(member.mass_dimension))?;
-        record.push(5, member.route.id().as_bytes())?;
+        record.push(5, &member.derivation_kind.0)?;
         record.push(6, &write_requirements(&member.requirements, caps)?)?;
-        registry.push(14, &record.finish())?;
+        registry.push(15, &record.finish())?;
     }
     Ok(registry.finish())
 }

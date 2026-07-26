@@ -27,7 +27,7 @@ fn main() {
     .join(MARKER_NAME);
     let _ = std::fs::remove_file(&marker);
 
-    let code = civsim_stone0::run(civsim_stone0::Mode::Local);
+    let code = civsim_stone0::run_at_repository_root(civsim_stone0::Mode::Local, &repo_root);
     if code != 0 {
         panic!(
             "Stone 0 blocked the canonical build graph. Resolve the reported provenance finding, or obtain the current one-command owner override out of band. Never write that override into the repository."

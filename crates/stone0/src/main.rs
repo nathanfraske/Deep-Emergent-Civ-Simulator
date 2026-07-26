@@ -17,15 +17,57 @@
 //! build anchor and parked compatibility runner also call the library from build scripts.
 
 use civsim_stone0::{run, Mode};
+use std::ffi::OsString;
+
+const USAGE: &str = "usage: stone0-gate [--ci | --self-test]";
+
+fn parse_mode(arguments: &[OsString]) -> Result<Mode, ()> {
+    match arguments {
+        [] => Ok(Mode::Local),
+        [flag] if flag == "--ci" => Ok(Mode::Ci),
+        [flag] if flag == "--self-test" => Ok(Mode::SelfTest),
+        _ => Err(()),
+    }
+}
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let mode = if args.iter().any(|a| a == "--self-test") {
-        Mode::SelfTest
-    } else if args.iter().any(|a| a == "--ci") {
-        Mode::Ci
-    } else {
-        Mode::Local
+    let arguments: Vec<OsString> = std::env::args_os().skip(1).collect();
+    let mode = match parse_mode(&arguments) {
+        Ok(mode) => mode,
+        Err(()) => {
+            eprintln!("{USAGE}");
+            std::process::exit(2);
+        }
     };
     std::process::exit(run(mode));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn arguments(values: &[&str]) -> Vec<OsString> {
+        values.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn exact_cli_modes_are_accepted() {
+        assert_eq!(parse_mode(&[]), Ok(Mode::Local));
+        assert_eq!(parse_mode(&arguments(&["--ci"])), Ok(Mode::Ci));
+        assert_eq!(parse_mode(&arguments(&["--self-test"])), Ok(Mode::SelfTest));
+    }
+
+    #[test]
+    fn conflicting_duplicate_unknown_and_positional_arguments_are_rejected() {
+        for invalid in [
+            arguments(&["--ci", "--self-test"]),
+            arguments(&["--ci", "--ci"]),
+            arguments(&["--self-test", "--self-test"]),
+            arguments(&["--unknown"]),
+            arguments(&["positional"]),
+            arguments(&["--ci", "positional"]),
+        ] {
+            assert_eq!(parse_mode(&invalid), Err(()));
+        }
+    }
 }

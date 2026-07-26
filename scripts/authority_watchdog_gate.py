@@ -21,6 +21,8 @@ REGISTRY = ROOT / "scripts" / "authority_watchdog.toml"
 CROSS_CHECKER = ROOT / "scripts" / "authority_registry_watchdog.py"
 RECEIPT_SCHEMA = "civsim.authority-inventory-agreement.v3"
 SOURCE_TEXT_CONTRACT = "canonical-git-lf-with-crlf-checkout-equivalence"
+CROSS_CHECKER_RECEIPT_TIMEOUT_SECONDS = 30
+CROSS_CHECKER_SELF_TEST_TIMEOUT_SECONDS = 90
 
 # This map is an independent, reviewed completeness pin. A registry edit cannot
 # add, remove, promote, demote, or relabel a mechanism without changing this
@@ -29,6 +31,7 @@ REQUIRED_PROFILES: dict[str, tuple[str, str | None, str]] = {
     "core.deterministic-math-kernels": ("authority", "scientific", "blocked"),
     "core.deterministic-math-table": ("authority", "scientific", "active"),
     "floor.catalog-admission": ("authority", "scientific", "active"),
+    "floor.codata-factual-row-binding": ("authority", "scientific", "active"),
     "floor.pi-budget": ("authority", "scientific", "active"),
     "governance.authority-inventory": ("authority", "governance", "active"),
     "governance.external-adverse-claim-release": (
@@ -38,6 +41,7 @@ REQUIRED_PROFILES: dict[str, tuple[str, str | None, str]] = {
     ),
     "governance.stone0-build-wiring": ("authority", "governance", "active"),
     "planet.completed-snapshot": ("authority", "scientific", "blocked"),
+    "planet.physical-vocabulary-partition": ("diagnostic", None, "diagnostic"),
     "planet.species-derivation-frontier": ("diagnostic", None, "diagnostic"),
     "planet.species-state-support": ("authority", "scientific", "blocked"),
     "planet.stage1-dimensional-census": ("authority", "scientific", "blocked"),
@@ -45,6 +49,11 @@ REQUIRED_PROFILES: dict[str, tuple[str, str | None, str]] = {
         "authority",
         "scientific",
         "blocked",
+    ),
+    "planet.stellar-species-floor-coordinate-projection": (
+        "authority",
+        "scientific",
+        "active",
     ),
     "units.certified-formula-projection": (
         "authority",
@@ -65,26 +74,29 @@ REQUIRED_PROFILES: dict[str, tuple[str, str | None, str]] = {
 REQUIRED_PROFILE_DIGESTS: dict[str, str] = {
     "core.deterministic-math-kernels": "95af1b4ff8ecfd58bb0e0ab9f1f146b329db8a9ded5c2002e8d4d324d3a119fb",
     "core.deterministic-math-table": "081f9af077c3ef40746cf6adb97a2d82b54325dfb36501eb88dd353f467e4a9b",
-    "floor.catalog-admission": "1f04f54954ab30f9709553bc4922ec9a2b8759f8f4b72fb2d2db1d7cbcceb389",
+    "floor.catalog-admission": "e1b8cfd716ffaa4a184aa4656b5f9aa1553e5452d19009593099b525daabc0b8",
+    "floor.codata-factual-row-binding": "3151bd9388f1bed1601724c421a4cdcd1e0a8c7de06d6127aeec4af48bbadd1b",
     "floor.pi-budget": "3ed6c43390a43cf921e96c600525a89da95cb62c522306acc725af93bc55d2f1",
     "governance.authority-inventory": "c2a6095c66f8dc4d9b2384a3b46c5da06142b27fad99b10ce6fc34239f5c5100",
     "governance.external-adverse-claim-release": "a8a74e0c6032ee15d125b7c2e00e4accf77de2c9ac7f9e675f5848f80f38295d",
-    "governance.stone0-build-wiring": "69ffca7a6ad2d2654df9af89a6f50bddb7fb550d682aff2d85df90220bdaf92e",
-    "planet.completed-snapshot": "dd72abfaa771ff707b884d66340830b4d3ba5378a36097dac3f13c11d94246ee",
-    "planet.species-derivation-frontier": "7991ef98a413bd1ac4893bcc30b8cc2c9746a52b126d1a8864c5c6d1332f8d60",
-    "planet.species-state-support": "2513182235eef6be7e340322dc465dc2570f9b295053ce355c4ba40623e21240",
+    "governance.stone0-build-wiring": "ff8dc217d4473b4264bc1a15ed6ad541e78455e0e95dedae5b3fdd89aba197c8",
+    "planet.completed-snapshot": "5c09a8d95b7de145110a9f97f773bb0e0a63d6d6dc0f964eeb8beb62efff5575",
+    "planet.physical-vocabulary-partition": "fcd35a3c4997fde2be067a86172894a7b1f1d983afd21abddf1b130feac33f0d",
+    "planet.species-derivation-frontier": "44fb171f11d42aaa2be122891aff3374c6f0ad56a3de0cb07058f6170f0d2f92",
+    "planet.species-state-support": "3ff574bcd1a9e19f95bfaafb3fcd472422531d4a2ac2dcc7655943c93a9d34f0",
     "planet.stage1-dimensional-census": "21140b26c937f9cca7a8066b98e9fa75e9366f483ca44ffd1cc5206315f2b5dc",
     "planet.stellar-birth-proof-tokens": "68f58f019ab4f620194133e673c64240d4ad066f97404698ba0bfbf8b96935d1",
-    "units.certified-formula-projection": "c1317c9000d82dc8507537120ce3c44a4a87886839a56d880c2d347a22266ff4",
-    "units.si-execution-table": "cfdc61ffea91745443c5e9b170198caf15c1a118ec92d645de68053193dcd8ae",
-    "units.si-representation-policy": "71d0b118afc0a88007ea19267e2277e89d4252f5654241182f22ab2663e51ce8",
+    "planet.stellar-species-floor-coordinate-projection": "7963fbd5fb857fb2516e11579e76409c5bdfc3cc53d172b15251016b87d80750",
+    "units.certified-formula-projection": "7ee2a9a60f102d0ea34bc5700d2070b079390c050d10c2d685e1525a0f091005",
+    "units.si-execution-table": "2eca0ae6da0ad4483e3038e5aa6bbf1cd3d158bf3ca49df78aab7224b8927d5e",
+    "units.si-representation-policy": "db7449a52dbf7f56b598828fe3888d0505e833c170c89de99a6b390a8057698b",
     "units.wide-integer-arithmetic": "3bfb94aa0c3f507ad8ba9762e91ca9009284becc9d9752d7b7b896cb9a26ca7d",
 }
 REQUIRED_COUNTS = {
-    "active": 7,
+    "active": 9,
     "blocked": 8,
-    "diagnostic": 1,
-    "total": 16,
+    "diagnostic": 2,
+    "total": 19,
 }
 META_PAIR = {
     "producer_path": "scripts/authority_watchdog_gate.py",
@@ -565,7 +577,7 @@ def cross_check_receipt(
         cwd=root,
         capture_output=True,
         check=False,
-        timeout=30,
+        timeout=CROSS_CHECKER_RECEIPT_TIMEOUT_SECONDS,
     )
     if completed.returncode != 0:
         detail = completed.stderr.decode("utf-8", errors="replace").strip()
@@ -590,7 +602,7 @@ def run_cross_checker_self_test(root: pathlib.Path = ROOT) -> None:
         cwd=root,
         capture_output=True,
         check=False,
-        timeout=30,
+        timeout=CROSS_CHECKER_SELF_TEST_TIMEOUT_SECONDS,
     )
     if completed.returncode != 0:
         detail = (completed.stdout + completed.stderr).decode(
@@ -673,10 +685,25 @@ def _required_mutations(data: dict[str, Any]) -> list[tuple[str, dict[str, Any]]
         row_index["units.certified-formula-projection"]
     ]["receipt_schema"] = "civsim.units.substituted-receipt.v1"
 
+    root_refusal_schema_omission = copy.deepcopy(data)
+    root_refusal_schema_omission["mechanism"][
+        row_index["planet.stellar-species-floor-coordinate-projection"]
+    ]["receipt_schema"] = (
+        "civsim.planet.stellar-birth-repository-physical-root-receipt.v5"
+    )
+
     canary_substitution = copy.deepcopy(data)
     canary_substitution["mechanism"][
         row_index["units.certified-formula-projection"]
     ]["canaries"][0] = "substituted canary"
+
+    root_refusal_canary_substitution = copy.deepcopy(data)
+    root_refusal_canaries = root_refusal_canary_substitution["mechanism"][
+        row_index["planet.stellar-species-floor-coordinate-projection"]
+    ]["canaries"]
+    root_refusal_canaries[
+        root_refusal_canaries.index("refusal stage substitution")
+    ] = "weaker refusal-stage check"
 
     owner_substitution = copy.deepcopy(data)
     owner_substitution["mechanism"][row_index["floor.pi-budget"]][
@@ -693,6 +720,25 @@ def _required_mutations(data: dict[str, Any]) -> list[tuple[str, dict[str, Any]]
         row_index["core.deterministic-math-kernels"]
     ]["open_cross_checker_requirements"][0] = "a weaker table check"
 
+    root_capability_requirement_substitution = copy.deepcopy(data)
+    root_capability_requirements = root_capability_requirement_substitution["mechanism"][
+        row_index["planet.species-state-support"]
+    ]["open_cross_checker_requirements"]
+    root_capability_matches = [
+        index
+        for index, requirement in enumerate(root_capability_requirements)
+        if "claim-specific independent capability" in requirement
+        and "non-root admission" in requirement
+    ]
+    if len(root_capability_matches) != 1:
+        raise AssertionError(
+            "species-state support must carry exactly one non-root capability requirement"
+        )
+    root_capability_index = root_capability_matches[0]
+    root_capability_requirements[root_capability_index] = (
+        "a weaker downstream root-capability check"
+    )
+
     observation_substitution = copy.deepcopy(data)
     observation_substitution["mechanism"][
         row_index["planet.species-derivation-frontier"]
@@ -707,6 +753,13 @@ def _required_mutations(data: dict[str, Any]) -> list[tuple[str, dict[str, Any]]
     adapter_omission["mechanism"][
         row_index["units.certified-formula-projection"]
     ]["semantic_closure"].remove("crates/units/src/compute.rs")
+
+    live_root_omission = copy.deepcopy(data)
+    live_root_omission["mechanism"][
+        row_index["planet.species-derivation-frontier"]
+    ]["semantic_closure"].remove(
+        "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/mod.rs"
+    )
 
     orchestrator_substitution = copy.deepcopy(data)
     governance_closure = orchestrator_substitution["mechanism"][
@@ -729,13 +782,20 @@ def _required_mutations(data: dict[str, Any]) -> list[tuple[str, dict[str, Any]]
         ("claim broadening", claim_broadening),
         ("implementation substitution", implementation_substitution),
         ("receipt schema substitution", schema_substitution),
+        ("root refusal receipt schema omission", root_refusal_schema_omission),
         ("canary substitution", canary_substitution),
+        ("root refusal canary substitution", root_refusal_canary_substitution),
         ("owner boundary substitution", owner_substitution),
         ("activation guard substitution", guard_substitution),
         ("activation requirement substitution", requirement_substitution),
+        (
+            "species root-capability requirement substitution",
+            root_capability_requirement_substitution,
+        ),
         ("diagnostic observation substitution", observation_substitution),
         ("shared material substitution", shared_material_substitution),
         ("semantic closure adapter omission", adapter_omission),
+        ("live species frontier root omission", live_root_omission),
         ("semantic closure orchestrator substitution", orchestrator_substitution),
         ("inventory header substitution", header_substitution),
     ]

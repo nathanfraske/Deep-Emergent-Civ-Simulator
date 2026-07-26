@@ -425,6 +425,13 @@ impl BigRat {
         (self.num.bit_len(), self.den.bit_len())
     }
 
+    /// Raw sign and magnitude components for crate-internal independent
+    /// arithmetic authorities. This exposes data only; it does not select or
+    /// attest any rounded result.
+    pub(crate) fn components(&self) -> (bool, &BigUint, &BigUint) {
+        (self.neg, &self.num, &self.den)
+    }
+
     /// Reduce to lowest terms by dividing numerator and denominator by their gcd. The VALUE is unchanged (so
     /// `cmp_rat`, `round_to_scale`, and every other observation return exactly the same result); this only bounds the
     /// limb count so a long chain of exact operations (a Gaussian elimination over many rows) keeps the numerator and
@@ -459,14 +466,24 @@ impl BigRat {
                 }
             }
         }
-        // Fit the magnitude in a non-negative i128 before applying the sign, so a value in
-        // [2^127, 2^128) reports out of range rather than wrapping to a negative i128.
+        // A negative i128 has one more representable magnitude than a positive
+        // i128. Admit exactly 2^127 only on the negative branch so i128::MIN is
+        // not mistaken for an out-of-range value.
         let mag_u = q.to_u128()?;
-        if mag_u > i128::MAX as u128 {
-            return None;
+        if self.neg {
+            let min_magnitude = 1u128 << 127;
+            if mag_u > min_magnitude {
+                None
+            } else if mag_u == min_magnitude {
+                Some(i128::MIN)
+            } else {
+                Some(-(mag_u as i128))
+            }
+        } else if mag_u > i128::MAX as u128 {
+            None
+        } else {
+            Some(mag_u as i128)
         }
-        let mag = mag_u as i128;
-        Some(if self.neg { -mag } else { mag })
     }
 
     /// Round to a signed integer significand at binary exponent `exponent2`.
@@ -525,21 +542,24 @@ impl BigRat {
             .or_else(|| mantissa.strip_prefix('+'))
             .unwrap_or(mantissa);
         let frac_len = match body.split_once('.') {
-            Some((_, f)) => f.len() as i64,
+            Some((_, f)) => decimal_fraction_len(f, s)?,
             None => 0,
         };
-        let net_exp = exp10 - frac_len;
+        let net_exp = exp10
+            .checked_sub(frac_len)
+            .ok_or_else(|| format!("decimal exponent out of range in {s}"))?;
+        let power = decimal_power_exponent(net_exp, s)?;
         if net_exp >= 0 {
             Ok(BigRat::new(
                 false,
-                BigUint::ten_pow(net_exp as u32),
+                BigUint::ten_pow(power),
                 BigUint::from_u64(1),
             ))
         } else {
             Ok(BigRat::new(
                 false,
                 BigUint::from_u64(1),
-                BigUint::ten_pow((-net_exp) as u32),
+                BigUint::ten_pow(power),
             ))
         }
     }
@@ -576,19 +596,19 @@ impl BigRat {
         }
         // Value = digits * 10^(exp10 - frac_len). Build num/den as powers of ten.
         let num_digits = big_from_dec_digits(&digits)?;
-        let net_exp = exp10 - frac_part.len() as i64;
+        let frac_len = decimal_fraction_len(frac_part, s)?;
+        let net_exp = exp10
+            .checked_sub(frac_len)
+            .ok_or_else(|| format!("decimal exponent out of range in {s}"))?;
+        let power = decimal_power_exponent(net_exp, s)?;
         if net_exp >= 0 {
             Ok(BigRat::new(
                 neg,
-                num_digits.mul(&BigUint::ten_pow(net_exp as u32)),
+                num_digits.mul(&BigUint::ten_pow(power)),
                 BigUint::from_u64(1),
             ))
         } else {
-            Ok(BigRat::new(
-                neg,
-                num_digits,
-                BigUint::ten_pow((-net_exp) as u32),
-            ))
+            Ok(BigRat::new(neg, num_digits, BigUint::ten_pow(power)))
         }
     }
 
@@ -599,6 +619,16 @@ impl BigRat {
         self.den.encode_canonical(&mut output);
         output
     }
+}
+
+fn decimal_fraction_len(fraction: &str, source: &str) -> Result<i64, String> {
+    i64::try_from(fraction.len())
+        .map_err(|_| format!("fractional digit count out of range in {source}"))
+}
+
+fn decimal_power_exponent(net_exp: i64, source: &str) -> Result<u32, String> {
+    u32::try_from(net_exp.unsigned_abs())
+        .map_err(|_| format!("decimal exponent out of range in {source}"))
 }
 
 /// Parse a run of decimal digits into a `BigUint` (Horner over base ten).
@@ -771,6 +801,22 @@ mod tests {
         let big_num = BigUint::from_u64(1).shl_bits(127);
         let v = BigRat::new(false, big_num, BigUint::from_u64(1));
         assert_eq!(v.round_to_scale(0), None);
+
+        let min = BigRat::new(
+            true,
+            BigUint::from_u64(1).shl_bits(127),
+            BigUint::from_u64(1),
+        );
+        assert_eq!(min.round_to_scale(0), Some(i128::MIN));
+
+        let below_min = BigRat::new(
+            true,
+            BigUint::from_u64(1)
+                .shl_bits(127)
+                .add(&BigUint::from_u64(1)),
+            BigUint::from_u64(1),
+        );
+        assert_eq!(below_min.round_to_scale(0), None);
     }
 
     #[test]
@@ -817,5 +863,13 @@ mod tests {
                 .cmp_rat(&BigRat::from_i64(-250)),
             Ordering::Equal
         );
+    }
+
+    #[test]
+    fn decimal_exponents_refuse_before_narrowing_or_signed_overflow() {
+        for source in ["1e4294967296", "1e-4294967296", "1.0e-9223372036854775808"] {
+            assert!(BigRat::from_decimal_str(source).is_err(), "{source}");
+            assert!(BigRat::decimal_ulp(source).is_err(), "{source}");
+        }
     }
 }

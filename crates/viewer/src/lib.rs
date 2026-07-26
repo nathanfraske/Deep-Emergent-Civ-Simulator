@@ -27,9 +27,12 @@ mod scene;
 
 pub use scene::{
     AnalysisScene, DimensionalCensusScene, FloorEventScene, FloorScene, ObservationScene,
-    ObservationSceneStatus, OpenRequirementScene, ProvenanceScene, RefusalReasonScene,
-    RefusalScene, RepresentationValueScene, SpeciesAttemptScene, SpeciesDerivationScene,
-    StageScene, TranscriptEventScene, TranscriptScene, ValuePayloadVisibility,
+    ObservationSceneStatus, OpenRequirementScene, PhysicalRootAdmissionScene,
+    PhysicalVocabularyCheckerDigests, PhysicalVocabularyPartitions, ProvenanceScene,
+    RefusalReasonScene, RefusalScene, RepositoryPhysicalRegistryFrontierScene,
+    RepresentationStatusScene, RepresentationValueScene, SpeciesAttemptScene,
+    SpeciesDerivationScene, StageScene, TranscriptEventScene, TranscriptScene,
+    ValuePayloadVisibility,
 };
 
 /// A read-only handle to a completed planet snapshot.
@@ -139,9 +142,15 @@ mod tests {
 
     #[test]
     fn run_observer_accepts_only_the_sealed_planet_projection() {
+        fn assert_frontier_contract_surface<'scene>(scene: &SpeciesDerivationScene<'scene>) {
+            let _: (Option<&'scene str>, Option<&'scene str>, Option<bool>) =
+                scene.frontier_contract();
+        }
+
         let observer: for<'a> fn(civsim_planet::PlanetObservation<'a>) -> ObservationView<'a> =
             observe_run;
         let _ = observer;
+        let _ = assert_frontier_contract_surface;
     }
 
     #[test]

@@ -22,6 +22,8 @@ param(
         "gates-list",
         "gates-run",
         "gates-self-tests",
+        "floor-source-evidence-check",
+        "floor-source-evidence-audit",
         "run",
         "run-derived",
         "readiness",
@@ -112,6 +114,8 @@ $commands = @{
     "gates-list"    = "just gates-list"
     "gates-run"     = "just gates-run"
     "gates-self-tests" = "just gates-self-tests"
+    "floor-source-evidence-check" = "just floor-source-evidence-check"
+    "floor-source-evidence-audit" = "just floor-source-evidence-audit"
     "doctor" = @'
 set -euo pipefail
 required=(bash python3 git cargo rustc rustup rustfmt just grep awk sed diff mktemp pgrep setsid realpath sha256sum flock)

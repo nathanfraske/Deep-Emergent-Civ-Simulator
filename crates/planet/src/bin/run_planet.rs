@@ -1,18 +1,15 @@
-use civsim_planet::{readiness_receipt, run_planet, sealed_absolute_physics_floor};
+use civsim_planet::{run_planet, sealed_absolute_physics_floor};
 
 fn main() {
     let mut args = std::env::args().skip(1);
     match args.next().as_deref() {
         Some("--help" | "-h") if args.next().is_none() => {
             println!(
-                "run_planet [--readiness]\n\nThe canonical run accepts no world values, profile, identity, or seed. With no arguments it constructs the repository-owned sealed absolute physics floor and enters the seven-stage runner. --readiness reports the missing-floor boundary without entering a stage."
+                "run_planet [--readiness]\n\nThe canonical run accepts no world values, profile, identity, or seed. With no arguments or --readiness it constructs the repository-owned sealed absolute physics floor and enters the same seven-stage runner."
             );
             return;
         }
-        Some("--readiness") if args.next().is_none() => {
-            print!("{}", readiness_receipt());
-            std::process::exit(2);
-        }
+        Some("--readiness") if args.next().is_none() => {}
         Some(argument) => {
             eprintln!(
                 "run_planet accepts no caller-authored world input; unsupported argument: {argument}"

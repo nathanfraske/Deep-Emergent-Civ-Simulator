@@ -283,14 +283,15 @@ impl SiExecutionMagnitudes {
     /// `hbar * sqrt(10^27 / (eps_0*m_e))` in eV nm^(3/2).
     ///
     /// The elementary charge cancels between the plasma frequency and the
-    /// joule-to-electron-volt conversion. The squared fold is formed exactly
-    /// before its one fixed-point square root, avoiding tiny intermediates.
+    /// joule-to-electron-volt conversion. The independent projection pair
+    /// certifies the complete positive square-root expression and its terminal
+    /// fixed-point cell. No rounded radicand or generic fixed-point square root
+    /// enters the causal value.
     pub fn plasma_energy_fold_ev_nm_three_halves(&self) -> Option<Fixed> {
-        let squared = certified_fixed_formula(
+        certified_positive_sqrt_formula(
             "(h / (2 * pi))^2 * 10^27 / (eps_0 * m_e)",
             &[self.planck, self.vacuum_permittivity, self.electron_mass],
-        )?;
-        (squared > Fixed::ZERO).then(|| squared.sqrt())
+        )
     }
 
     /// `e^2 / (4*pi*eps_0)` at one angstrom, expressed in eV angstrom.
@@ -346,6 +347,31 @@ fn certified_fixed_formula(formula: &str, values: &[ScaledConstant]) -> Option<F
         .collect::<Vec<_>>();
     let certificate =
         crate::certified_projection::certify_at_scale(formula, &inputs, Fixed::FRAC_BITS).ok()?;
+    Some(Fixed::from_bits(
+        i64::try_from(certificate.producer_bits).ok()?,
+    ))
+}
+
+fn certified_positive_sqrt_formula(
+    radicand_formula: &str,
+    values: &[ScaledConstant],
+) -> Option<Fixed> {
+    let inputs = values
+        .iter()
+        .map(|value| {
+            crate::certified_projection::ProjectionInput::new(
+                value.symbol(),
+                value.bits(),
+                value.scale_bits(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let certificate = crate::certified_projection::certify_positive_sqrt_at_scale(
+        radicand_formula,
+        &inputs,
+        Fixed::FRAC_BITS,
+    )
+    .ok()?;
     Some(Fixed::from_bits(
         i64::try_from(certificate.producer_bits).ok()?,
     ))
@@ -920,6 +946,14 @@ mod tests {
             1.174,
             0.002
         ));
+        assert_eq!(
+            execution
+                .plasma_energy_fold_ev_nm_three_halves()
+                .unwrap()
+                .to_bits(),
+            5_043_327_366,
+            "the certified complete-expression root preserves the prior Q32.32 fold"
+        );
         assert!(close(
             execution.coulomb_energy_ev_angstrom().unwrap(),
             14.399_6,

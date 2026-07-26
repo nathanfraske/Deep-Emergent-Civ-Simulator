@@ -16,7 +16,9 @@ use super::{
 use civsim_ledger::{
     AbsolutePhysicsFloor, ChaosProtocolReceipt, ChaosRegimeReceipt, Provenance, Tier,
 };
-use civsim_units::constants::si_representation_magnitudes;
+use civsim_units::constants::{
+    si_representation_magnitudes, ConstantProjectionError, SiRepresentationMagnitudes,
+};
 use civsim_units::fundamentals::{
     ATOMIC_VOLUME_CONVERSION, GAS_CONSTANT, REPRESENTATION_DEFINITIONS, SI_BASE_DIMENSION_IDS,
     SI_REPRESENTATION_SCHEMA_ID, STEFAN_BOLTZMANN, VACUUM_PERMITTIVITY,
@@ -25,7 +27,10 @@ use civsim_units::physics_floor::PHYSICAL_FLOOR_LEN;
 use std::{fmt, num::TryFromIntError};
 
 /// Stable schema identity for the current concrete transcript format.
-pub const RUN_TRANSCRIPT_SCHEMA_ID: &str = "civsim.planet.transcript.v9";
+pub const RUN_TRANSCRIPT_SCHEMA_ID: &str = "civsim.planet.transcript.v10";
+
+/// Stable schema identity for representation availability states.
+pub const REPRESENTATION_STATUS_SCHEMA_ID: &str = "civsim.planet.representation-status.v1";
 
 pub(super) fn canonical_text(value: &str) -> CanonicalText<'_> {
     CanonicalText(value)
@@ -63,8 +68,14 @@ pub struct TranscriptSchema {
 
 impl TranscriptSchema {
     pub const V9: Self = Self {
-        id: RUN_TRANSCRIPT_SCHEMA_ID,
+        id: "civsim.planet.transcript.v9",
         major: 9,
+        minor: 0,
+    };
+
+    pub const V10: Self = Self {
+        id: RUN_TRANSCRIPT_SCHEMA_ID,
+        major: 10,
         minor: 0,
     };
 
@@ -111,26 +122,59 @@ impl RepresentationValueRecord {
     }
 }
 
-/// Complete representation receipt required to replay physical quantities.
-/// It deliberately has no tier or provenance field because SI definitions are
-/// conventions, not causal facts.
+/// Typed availability of the noncausal SI representation receipt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepresentationStatus {
+    /// Every sealed SI value was projected and recorded.
+    Available,
+    /// Projection failed, so the transcript records neither SI values nor a
+    /// physical execution authority.
+    RepresentationUnavailable,
+}
+
+impl RepresentationStatus {
+    /// Stable state identifier carried by the unavailable representation wire.
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Available => "available",
+            Self::RepresentationUnavailable => "representation_unavailable",
+        }
+    }
+}
+
+/// Representation receipt required to replay physical quantities when it is
+/// available. It deliberately has no tier or provenance field because SI
+/// definitions are conventions, not causal facts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepresentationReceipt {
     schema_id: &'static str,
-    values: Vec<RepresentationValueRecord>,
+    state: RepresentationState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RepresentationState {
+    Available(Vec<RepresentationValueRecord>),
+    RepresentationUnavailable { detail: String },
 }
 
 impl RepresentationReceipt {
     fn sealed() -> Result<Self, TranscriptError> {
-        let magnitudes = si_representation_magnitudes().map_err(|error| {
-            TranscriptError::FloorShapeMismatch {
+        Self::sealed_from_projection(si_representation_magnitudes())
+    }
+
+    /// This internal seam keeps a failed units projection observable without
+    /// mutating the process-wide units cache in tests.
+    fn sealed_from_projection(
+        magnitudes: Result<SiRepresentationMagnitudes, ConstantProjectionError>,
+    ) -> Result<Self, TranscriptError> {
+        let magnitudes =
+            magnitudes.map_err(|error| TranscriptError::RepresentationUnavailable {
                 detail: format!("SI representation projection failed: {error}"),
-            }
-        })?;
+            })?;
         let mut values = Vec::with_capacity(REPRESENTATION_DEFINITIONS.len() + 3);
         for definition in REPRESENTATION_DEFINITIONS {
             let value = magnitudes.get(definition.symbol).ok_or_else(|| {
-                TranscriptError::FloorShapeMismatch {
+                TranscriptError::RepresentationUnavailable {
                     detail: format!(
                         "SI representation definition '{}' has no projected value",
                         definition.symbol
@@ -153,7 +197,7 @@ impl RepresentationReceipt {
         }
         for derived in [STEFAN_BOLTZMANN, GAS_CONSTANT, ATOMIC_VOLUME_CONVERSION] {
             let value = magnitudes.get(derived.symbol).ok_or_else(|| {
-                TranscriptError::FloorShapeMismatch {
+                TranscriptError::RepresentationUnavailable {
                     detail: format!(
                         "SI representation derivation '{}' has no projected value",
                         derived.symbol
@@ -176,16 +220,49 @@ impl RepresentationReceipt {
         }
         Ok(Self {
             schema_id: SI_REPRESENTATION_SCHEMA_ID,
-            values,
+            state: RepresentationState::Available(values),
         })
+    }
+
+    fn unavailable(detail: String) -> Self {
+        Self {
+            schema_id: SI_REPRESENTATION_SCHEMA_ID,
+            state: RepresentationState::RepresentationUnavailable { detail },
+        }
     }
 
     pub const fn schema_id(&self) -> &'static str {
         self.schema_id
     }
 
+    /// Whether this receipt carries projected SI values or a typed refusal.
+    pub const fn status(&self) -> RepresentationStatus {
+        match &self.state {
+            RepresentationState::Available(_) => RepresentationStatus::Available,
+            RepresentationState::RepresentationUnavailable { .. } => {
+                RepresentationStatus::RepresentationUnavailable
+            }
+        }
+    }
+
+    /// Version governing the representation availability state.
+    pub const fn status_schema_id(&self) -> &'static str {
+        REPRESENTATION_STATUS_SCHEMA_ID
+    }
+
+    /// Stable projection error text when no SI values were recorded.
+    pub fn unavailable_reason(&self) -> Option<&str> {
+        match &self.state {
+            RepresentationState::Available(_) => None,
+            RepresentationState::RepresentationUnavailable { detail } => Some(detail),
+        }
+    }
+
     pub fn values(&self) -> &[RepresentationValueRecord] {
-        &self.values
+        match &self.state {
+            RepresentationState::Available(values) => values,
+            RepresentationState::RepresentationUnavailable { .. } => &[],
+        }
     }
 }
 
@@ -382,25 +459,79 @@ pub struct RunTranscript {
 }
 
 impl RunTranscript {
-    pub(super) fn empty(declared_floor_entries: usize) -> Self {
-        Self {
-            schema: TranscriptSchema::V9,
-            representation: RepresentationReceipt::sealed()
-                .expect("the sealed SI representation must project"),
+    pub(super) fn empty(declared_floor_entries: usize) -> Result<Self, TranscriptError> {
+        Self::empty_with_representation(declared_floor_entries, RepresentationReceipt::sealed())
+    }
+
+    fn empty_with_representation(
+        declared_floor_entries: usize,
+        representation: Result<RepresentationReceipt, TranscriptError>,
+    ) -> Result<Self, TranscriptError> {
+        Ok(Self {
+            schema: TranscriptSchema::V10,
+            representation: representation?,
             declared_floor_entries,
             events: Vec::new(),
             next_stage_index: 0,
             active_stage: None,
             closed: false,
+        })
+    }
+
+    /// Construct the terminal record for one failed SI representation projection.
+    /// This is intentionally direct: retrying the failed projection would not add
+    /// authority and could only re-enter the same failure.
+    #[cfg(test)]
+    pub(super) fn representation_unavailable(
+        declared_floor_entries: usize,
+        detail: String,
+    ) -> Self {
+        Self::representation_unavailable_with_refusals(declared_floor_entries, detail, Vec::new())
+    }
+
+    /// Preserve every refusal known before the representation projection failed.
+    pub(super) fn representation_unavailable_with_refusals(
+        declared_floor_entries: usize,
+        detail: String,
+        mut refusals: Vec<Refusal>,
+    ) -> Self {
+        refusals.push(Refusal::representation_unavailable(detail.clone()));
+        refusals.sort_by(|left, right| left.canonical_cmp(right));
+        Self {
+            schema: TranscriptSchema::V10,
+            representation: RepresentationReceipt::unavailable(detail),
+            declared_floor_entries,
+            events: vec![RunEvent {
+                id: EventId::generated(0),
+                kind: RunEventKind::Refused {
+                    stage: None,
+                    refusals,
+                },
+            }],
+            next_stage_index: 0,
+            active_stage: None,
+            closed: true,
         }
     }
 
     /// Build the exact structural and magnitude record for the sealed floor.
+    #[cfg(test)]
     pub(super) fn from_audited_floor(
         floor: &AbsolutePhysicsFloor,
         view: &AuditedFloorView<'_>,
     ) -> Result<Self, TranscriptError> {
-        let mut transcript = Self::empty(floor.len());
+        let mut transcript = Self::empty(floor.len())?;
+        transcript.append_audited_floor(floor, view)?;
+        Ok(transcript)
+    }
+
+    /// Append the exact structural and magnitude record for the sealed floor.
+    /// The caller must first have sealed an available representation receipt.
+    pub(super) fn append_audited_floor(
+        &mut self,
+        floor: &AbsolutePhysicsFloor,
+        view: &AuditedFloorView<'_>,
+    ) -> Result<(), TranscriptError> {
         let entries: Vec<_> = floor.entries().collect();
         if entries.len() != PHYSICAL_FLOOR_LEN {
             return Err(TranscriptError::FloorShapeMismatch {
@@ -439,9 +570,17 @@ impl RunTranscript {
             ),
         ];
 
-        for (index, (constant, bound_symbol, value)) in physical_values.into_iter().enumerate() {
-            let entry = entries[index];
+        for (constant, bound_symbol, value) in physical_values {
             let expected_id = format!("fundamental.{}", constant.symbol);
+            let entry = entries
+                .iter()
+                .copied()
+                .find(|entry| entry.id == expected_id)
+                .ok_or_else(|| TranscriptError::FloorShapeMismatch {
+                    detail: format!(
+                        "audited floor has no sealed measured identity '{expected_id}'"
+                    ),
+                })?;
             if entry.id != expected_id
                 || bound_symbol != constant.symbol
                 || entry.tier != Tier::Universal
@@ -450,7 +589,7 @@ impl RunTranscript {
             {
                 return Err(TranscriptError::FloorShapeMismatch {
                     detail: format!(
-                        "floor entry {index} '{}' does not match sealed measured identity '{expected_id}'",
+                        "floor entry '{}' does not match sealed measured identity '{expected_id}'",
                         entry.id
                     ),
                 });
@@ -464,7 +603,7 @@ impl RunTranscript {
                             entry.id
                         ),
                     })?;
-            transcript.append(RunEventKind::FloorValue(
+            self.append(RunEventKind::FloorValue(
                 ExactValueRecord::sealed_measured_floor(
                     entry.id.clone(),
                     &constant,
@@ -487,7 +626,7 @@ impl RunTranscript {
             VACUUM_PERMITTIVITY.formula,
             eps0_inputs,
         );
-        transcript.append(RunEventKind::DerivedValue(
+        self.append(RunEventKind::DerivedValue(
             ExactValueRecord::sealed_derived_value(
                 "derived.eps_0".into(),
                 &VACUUM_PERMITTIVITY,
@@ -498,7 +637,7 @@ impl RunTranscript {
             ),
         ))?;
 
-        Ok(transcript)
+        Ok(())
     }
 
     /// Schema governing the readable record stream.
@@ -670,6 +809,9 @@ impl RunTranscript {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TranscriptError {
     Closed,
+    RepresentationUnavailable {
+        detail: String,
+    },
     FloorShapeMismatch {
         detail: String,
     },
@@ -701,6 +843,7 @@ impl fmt::Display for TranscriptError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Closed => f.write_str("the canonical transcript is already closed"),
+            Self::RepresentationUnavailable { detail } => f.write_str(detail),
             Self::FloorShapeMismatch { detail } => {
                 write!(f, "sealed floor transcript mismatch: {detail}")
             }
@@ -751,30 +894,55 @@ impl fmt::Display for RunTranscript {
         writeln!(f, "transcript={}", self.schema.id())?;
         writeln!(f, "schema.major={}", self.schema.major())?;
         writeln!(f, "schema.minor={}", self.schema.minor())?;
-        writeln!(
-            f,
-            "representation.schema={}",
-            canonical_text(self.representation.schema_id())
-        )?;
-        writeln!(
-            f,
-            "representation.base_dimension_count={}",
-            SI_BASE_DIMENSION_IDS.len()
-        )?;
-        for (index, id) in SI_BASE_DIMENSION_IDS.iter().enumerate() {
-            writeln!(
-                f,
-                "representation.base_dimension.{index:04}={}",
-                canonical_text(id)
-            )?;
-        }
-        writeln!(
-            f,
-            "representation.value_count={}",
-            self.representation.values().len()
-        )?;
-        for (index, value) in self.representation.values().iter().enumerate() {
-            write_representation_value(f, &format!("representation.value.{index:04}"), value)?;
+        // In V10, the complete representation fields imply `Available`; V1
+        // status fields appear only for the unavailable variant.
+        match &self.representation.state {
+            RepresentationState::Available(values) => {
+                writeln!(
+                    f,
+                    "representation.schema={}",
+                    canonical_text(self.representation.schema_id())
+                )?;
+                writeln!(
+                    f,
+                    "representation.base_dimension_count={}",
+                    SI_BASE_DIMENSION_IDS.len()
+                )?;
+                for (index, id) in SI_BASE_DIMENSION_IDS.iter().enumerate() {
+                    writeln!(
+                        f,
+                        "representation.base_dimension.{index:04}={}",
+                        canonical_text(id)
+                    )?;
+                }
+                writeln!(f, "representation.value_count={}", values.len())?;
+                for (index, value) in values.iter().enumerate() {
+                    write_representation_value(
+                        f,
+                        &format!("representation.value.{index:04}"),
+                        value,
+                    )?;
+                }
+            }
+            RepresentationState::RepresentationUnavailable { detail } => {
+                writeln!(
+                    f,
+                    "representation.status_schema={}",
+                    canonical_text(self.representation.status_schema_id())
+                )?;
+                writeln!(
+                    f,
+                    "representation.status={}",
+                    self.representation.status().id()
+                )?;
+                writeln!(
+                    f,
+                    "representation.schema={}",
+                    canonical_text(self.representation.schema_id())
+                )?;
+                writeln!(f, "representation.error={}", canonical_text(detail))?;
+                writeln!(f, "representation.value_count=0")?;
+            }
         }
         writeln!(f, "declared_floor_entries={}", self.declared_floor_entries)?;
         writeln!(f, "event_count={}", self.events.len())?;
@@ -1344,6 +1512,92 @@ mod tests {
     }
 
     #[test]
+    fn transcript_schema_selectors_preserve_distinct_v9_and_v10_contracts() {
+        assert_eq!(TranscriptSchema::V9.id(), "civsim.planet.transcript.v9");
+        assert_eq!(TranscriptSchema::V9.major(), 9);
+        assert_eq!(TranscriptSchema::V9.minor(), 0);
+        assert_eq!(TranscriptSchema::V10.id(), RUN_TRANSCRIPT_SCHEMA_ID);
+        assert_eq!(TranscriptSchema::V10.major(), 10);
+        assert_eq!(TranscriptSchema::V10.minor(), 0);
+        assert_ne!(TranscriptSchema::V9, TranscriptSchema::V10);
+    }
+
+    #[test]
+    fn current_transcripts_select_v10() {
+        let transcript = RunTranscript::empty(PHYSICAL_FLOOR_LEN)
+            .expect("the sealed SI representation projects");
+        assert_eq!(transcript.schema(), TranscriptSchema::V10);
+        assert_eq!(transcript.schema().id(), RUN_TRANSCRIPT_SCHEMA_ID);
+    }
+
+    #[test]
+    fn injected_representation_projection_failure_is_a_value_free_terminal_refusal() {
+        let failure = RunTranscript::empty_with_representation(
+            PHYSICAL_FLOOR_LEN,
+            RepresentationReceipt::sealed_from_projection(Err(
+                ConstantProjectionError::RepresentationPolicy(
+                    "injected representation failure".to_owned(),
+                ),
+            )),
+        )
+        .expect_err(
+            "the injected SI representation failure must not construct an available transcript",
+        );
+        let TranscriptError::RepresentationUnavailable { detail } = failure else {
+            panic!("the failed representation has one typed refusal path")
+        };
+        assert_eq!(
+            detail,
+            "SI representation projection failed: SI representation policy is not independently sealed: injected representation failure"
+        );
+
+        let transcript = RunTranscript::representation_unavailable(PHYSICAL_FLOOR_LEN, detail);
+        let representation = transcript.representation();
+        assert_eq!(
+            representation.status(),
+            RepresentationStatus::RepresentationUnavailable
+        );
+        assert_eq!(
+            representation.status_schema_id(),
+            REPRESENTATION_STATUS_SCHEMA_ID
+        );
+        assert!(representation.values().is_empty());
+        assert_eq!(
+            representation.unavailable_reason(),
+            Some(
+                "SI representation projection failed: SI representation policy is not independently sealed: injected representation failure"
+            )
+        );
+        assert!(transcript.is_closed());
+        assert_eq!(transcript.events().len(), 1);
+        assert!(matches!(
+            transcript.events()[0].kind(),
+            RunEventKind::Refused {
+                stage: None,
+                refusals,
+            } if refusals.len() == 1
+                && refusals[0].code() == RefusalCode::RepresentationUnavailable
+                && refusals[0].detail()
+                    == "SI representation projection failed: SI representation policy is not independently sealed: injected representation failure"
+        ));
+        assert!(transcript.events().iter().all(|event| !matches!(
+            event.kind(),
+            RunEventKind::FloorValue(_) | RunEventKind::DerivedValue(_)
+        )));
+
+        let text = transcript.to_string();
+        assert!(text
+            .contains("representation.status_schema=\"civsim.planet.representation-status.v1\"\n"));
+        assert!(text.contains("representation.status=representation_unavailable\n"));
+        assert!(text.contains(
+            "representation.error=\"SI representation projection failed: SI representation policy is not independently sealed: injected representation failure\"\n"
+        ));
+        assert!(text.contains("representation.value_count=0\n"));
+        assert!(!text.contains("representation.base_dimension."));
+        assert!(!text.contains("representation.value.0000"));
+    }
+
+    #[test]
     fn floor_events_follow_the_declared_catalog_and_event_ordinals() {
         let floor = audited_floor();
         let view = AuditedFloorView::from_floor(&floor).expect("the floor has sealed magnitudes");
@@ -1465,6 +1719,13 @@ mod tests {
             transcript.representation().schema_id(),
             SI_REPRESENTATION_SCHEMA_ID
         );
+        assert_eq!(
+            transcript.representation().status(),
+            RepresentationStatus::Available
+        );
+        let text = transcript.to_string();
+        assert!(!text.contains("representation.status="));
+        assert!(!text.contains("representation.status_schema="));
         assert_eq!(transcript.representation().values().len(), 10);
         for record in transcript.representation().values() {
             if record.kind_id() == "exact_definition" {
@@ -1630,7 +1891,7 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(first.to_string(), second.to_string());
         assert!(first.to_string().starts_with(
-            "transcript=civsim.planet.transcript.v9\nschema.major=9\nschema.minor=0\n"
+            "transcript=civsim.planet.transcript.v10\nschema.major=10\nschema.minor=0\n"
         ));
         let last = first.events().last().expect("the refusal is recorded");
         assert!(matches!(

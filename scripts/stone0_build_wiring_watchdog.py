@@ -28,6 +28,7 @@ OBSERVED_PATHS = (
     "crates/stone0-build/Cargo.toml",
     "crates/stone0-build/build.rs",
     "crates/stone0-build/src/lib.rs",
+    "crates/stone0/src/lib.rs",
     "crates/planet/Cargo.toml",
     "crates/planet/build.rs",
     "crates/planet-substrate/Cargo.toml",
@@ -123,17 +124,102 @@ def inspect(root: pathlib.Path) -> None:
             raise WatchdogError(f"{client} regained an independent gate runner")
 
     build_source = _text(root, f"{ANCHOR_PATH}/build.rs")
+    _one(
+        r'^\s*let repo_root = Path::new\(env!\("CARGO_MANIFEST_DIR"\)\)'
+        r'\.join\("\.\./\.\."\);\s*$',
+        build_source,
+        "manifest-derived repository root",
+    )
+    _one(
+        r"civsim_stone0::run_at_repository_root"
+        r"\(civsim_stone0::Mode::Local, &repo_root\)",
+        build_source,
+        "explicit-root Stone 0 call",
+    )
     sequence = [
+        build_source.find(
+            'let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");'
+        ),
+        build_source.find("civsim_stone0::emit_cargo_rerun_inputs(&repo_root);"),
         build_source.find("std::fs::remove_file(&marker)"),
-        build_source.find("civsim_stone0::run(civsim_stone0::Mode::Local)"),
+        build_source.find(
+            "civsim_stone0::run_at_repository_root("
+            "civsim_stone0::Mode::Local, &repo_root)"
+        ),
         build_source.find("if code != 0"),
         build_source.find("std::fs::write(&marker, MARKER_SOURCE)"),
         build_source.find("cargo:rustc-env=CIVSIM_STONE0_GUARD_MARKER"),
     ]
     if any(position < 0 for position in sequence) or sequence != sorted(sequence):
         raise WatchdogError("anchor run and marker order changed")
+    if "civsim_stone0::run(civsim_stone0::Mode::Local)" in build_source:
+        raise WatchdogError("anchor retained the ambient repository-root runner")
     if TOKEN not in build_source:
         raise WatchdogError("anchor marker token changed")
+
+    stone0_source = _text(root, "crates/stone0/src/lib.rs")
+    explicit_route = _one(
+        r"(?ms)^pub fn run_at_repository_root\(.*?^\}\s*$",
+        stone0_source,
+        "explicit-root entry-point section",
+    ).group(0)
+    root_validator = _one(
+        r"(?ms)^fn canonicalize_and_validate_repository_root\(.*?^\}\s*$",
+        stone0_source,
+        "repository-root validator section",
+    ).group(0)
+    top_level_query = _one(
+        r"(?ms)^fn trusted_git_top_level\(.*?^\}\s*$",
+        stone0_source,
+        "trusted Git top-level section",
+    ).group(0)
+    command_builder = _one(
+        r"(?ms)^fn trusted_git_command\(.*?^\}\s*$",
+        stone0_source,
+        "trusted Git command section",
+    ).group(0)
+
+    _one(
+        r"canonicalize_and_validate_repository_root\(repo_root\)",
+        explicit_route,
+        "explicit-root validator call",
+    )
+    trusted_call = _one(
+        r"let\s+git_root\s*=\s*trusted_git_top_level\(&canonical\)\?;",
+        root_validator,
+        "trusted Git top-level acquisition",
+    )
+    inequality = _one(
+        r"if\s+git_root\s*!=\s*canonical\s*\{",
+        root_validator,
+        "trusted Git root inequality",
+    )
+    refusal = root_validator.find("return Err(format!(", inequality.end())
+    success = root_validator.find("Ok(canonical)", inequality.end())
+    if (
+        refusal < 0
+        or success < 0
+        or not trusted_call.start() < inequality.start() < refusal < success
+    ):
+        raise WatchdogError("trusted Git root inequality no longer fails before acceptance")
+
+    _one(
+        r"let\s+mut\s+command\s*=\s*trusted_git_command\(root\)\?;",
+        top_level_query,
+        "trusted Git top-level command route",
+    )
+    command_fragments = (
+        r"let\s+git\s*=\s*trusted_git_executable\(\)\?;",
+        r"let\s+mut\s+command\s*=\s*Command::new\(git\);",
+        r"\.env_clear\(\)",
+        r'\.env\("PATH",\s*"/usr/bin:/bin"\)',
+    )
+    command_positions = [
+        _one(pattern, command_builder, f"trusted Git command step {index}").start()
+        for index, pattern in enumerate(command_fragments)
+    ]
+    if command_positions != sorted(command_positions):
+        raise WatchdogError("trusted Git command steps changed order")
 
     library = _text(root, f"{ANCHOR_PATH}/src/lib.rs")
     required_library_fragments = (
@@ -188,6 +274,26 @@ def self_test() -> None:
         mutations = (
             ("Cargo.toml", ANCHOR_PATH, "crates/stone0-build-duplicate"),
             (f"{ANCHOR_PATH}/Cargo.toml", "../stone0", "../replacement"),
+            (
+                f"{ANCHOR_PATH}/build.rs",
+                "Mode::Local, &repo_root)",
+                'Mode::Local, &Path::new("."))',
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                "trusted_git_top_level(&canonical)?",
+                "Ok(canonical.clone())?",
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                "git_root != canonical",
+                "git_root == canonical",
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                "let git = trusted_git_executable()?;",
+                'let git = PathBuf::from("git");',
+            ),
             (f"{ANCHOR_PATH}/build.rs", "if code != 0", "if false"),
             (f"{ANCHOR_PATH}/src/lib.rs", TOKEN, "replacement-token"),
             ("crates/planet-substrate/build.rs", "assert_guard_linked", "skip_guard"),

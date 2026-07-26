@@ -271,6 +271,9 @@ pub enum ColumnDerivationRefusal {
     /// The expansivity join refused, carrying its own reason (a phase with no banked gamma, bulk modulus or
     /// registry row).
     Expansivity(String),
+    /// The state-resolved thermoelastic ladder found a typed refusal that must not be converted into an
+    /// ambient fallback. In particular, an uncollapsed source-family gap has no scalar selection authority.
+    Thermoelastic(civsim_materials::thermoelastic::ThermoRefusal),
     /// The creep ladder refused, carrying its own reason (an unfeedable row, a domain violation, or a solve
     /// that did not converge).
     Viscosity(String),
@@ -311,6 +314,9 @@ impl std::fmt::Display for ColumnDerivationRefusal {
             }
             ColumnDerivationRefusal::Expansivity(reason) => {
                 write!(f, "the expansivity join refused: {reason}")
+            }
+            ColumnDerivationRefusal::Thermoelastic(reason) => {
+                write!(f, "the thermoelastic ladder refused: {reason}")
             }
             ColumnDerivationRefusal::Viscosity(reason) => {
                 write!(f, "the creep ladder refused: {reason}")
@@ -516,7 +522,7 @@ pub fn derive_column_thermal_properties(
         temperature_k,
         pressure_bar,
     };
-    let pass = ladder_pass_over_census(&volume_census, state, tables);
+    let pass = ladder_pass_over_census(&volume_census, state, tables)?;
 
     // Density: the registry's own molar volumes and masses, in g/cm^3, lifted to kg/m^3, and then CARRIED
     // TO THE REQUESTED STATE by the same solve the expansivity came from.
@@ -609,7 +615,7 @@ pub fn derive_column_thermal_properties(
     // second pass is skipped outright when the first refused, since the fallback is then the only
     // available answer and running the ladder again would buy nothing.
     let anchor_k = civsim_materials::conductivity::hofmeister_reference_temperature_k();
-    let anchor_pass = pass.as_ref().and_then(|_| {
+    let anchor_pass = if pass.is_some() {
         ladder_pass_over_census(
             &volume_census,
             civsim_materials::thermoelastic::ThermoState {
@@ -617,8 +623,10 @@ pub fn derive_column_thermal_properties(
                 pressure_bar,
             },
             tables,
-        )
-    });
+        )?
+    } else {
+        None
+    };
     let expansivity_integral = expansivity_integral_from_anchor(
         pass.as_ref(),
         anchor_pass.as_ref(),
@@ -925,7 +933,42 @@ fn ladder_pass_over_census(
     volume_census: &[(String, Fixed)],
     state: civsim_materials::thermoelastic::ThermoState,
     tables: &BankedTables<'_>,
-) -> Option<LadderPass> {
+) -> Result<Option<LadderPass>, ColumnDerivationRefusal> {
+    // Resolve the material responses before doing the aggregate arithmetic so a source-family gap can
+    // cross this boundary as its own typed refusal. Other unavailable rungs retain the existing ambient
+    // fallback behavior by returning `Ok(None)`.
+    let mut resolved = Vec::with_capacity(volume_census.len());
+    for (name, fraction) in volume_census {
+        match civsim_materials::thermoelastic::response_at(
+            name,
+            state,
+            tables.registry,
+            tables.moduli,
+            tables.gruneisen,
+            tables.anchors,
+        ) {
+            Ok(response) => resolved.push((name.clone(), *fraction, response)),
+            Err(
+                refusal @ civsim_materials::thermoelastic::ThermoRefusal::UncollapsedSourceFamilyGap {
+                    ..
+                },
+            ) => return Err(ColumnDerivationRefusal::Thermoelastic(refusal)),
+            Err(_) => return Ok(None),
+        }
+    }
+
+    // The remaining refusals are arithmetic or missing-row failures that have always selected the ambient
+    // fallback. Keep that behavior explicit while this function's outer `Result` is reserved for the typed
+    // source-family refusal above.
+    macro_rules! or_unavailable {
+        ($value:expr) => {
+            match $value {
+                Some(value) => value,
+                None => return Ok(None),
+            }
+        };
+    }
+
     // THE WEIGHT IS THE STATE FRACTION, NOT THE AMBIENT ONE, and the two are different mixtures.
     //
     // The census arrives as ambient volume fractions `phi_i0`. At the requested state each phase has its
@@ -963,28 +1006,20 @@ fn ladder_pass_over_census(
     let mut rung: Option<civsim_materials::thermoelastic::ThermoRung> = None;
     let mut one_rung = true;
     let mut state_weights: Vec<(String, Fixed)> = Vec::with_capacity(volume_census.len());
-    for (name, fraction) in volume_census {
-        let r = civsim_materials::thermoelastic::response_at(
-            name,
-            state,
-            tables.registry,
-            tables.moduli,
-            tables.gruneisen,
-            tables.anchors,
-        )
-        .ok()?;
+    for (name, fraction, r) in &resolved {
         // The ratio against the phase's OWN reference volume, taken from the registry the census was
         // built from, so the compression is measured against the same basis the density uses.
-        let v0 = tables.registry.phase(name)?.molar_volume;
+        let v0 = or_unavailable!(tables.registry.phase(name)).molar_volume;
         if v0 <= Fixed::ZERO {
-            return None;
+            return Ok(None);
         }
-        let f = r.molar_volume_cm3.checked_div(v0)?;
+        let f = or_unavailable!(r.molar_volume_cm3.checked_div(v0));
         // The phase's share of the STATE volume, before renormalising: `phi_i0 f_i`.
-        let weight = f.checked_mul(*fraction)?;
-        alpha_weighted = alpha_weighted.checked_add(r.alpha_per_k.checked_mul(weight)?)?;
+        let weight = or_unavailable!(f.checked_mul(*fraction));
+        let weighted_alpha = or_unavailable!(r.alpha_per_k.checked_mul(weight));
+        alpha_weighted = or_unavailable!(alpha_weighted.checked_add(weighted_alpha));
         cp_weighted = cp_weighted.and_then(|acc| {
-            let c_p = isobaric_capacity_j_per_mol_k(&r, state.temperature_k)?;
+            let c_p = isobaric_capacity_j_per_mol_k(r, state.temperature_k)?;
             let per_volume = c_p.checked_div(r.molar_volume_cm3)?;
             acc.checked_add(per_volume.checked_mul(weight)?)
         });
@@ -993,30 +1028,30 @@ fn ladder_pass_over_census(
             Some(seen) if seen != r.rung => one_rung = false,
             Some(_) => {}
         }
-        state_total = state_total.checked_add(weight)?;
-        covered = covered.checked_add(*fraction)?;
+        state_total = or_unavailable!(state_total.checked_add(weight));
+        covered = or_unavailable!(covered.checked_add(*fraction));
         state_weights.push((name.clone(), weight));
     }
     if covered <= Fixed::ZERO || state_total <= Fixed::ZERO {
-        return None;
+        return Ok(None);
     }
     // Renormalise the state weights to one, so a consumer can use them as fractions directly.
     let mut state_census = Vec::with_capacity(state_weights.len());
     for (name, weight) in state_weights {
-        state_census.push((name, weight.checked_div(state_total)?));
+        state_census.push((name, or_unavailable!(weight.checked_div(state_total))));
     }
-    Some(LadderPass {
+    Ok(Some(LadderPass {
         // Divided by the STATE total, so numerator and denominator carry the same weighting.
-        alpha_per_k: alpha_weighted.checked_div(state_total)?,
+        alpha_per_k: or_unavailable!(alpha_weighted.checked_div(state_total)),
         // The compression is the ratio of state volume to ambient volume, so this denominator is the
         // AMBIENT total and stays as it was. The two divisors differ on purpose.
-        compression: state_total.checked_div(covered)?,
+        compression: or_unavailable!(state_total.checked_div(covered)),
         // The same STATE total as the expansivity, because the accumulator above is per unit of state
         // volume and `state_total` is the volume the ambient census expands to.
         c_p_j_per_cm3_k: cp_weighted.and_then(|c| c.checked_div(state_total)),
         rung: if one_rung { rung } else { None },
         state_census,
-    })
+    }))
 }
 
 /// One phase's ISOBARIC heat capacity (J/(mol K)) at the state its own response describes.
@@ -2312,6 +2347,44 @@ mod tests {
         ]
     }
 
+    /// A CAUSAL COLUMN PASS CANNOT CHOOSE ONE SOURCE FAMILY.
+    ///
+    /// Enstatite has two nonidentical source inversions at this state. The materials layer retains both, and
+    /// the geodynamics boundary must carry the exact typed gap rather than converting it into `None` and
+    /// falling through to an ambient point.
+    #[test]
+    fn an_uncollapsed_source_family_gap_reaches_geodynamics_as_a_typed_refusal() {
+        let (registry, periodic, conductivity, gruneisen, moduli, anchors) = banked();
+        let tables = BankedTables {
+            registry: &registry,
+            periodic: &periodic,
+            conductivity: &conductivity,
+            gruneisen: &gruneisen,
+            moduli: &moduli,
+            anchors: &anchors,
+        };
+        let census = vec![("enstatite".to_string(), Fixed::ONE)];
+        let state = civsim_materials::thermoelastic::ThermoState {
+            temperature_k: Fixed::from_int(1600),
+            pressure_bar: Fixed::from_int(100_000),
+        };
+
+        let refusal = match ladder_pass_over_census(&census, state, &tables) {
+            Err(refusal) => refusal,
+            Ok(_) => panic!("a causal pass has no authority to select one source inversion"),
+        };
+        assert_eq!(
+            refusal,
+            ColumnDerivationRefusal::Thermoelastic(
+                civsim_materials::thermoelastic::ThermoRefusal::UncollapsedSourceFamilyGap {
+                    phase: "enstatite".to_string(),
+                    source_families: vec!["slb2005".to_string(), "slb2011".to_string()],
+                }
+            ),
+            "the exact families must cross the consumer boundary without becoming an ambient fallback"
+        );
+    }
+
     /// THE BUNDLE CARRIES ONE HEAT CAPACITY AND IT TRACES TO THE LADDER PASS THE EXPANSIVITY CAME FROM.
     ///
     /// It carried two. The ladder solves a Debye `C_V` at the column's own state on the way to `alpha` and
@@ -2432,6 +2505,7 @@ mod tests {
         let census = civsim_physics::petrology::assemblage_volume_fractions(&assemblage, &registry)
             .expect("its census resolves");
         let cold_pass = ladder_pass_over_census(&census, cold_state, &tables)
+            .expect("the census carries no uncollapsed source-family gap")
             .expect("the ladder answers at 400 K and depth");
         let cold_density =
             civsim_physics::petrology::assemblage_density(&assemblage, &registry, &periodic)
@@ -2477,45 +2551,36 @@ mod tests {
             moduli: &moduli,
             anchors: &anchors,
         };
-        // Magnesium in excess of the forsterite stoichiometry, so the rock minimizes to forsterite plus
-        // periclase rather than to one phase.
-        let composition = vec![
-            ("Mg".to_string(), Fixed::from_int(4)),
-            ("Si".to_string(), Fixed::ONE),
-            ("O".to_string(), Fixed::from_int(6)),
+        // An equal-volume synthetic census of two phases that each have ONE distinct source determination.
+        // The old fixture minimized to forsterite plus periclase, but periclase carries two nonidentical
+        // thermoelastic inversions and the causal ladder now correctly refuses to choose one. Keeping that
+        // fixture here would test the source-family refusal a second time and leave molar weighting untested.
+        let census = vec![
+            ("corundum".to_string(), Fixed::from_ratio(1, 2)),
+            ("forsterite".to_string(), Fixed::from_ratio(1, 2)),
         ];
         let temperature = Fixed::from_int(1600);
         let pressure_bar = Fixed::from_int(112_670);
-        let assemblage = civsim_physics::petrology::stable_assemblage(
-            &composition,
-            temperature,
-            pressure_bar,
-            &registry,
-        )
-        .expect("the two-phase assemblage minimizes");
-        assert!(
-            assemblage.phases.len() > 1,
-            "this test is worthless on a single-phase census, since every weighting collapses there; \
-             read {:?}",
-            assemblage.phases
-        );
-        let census = civsim_physics::petrology::assemblage_volume_fractions(&assemblage, &registry)
-            .expect("its census resolves");
         let state = civsim_materials::thermoelastic::ThermoState {
             temperature_k: temperature,
             pressure_bar,
         };
         let pass = ladder_pass_over_census(&census, state, &tables)
+            .expect("the census carries no uncollapsed source-family gap")
             .expect("the ladder answers the whole two-phase census");
 
         // The route under test: the pass's capacity per unit of the assemblage's own volume, over the
         // density the same pass implies, exactly as the derivation forms it.
-        let density =
-            civsim_physics::petrology::assemblage_density(&assemblage, &registry, &periodic)
-                .expect("its ambient density resolves")
-                .to_f64_lossy()
-                * 1000.0
-                / pass.compression.to_f64_lossy();
+        let mut ambient_density_g_cm3 = 0.0;
+        for (name, fraction) in &census {
+            let phase = registry.phase(name).expect("the phase is banked");
+            let molar_mass = civsim_physics::petrology::phase_molar_mass(phase, &periodic)
+                .expect("its molar mass resolves")
+                .to_f64_lossy();
+            ambient_density_g_cm3 +=
+                fraction.to_f64_lossy() * molar_mass / phase.molar_volume.to_f64_lossy();
+        }
+        let density = ambient_density_g_cm3 * 1000.0 / pass.compression.to_f64_lossy();
         let from_pass = pass
             .c_p_j_per_cm3_k
             .expect("the pass carries a capacity")
@@ -2523,10 +2588,13 @@ mod tests {
             * 1.0e6
             / density;
 
-        // The reference route: the assemblage's own molar amounts, never touching a volume fraction.
+        // The reference route converts the ambient volume census into moles explicitly: `n_i` is
+        // proportional to `phi_i / V_0i`. It never reads the pass's capacity accumulator.
         let mut capacity = 0.0;
         let mut mass = 0.0;
-        for (name, amount) in &assemblage.phases {
+        let mut total_moles = 0.0;
+        let mut volume_weighted_molar = 0.0;
+        for (name, fraction) in &census {
             let r = civsim_materials::thermoelastic::response_at(
                 name, state, &registry, &moduli, &gruneisen, &anchors,
             )
@@ -2543,15 +2611,15 @@ mod tests {
                     * r.bulk_modulus_gpa.to_f64_lossy()
                     * r.molar_volume_cm3.to_f64_lossy()
                     * temperature.to_f64_lossy();
-            let n = amount.to_f64_lossy();
+            let phase = registry.phase(name).expect("the phase is banked");
+            let n = fraction.to_f64_lossy() / phase.molar_volume.to_f64_lossy();
             capacity += n * c_p;
-            mass += n * civsim_physics::petrology::phase_molar_mass(
-                registry.phase(name).expect("the phase is banked"),
-                &periodic,
-            )
-            .expect("its molar mass resolves")
-            .to_f64_lossy()
+            mass += n * civsim_physics::petrology::phase_molar_mass(phase, &periodic)
+                .expect("its molar mass resolves")
+                .to_f64_lossy()
                 / 1000.0;
+            total_moles += n;
+            volume_weighted_molar += fraction.to_f64_lossy() * c_p;
         }
         let by_moles = capacity / mass;
 
@@ -2563,23 +2631,9 @@ mod tests {
 
         // AND THE TWO WEIGHTINGS REALLY DO DIFFER HERE, so the agreement above is evidence rather than a
         // coincidence of a census where every weighting is the same census.
-        let mut volume_weighted_molar = 0.0;
-        for (name, fraction) in &census {
-            let r = civsim_materials::thermoelastic::response_at(
-                name, state, &registry, &moduli, &gruneisen, &anchors,
-            )
-            .expect("each phase answers");
-            volume_weighted_molar +=
-                fraction.to_f64_lossy() * r.c_v_j_per_mol_k.expect("a capacity").to_f64_lossy();
-        }
-        let mole_weighted_molar = capacity
-            / assemblage
-                .phases
-                .iter()
-                .map(|(_, n)| n.to_f64_lossy())
-                .sum::<f64>();
+        let mole_weighted_molar = capacity / total_moles;
         assert!(
-            (volume_weighted_molar - mole_weighted_molar).abs() / mole_weighted_molar > 0.10,
+            (volume_weighted_molar - mole_weighted_molar).abs() / mole_weighted_molar > 0.01,
             "this census must separate the two weightings in fact, else the test proves nothing; \
              volume-weighted {volume_weighted_molar:.1} against mole-weighted {mole_weighted_molar:.1} \
              J/(mol K)"
@@ -2640,8 +2694,12 @@ mod tests {
             )
         };
 
-        let hot = at(temperature, solved_bar).expect("the ladder answers at the column's state");
-        let cold = at(anchor_k, solved_bar).expect("and at the anchor temperature, same pressure");
+        let hot = at(temperature, solved_bar)
+            .expect("the census carries no uncollapsed source-family gap")
+            .expect("the ladder answers at the column's state");
+        let cold = at(anchor_k, solved_bar)
+            .expect("the census carries no uncollapsed source-family gap")
+            .expect("and at the anchor temperature, same pressure");
         assert_eq!(
             hot.rung, cold.rung,
             "this test needs both endpoints on ONE rung; that is the case it is about"
@@ -2691,8 +2749,12 @@ mod tests {
 
         // THE BRANCH: at 1 bar the two endpoints resolve through different rungs, and the helper falls
         // back rather than dividing one model's volume by another's.
-        let hot_1bar = at(temperature, Fixed::ONE).expect("the ladder answers at 1 bar and 1600 K");
-        let cold_1bar = at(anchor_k, Fixed::ONE).expect("and at 1 bar and 298 K");
+        let hot_1bar = at(temperature, Fixed::ONE)
+            .expect("the census carries no uncollapsed source-family gap")
+            .expect("the ladder answers at 1 bar and 1600 K");
+        let cold_1bar = at(anchor_k, Fixed::ONE)
+            .expect("the census carries no uncollapsed source-family gap")
+            .expect("and at 1 bar and 298 K");
         assert_ne!(
             hot_1bar.rung, cold_1bar.rung,
             "at 1 bar the anchor is inside the ambient row's frame and the hot end is not; that \

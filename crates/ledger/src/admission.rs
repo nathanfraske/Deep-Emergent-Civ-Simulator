@@ -234,8 +234,9 @@ impl AbsolutePhysicsFloor {
             return Err(FloorAdmissionError::EmptyFloor);
         }
 
+        let leaf_ancestry = leaf_ancestry(&ledger);
         for entry in ledger.entries() {
-            validate_entry(&ledger, entry)?;
+            validate_entry(entry, &leaf_ancestry)?;
         }
 
         let mut receipts_by_entry = BTreeMap::new();
@@ -363,7 +364,10 @@ impl AbsolutePhysicsFloor {
     }
 }
 
-fn validate_entry(ledger: &Ledger, entry: &Entry) -> Result<(), FloorAdmissionError> {
+fn validate_entry(
+    entry: &Entry,
+    leaf_ancestry: &BTreeMap<String, bool>,
+) -> Result<(), FloorAdmissionError> {
     if entry.tier == Tier::Contingency || entry.provenance == Provenance::Contingency {
         return Err(FloorAdmissionError::CallerSuppliedContingency {
             entry_id: entry.id.clone(),
@@ -379,7 +383,7 @@ fn validate_entry(ledger: &Ledger, entry: &Entry) -> Result<(), FloorAdmissionEr
         });
     }
     if entry.provenance == Provenance::Derived {
-        if !has_leaf_ancestry(ledger, &entry.id) {
+        if !leaf_ancestry.get(&entry.id).copied().unwrap_or(false) {
             return Err(FloorAdmissionError::DerivedWithoutLeafAncestry(
                 entry.id.clone(),
             ));
@@ -395,18 +399,41 @@ fn validate_entry(ledger: &Ledger, entry: &Entry) -> Result<(), FloorAdmissionEr
     Ok(())
 }
 
-fn has_leaf_ancestry(ledger: &Ledger, id: &str) -> bool {
-    let Some(entry) = ledger.get(id) else {
-        return false;
-    };
-    if entry.provenance != Provenance::Derived {
-        return true;
+fn leaf_ancestry(ledger: &Ledger) -> BTreeMap<String, bool> {
+    let mut ancestry = BTreeMap::new();
+    for root in ledger.entries() {
+        if ancestry.contains_key(&root.id) {
+            continue;
+        }
+        let mut stack = vec![(root.id.clone(), false)];
+        while let Some((id, expanded)) = stack.pop() {
+            if ancestry.contains_key(&id) {
+                continue;
+            }
+            let Some(entry) = ledger.get(&id) else {
+                ancestry.insert(id, false);
+                continue;
+            };
+            if entry.provenance != Provenance::Derived {
+                ancestry.insert(id, true);
+            } else if expanded {
+                let admitted = !entry.inputs.is_empty()
+                    && entry
+                        .inputs
+                        .iter()
+                        .all(|input| ancestry.get(input).copied().unwrap_or(false));
+                ancestry.insert(id, admitted);
+            } else {
+                stack.push((id, true));
+                for input in entry.inputs.iter().rev() {
+                    if !ancestry.contains_key(input) {
+                        stack.push((input.clone(), false));
+                    }
+                }
+            }
+        }
     }
-    !entry.inputs.is_empty()
-        && entry
-            .inputs
-            .iter()
-            .all(|input| has_leaf_ancestry(ledger, input))
+    ancestry
 }
 
 fn requires_exhaustion_receipt(entry: &Entry) -> bool {
@@ -611,6 +638,35 @@ mod tests {
         assert_eq!(floor.len(), 2);
         assert!(!floor.is_empty());
         assert!(floor.get("composite.fixture").is_some());
+    }
+
+    #[test]
+    fn deep_floor_ancestry_admission_is_iterative() {
+        const DEPTH: usize = 16_384;
+        let mut entries = Vec::with_capacity(DEPTH);
+        entries.push(universal_leaf("deep.floor.0"));
+        for index in 1..DEPTH {
+            entries.push(Entry {
+                id: format!("deep.floor.{index}"),
+                tier: Tier::Universal,
+                provenance: Provenance::Derived,
+                inputs: vec![format!("deep.floor.{}", index - 1)],
+            });
+        }
+        let ledger = Ledger::build(entries).unwrap();
+        assert_eq!(
+            ledger.effective_provenance(&format!("deep.floor.{}", DEPTH - 1)),
+            Some(Provenance::Derived)
+        );
+        let receipt = evidence_receipt(
+            "deep.floor.0",
+            "fixture.deep_floor",
+            "fixture.deep_floor.root",
+            1,
+        );
+
+        let floor = AbsolutePhysicsFloor::admit(ledger, [receipt]).unwrap();
+        assert!(floor.get(&format!("deep.floor.{}", DEPTH - 1)).is_some());
     }
 
     #[test]

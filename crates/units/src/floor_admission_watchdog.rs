@@ -9,9 +9,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 pub(crate) const CHECKER_IMPLEMENTATION_ID: &str =
-    "civsim.units.floor-catalog-admission-watchdog.v1";
+    "civsim.units.canonical-floor-admission-watchdog.v3";
 
-const INPUT_SCHEMA_ID: &str = "civsim.units.floor-catalog-admission-input.v1";
+const INPUT_SCHEMA_ID: &str = "civsim.units.floor-catalog-admission-input.v3";
+const DERIVATION_EXHAUSTION_SCHEMA_ID: &str = "civsim.floor.irreducible.derivation-exhaustion.v1";
+const BUCKINGHAM_PI_SCHEMA_ID: &str = "civsim.floor.irreducible.buckingham-pi.v1";
+const GAP_LAW_SCHEMA_ID: &str = "civsim.floor.irreducible.gap-law.v1";
+const CHAOS_PROTOCOL_SCHEMA_ID: &str = "civsim.floor.irreducible.chaos-protocol.v1";
+const RESIDUAL_LAW_SCHEMA_ID: &str = "civsim.floor.irreducible.residual-law.v1";
+const RESIDUAL_SLOT_SCHEMA_ID: &str = "civsim.floor.irreducible.residual-slot.v1";
+const OWNER_ADMISSION_SCHEMA_ID: &str = "civsim.floor.irreducible.owner-admission.v1";
+const OWNER_ADMISSION_DECISION_ID: &str = "owner.admitted";
 const MAX_COLLECTION_ITEMS: usize = 4_096;
 const MAX_TEXT_BYTES: usize = 1 << 20;
 
@@ -19,8 +27,8 @@ const MAX_TEXT_BYTES: usize = 1 << 20;
 // and exhaustion-receipt input bytes. It is intentionally separate from the
 // producer declarations and the physical authority digest.
 const EXPECTED_INPUT_SHA256: [u8; 32] = [
-    0x95, 0xc4, 0x8e, 0xf3, 0x65, 0x75, 0xa5, 0x8e, 0x60, 0xb3, 0x25, 0x88, 0xda, 0xab, 0xf3, 0x47,
-    0xd8, 0xcd, 0xd2, 0x77, 0x72, 0x81, 0x2d, 0x98, 0x3a, 0x99, 0xc1, 0x30, 0x4a, 0x66, 0x3c, 0xf4,
+    0xc2, 0xda, 0x97, 0x10, 0x3b, 0x13, 0x08, 0x22, 0x67, 0x5e, 0x85, 0x58, 0x72, 0x4c, 0x9c, 0xfc,
+    0x32, 0xe9, 0xe9, 0xc0, 0x53, 0xb8, 0x58, 0x6a, 0xe8, 0xc7, 0x39, 0x13, 0x97, 0x9e, 0x63, 0x0c,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +62,35 @@ pub(crate) enum FloorAdmissionWatchdogError {
     Malformed(String),
     Refused(String),
     CanonicalInputMismatch { expected: [u8; 32], found: [u8; 32] },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FloorAdmissionWatchdogRejectionClass {
+    MalformedInput,
+    SemanticValidation,
+    CanonicalInputCustody,
+}
+
+impl FloorAdmissionWatchdogRejectionClass {
+    pub(crate) const fn stable_id(self) -> &'static str {
+        match self {
+            Self::MalformedInput => "checker.rejected.malformed_input",
+            Self::SemanticValidation => "checker.rejected.semantic_validation",
+            Self::CanonicalInputCustody => "checker.rejected.canonical_input_custody",
+        }
+    }
+}
+
+impl FloorAdmissionWatchdogError {
+    pub(crate) const fn rejection_class(&self) -> FloorAdmissionWatchdogRejectionClass {
+        match self {
+            Self::Malformed(_) => FloorAdmissionWatchdogRejectionClass::MalformedInput,
+            Self::Refused(_) => FloorAdmissionWatchdogRejectionClass::SemanticValidation,
+            Self::CanonicalInputMismatch { .. } => {
+                FloorAdmissionWatchdogRejectionClass::CanonicalInputCustody
+            }
+        }
+    }
 }
 
 impl fmt::Display for FloorAdmissionWatchdogError {
@@ -106,6 +143,52 @@ struct CheckedReceipt {
     phenomenon: String,
     residual_slot: String,
     buckingham_pi_groups: usize,
+    component_digests: IrreducibleComponentDigests,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct IrreducibleComponentDigests {
+    derivation_exhaustion: [u8; 32],
+    buckingham_pi: [u8; 32],
+    gap_law: [u8; 32],
+    chaos_protocol: [u8; 32],
+    residual_law: [u8; 32],
+    residual_slot: [u8; 32],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CheckedOwnerAdmission {
+    entry_id: String,
+    decision_id: String,
+    component_digests: IrreducibleComponentDigests,
+    owner_admission: [u8; 32],
+}
+
+struct ComponentHasher(Sha256);
+
+impl ComponentHasher {
+    fn new(schema_id: &str) -> Self {
+        let mut hasher = Self(Sha256::new());
+        hasher.text(schema_id);
+        hasher
+    }
+
+    fn text(&mut self, value: &str) {
+        self.bytes(value.as_bytes());
+    }
+
+    fn bytes(&mut self, value: &[u8]) {
+        self.0.update((value.len() as u64).to_le_bytes());
+        self.0.update(value);
+    }
+
+    fn count(&mut self, value: usize) {
+        self.bytes(&(value as u64).to_le_bytes());
+    }
+
+    fn finish(self) -> [u8; 32] {
+        self.0.finalize().into()
+    }
 }
 
 struct ByteCursor<'a> {
@@ -175,6 +258,21 @@ impl<'a> ByteCursor<'a> {
             )));
         }
         Ok(value)
+    }
+
+    fn digest(&mut self, field: &str) -> Result<[u8; 32], FloorAdmissionWatchdogError> {
+        let end = self
+            .offset
+            .checked_add(32)
+            .ok_or_else(|| FloorAdmissionWatchdogError::Malformed(field.to_owned()))?;
+        let raw = self
+            .bytes
+            .get(self.offset..end)
+            .ok_or_else(|| FloorAdmissionWatchdogError::Malformed(format!("truncated {field}")))?;
+        self.offset = end;
+        let mut digest = [0_u8; 32];
+        digest.copy_from_slice(raw);
+        Ok(digest)
     }
 
     fn finish(self) -> Result<(), FloorAdmissionWatchdogError> {
@@ -250,61 +348,82 @@ fn read_required_fields(
     cursor: &mut ByteCursor<'_>,
     prefix: &str,
     fields: &[&str],
-) -> Result<(), FloorAdmissionWatchdogError> {
+) -> Result<Vec<String>, FloorAdmissionWatchdogError> {
+    let mut values = Vec::with_capacity(fields.len());
     for field in fields {
-        cursor.required_text(&format!("{prefix}.{field}"))?;
+        values.push(cursor.required_text(&format!("{prefix}.{field}"))?);
     }
-    Ok(())
+    Ok(values)
 }
 
 fn parse_chaos_protocol(
     cursor: &mut ByteCursor<'_>,
     index: usize,
-) -> Result<(), FloorAdmissionWatchdogError> {
+    entry_id: &str,
+) -> Result<[u8; 32], FloorAdmissionWatchdogError> {
     let prefix = format!("receipt[{index}].chaos");
     let branch = cursor.required_text(&format!("{prefix}.branch"))?;
+    let mut digest = ComponentHasher::new(CHAOS_PROTOCOL_SCHEMA_ID);
+    digest.text(entry_id);
+    digest.text(&branch);
     match branch.as_str() {
         "not_applicable" => {
-            cursor.required_text(&format!("{prefix}.basis"))?;
+            let basis = cursor.required_text(&format!("{prefix}.basis"))?;
+            digest.text(&basis);
         }
         "dynamical" => {
-            read_required_fields(
+            let header = read_required_fields(
                 cursor,
                 &prefix,
                 &["classification", "regime_partition", "transition_law"],
             )?;
+            for value in header {
+                digest.text(&value);
+            }
             let regime_count = cursor.count(&format!("{prefix}.regime_count"))?;
             if regime_count == 0 {
                 return Err(FloorAdmissionWatchdogError::Refused(format!(
                     "{prefix} has no regimes"
                 )));
             }
+            digest.count(regime_count);
             for regime_index in 0..regime_count {
                 let regime_prefix = format!("{prefix}.regime[{regime_index}]");
                 let kind = cursor.required_text(&format!("{regime_prefix}.kind"))?;
+                digest.text(&kind);
                 match kind.as_str() {
-                    "resolved_trajectory" => read_required_fields(
-                        cursor,
-                        &regime_prefix,
-                        &[
-                            "validity_domain",
-                            "resolution_bound",
-                            "evolution_postcondition",
-                            "exact_replay",
-                        ],
-                    )?,
-                    "subresolution_measure" => read_required_fields(
-                        cursor,
-                        &regime_prefix,
-                        &[
-                            "validity_domain",
-                            "stationary_measure",
-                            "conservation_projection",
-                            "stability_postcondition",
-                            "coordinate_discipline",
-                            "exact_replay",
-                        ],
-                    )?,
+                    "resolved_trajectory" => {
+                        let fields = read_required_fields(
+                            cursor,
+                            &regime_prefix,
+                            &[
+                                "validity_domain",
+                                "resolution_bound",
+                                "evolution_postcondition",
+                                "exact_replay",
+                            ],
+                        )?;
+                        for value in fields {
+                            digest.text(&value);
+                        }
+                    }
+                    "subresolution_measure" => {
+                        let fields = read_required_fields(
+                            cursor,
+                            &regime_prefix,
+                            &[
+                                "validity_domain",
+                                "stationary_measure",
+                                "conservation_projection",
+                                "stability_postcondition",
+                                "coordinate_discipline",
+                                "exact_replay",
+                            ],
+                        )?;
+                        for value in fields {
+                            digest.text(&value);
+                        }
+                    }
                     _ => {
                         return Err(FloorAdmissionWatchdogError::Refused(format!(
                             "{regime_prefix} has unknown kind '{kind}'"
@@ -319,7 +438,7 @@ fn parse_chaos_protocol(
             )));
         }
     }
-    Ok(())
+    Ok(digest.finish())
 }
 
 fn parse_receipts(
@@ -337,8 +456,9 @@ fn parse_receipts(
                 "{prefix} has no derivation attempts"
             )));
         }
+        let mut attempts = Vec::with_capacity(attempt_count);
         for attempt_index in 0..attempt_count {
-            cursor.required_text(&format!("{prefix}.attempt[{attempt_index}]"))?;
+            attempts.push(cursor.required_text(&format!("{prefix}.attempt[{attempt_index}]"))?);
         }
         let residual_slot = cursor.required_text(&format!("{prefix}.residual_slot"))?;
         let buckingham_pi_groups = usize::try_from(
@@ -349,7 +469,7 @@ fn parse_receipts(
                 "{prefix}.buckingham_pi_groups does not fit usize"
             ))
         })?;
-        read_required_fields(
+        let gap_fields = read_required_fields(
             cursor,
             &prefix,
             &[
@@ -359,8 +479,8 @@ fn parse_receipts(
                 "gap.scale_free_limit",
             ],
         )?;
-        parse_chaos_protocol(cursor, index)?;
-        read_required_fields(
+        let chaos_protocol = parse_chaos_protocol(cursor, index, &entry_id)?;
+        let residual_fields = read_required_fields(
             cursor,
             &prefix,
             &[
@@ -370,17 +490,120 @@ fn parse_receipts(
                 "residual.dimensional_analysis",
             ],
         )?;
+
+        let mut derivation_exhaustion = ComponentHasher::new(DERIVATION_EXHAUSTION_SCHEMA_ID);
+        derivation_exhaustion.text(&entry_id);
+        derivation_exhaustion.text(&phenomenon);
+        derivation_exhaustion.count(attempts.len());
+        for attempt in &attempts {
+            derivation_exhaustion.text(attempt);
+        }
+
+        let mut buckingham_pi = ComponentHasher::new(BUCKINGHAM_PI_SCHEMA_ID);
+        buckingham_pi.text(&entry_id);
+        buckingham_pi.text(&phenomenon);
+        buckingham_pi.count(buckingham_pi_groups);
+
+        let mut gap_law = ComponentHasher::new(GAP_LAW_SCHEMA_ID);
+        gap_law.text(&entry_id);
+        for field in &gap_fields {
+            gap_law.text(field);
+        }
+
+        let mut residual_law = ComponentHasher::new(RESIDUAL_LAW_SCHEMA_ID);
+        residual_law.text(&entry_id);
+        for field in &residual_fields {
+            residual_law.text(field);
+        }
+
+        let mut residual_slot_digest = ComponentHasher::new(RESIDUAL_SLOT_SCHEMA_ID);
+        residual_slot_digest.text(&entry_id);
+        residual_slot_digest.text(&phenomenon);
+        residual_slot_digest.text(&residual_slot);
+
         receipts.push(CheckedReceipt {
             entry_id,
             phenomenon,
             residual_slot,
             buckingham_pi_groups,
+            component_digests: IrreducibleComponentDigests {
+                derivation_exhaustion: derivation_exhaustion.finish(),
+                buckingham_pi: buckingham_pi.finish(),
+                gap_law: gap_law.finish(),
+                chaos_protocol,
+                residual_law: residual_law.finish(),
+                residual_slot: residual_slot_digest.finish(),
+            },
         });
     }
     Ok(receipts)
 }
 
+fn owner_admission_digest(
+    entry_id: &str,
+    decision_id: &str,
+    components: IrreducibleComponentDigests,
+) -> [u8; 32] {
+    let mut digest = ComponentHasher::new(OWNER_ADMISSION_SCHEMA_ID);
+    digest.text(entry_id);
+    digest.text(decision_id);
+    digest.bytes(&components.derivation_exhaustion);
+    digest.bytes(&components.buckingham_pi);
+    digest.bytes(&components.gap_law);
+    digest.bytes(&components.chaos_protocol);
+    digest.bytes(&components.residual_law);
+    digest.bytes(&components.residual_slot);
+    digest.finish()
+}
+
+fn parse_owner_admissions(
+    cursor: &mut ByteCursor<'_>,
+) -> Result<Vec<CheckedOwnerAdmission>, FloorAdmissionWatchdogError> {
+    let count = cursor.count("owner_admission_count")?;
+    let mut admissions = Vec::with_capacity(count);
+    for index in 0..count {
+        let prefix = format!("owner_admission[{index}]");
+        let entry_id = cursor.required_text(&format!("{prefix}.entry_id"))?;
+        let schema_id = cursor.required_text(&format!("{prefix}.schema_id"))?;
+        if schema_id != OWNER_ADMISSION_SCHEMA_ID {
+            return Err(FloorAdmissionWatchdogError::Refused(format!(
+                "{prefix} has unsupported schema '{schema_id}'"
+            )));
+        }
+        let decision_id = cursor.required_text(&format!("{prefix}.decision_id"))?;
+        if decision_id != OWNER_ADMISSION_DECISION_ID {
+            return Err(FloorAdmissionWatchdogError::Refused(format!(
+                "{prefix} is not an explicit owner admission"
+            )));
+        }
+        let component_digests = IrreducibleComponentDigests {
+            derivation_exhaustion: cursor.digest(&format!("{prefix}.derivation_exhaustion"))?,
+            buckingham_pi: cursor.digest(&format!("{prefix}.buckingham_pi"))?,
+            gap_law: cursor.digest(&format!("{prefix}.gap_law"))?,
+            chaos_protocol: cursor.digest(&format!("{prefix}.chaos_protocol"))?,
+            residual_law: cursor.digest(&format!("{prefix}.residual_law"))?,
+            residual_slot: cursor.digest(&format!("{prefix}.residual_slot"))?,
+        };
+        let owner_admission = cursor.digest(&format!("{prefix}.owner_admission"))?;
+        admissions.push(CheckedOwnerAdmission {
+            entry_id,
+            decision_id,
+            component_digests,
+            owner_admission,
+        });
+    }
+    Ok(admissions)
+}
+
 fn validate_entries(entries: &[CheckedEntry]) -> Result<(), FloorAdmissionWatchdogError> {
+    if entries
+        .windows(2)
+        .any(|pair| pair[0].id.as_bytes() >= pair[1].id.as_bytes())
+    {
+        return Err(FloorAdmissionWatchdogError::Refused(
+            "catalog members are not in canonical identity order".into(),
+        ));
+    }
     let mut ids = BTreeSet::new();
     for entry in entries {
         if !ids.insert(entry.id.as_str()) {
@@ -427,6 +650,16 @@ fn validate_entries(entries: &[CheckedEntry]) -> Result<(), FloorAdmissionWatchd
         if entry.tier == CheckedTier::Universal && entry.provenance != CheckedProvenance::Measured {
             return Err(FloorAdmissionWatchdogError::Refused(format!(
                 "universal catalog member '{}' is not measured",
+                entry.id
+            )));
+        }
+        if entry
+            .inputs
+            .windows(2)
+            .any(|pair| pair[0].as_bytes() >= pair[1].as_bytes())
+        {
+            return Err(FloorAdmissionWatchdogError::Refused(format!(
+                "catalog member '{}' inputs are not in canonical identity order",
                 entry.id
             )));
         }
@@ -486,6 +719,14 @@ fn validate_receipts(
     entries: &[CheckedEntry],
     receipts: &[CheckedReceipt],
 ) -> Result<(), FloorAdmissionWatchdogError> {
+    if receipts
+        .windows(2)
+        .any(|pair| pair[0].entry_id.as_bytes() >= pair[1].entry_id.as_bytes())
+    {
+        return Err(FloorAdmissionWatchdogError::Refused(
+            "receipts are not in canonical entry-identity order".into(),
+        ));
+    }
     let by_entry = entries
         .iter()
         .map(|entry| (entry.id.as_str(), entry))
@@ -556,6 +797,53 @@ fn validate_receipts(
     Ok(())
 }
 
+fn validate_owner_admissions(
+    receipts: &[CheckedReceipt],
+    admissions: &[CheckedOwnerAdmission],
+) -> Result<(), FloorAdmissionWatchdogError> {
+    if admissions
+        .windows(2)
+        .any(|pair| pair[0].entry_id.as_bytes() >= pair[1].entry_id.as_bytes())
+    {
+        return Err(FloorAdmissionWatchdogError::Refused(
+            "owner admissions are not in canonical entry-identity order".into(),
+        ));
+    }
+    if admissions.len() != receipts.len() {
+        return Err(FloorAdmissionWatchdogError::Refused(format!(
+            "{} irreducible receipts have {} owner admissions",
+            receipts.len(),
+            admissions.len()
+        )));
+    }
+    for (receipt, admission) in receipts.iter().zip(admissions) {
+        if admission.entry_id != receipt.entry_id {
+            return Err(FloorAdmissionWatchdogError::Refused(format!(
+                "owner admission '{}' does not bind irreducible receipt '{}'",
+                admission.entry_id, receipt.entry_id
+            )));
+        }
+        if admission.component_digests != receipt.component_digests {
+            return Err(FloorAdmissionWatchdogError::Refused(format!(
+                "owner admission '{}' does not bind the full typed irreducible route",
+                admission.entry_id
+            )));
+        }
+        let expected = owner_admission_digest(
+            &admission.entry_id,
+            &admission.decision_id,
+            admission.component_digests,
+        );
+        if admission.owner_admission != expected {
+            return Err(FloorAdmissionWatchdogError::Refused(format!(
+                "owner admission '{}' digest differs from its canonical route",
+                admission.entry_id
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn verify_floor_catalog_admission_bytes(
     bytes: &[u8],
 ) -> Result<FloorAdmissionWatchdogReceipt, FloorAdmissionWatchdogError> {
@@ -568,10 +856,12 @@ pub(crate) fn verify_floor_catalog_admission_bytes(
     }
     let entries = parse_entries(&mut cursor)?;
     let receipts = parse_receipts(&mut cursor)?;
+    let owner_admissions = parse_owner_admissions(&mut cursor)?;
     cursor.finish()?;
 
     validate_entries(&entries)?;
     validate_receipts(&entries, &receipts)?;
+    validate_owner_admissions(&receipts, &owner_admissions)?;
 
     let input_digest: [u8; 32] = Sha256::digest(bytes).into();
     if input_digest != EXPECTED_INPUT_SHA256 {

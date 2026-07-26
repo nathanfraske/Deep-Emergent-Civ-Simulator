@@ -23,11 +23,11 @@ The 112 deriving subsystems below live outside the absolute floor. Each produces
 
 ### `crates/core/src/fixed.rs`
 
-- a permutation-independent log-domain sum <- the input log magnitudes and the fixed-point exp and ln kernels (`crates/core/src/fixed.rs:539`)
-- a classified fixed-point power <- the base, the exponent and the representable window (`crates/core/src/fixed.rs:754`)
-- the representable exponential edge <- the natural log of the representation's ceiling (`crates/core/src/fixed.rs:780`)
-- a classified fixed-point exponential <- the argument and the representable window (`crates/core/src/fixed.rs:792`)
-- the argument beyond which erfc is zero <- the exponential's representable floor (`crates/core/src/fixed.rs:867`)
+- a permutation-independent log-domain sum <- the input log magnitudes and the fixed-point exp and ln kernels (`crates/core/src/fixed.rs:564`)
+- a classified fixed-point power <- the base, the exponent and the representable window (`crates/core/src/fixed.rs:779`)
+- the representable exponential edge <- the natural log of the representation's ceiling (`crates/core/src/fixed.rs:805`)
+- a classified fixed-point exponential <- the argument and the representable window (`crates/core/src/fixed.rs:817`)
+- the argument beyond which erfc is zero <- the exponential's representable floor (`crates/core/src/fixed.rs:892`)
 ### `crates/materials/src/conductivity.rs`
 
 - lattice thermal conductivity k(T) at the anchor's own ambient pressure frame <- a measured kappa_298 anchor + the banked Grueneisen parameter + the caller's expansivity integral (measured rung) (`crates/materials/src/conductivity.rs:210`)
@@ -43,18 +43,18 @@ The 112 deriving subsystems below live outside the absolute floor. Each produces
 - the bulk sound speed <- bulk modulus + density (`crates/materials/src/freezer.rs:176`)
 ### `crates/materials/src/mie_gruneisen_debye.rs`
 
-- a phase's per-inversion MGD anchor sets <- each source family's own jointly-fit cells (`crates/materials/src/mie_gruneisen_debye.rs:154`)
-- a phase's Debye thermal energy <- its atom count, the requested temperature and its characteristic Debye temperature (`crates/materials/src/mie_gruneisen_debye.rs:384`)
-- a phase's Grueneisen parameter at volume <- its reference gamma, volume ratio and volume exponent (`crates/materials/src/mie_gruneisen_debye.rs:412`)
-- the branch point between the direct and limiting Debye-temperature forms <- the representation's ulp and the second-order Taylor coefficient (`crates/materials/src/mie_gruneisen_debye.rs:440`)
-- a phase's Debye temperature at volume <- its reference Debye temperature, gamma and volume exponent (`crates/materials/src/mie_gruneisen_debye.rs:470`)
-- a phase's cold-isotherm pressure <- its reference volume, bulk modulus and pressure derivative (`crates/materials/src/mie_gruneisen_debye.rs:490`)
-- a phase's thermal pressure at a state <- its Grueneisen parameter, Debye thermal energy and molar volume (`crates/materials/src/mie_gruneisen_debye.rs:516`)
-- a phase's pressure at a state <- its cold isotherm and the Debye thermal pressure above the reference temperature (`crates/materials/src/mie_gruneisen_debye.rs:529`)
-- a central difference's numerical band <- its own step-halved twin and the representation's ulp (`crates/materials/src/mie_gruneisen_debye.rs:650`)
-- a phase's isothermal bulk modulus at a volume <- the volume derivative of its own equation of state (`crates/materials/src/mie_gruneisen_debye.rs:683`)
-- a phase's spinodal volume at a temperature <- the zero of its own isothermal bulk modulus (`crates/materials/src/mie_gruneisen_debye.rs:739`)
-- a phase's molar volume, bulk modulus, expansivity and heat capacity at a state <- its six Mie-Grueneisen-Debye anchors (`crates/materials/src/mie_gruneisen_debye.rs:799`)
+- a phase's per-inversion MGD anchor sets <- each source family's own jointly-fit cells (`crates/materials/src/mie_gruneisen_debye.rs:177`)
+- a phase's Debye thermal energy <- its atom count, the requested temperature and its characteristic Debye temperature (`crates/materials/src/mie_gruneisen_debye.rs:407`)
+- a phase's Grueneisen parameter at volume <- its reference gamma, volume ratio and volume exponent (`crates/materials/src/mie_gruneisen_debye.rs:435`)
+- the branch point between the direct and limiting Debye-temperature forms <- the representation's ulp and the second-order Taylor coefficient (`crates/materials/src/mie_gruneisen_debye.rs:463`)
+- a phase's Debye temperature at volume <- its reference Debye temperature, gamma and volume exponent (`crates/materials/src/mie_gruneisen_debye.rs:493`)
+- a phase's cold-isotherm pressure <- its reference volume, bulk modulus and pressure derivative (`crates/materials/src/mie_gruneisen_debye.rs:513`)
+- a phase's thermal pressure at a state <- its Grueneisen parameter, Debye thermal energy and molar volume (`crates/materials/src/mie_gruneisen_debye.rs:539`)
+- a phase's pressure at a state <- its cold isotherm and the Debye thermal pressure above the reference temperature (`crates/materials/src/mie_gruneisen_debye.rs:552`)
+- a central difference's numerical band <- its own step-halved twin and the representation's ulp (`crates/materials/src/mie_gruneisen_debye.rs:673`)
+- a phase's isothermal bulk modulus at a volume <- the volume derivative of its own equation of state (`crates/materials/src/mie_gruneisen_debye.rs:706`)
+- a phase's spinodal volume at a temperature <- the zero of its own isothermal bulk modulus (`crates/materials/src/mie_gruneisen_debye.rs:762`)
+- a phase's molar volume, bulk modulus, expansivity and heat capacity at a state <- its six Mie-Grueneisen-Debye anchors (`crates/materials/src/mie_gruneisen_debye.rs:822`)
 ### `crates/materials/src/properties.rs`
 
 - a phase's density <- molar mass + molar volume (`crates/materials/src/properties.rs:87`)
@@ -63,11 +63,11 @@ The 112 deriving subsystems below live outside the absolute floor. Each produces
 - lattice thermal conductivity k(T) <- Grueneisen, mean atomic mass, Debye temperature, atomic volume, cell count (Slack estimator rung) (`crates/materials/src/properties.rs:894`)
 ### `crates/materials/src/thermoelastic.rs`
 
-- a phase's volume per atom <- its registry molar volume and formula-unit atom count (`crates/materials/src/thermoelastic.rs:373`)
-- a phase's elastic Debye temperature <- its banked bulk and shear moduli, density and atomic volume (`crates/materials/src/thermoelastic.rs:442`)
-- a phase's thermoelastic response at a state <- the strongest available rung over the banked per-phase anchors (`crates/materials/src/thermoelastic.rs:541`)
-- a phase's per-inversion thermoelastic branches at a state <- each banked source family's own jointly-fit anchors (`crates/materials/src/thermoelastic.rs:701`)
-- a phase's ambient volumetric expansivity <- its banked gamma, bulk modulus, molar volume and Dulong-Petit capacity (`crates/materials/src/thermoelastic.rs:828`)
+- a phase's volume per atom <- its registry molar volume and formula-unit atom count (`crates/materials/src/thermoelastic.rs:392`)
+- a phase's elastic Debye temperature <- its banked bulk and shear moduli, density and atomic volume (`crates/materials/src/thermoelastic.rs:461`)
+- a phase's thermoelastic response at a state <- the strongest available rung over the banked per-phase anchors (`crates/materials/src/thermoelastic.rs:560`)
+- a phase's per-inversion thermoelastic branches at a state <- each banked source family's own jointly-fit anchors (`crates/materials/src/thermoelastic.rs:683`)
+- a phase's ambient volumetric expansivity <- its banked gamma, bulk modulus, molar volume and Dulong-Petit capacity (`crates/materials/src/thermoelastic.rs:810`)
 ### `crates/physics/src/convection_scaling.rs`
 
 - the in-scope stagnant-lid log-domain Nusselt determinations and their reporting envelope <- the world's stress exponent and its tagged Rayleigh and Frank-Kamenetskii projections, each cited row's coefficient and two exponents, and each row's own declared fitting scope (`crates/physics/src/convection_scaling.rs:909`)
@@ -165,17 +165,17 @@ The 112 deriving subsystems below live outside the absolute floor. Each produces
 - the scaled compatibility column's thermal diffusivity <- its own conductivity, density and specific heat through the shared floor law (`crates/planet-substrate/src/geodynamics.rs:159`)
 - the buoyant parcel radius <- the column's own layer depth + its critical wavenumber (cell half-wavelength) (`crates/planet-substrate/src/geodynamics.rs:192`)
 - a column's thermal diffusivity <- its own conductivity, density and specific heat (`crates/planet-substrate/src/geodynamics.rs:247`)
-- a column's SI layer depth <- its own representable-scaled depth (megametres to metres) (`crates/planet-substrate/src/geodynamics.rs:382`)
-- an interior column's thermal properties <- the world's own composition through the banked assemblage, ladder and Dulong-Petit derivations (`crates/planet-substrate/src/geodynamics.rs:476`)
-- a column's self-consistent pressure and thermal properties <- its composition, temperature, depth and gravity (`crates/planet-substrate/src/geodynamics.rs:779`)
-- the mid-layer lithostatic pressure <- the column's density, gravity and layer depth (`crates/planet-substrate/src/geodynamics.rs:839`)
-- a phase's isobaric heat capacity <- its own isochoric capacity, expansivity, bulk modulus and molar volume at one state (`crates/planet-substrate/src/geodynamics.rs:1046`)
-- the anchor-to-state expansivity integral <- the census's own molar volumes at the two states, or its constant expansivity where one model does not span them (`crates/planet-substrate/src/geodynamics.rs:1092`)
-- the interior column temperature and convection-onset state <- the merged floor law-forms (thermal_density_anomaly, rayleigh_number, threshold_latch, stokes_velocity, heat_advection, internal_heat_evolution, conduction) over the column's own physical parameters; no authored convection knob (Ra_crit is the derived marginal-stability eigenvalue, the Stokes coefficient the derived 2/9, the buoyancy the real material thermal expansion). A NEW derivation (not a retired-floor replacement), now covered by the liveness gate broadened to any derived output and any input source (task #46): the derive_gate registry carries a column_convection row (category new-derivation) whose probe perturbs the ColumnParams heat_production (a resident-field input) and asserts the stepped temperature responds. (`crates/planet-substrate/src/geodynamics.rs:1418`)
-- a column's log-domain Rayleigh number and convection onset <- its SI buoyancy, gravity, depth, log viscosity and diffusivity (`crates/planet-substrate/src/geodynamics.rs:1510`)
-- a column's per-tick conductive loss energy per kelvin <- its conductivity, density, depth and log tick length (`crates/planet-substrate/src/geodynamics.rs:1617`)
-- an SI interior column's next temperature and convection state <- its derived thermal properties, log viscosity, boundary-layer Nusselt enhancement and per-tick radiogenic energy (`crates/planet-substrate/src/geodynamics.rs:1681`)
-- the interior column's secular thermal history <- radiogenic_decay (the isotope reservoir spending down over the world clock) feeding radiogenic_heat (the falling heat production) into the convection step, so the interior warms under radiogenic heating and cools as the sources decay; no authored cooling knob, the source history is the decaying reservoir (`crates/planet-substrate/src/geodynamics.rs:1864`)
+- a column's SI layer depth <- its own representable-scaled depth (megametres to metres) (`crates/planet-substrate/src/geodynamics.rs:388`)
+- an interior column's thermal properties <- the world's own composition through the banked assemblage, ladder and Dulong-Petit derivations (`crates/planet-substrate/src/geodynamics.rs:482`)
+- a column's self-consistent pressure and thermal properties <- its composition, temperature, depth and gravity (`crates/planet-substrate/src/geodynamics.rs:787`)
+- the mid-layer lithostatic pressure <- the column's density, gravity and layer depth (`crates/planet-substrate/src/geodynamics.rs:847`)
+- a phase's isobaric heat capacity <- its own isochoric capacity, expansivity, bulk modulus and molar volume at one state (`crates/planet-substrate/src/geodynamics.rs:1081`)
+- the anchor-to-state expansivity integral <- the census's own molar volumes at the two states, or its constant expansivity where one model does not span them (`crates/planet-substrate/src/geodynamics.rs:1127`)
+- the interior column temperature and convection-onset state <- the merged floor law-forms (thermal_density_anomaly, rayleigh_number, threshold_latch, stokes_velocity, heat_advection, internal_heat_evolution, conduction) over the column's own physical parameters; no authored convection knob (Ra_crit is the derived marginal-stability eigenvalue, the Stokes coefficient the derived 2/9, the buoyancy the real material thermal expansion). A NEW derivation (not a retired-floor replacement), now covered by the liveness gate broadened to any derived output and any input source (task #46): the derive_gate registry carries a column_convection row (category new-derivation) whose probe perturbs the ColumnParams heat_production (a resident-field input) and asserts the stepped temperature responds. (`crates/planet-substrate/src/geodynamics.rs:1453`)
+- a column's log-domain Rayleigh number and convection onset <- its SI buoyancy, gravity, depth, log viscosity and diffusivity (`crates/planet-substrate/src/geodynamics.rs:1545`)
+- a column's per-tick conductive loss energy per kelvin <- its conductivity, density, depth and log tick length (`crates/planet-substrate/src/geodynamics.rs:1652`)
+- an SI interior column's next temperature and convection state <- its derived thermal properties, log viscosity, boundary-layer Nusselt enhancement and per-tick radiogenic energy (`crates/planet-substrate/src/geodynamics.rs:1716`)
+- the interior column's secular thermal history <- radiogenic_decay (the isotope reservoir spending down over the world clock) feeding radiogenic_heat (the falling heat production) into the convection step, so the interior warms under radiogenic heating and cools as the sources decay; no authored cooling knob, the source history is the decaying reservoir (`crates/planet-substrate/src/geodynamics.rs:1899`)
 ### `crates/planet-substrate/src/giants.rs`
 
 - the disk-truncation gas/angular-momentum residual ledger <- the static viscous-similarity gas profile partitioned at the resonant truncation radius R_t=f*R_L, the retained budget and the removed residual an interpretation-neutral conservation account for the binarity cap (`crates/planet-substrate/src/giants.rs:484`)

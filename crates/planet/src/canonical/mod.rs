@@ -32,13 +32,13 @@ pub use civsim_ledger::{
 };
 pub use identity::{BodyId, ContingencyDrawId, EventId, RealizationId, ReservoirId};
 pub use observation::PlanetObservation;
-pub use pipeline::{readiness_receipt, run_planet, PlanetRunOutcome};
+pub use pipeline::{run_planet, PlanetRunOutcome};
 pub use preflight::preflight;
 pub use receipt::{OpenRequirement, Refusal, RefusalCode, RunReceipt, StageReceipt, StageStatus};
 pub use requirement_analysis::{
     DimensionalAttemptView, DimensionalPhenomenonView, DimensionalVariableView,
-    ExactDimensionalCensusView, RequirementAnalysis, SpeciesDerivationAnalysisView,
-    SpeciesDerivationAttemptView,
+    ExactDimensionalCensusView, PhysicalRootAdmissionView, RequirementAnalysis,
+    SpeciesDerivationAnalysisView, SpeciesDerivationAttemptView,
 };
 pub use snapshot::PlanetSnapshot;
 pub use stage::Stage;
@@ -49,7 +49,8 @@ pub use stellar_birth_structure::{
     StellarStateSchemaView,
 };
 pub use transcript::{
-    ContingencyEvent, GeneratedSubjectId, RepresentationReceipt, RepresentationValueRecord,
-    RunEvent, RunEventKind, RunTranscript, TranscriptError, TranscriptSchema, WrittenStateEvent,
-    WrittenStateRecord, RUN_TRANSCRIPT_SCHEMA_ID,
+    ContingencyEvent, GeneratedSubjectId, RepresentationReceipt, RepresentationStatus,
+    RepresentationValueRecord, RunEvent, RunEventKind, RunTranscript, TranscriptError,
+    TranscriptSchema, WrittenStateEvent, WrittenStateRecord, REPRESENTATION_STATUS_SCHEMA_ID,
+    RUN_TRANSCRIPT_SCHEMA_ID,
 };

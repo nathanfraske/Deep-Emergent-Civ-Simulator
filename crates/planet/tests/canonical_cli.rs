@@ -16,7 +16,7 @@ fn the_no_argument_binary_enters_the_floor_only_runner_and_refuses() {
 
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stderr.is_empty());
-    assert!(stdout.starts_with("receipt=civsim.planet.run.v11\ncomplete=false\n"));
+    assert!(stdout.starts_with("receipt=civsim.planet.run.v12\ncomplete=false\n"));
     assert!(stdout.contains("absolute_floor_entries=3\n"));
     assert!(stdout.contains("representation.schema=\"civsim.units.si-representation.v1\"\n"));
     assert!(stdout.contains("event_count=6\n"));
@@ -68,11 +68,59 @@ fn the_no_argument_binary_enters_the_floor_only_runner_and_refuses() {
     assert!(stdout.contains(
         "refusal.0000.open_requirement.0000.analysis.0001.floor_anchor.membership_authority=false\n"
     ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.scalar_coordinate_count=3\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.membership_neutral_mass_projection_count=1\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.registry_refusal_code=\"no_admitted_species_derivation_rules\"\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.membership_authority=false\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.root_canary_suite_id=\"civsim.planet.stellar-birth-repository-physical-root-canaries.v6\"\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.root_receipt_schema=\"civsim.planet.stellar-birth-repository-physical-root-receipt.v5\"\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.root_producer_id=\"civsim.planet.stellar-birth-repository-physical-root-producer.v6\"\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.root_watchdog_id=\"civsim.planet.stellar-birth-repository-physical-root-watchdog.v6\"\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.root_decision_id=\"agreed_projected\"\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.vocabulary_receipt_schema=\"civsim.planet.stellar-birth-physical-vocabulary-agreement.v1\"\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.vocabulary.descriptor_role_count=0\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.vocabulary.relation_target_count=4\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.vocabulary.constraint_law_count=0\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.vocabulary.current_input_partition_complete=true\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.vocabulary.global_coverage=false\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.vocabulary.membership_authority=false\n"
+    ));
     assert!(stdout
         .contains("refusal.0000.open_requirement.0000.analysis.0001.protocol.chaos=not_reached\n"));
     assert!(stdout.contains("refusal.0000.open_requirement.0001.analysis_count=0\n"));
     assert!(stdout.contains(".exhaustion.gap.chaos_protocol=not_applicable\n"));
-    assert!(stdout.contains("transcript=civsim.planet.transcript.v9\n"));
+    assert!(stdout.contains("transcript=civsim.planet.transcript.v10\n"));
     assert!(!stdout.contains(".kind=contingency\n"));
     assert!(!stdout.contains(".kind=written_state\n"));
 }
@@ -89,16 +137,14 @@ fn repeating_the_front_door_is_byte_identical() {
 }
 
 #[test]
-fn readiness_is_a_distinct_zero_floor_refusal() {
-    let output = run(&["--readiness"]);
-    let stdout = String::from_utf8(output.stdout).expect("receipt output is UTF-8");
+fn readiness_is_an_observer_alias_for_the_canonical_front_door() {
+    let front_door = run(&[]);
+    let readiness = run(&["--readiness"]);
 
-    assert_eq!(output.status.code(), Some(2));
-    assert!(output.stderr.is_empty());
-    assert!(stdout.contains("absolute_floor_entries=0\n"));
-    assert!(stdout.contains("refusal.0000.code=absolute_floor_required\n"));
-    assert!(stdout.contains("refusal.0000.requirement=\"absolute_physics_floor\"\n"));
-    assert!(!stdout.contains("stage.star_disk_system=refused\n"));
+    assert_eq!(front_door.status.code(), Some(2));
+    assert_eq!(readiness.status.code(), Some(2));
+    assert_eq!(readiness.stdout, front_door.stdout);
+    assert_eq!(readiness.stderr, front_door.stderr);
 }
 
 #[test]
@@ -309,7 +355,7 @@ fn refusal_details_have_a_typed_read_only_api() {
 }
 
 #[test]
-fn species_authority_exhaustion_has_a_typed_read_only_api() {
+fn species_live_refusal_has_a_typed_read_only_api() {
     let floor = sealed_absolute_physics_floor().expect("the repository floor seals");
     let outcome = run_planet(&floor);
     let analyses = outcome.receipt().refusals()[0].open_requirements()[0].analyses();
@@ -320,6 +366,56 @@ fn species_authority_exhaustion_has_a_typed_read_only_api() {
     assert!(species.is_computed());
     assert_eq!(species.floor_anchor_id(), Some("fundamental.m_e"));
     assert_eq!(species.floor_anchor_membership_authority(), Some(false));
+    assert_eq!(
+        species.physical_registry_root_claim_id(),
+        Some("planet.stellar-species-floor-coordinate-projection")
+    );
+    assert_eq!(
+        species.physical_registry_root_receipt_schema_id(),
+        Some("civsim.planet.stellar-birth-repository-physical-root-receipt.v5")
+    );
+    assert_eq!(
+        species.physical_registry_root_canary_suite_id(),
+        Some("civsim.planet.stellar-birth-repository-physical-root-canaries.v6")
+    );
+    assert_eq!(
+        species.physical_registry_root_decision_id(),
+        Some("agreed_projected")
+    );
+    assert_eq!(
+        species.physical_registry_root_producer_id(),
+        Some("civsim.planet.stellar-birth-repository-physical-root-producer.v6")
+    );
+    assert_eq!(
+        species.physical_registry_root_watchdog_id(),
+        Some("civsim.planet.stellar-birth-repository-physical-root-watchdog.v6")
+    );
+    assert_eq!(species.physical_registry_scalar_coordinate_count(), Some(3));
+    assert_eq!(
+        species.physical_registry_membership_neutral_mass_projection_count(),
+        Some(1)
+    );
+    assert_eq!(species.physical_registry_admitted_root_count(), Some(4));
+    assert_eq!(species.physical_vocabulary_counts(), Some((4, 0, 4, 0)));
+    assert_eq!(
+        species.physical_vocabulary_scope(),
+        Some((true, false, false))
+    );
+    assert_eq!(
+        species
+            .physical_vocabulary_relation_target_identities()
+            .map(|identities| identities.len()),
+        Some(4)
+    );
+    assert_ne!(species.physical_vocabulary_receipt_sha256(), Some([0; 32]));
+    assert_eq!(
+        species.physical_registry_refusal_code(),
+        Some("no_admitted_species_derivation_rules")
+    );
+    assert_eq!(
+        species.physical_registry_membership_authority(),
+        Some(false)
+    );
     assert_eq!(species.candidate_member_count(), Some(0));
     assert_eq!(species.verified_support_member_count(), Some(0));
     assert_eq!(species.value_payload_present(), Some(false));
@@ -330,12 +426,21 @@ fn species_authority_exhaustion_has_a_typed_read_only_api() {
     );
     assert_eq!(species.gap_law_status_id(), Some("not_reached"));
     assert_eq!(species.chaos_protocol_status_id(), Some("not_reached"));
-    assert_eq!(species.attempts().len(), 3);
+    assert_eq!(
+        species.frontier_source_id(),
+        Some("repository_physical_registry_live_refusal")
+    );
+    assert_eq!(
+        species.frontier_scope_id(),
+        Some("first_executable_refusal_only")
+    );
+    assert_eq!(species.frontier_completeness_claim(), Some(false));
+    assert_eq!(species.attempts().len(), 1);
     assert!(species
         .open_proof_ids()
         .iter()
-        .any(|id| id == "physical_species_membership_derivation_unavailable"));
-    assert!(species
+        .any(|id| id == "species_mass_uncertainty_transport"));
+    assert!(!species
         .open_proof_ids()
         .iter()
         .any(|id| id == "finite_exact_resource_domain_unavailable"));

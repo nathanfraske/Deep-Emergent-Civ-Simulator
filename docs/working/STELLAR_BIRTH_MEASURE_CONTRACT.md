@@ -48,8 +48,24 @@ content. An independent parser and graph walk checks the same canonical
 catalog and receipt bytes without calling the producer admission path. One
 sealed physical-floor authority binding covers both results, every admission's
 tier and provenance, the ordered registries, and receipt pins under
-`civsim.units.physical-floor-authority-binding.v3`. Derived values replay from
-exact projected ancestry published in transcript schema major 9, with typed SI
+`civsim.units.physical-floor-authority-binding.v5`. The v5 seal additionally
+binds an explicit owner-admission record for each identity-keyed irreducible
+route. Each record separately commits derivation exhaustion, Buckingham Pi,
+Gap Law, the typed Chaos Protocol branch, Residual Law, and the unique residual
+slot; the independent floor parser reconstructs and checks the same tuple. The
+v5 seal also binds the
+three exact CODATA row facts under
+`civsim.units.codata-2018-floor-facts.v1` and the independently produced and
+checked `civsim.units.codata-2018-floor-evidence-pair.v2` custody receipt.
+The mandatory offline route executes 27 exact mutation cases across both
+implementations and binds each changed input plus its stable refusal code. The
+receipt is SHA-256
+`08c67f6d6e4543e7cb35be383f08aa1bbe7361878ff78bbc8567d08104f97983`;
+the resulting physical-floor authority digest is
+`75a20e5b22cd52dadb1beb44cba1a1b16bbaf45a353b32510c67753403932933`.
+Custody fixes source identity, row location, value, uncertainty, unit, and
+dimension, but it does not admit the magnitude. Derived values replay from
+exact projected ancestry published in transcript schema major 10, with typed SI
 dimensions and exact-symbol ancestry checked from the formula. Physical helper
 APIs require the same sealed execution capability and cannot bind or mutate its
 values. This closes the representation and API reachability seams; it does not
@@ -184,23 +200,48 @@ fractions to sum exactly to one. It never normalizes an incomplete support and
 has no branch for a familiar species, stellar population, chemistry table, or
 molecular convention.
 
-This does not derive a species or a mass. The opaque state proof and registry
-authority in this slice are structural seals with no production constructors,
-bound payloads, or semantic checkers. The repository resolver returns `None`,
-so no production path can call the reducer. The joint-measure refusal now
-includes a separate `civsim.planet.stellar-birth-species-derivation-analysis.v1`
-report. Its private authority is constructible only from the audited floor, the
-independently sealed floor digest, and the validated structure schemas. It
-records the exact `m_e` coordinate as a mass anchor with
-`membership_authority=false`, then reports zero candidate members, zero
-verified support members, no value payload, and no residual-slot claim. The
-three ordered attempts remain blocked on complete registry descriptors,
-mass and state ancestry, sector and validity proof, conditioned support and
-zero-coordinate semantics, exact resource bounds, joint-measure binding, and
-an integer projection schema. Dimension-only reachability is not physical
-closure, so Gap Law, Chaos Protocol, Residual Law, and the unique residual slot
-remain not reached or not claimed. This analysis has `closure_effect=none` and
-`coverage_claim=false`.
+This does not derive a species or a species mass. The opaque state proof and
+registry authority in this slice are structural seals with no production
+constructors, bound payloads, or semantic checkers. The repository resolver
+returns `None`, so no production path can call the reducer. The joint-measure
+refusal includes
+`civsim.planet.stellar-birth-species-derivation-analysis.v4`, checked by
+`civsim.planet.stellar-birth-species-derivation-watchdog.v5`. Its private
+authority is constructible only from the audited floor, the independently
+sealed floor digest, the validated structure schemas, and the live physical
+root pair. It retains the exact `m_e` compatibility anchor with
+`membership_authority=false`, then records the paired root claim and receipt,
+three scalar coordinates, one membership-neutral pure-mass expression, zero
+candidate members, zero verified support members, no value payload, and no
+residual-slot claim. Its only attempt is the first executable refusal reached
+by the live physical registry.
+
+Before that refusal, two bounded classifiers independently partition the exact
+admitted input into physical descriptor roles, relation targets, and constraint
+laws. The current partition is `0 / 4 / 0`: all four floor-derived roots are
+relation targets, while no descriptor role or constraint law is admitted.
+`current_input_partition_complete=true` describes only those four inputs;
+`global_physical_vocabulary_coverage=false` and
+`membership_authority=false` remain explicit. The frontier also serializes one
+identity-keyed row per root with its ledger tier, provenance tag, and admission
+route, so a future lawful irreducible or unfamiliar root cannot be collapsed
+into a hard-coded Universal `[D]` aggregate. The live frontier accepts either
+`no_admitted_species_derivation_rules` or
+`physical_vocabulary_coverage_incomplete` as a scientific refusal and rejects
+integrity failures.
+
+The open proofs are copied from the live refusal and checked against a fresh
+registry result. Unreached support and mean-mass paths are omitted rather than
+populated from authored proof guesses. The bitstream
+states `frontier.scope=first_executable_refusal_only` and
+`frontier.completeness_claim=false`. The checker proves faithful propagation
+of the live refusal. It does not prove that the registry's diagnostic
+vocabulary is complete. Dimension-only reachability is not physical closure,
+so Gap Law, Chaos Protocol, Residual Law, and the unique residual slot remain
+not reached or not claimed. This analysis has `closure_effect=none` and
+`coverage_claim=false`. The observer-only viewer
+projects the same source, scope, and completeness fields without a return edge
+to the run.
 
 The byte-neutral structural packet is private and landed. It separates a
 complete descriptor packet from conditioned support, uses content-derived
@@ -226,22 +267,90 @@ transition laws, exact rational mass expressions, proved massless laws, and
 direct floor-property, elementary-excitation, or composite-bound-state
 closure. Both bind the sealed floor, value-free structure schemas, checker
 identities, canonical provenance marks, complete receipt roles, exact
-seven-axis dimensions, resource ceilings, physical content, and the complete
-reachable registry. Their graph walks, rational decoders, budget accounting,
-and canonical encoders are independently implemented. Synthetic unfamiliar
-and lawful massless graphs can exercise agreement, but the result carries
+bounded variable-cardinality dimensions over domain-separated axis identities,
+resource ceilings, physical content, and the complete reachable registry. The
+seven SI axes are the current admitted basis, not a closed physical basis in the
+type or wire. The registry, proof graph, producer, and watchdog are v3. Their
+graph walks, rational decoders, budget accounting, and canonical encoders are
+independently implemented. Synthetic unfamiliar axes, species, and lawful
+massless graphs can exercise agreement, but the result carries
 `authority_effect=none` and has no path to conditioned support or the reducer.
 
-The repository supplies no admitted derivation roots. Its exact result is
-therefore `no_admitted_species_derivation_roots`, with zero members, no
-coverage claim, and no authority effect. The next bounded physical rung is
+The repository supplies four admitted coordinate roots. Two independent
+paths extract the exact sealed floor leaves, canonicalize source arrival order
+by semantic coordinate identity, and project three scalar coordinates plus one
+pure-mass expression from `m_e`. The latter has
+`scope=membership-neutral`; all four artifacts are Universal `[D]` and grant
+no species membership authority. The packet and projection schemas, producer,
+watchdog, and success receipt are v5; the refusal receipt is v4, root ancestry
+is v2, and coordinate content is v3. The root-pair v5 success receipt binds the
+claim, canonicalized semantic input, separate producer and watchdog result
+digests, separate resource-contract digests, runtime canary digest, neutral
+decision, and receipt digest. The physical registry therefore reaches the more
+precise refusal `no_admitted_species_derivation_rules`, with zero members, no
+coverage claim, and no authority effect.
+
+### Verified repair note, 2026-07-25
+
+The source pass confirms a live `TranscriptSchema::V10` selector for the v10
+transcript contract while preserving `TranscriptSchema::V9` as a distinct v9
+selector. The current v5 root contract supersedes the earlier order-sensitive
+packet behavior: each production implementation canonicalizes sealed source
+arrival order by semantic coordinate identity, so a reorder is not a physical
+difference and does not refuse. Each still rejects a coordinated entry-id and
+symbol rename that retains the old receipt with the typed
+`sealed_source_binding_mismatch` refusal.
+
+After projection, both production verifiers replay a private candidate
+manifest. Their executable v5 canaries catch artifact omission, artifact
+duplication, `MembershipNeutral` to `SpeciesRestMass` scope escalation,
+canonical projection byte drift, admission-receipt substitution, and
+coordinated ancestry plus capability substitution. Producer and watchdog
+construct separate canonical ancestry manifests over source identity, tier,
+artifact identity, and ancestry digest. Receipt v5 binds both equal nonzero
+manifest digests. The verifiers also re-extract and reproject their current
+sealed packets, exact-match the manifest, bytes, counts, and ancestry,
+reconnect both receipt resource digests to their local contracts, and
+recompute their own packet-canary execution digests. Packet transcripts bind
+each complete mutant and observed checker result. A separate paired transcript
+binds every post-projection mutant, receipt, admission, opaque capability, and
+observed verifier result except its own digest field. A self-consistent
+unsealed projection cannot cross that boundary. A production refusal also
+requires an exact fresh replay of the current sealed decision, so a
+structurally consistent synthetic receipt cannot become current evidence. The
+generic alien-coordinate projector is test-only inspection output and cannot
+mint an admission receipt or root capability.
+
+The root success receipt is
+`civsim.planet.stellar-birth-repository-physical-root-receipt.v5`; the refusal
+receipt is
+`civsim.planet.stellar-birth-repository-physical-root-refusal-receipt.v5`; the
+ancestry schema is
+`civsim.planet.stellar-birth-repository-physical-root-ancestry.v2`; the canary
+suite is v6, and the producer and watchdog implementations are v6. The active
+authority profile hash is
+`c7239a2f62f67bb35a63823cbfa04e3b235d1f88837dd4716cbcd1e0a88a696c`.
+This repair proves faithful floor projection and downstream root verification,
+not floor scientific sufficiency. Every species-forming field, operator, state,
+sector, validity, constraint, excitation, bound-state, mass-uncertainty, and
+massless-law root remains open. The live result remains zero members, no
+coverage claim, and no authority effect.
+
+The next bounded physical sub-rung is the rest of
 `P-STELLAR-SPECIES-DERIVATION-ROOTS`: derive or fully admit the field,
-operator, state, sector, validity, constraint-law, and mass-projection or
-massless-law artifacts consumed by the pair. The current floor cannot populate
-even an electron member: `m_e` is a mass coordinate, not proof of a degree of
-freedom, state, interaction sector, stable excitation, or complete registry.
-A cited mass table, familiar species enum, named stellar class, or empty
-registry cannot bypass that refusal.
+operator, state, sector, validity, constraint-law, excitation, bound-state,
+species mass-uncertainty, or massless-law artifacts consumed by the pair.
+Production artifacts now carry a private opaque
+`VerifiedAdmissionCapability` rather than accepting receipt-shaped fields as
+authority. The repository-root pair is the only production minter. The
+capability binds artifact identity, exact root admission, and pair-receipt
+digest, and both downstream validators independently reject any drift. A
+future non-root rule must supply its own independent authority pair, admitted
+physical law, exact proof ancestry, and matching capability mint. The current
+floor cannot populate an electron member: `m_e` is a mass coordinate, not
+proof of a degree of freedom, state, interaction sector, stable excitation, or
+complete registry. A cited mass table, familiar species enum, named stellar
+class, or empty registry cannot bypass that refusal.
 
 A future smart authority must bind content identity, exact mass and
 dimension ancestry, charge and physical state, active sectors and couplings,
@@ -286,11 +395,16 @@ The no-argument runner serializes the separate SI representation receipt and
 three physical floor values, derives `eps_0`, enters Stage 1, and returns
 `stellar_birth.realization_measure`. It emits six transcript events: three
 floor records, one derived-value record, one Stage 1 entry, and one refusal.
-It emits no `[X]`, no `[W]` realization, and no snapshot. Repeated runs are
-byte-identical at `367,628` stdout bytes and SHA-256
-`b677189984cf34ec59d01f16d43d135420ef8b8b33c731ea814978d3666e4531`.
-The current receipt is `civsim.planet.run.v11`; its transcript schema major is
-`9`.
+It emits no `[X]`, no `[W]` realization, and no snapshot. Two direct runs after
+the v5 root agreement and refusal, CODATA custody, variable-axis support,
+paired final-verifier repair, physical-vocabulary binding, and identity-keyed
+root census are byte-identical at `383,680` stdout bytes and SHA-256
+`02c4e48c5f56a54ed1429bea82d96dffdd38722d7ed23456ef0b64fa070153b5`,
+with exit `2` and empty stderr. A direct `--readiness` run has the same exit,
+stdout, stderr, and digest. It is an observer alias for the canonical front
+door, not a separate readiness result or evidence source. The changed bytes
+bind authority evidence, not a changed physical outcome. The current receipt
+is `civsim.planet.run.v12`; its transcript schema major is `10`.
 
 The three-node graph now executes as a fixed-order conjunction over two opaque
 repository-owned proof capabilities. The production resolver currently
@@ -339,13 +453,15 @@ other dropped mechanism remain explicit residual or refusal obligations.
    spectral closure, fragmentation, magnetic braking, multicenter reduction,
    a persistent disk state, and every dynamical regime. Do not decompose the
    joint measure into authored marginals.
-2. Derive or fully admit the repository-owned field, operator, state, sector,
-   validity, constraint-law, and mass-projection roots consumed by the landed
-   conditional physical registry pair. The pair already checks proof semantics
-   and complete closure, but production has no roots and its agreement has no
-   authority effect. After a separate production registry authority binds,
-   close conditioned support behind the landed packet. Only then may the
-   structural reducer derive mean particle mass.
+2. Preserve the landed independent floor-coordinate projection, then derive or
+   fully admit the repository-owned field, operator, state, sector, validity,
+   constraint-law, excitation, bound-state, species mass-uncertainty, and
+   massless-law roots consumed by the conditional physical registry pair. The
+   four current roots are membership-neutral and grant no species authority.
+   Preserve the landed downstream schema-specific root-capability verification
+   before any member can close. After a separate production registry authority
+   binds, close conditioned support behind the landed packet. Only then may
+   the structural reducer derive mean particle mass.
 3. Derive coupled gas and dust thermal balance, equation-of-state closure,
    collapse measure, mass-flow history, material mass and position histories,
    local-frame angular-momentum transport, and multicenter circularization law

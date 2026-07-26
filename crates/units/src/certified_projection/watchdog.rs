@@ -1,7 +1,12 @@
+mod canary;
+
 use super::{
-    formula_digest, input_digest, ProjectionCertificate, ProjectionCoordinate, ProjectionInput,
-    CERTIFICATE_SCHEMA_ID, FACTORED_CERTIFICATE_SCHEMA_ID, FACTORED_PRODUCER_IMPLEMENTATION_ID,
-    FACTORED_WATCHDOG_IMPLEMENTATION_ID, PRODUCER_IMPLEMENTATION_ID, WATCHDOG_IMPLEMENTATION_ID,
+    formula_digest, input_digest, CanaryAttestation, ProjectionCertificate, ProjectionCoordinate,
+    ProjectionInput, ProjectionRequest, CERTIFICATE_SCHEMA_ID, FACTORED_CERTIFICATE_SCHEMA_ID,
+    FACTORED_PRODUCER_IMPLEMENTATION_ID, FACTORED_WATCHDOG_IMPLEMENTATION_ID,
+    POSITIVE_SQRT_CERTIFICATE_SCHEMA_ID, POSITIVE_SQRT_PRODUCER_IMPLEMENTATION_ID,
+    POSITIVE_SQRT_WATCHDOG_IMPLEMENTATION_ID, PRODUCER_IMPLEMENTATION_ID,
+    WATCHDOG_IMPLEMENTATION_ID,
 };
 use crate::bignum::{BigRat, BigUint};
 use sha2::{Digest, Sha256};
@@ -24,7 +29,6 @@ const MAX_SIGN_RUN: usize = 64;
 // compact dyadic grid. This avoids propagating giant Machin denominators
 // through every runtime formula while retaining a strict outer enclosure.
 const PI_DYADIC_ENCLOSURE_BITS: u32 = 120;
-
 #[derive(Clone, Debug)]
 enum Lexeme {
     Number(String),
@@ -70,8 +74,9 @@ pub(super) fn verify(
     certificate: &ProjectionCertificate,
     formula: &str,
     inputs: &[ProjectionInput],
+    request: ProjectionRequest,
 ) -> Result<i128, String> {
-    validate_watchdog_resources(formula, inputs, certificate.target_binary_exponent2)?;
+    validate_watchdog_resources(formula, inputs, request)?;
     if certificate.schema_id != CERTIFICATE_SCHEMA_ID
         || certificate.producer_implementation_id != PRODUCER_IMPLEMENTATION_ID
         || certificate.watchdog_implementation_id != WATCHDOG_IMPLEMENTATION_ID
@@ -99,24 +104,54 @@ pub(super) fn verify(
     let zero = BigRat::from_i64(0);
     if found.lower.cmp_rat(&zero) != Ordering::Greater
         || found.upper.cmp_rat(&zero) != Ordering::Greater
-        || found.lower.floor_log2() != found.upper.floor_log2()
-        || found.lower.floor_log2() != certificate.magnitude_log2
     {
         return Err("watchdog could not reproduce one positive magnitude bracket".to_owned());
     }
-    let lower_bits = found
-        .lower
-        .round_to_binary_exponent(certificate.target_binary_exponent2)
-        .ok_or_else(|| "watchdog lower endpoint exceeds i128".to_owned())?;
-    let upper_bits = found
-        .upper
-        .round_to_binary_exponent(certificate.target_binary_exponent2)
-        .ok_or_else(|| "watchdog upper endpoint exceeds i128".to_owned())?;
+    let lower_magnitude_log2 = watchdog_floor_log2(&found.lower)?;
+    let upper_magnitude_log2 = watchdog_floor_log2(&found.upper)?;
+    if lower_magnitude_log2 != upper_magnitude_log2
+        || lower_magnitude_log2 != certificate.magnitude_log2
+    {
+        return Err("watchdog could not reproduce one positive magnitude bracket".to_owned());
+    }
+    let expected_target_binary_exponent2 = match request {
+        ProjectionRequest::FixedScale { scale_bits } => i32::try_from(scale_bits)
+            .ok()
+            .and_then(i32::checked_neg)
+            .ok_or_else(|| {
+                "watchdog fixed projection scale exceeds signed exponent range".to_owned()
+            })?,
+        ProjectionRequest::Significant { bits } => {
+            let exponent = lower_magnitude_log2
+                .checked_sub(i64::from(bits) - 1)
+                .ok_or_else(|| "watchdog derived coefficient exponent overflows i64".to_owned())?;
+            i32::try_from(exponent)
+                .map_err(|_| "watchdog derived coefficient exponent exceeds i32".to_owned())?
+        }
+    };
+    if expected_target_binary_exponent2.unsigned_abs() > MAX_COORDINATE_SHIFT_BITS {
+        return Err(
+            "watchdog derived coefficient exponent exceeds the normalization resource cap"
+                .to_owned(),
+        );
+    }
+    if certificate.request != request {
+        return Err("projection certificate request differs from the watchdog request".to_owned());
+    }
+    if certificate.target_binary_exponent2 != expected_target_binary_exponent2 {
+        return Err("producer target exponent differs from the watchdog request".to_owned());
+    }
+    let lower_bits =
+        watchdog_round_to_binary_exponent(&found.lower, expected_target_binary_exponent2)
+            .ok_or_else(|| "watchdog lower endpoint exceeds i128".to_owned())?;
+    let upper_bits =
+        watchdog_round_to_binary_exponent(&found.upper, expected_target_binary_exponent2)
+            .ok_or_else(|| "watchdog upper endpoint exceeds i128".to_owned())?;
     if lower_bits != upper_bits {
         return Err("watchdog interval straddles a rounding boundary".to_owned());
     }
     for endpoint in [&certificate.lower, &certificate.upper] {
-        if endpoint.round_to_binary_exponent(certificate.target_binary_exponent2)
+        if watchdog_round_to_binary_exponent(endpoint, expected_target_binary_exponent2)
             != Some(certificate.producer_bits)
         {
             return Err("producer endpoint does not certify its published integer".to_owned());
@@ -125,10 +160,215 @@ pub(super) fn verify(
     Ok(lower_bits)
 }
 
+/// Independently select the nearest integer significand at `exponent2`.
+///
+/// This deliberately derives quotient, remainder, midpoint status, quotient
+/// parity, sign, and signed-i128 range locally instead of consulting BigRat's
+/// producer-side rounding routines.
+pub(super) fn watchdog_round_to_binary_exponent(value: &BigRat, exponent2: i32) -> Option<i128> {
+    let (negative, numerator, denominator) = value.components();
+    let (dividend, divisor) = if exponent2 <= 0 {
+        (
+            numerator.shl_bits(exponent2.unsigned_abs()),
+            denominator.clone(),
+        )
+    } else {
+        (
+            numerator.clone(),
+            denominator.shl_bits(exponent2.unsigned_abs()),
+        )
+    };
+    let (mut magnitude, remainder) = dividend.divmod(&divisor);
+    let twice_remainder = remainder.shl_bits(1);
+    let increment = match twice_remainder.cmp_big(&divisor) {
+        Ordering::Less => false,
+        Ordering::Greater => true,
+        Ordering::Equal => {
+            let (_, parity) = magnitude.divmod(&BigUint::from_u64(2));
+            !parity.is_zero()
+        }
+    };
+    if increment {
+        magnitude = magnitude.add(&BigUint::from_u64(1));
+    }
+    watchdog_signed_i128(negative, &magnitude)
+}
+
+fn watchdog_signed_i128(negative: bool, magnitude: &BigUint) -> Option<i128> {
+    let magnitude = magnitude.to_u128()?;
+    if negative {
+        let min_magnitude = 1_u128 << 127;
+        if magnitude > min_magnitude {
+            None
+        } else if magnitude == min_magnitude {
+            Some(i128::MIN)
+        } else {
+            Some(-(magnitude as i128))
+        }
+    } else if magnitude > i128::MAX as u128 {
+        None
+    } else {
+        Some(magnitude as i128)
+    }
+}
+
+/// Independently prove the power-of-two cell containing a nonzero rational
+/// magnitude. The bit lengths provide only a bounded candidate; exact raw
+/// component comparisons prove both cell edges.
+pub(super) fn watchdog_floor_log2(value: &BigRat) -> Result<i64, String> {
+    let (_, numerator, denominator) = value.components();
+    if numerator.is_zero() {
+        return Err("watchdog cannot derive a magnitude cell for zero".to_owned());
+    }
+    let candidate = i64::from(numerator.bit_len()) - i64::from(denominator.bit_len());
+    let floor = if watchdog_abs_cmp_power_of_two(value, candidate)? == Ordering::Less {
+        candidate
+            .checked_sub(1)
+            .ok_or_else(|| "watchdog magnitude cell underflows i64".to_owned())?
+    } else {
+        candidate
+    };
+    let upper = floor
+        .checked_add(1)
+        .ok_or_else(|| "watchdog magnitude cell overflows i64".to_owned())?;
+    if watchdog_abs_cmp_power_of_two(value, floor)? == Ordering::Less
+        || watchdog_abs_cmp_power_of_two(value, upper)? != Ordering::Less
+    {
+        return Err("watchdog could not prove the exact power-of-two magnitude cell".to_owned());
+    }
+    Ok(floor)
+}
+
+fn watchdog_abs_cmp_power_of_two(value: &BigRat, exponent2: i64) -> Result<Ordering, String> {
+    let (_, numerator, denominator) = value.components();
+    let shift = u32::try_from(exponent2.unsigned_abs())
+        .map_err(|_| "watchdog magnitude comparison shift exceeds u32".to_owned())?;
+    Ok(if exponent2 >= 0 {
+        numerator.cmp_big(&denominator.shl_bits(shift))
+    } else {
+        numerator.shl_bits(shift).cmp_big(denominator)
+    })
+}
+
+pub(super) fn verify_positive_sqrt(
+    certificate: &ProjectionCertificate,
+    radicand_formula: &str,
+    inputs: &[ProjectionInput],
+    request: ProjectionRequest,
+) -> Result<i128, String> {
+    validate_watchdog_resources(radicand_formula, inputs, request)?;
+    let ProjectionRequest::FixedScale { scale_bits } = request else {
+        return Err("positive square-root projection requires a fixed-scale request".to_owned());
+    };
+    if certificate.schema_id != POSITIVE_SQRT_CERTIFICATE_SCHEMA_ID
+        || certificate.producer_implementation_id != POSITIVE_SQRT_PRODUCER_IMPLEMENTATION_ID
+        || certificate.watchdog_implementation_id != POSITIVE_SQRT_WATCHDOG_IMPLEMENTATION_ID
+    {
+        return Err("positive square-root certificate implementation identity differs".to_owned());
+    }
+    if certificate.formula_sha256 != formula_digest(radicand_formula)
+        || certificate.inputs_sha256 != input_digest(inputs)
+    {
+        return Err("positive square-root certificate input digest differs".to_owned());
+    }
+    if certificate.request != request {
+        return Err(
+            "positive square-root certificate request differs from the watchdog request".to_owned(),
+        );
+    }
+    let expected_target_binary_exponent2 = i32::try_from(scale_bits)
+        .ok()
+        .and_then(i32::checked_neg)
+        .ok_or_else(|| {
+            "watchdog square-root projection scale exceeds signed exponent range".to_owned()
+        })?;
+    if certificate.target_binary_exponent2 != expected_target_binary_exponent2 {
+        return Err(
+            "positive square-root target exponent differs from the watchdog request".to_owned(),
+        );
+    }
+
+    let lexemes = scan(radicand_formula)?;
+    if lexemes.len() > MAX_TOKENS {
+        return Err("watchdog square-root formula exceeds token resource cap".to_owned());
+    }
+    let rpn = shunting_yard(&lexemes)?;
+    let found = evaluate_rpn(&rpn, inputs, certificate.pi_terms)?;
+    if certificate.lower.cmp_rat(&found.lower) == Ordering::Greater
+        || certificate.upper.cmp_rat(&found.upper) == Ordering::Less
+    {
+        return Err(
+            "producer square-root interval does not contain the independent watchdog interval"
+                .to_owned(),
+        );
+    }
+    let zero = BigRat::from_i64(0);
+    if found.lower.cmp_rat(&zero) != Ordering::Greater
+        || found.upper.cmp_rat(&zero) != Ordering::Greater
+    {
+        return Err("watchdog square-root radicand is not strictly positive".to_owned());
+    }
+    let lower_magnitude_log2 = watchdog_floor_log2(&found.lower)?.div_euclid(2);
+    if lower_magnitude_log2 != watchdog_floor_log2(&found.upper)?.div_euclid(2)
+        || lower_magnitude_log2 != certificate.magnitude_log2
+    {
+        return Err(
+            "watchdog could not reproduce one positive square-root magnitude bracket".to_owned(),
+        );
+    }
+    if certificate.producer_bits.is_negative() {
+        return Err("producer published a negative positive-square-root integer".to_owned());
+    }
+    let candidate = certificate.producer_bits as u128;
+    for endpoint in [
+        &found.lower,
+        &found.upper,
+        &certificate.lower,
+        &certificate.upper,
+    ] {
+        if !watchdog_root_cell_contains(endpoint, candidate, scale_bits)? {
+            return Err(
+                "positive square-root interval straddles the producer root cell".to_owned(),
+            );
+        }
+    }
+    Ok(certificate.producer_bits)
+}
+
+fn watchdog_root_cell_contains(
+    value: &BigRat,
+    candidate: u128,
+    scale_bits: u32,
+) -> Result<bool, String> {
+    let lower = watchdog_scaled_square(candidate, scale_bits)?;
+    let upper = watchdog_scaled_square(
+        candidate
+            .checked_add(1)
+            .ok_or_else(|| "watchdog square-root cell upper edge overflows".to_owned())?,
+        scale_bits,
+    )?;
+    Ok(lower.cmp_rat(value) != Ordering::Greater && upper.cmp_rat(value) == Ordering::Greater)
+}
+
+fn watchdog_scaled_square(bits: u128, scale_bits: u32) -> Result<BigRat, String> {
+    let doubled_scale = scale_bits
+        .checked_add(scale_bits)
+        .ok_or_else(|| "watchdog square-root scale arithmetic overflows".to_owned())?;
+    if u64::from(doubled_scale) > MAX_INTERMEDIATE_COMPONENT_BITS {
+        return Err("watchdog square-root cell exceeds the intermediate resource cap".to_owned());
+    }
+    let magnitude = BigUint::from_u128(bits);
+    Ok(BigRat::new(
+        false,
+        magnitude.pow(2),
+        BigUint::from_u64(1).shl_bits(doubled_scale),
+    ))
+}
+
 fn validate_watchdog_resources(
     formula: &str,
     inputs: &[ProjectionInput],
-    target_binary_exponent2: i32,
+    request: ProjectionRequest,
 ) -> Result<(), String> {
     if formula.len() > MAX_FORMULA_BYTES {
         return Err("watchdog formula exceeds the byte resource cap".to_owned());
@@ -136,8 +376,17 @@ fn validate_watchdog_resources(
     if inputs.len() > MAX_INPUTS {
         return Err("watchdog input count exceeds the resource cap".to_owned());
     }
-    if target_binary_exponent2.unsigned_abs() > MAX_COORDINATE_SHIFT_BITS {
-        return Err("watchdog target exponent exceeds the resource cap".to_owned());
+    match request {
+        ProjectionRequest::FixedScale { scale_bits } if scale_bits > MAX_COORDINATE_SHIFT_BITS => {
+            return Err("watchdog fixed projection scale exceeds the resource cap".to_owned())
+        }
+        ProjectionRequest::Significant { bits } if !(1..=120).contains(&bits) => {
+            return Err(
+                "watchdog certified coefficient significance must be from 1 through 120 bits"
+                    .to_owned(),
+            )
+        }
+        _ => {}
     }
     for (index, input) in inputs.iter().enumerate() {
         let mut bytes = input.symbol.bytes();
@@ -235,6 +484,10 @@ fn validate_watchdog_decimal_resource(value: &str) -> Result<(), String> {
         return Err("watchdog decimal exponent exceeds the power resource cap".to_owned());
     }
     Ok(())
+}
+
+pub(super) fn production_canary_attestation() -> Result<CanaryAttestation, String> {
+    canary::production_canary_attestation()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -543,26 +796,38 @@ fn compute_pi_interval(terms: u32) -> WatchdogBounds {
 }
 
 fn widen_to_dyadic_grid(exact: WatchdogBounds) -> WatchdogBounds {
-    let low = exact
-        .lower
-        .round_to_scale(PI_DYADIC_ENCLOSURE_BITS)
+    let low = watchdog_dyadic_floor(&exact.lower, PI_DYADIC_ENCLOSURE_BITS)
         .expect("watchdog Pi lower endpoint fits its dyadic grid");
-    let high = exact
-        .upper
-        .round_to_scale(PI_DYADIC_ENCLOSURE_BITS)
+    let high = watchdog_dyadic_ceil(&exact.upper, PI_DYADIC_ENCLOSURE_BITS)
         .expect("watchdog Pi upper endpoint fits its dyadic grid");
-    WatchdogBounds {
-        lower: BigRat::from_scaled_i128(
-            low.checked_sub(1)
-                .expect("watchdog Pi lower grid has signed-i128 headroom"),
-            PI_DYADIC_ENCLOSURE_BITS,
-        ),
-        upper: BigRat::from_scaled_i128(
-            high.checked_add(1)
-                .expect("watchdog Pi upper grid has signed-i128 headroom"),
-            PI_DYADIC_ENCLOSURE_BITS,
-        ),
+    let widened = WatchdogBounds {
+        lower: BigRat::from_scaled_i128(low, PI_DYADIC_ENCLOSURE_BITS),
+        upper: BigRat::from_scaled_i128(high, PI_DYADIC_ENCLOSURE_BITS),
+    };
+    assert!(
+        widened.lower.cmp_rat(&exact.lower) != Ordering::Greater
+            && widened.upper.cmp_rat(&exact.upper) != Ordering::Less,
+        "watchdog Pi dyadic grid must contain its exact interval"
+    );
+    widened
+}
+
+pub(super) fn watchdog_dyadic_floor(value: &BigRat, scale_bits: u32) -> Option<i128> {
+    let (negative, numerator, denominator) = value.components();
+    let (mut magnitude, remainder) = numerator.shl_bits(scale_bits).divmod(denominator);
+    if negative && !remainder.is_zero() {
+        magnitude = magnitude.add(&BigUint::from_u64(1));
     }
+    watchdog_signed_i128(negative, &magnitude)
+}
+
+pub(super) fn watchdog_dyadic_ceil(value: &BigRat, scale_bits: u32) -> Option<i128> {
+    let (negative, numerator, denominator) = value.components();
+    let (mut magnitude, remainder) = numerator.shl_bits(scale_bits).divmod(denominator);
+    if !negative && !remainder.is_zero() {
+        magnitude = magnitude.add(&BigUint::from_u64(1));
+    }
+    watchdog_signed_i128(negative, &magnitude)
 }
 
 fn ordered(first: BigRat, second: BigRat) -> WatchdogBounds {
@@ -596,6 +861,7 @@ fn atan_partial(reciprocal: u64, terms: u32) -> BigRat {
 }
 
 fn shunting_yard(lexemes: &[Lexeme]) -> Result<Vec<Rpn>, String> {
+    validate_power_literal_grammar(lexemes)?;
     let mut output = Vec::new();
     let mut operators: Vec<Lexeme> = Vec::new();
     let mut expect_operand = true;
@@ -656,6 +922,26 @@ fn shunting_yard(lexemes: &[Lexeme]) -> Result<Vec<Rpn>, String> {
         move_operator(&mut operators, &mut output)?;
     }
     Ok(output)
+}
+
+fn validate_power_literal_grammar(lexemes: &[Lexeme]) -> Result<(), String> {
+    for (index, lexeme) in lexemes.iter().enumerate() {
+        if !matches!(lexeme, Lexeme::Operator(Operator::Power)) {
+            continue;
+        }
+        let Some(Lexeme::Number(exponent)) = lexemes.get(index + 1) else {
+            return Err("watchdog exponent must be one unsigned integer literal".to_owned());
+        };
+        if !exponent.bytes().all(|byte| byte.is_ascii_digit())
+            || matches!(
+                lexemes.get(index + 2),
+                Some(Lexeme::Operator(Operator::Power))
+            )
+        {
+            return Err("watchdog exponent must be one unsigned integer literal".to_owned());
+        }
+    }
+    Ok(())
 }
 
 fn move_operator(operators: &mut Vec<Lexeme>, output: &mut Vec<Rpn>) -> Result<(), String> {

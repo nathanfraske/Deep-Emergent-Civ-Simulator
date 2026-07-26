@@ -5,11 +5,16 @@ mod view;
 mod watchdog;
 mod wire;
 
-pub use view::{SpeciesDerivationAnalysisView, SpeciesDerivationAttemptView};
+pub use view::{
+    PhysicalRootAdmissionView, SpeciesDerivationAnalysisView, SpeciesDerivationAttemptView,
+};
 pub(in crate::canonical) use wire::write_species_derivation_analysis;
 
 use crate::canonical::{
     floor_magnitudes::AuditedFloorView,
+    stellar_birth_species::physical_registry::{
+        repository_physical_registry_frontier, RepositoryPhysicalRegistryFrontier,
+    },
     stellar_birth_structure::{
         stellar_birth_structure_schema, StellarBirthStructureSchema, StructureSchemaError,
     },
@@ -23,13 +28,17 @@ use watchdog::validate_analysis;
 use super::COMPLETE_SPECIES_STATE_MEAN_PARTICLE_MASS_LAW_ID;
 
 pub(in crate::canonical) const SPECIES_DERIVATION_ANALYSIS_SCHEMA_ID: &str =
-    "civsim.planet.stellar-birth-species-derivation-analysis.v1";
+    "civsim.planet.stellar-birth-species-derivation-analysis.v4";
 pub(in crate::canonical) const SPECIES_DERIVATION_ANALYSIS_CHECKER_ID: &str =
-    "civsim.planet.stellar-birth-species-derivation-watchdog.v2";
+    "civsim.planet.stellar-birth-species-derivation-watchdog.v5";
 
 const FLOOR_ANCHOR_ID: &str = "fundamental.m_e";
 const FLOOR_ANCHOR_SYMBOL: &str = "m_e";
 const FLOOR_ANCHOR_ROLE: &str = "mass_coordinate_anchor_only";
+const FRONTIER_SOURCE_ID: &str = "repository_physical_registry_live_refusal";
+const FRONTIER_SCOPE_ID: &str = "first_executable_refusal_only";
+pub(super) const LIVE_PHYSICAL_REGISTRY_ATTEMPT_ID: &str =
+    "stellar_birth.species_derivation.live_physical_registry_refusal";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum AnalysisProgress {
@@ -84,6 +93,10 @@ pub(in crate::canonical) struct SpeciesDerivationAnalysis {
     physical_regime_registry_schema_id: &'static str,
     reducer_law_id: &'static str,
     floor_mass_anchor: FloorMassAnchor,
+    physical_registry_frontier: RepositoryPhysicalRegistryFrontier,
+    frontier_source_id: &'static str,
+    frontier_scope_id: &'static str,
+    frontier_completeness_claim: bool,
     attempts: Vec<SpeciesDerivationAttempt>,
     open_proof_ids: Vec<String>,
     candidate_member_count: usize,
@@ -115,6 +128,7 @@ struct SpeciesDerivationAnalysisAuthority {
     floor_binding_sha256: String,
     structure: StellarBirthStructureSchema,
     floor_mass_anchor: FloorMassAnchor,
+    physical_registry_frontier: RepositoryPhysicalRegistryFrontier,
 }
 
 impl SpeciesDerivationAnalysisAuthority {
@@ -122,6 +136,8 @@ impl SpeciesDerivationAnalysisAuthority {
         let binding = sealed_physical_floor_authority_binding()
             .map_err(|error| AnalysisBuildError::FloorAuthority(error.to_string()))?;
         let structure = stellar_birth_structure_schema()?;
+        let physical_registry_frontier = repository_physical_registry_frontier()
+            .map_err(|error| AnalysisBuildError::PhysicalRegistryFrontier(error.code.to_owned()))?;
         let electron_mass = floor.magnitudes.electron_mass;
         if electron_mass.symbol() != FLOOR_ANCHOR_SYMBOL || electron_mass.bits() == 0 {
             return Err(AnalysisBuildError::FloorAnchorMismatch);
@@ -139,6 +155,7 @@ impl SpeciesDerivationAnalysisAuthority {
                 role: FLOOR_ANCHOR_ROLE,
                 membership_authority: false,
             },
+            physical_registry_frontier,
         })
     }
 }
@@ -148,6 +165,7 @@ enum AnalysisBuildError {
     FloorAuthority(String),
     Structure(StructureSchemaError),
     FloorAnchorMismatch,
+    PhysicalRegistryFrontier(String),
     InternalInvariant(String),
 }
 
@@ -157,6 +175,7 @@ impl AnalysisBuildError {
             Self::FloorAuthority(_) => "floor_authority_unavailable",
             Self::Structure(_) => "structure_schema_unavailable",
             Self::FloorAnchorMismatch => "floor_mass_anchor_mismatch",
+            Self::PhysicalRegistryFrontier(_) => "physical_registry_frontier_unavailable",
             Self::InternalInvariant(_) => "analysis_invariant_violation",
         }
     }
@@ -176,6 +195,9 @@ impl fmt::Display for AnalysisBuildError {
             Self::FloorAnchorMismatch => {
                 f.write_str("audited electron-mass coordinate does not match its sealed anchor")
             }
+            Self::PhysicalRegistryFrontier(detail) => {
+                write!(f, "physical-registry frontier: {detail}")
+            }
             Self::InternalInvariant(detail) => write!(f, "analysis invariant: {detail}"),
         }
     }
@@ -184,7 +206,7 @@ impl fmt::Display for AnalysisBuildError {
 fn build_analysis(
     authority: SpeciesDerivationAnalysisAuthority,
 ) -> Result<SpeciesDerivationAnalysis, AnalysisBuildError> {
-    let frontier = produce_frontier();
+    let frontier = produce_frontier(&authority.physical_registry_frontier);
     let analysis = SpeciesDerivationAnalysis {
         floor_binding_schema_id: authority.floor_binding_schema_id,
         floor_binding_sha256: authority.floor_binding_sha256,
@@ -208,6 +230,10 @@ fn build_analysis(
             .schema_id,
         reducer_law_id: COMPLETE_SPECIES_STATE_MEAN_PARTICLE_MASS_LAW_ID,
         floor_mass_anchor: authority.floor_mass_anchor,
+        physical_registry_frontier: authority.physical_registry_frontier,
+        frontier_source_id: FRONTIER_SOURCE_ID,
+        frontier_scope_id: FRONTIER_SCOPE_ID,
+        frontier_completeness_claim: false,
         attempts: frontier.attempts,
         open_proof_ids: frontier.open_proof_ids,
         candidate_member_count: frontier.candidate_member_count,
@@ -292,28 +318,78 @@ mod tests {
             Some("mass_coordinate_anchor_only")
         );
         assert_eq!(view.floor_anchor_membership_authority(), Some(false));
+        assert_eq!(
+            view.physical_registry_root_claim_id(),
+            Some("planet.stellar-species-floor-coordinate-projection")
+        );
+        assert_eq!(
+            view.physical_registry_root_canary_suite_id(),
+            Some("civsim.planet.stellar-birth-repository-physical-root-canaries.v6")
+        );
+        assert_eq!(
+            view.physical_registry_root_decision_id(),
+            Some("agreed_projected")
+        );
+        assert_eq!(view.physical_registry_scalar_coordinate_count(), Some(3));
+        assert_eq!(
+            view.physical_registry_membership_neutral_mass_projection_count(),
+            Some(1)
+        );
+        assert_eq!(view.physical_registry_admitted_root_count(), Some(4));
+        assert_eq!(view.physical_registry_membership_authority(), Some(false));
+        assert_eq!(view.physical_vocabulary_counts(), Some((4, 0, 4, 0)));
+        assert_eq!(view.physical_vocabulary_scope(), Some((true, false, false)));
+        assert_eq!(
+            view.physical_vocabulary_relation_target_identities()
+                .map(|identities| identities.len()),
+            Some(4)
+        );
+        assert_ne!(view.physical_vocabulary_receipt_sha256(), Some([0; 32]));
+        assert_eq!(
+            view.physical_registry_refusal_code(),
+            Some("no_admitted_species_derivation_rules")
+        );
+        assert_eq!(view.physical_registry_open_obligations().len(), 6);
+        assert_ne!(view.physical_registry_root_receipt_sha256(), Some([0; 32]));
+        assert_eq!(
+            view.frontier_source_id(),
+            Some("repository_physical_registry_live_refusal")
+        );
+        assert_eq!(
+            view.frontier_scope_id(),
+            Some("first_executable_refusal_only")
+        );
+        assert_eq!(view.frontier_completeness_claim(), Some(false));
         assert_eq!(view.candidate_member_count(), Some(0));
         assert_eq!(view.verified_support_member_count(), Some(0));
         assert_eq!(view.value_payload_present(), Some(false));
         assert_eq!(view.residual_slot_claim(), Some(false));
         assert_eq!(view.gap_law_status_id(), Some("not_reached"));
         assert_eq!(view.chaos_protocol_status_id(), Some("not_reached"));
-        assert_eq!(view.attempts().len(), 3);
+        assert_eq!(view.attempts().len(), 1);
         assert_eq!(
             view.open_proof_ids(),
             [
-                "canonical_species_state_descriptor_checker_unavailable",
-                "charge_state_sector_validity_proof_unavailable",
-                "conditioned_zero_or_sparse_support_semantics_unavailable",
-                "finite_exact_resource_domain_unavailable",
-                "integer_projection_schema_unavailable",
-                "joint_measure_support_binding_unavailable",
-                "physical_species_membership_derivation_unavailable",
-                "rest_mass_dimension_and_ancestry_proof_unavailable",
+                "admitted_constraint_laws",
+                "admitted_physical_descriptor_roles",
+                "admitted_species_derivation_rules",
+                "complete_global_physical_vocabulary_coverage",
+                "complete_registry_closure_domain",
+                "species_mass_uncertainty_transport",
             ]
             .into_iter()
             .map(str::to_owned)
             .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            view.attempts()
+                .next()
+                .expect("one live attempt")
+                .input_ids(),
+            [
+                "planet.stellar-species-floor-coordinate-projection",
+                "civsim.planet.stellar-birth-physical-vocabulary.partition.v1",
+            ]
         );
     }
 
@@ -326,11 +402,7 @@ mod tests {
             view.attempts()
                 .map(|attempt| attempt.id())
                 .collect::<Vec<_>>(),
-            [
-                "stellar_birth.species_derivation.complete_registry",
-                "stellar_birth.species_derivation.complete_conditioned_support",
-                "stellar_birth.species_derivation.exact_mean_mass_projection",
-            ]
+            ["stellar_birth.species_derivation.live_physical_registry_refusal"]
         );
     }
 
@@ -351,5 +423,69 @@ mod tests {
         };
         analysis.attempts[0].id = "producer-selected-replacement";
         assert!(validate_analysis(&analysis).is_err());
+    }
+
+    #[test]
+    fn omitting_a_live_registry_obligation_fails_the_checker() {
+        let SpeciesDerivationAnalysisArtifact::Computed(mut analysis) = analysis() else {
+            panic!("the production analysis should compute");
+        };
+        let omitted = analysis.attempts[0]
+            .open_proof_ids
+            .pop()
+            .expect("the live refusal has obligations");
+        analysis.open_proof_ids.retain(|proof| proof != &omitted);
+
+        assert!(validate_analysis(&analysis).is_err());
+    }
+
+    #[test]
+    fn an_authored_downstream_path_cannot_gain_a_completeness_implication() {
+        let SpeciesDerivationAnalysisArtifact::Computed(mut analysis) = analysis() else {
+            panic!("the production analysis should compute");
+        };
+        analysis.attempts.push(SpeciesDerivationAttempt {
+            id: "stellar_birth.species_derivation.authored_future_path",
+            status: AnalysisProgress::BlockedOpenProofs,
+            input_ids: vec!["future.authored.input".to_owned()],
+            open_proof_ids: vec!["future.authored.proof".to_owned()],
+        });
+        analysis
+            .open_proof_ids
+            .push("future.authored.proof".to_owned());
+        analysis.open_proof_ids.sort();
+
+        assert!(validate_analysis(&analysis).is_err());
+    }
+
+    #[test]
+    fn completeness_escalation_fails_the_checker() {
+        let SpeciesDerivationAnalysisArtifact::Computed(mut analysis) = analysis() else {
+            panic!("the production analysis should compute");
+        };
+        analysis.frontier_completeness_claim = true;
+
+        assert!(validate_analysis(&analysis).is_err());
+    }
+
+    #[test]
+    fn producer_follows_an_unfamiliar_live_obligation_without_an_authored_mirror() {
+        let SpeciesDerivationAnalysisArtifact::Computed(analysis) = analysis() else {
+            panic!("the production analysis should compute");
+        };
+        let mut physical = analysis.physical_registry_frontier.clone();
+        physical.open_obligations = vec!["unfamiliar.live.registry.obligation"];
+
+        let produced = produce_frontier(&physical);
+
+        assert_eq!(produced.attempts.len(), 1);
+        assert_eq!(
+            produced.attempts[0].open_proof_ids,
+            ["unfamiliar.live.registry.obligation"]
+        );
+        assert_eq!(
+            produced.open_proof_ids,
+            ["unfamiliar.live.registry.obligation"]
+        );
     }
 }

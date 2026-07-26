@@ -182,6 +182,24 @@ test -d "$TOMB"
 bash "$ROOT/scripts/target_gc.sh" --cap-mb 10 --keep 10
 test ! -e "$TOMB"
 
+VANISHING_TOMB="$CACHE_BASE/targets/.civsim-gc-$OLD_KEY-vanishing"
+mkdir -p "$VANISHING_TOMB"
+printf 'schema=1\norigin=%s\n' "$OLD_MANAGED" > "$VANISHING_TOMB/.civsim-gc-tomb-v1"
+REAL_AWK="$(command -v awk)"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'last="${!#}"' \
+  'if [ "$last" = "${TARGET_GC_TEST_VANISH_TOMB:-}/.civsim-gc-tomb-v1" ]; then' \
+  '  rm -rf -- "$TARGET_GC_TEST_VANISH_TOMB"' \
+  'fi' \
+  'exec "$TARGET_GC_REAL_AWK" "$@"' \
+  > "$FAKE_BIN/awk"
+chmod +x "$FAKE_BIN/awk"
+TARGET_GC_TEST_VANISH_TOMB="$VANISHING_TOMB" TARGET_GC_REAL_AWK="$REAL_AWK" \
+  bash "$ROOT/scripts/target_gc.sh" --cap-mb 10 --keep 10
+test ! -e "$VANISHING_TOMB"
+rm "$FAKE_BIN/awk"
+
 NESTED_ORIGIN="$MANAGED/canonical/debug/incremental"
 NESTED_TOMB="$MANAGED/canonical/debug/.civsim-gc-incremental-777"
 mkdir -p "$NESTED_TOMB"
@@ -308,4 +326,4 @@ if WSL_DISTRO_NAME=synthetic CIVSIM_REPO_ROOT="$TMP/missing-repository" \
   exit 1
 fi
 
-echo "target GC self-test: PASS (argument and root refusal, symlink refusal, warm retention, global eviction, tomb recovery, hard cap, build lock, post-build enforcement, marker recovery, throttle, trim failure, stable WSL layout)"
+echo "target GC self-test: PASS (argument and root refusal, symlink refusal, warm retention, global eviction, tomb recovery and disappearance, hard cap, build lock, post-build enforcement, marker recovery, throttle, trim failure, stable WSL layout)"

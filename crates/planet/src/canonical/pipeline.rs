@@ -71,6 +71,19 @@ pub fn run_planet(floor: &AbsolutePhysicsFloor) -> PlanetRunOutcome {
         return PlanetRunOutcome::refused(RunReceipt::refused(floor.len(), refusals));
     }
 
+    // Seal the noncausal representation before constructing the execution view.
+    // If it fails, do not ask the units layer to project it again through that
+    // view; emit the one typed, value-free refusal instead.
+    let mut transcript = match RunTranscript::empty(floor.len()) {
+        Ok(transcript) => transcript,
+        Err(error) => {
+            return PlanetRunOutcome::refused(RunReceipt::representation_unavailable(
+                floor.len(),
+                error.to_string(),
+            ));
+        }
+    };
+
     let floor_view = match AuditedFloorView::from_floor(floor) {
         Ok(floor_view) => floor_view,
         Err(error) => {
@@ -82,15 +95,12 @@ pub fn run_planet(floor: &AbsolutePhysicsFloor) -> PlanetRunOutcome {
     };
     debug_assert_eq!(floor_view.len(), floor.len());
 
-    let mut transcript = match RunTranscript::from_audited_floor(floor, &floor_view) {
-        Ok(transcript) => transcript,
-        Err(error) => {
-            return PlanetRunOutcome::refused(RunReceipt::refused(
-                floor.len(),
-                vec![Refusal::transcript_invariant(error.to_string())],
-            ));
-        }
-    };
+    if let Err(error) = transcript.append_audited_floor(floor, &floor_view) {
+        return PlanetRunOutcome::refused(RunReceipt::refused(
+            floor.len(),
+            vec![Refusal::transcript_invariant(error.to_string())],
+        ));
+    }
     if let Err(error) = transcript.enter_stage(Stage::StarDiskSystem) {
         return PlanetRunOutcome::refused(RunReceipt::refused(
             floor.len(),
@@ -159,12 +169,6 @@ fn close_refused_transcript(
     }
 }
 
-/// A command-line readiness receipt when no admitted absolute floor was
-/// supplied.
-pub fn readiness_receipt() -> RunReceipt {
-    RunReceipt::refused(0, vec![Refusal::absolute_floor_required()])
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,19 +183,37 @@ mod tests {
     }
 
     #[test]
-    fn readiness_without_an_absolute_floor_is_never_success() {
-        let receipt = readiness_receipt();
-        assert!(!receipt.is_complete());
+    fn a_refused_run_exposes_no_snapshot() {
+        let outcome = run_planet(&physical_floor());
+        assert!(outcome.snapshot().is_none());
         assert_eq!(
-            receipt.refusals()[0].code(),
-            RefusalCode::AbsoluteFloorRequired
+            outcome.receipt().refusals()[0].code(),
+            RefusalCode::MissingStageRequirement
         );
     }
 
     #[test]
-    fn a_refused_run_exposes_no_snapshot() {
-        let outcome = PlanetRunOutcome::refused(readiness_receipt());
+    fn unavailable_representation_still_has_a_visible_refusal_outcome() {
+        let outcome = PlanetRunOutcome::refused(RunReceipt::representation_unavailable(
+            3,
+            "SI representation projection failed: injected pipeline failure".to_owned(),
+        ));
+        let observation = outcome.observation();
+
+        assert!(outcome.is_refused());
+        assert!(!outcome.is_complete());
         assert!(outcome.snapshot().is_none());
+        assert!(!observation.is_complete());
+        assert!(observation.snapshot().is_none());
+        assert!(std::ptr::eq(observation.receipt(), outcome.receipt()));
+        assert_eq!(
+            observation
+                .refusal_receipt()
+                .expect("the representation failure remains observable")
+                .refusals()[0]
+                .code(),
+            RefusalCode::RepresentationUnavailable
+        );
     }
 
     #[test]
@@ -290,6 +312,36 @@ mod tests {
 
         assert_eq!(first.receipt(), second.receipt());
         assert_eq!(first.receipt().to_string(), second.receipt().to_string());
+    }
+
+    #[test]
+    fn floor_arrival_order_cannot_steer_the_receipt_or_observer_bytes() {
+        let canonical = physical_floor();
+        let mut entries = canonical.entries().cloned().collect::<Vec<_>>();
+        entries.reverse();
+        let receipts = canonical
+            .entries()
+            .map(|entry| {
+                canonical
+                    .receipt(&entry.id)
+                    .expect("each sealed floor leaf has one receipt")
+                    .clone()
+            })
+            .collect::<Vec<_>>();
+        let reordered = AbsolutePhysicsFloor::admit(
+            Ledger::build(entries).expect("reordered floor remains structurally valid"),
+            receipts,
+        )
+        .expect("arrival order is not a physical input");
+
+        let expected = run_planet(&canonical);
+        let observed = run_planet(&reordered);
+
+        assert_eq!(expected.receipt(), observed.receipt());
+        assert_eq!(
+            expected.observation().receipt().to_string(),
+            observed.observation().receipt().to_string()
+        );
     }
 
     #[test]

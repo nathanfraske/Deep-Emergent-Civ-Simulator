@@ -1,13 +1,15 @@
 use super::super::SpeciesContentIdentity;
 use super::{
-    inspect_physical_registry, model::*, producer, repository_input,
-    resolve_repository_physical_species_registry, watchdog,
+    inspect_physical_registry, is_repository_scientific_refusal, model::*, producer,
+    repository_input, repository_physical_registry_frontier,
+    resolve_repository_physical_species_registry, root_admission_census, watchdog,
 };
+use civsim_units::{bignum::BigUint, digest::sha256};
 
 #[derive(Debug, Clone, Copy)]
-enum FixtureRoute {
-    Direct,
-    Elementary,
+enum FixtureDerivation {
+    FloorLinked,
+    Unfamiliar,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -95,11 +97,11 @@ fn content(kind: &str, tag: u8) -> CanonicalArtifact {
 fn admitted(payload: ArtifactPayload, tag: u8) -> AdmittedArtifact {
     let claimed_identity =
         producer::derive_artifact_identity_for_test(&payload).expect("fixture artifact hashes");
-    AdmittedArtifact {
+    AdmittedArtifact::from_exact_test_recomputation(
         claimed_identity,
-        admission: derived_admission(tag),
+        derived_admission(tag),
         payload,
-    }
+    )
 }
 
 fn push_artifact(
@@ -113,9 +115,26 @@ fn push_artifact(
     identity
 }
 
+fn refresh_vocabulary_binding(input: &mut PhysicalRegistryInput) {
+    input.vocabulary_binding = super::vocabulary::derive_binding(&input.admitted_artifacts)
+        .expect("synthetic admitted roots classify");
+}
+
+fn descriptor(artifacts: &mut Vec<AdmittedArtifact>, name: &str, tag: u8) -> ArtifactIdentity {
+    push_artifact(
+        artifacts,
+        ArtifactPayload::PhysicalDescriptor(content(name, tag)),
+        tag,
+    )
+}
+
+fn relation(role: ArtifactIdentity, target: ArtifactIdentity) -> ArtifactRelation {
+    ArtifactRelation { role, target }
+}
+
 fn build_fixture(
     base_tag: u8,
-    route: FixtureRoute,
+    derivation: FixtureDerivation,
     massless: bool,
     defects: FixtureDefects,
 ) -> Fixture {
@@ -125,46 +144,81 @@ fn build_fixture(
     let mass_numerator = if defects.zero_projection { 0 } else { 7 };
     let scalar = push_artifact(
         &mut artifacts,
-        ArtifactPayload::ScalarCoordinate(ScalarCoordinateArtifact {
+        ArtifactPayload::ScalarCoordinate(Box::new(ScalarCoordinateArtifact {
             coordinate: content("mass-coordinate", base_tag),
             exact_value: rational(mass_numerator, 3),
             dimension: MASS_DIMENSION,
-        }),
+        })),
         base_tag,
     );
-    let field = push_artifact(
+    let derivation_kind = descriptor(
         &mut artifacts,
-        ArtifactPayload::FieldContent(content("unfamiliar-field", base_tag.wrapping_add(1))),
+        match derivation {
+            FixtureDerivation::FloorLinked => "floor-linked-derivation-kind",
+            FixtureDerivation::Unfamiliar => "thaumic-law-derivation-kind",
+        },
         base_tag.wrapping_add(1),
     );
-    let operator = push_artifact(
+    let source_role = descriptor(
         &mut artifacts,
-        ArtifactPayload::Operator(content("unfamiliar-operator", base_tag.wrapping_add(2))),
+        "floor-coordinate-input-role",
         base_tag.wrapping_add(2),
     );
-    let state = push_artifact(
+    let field_role = descriptor(
         &mut artifacts,
-        ArtifactPayload::StateCoordinate(content(
-            "unfamiliar-state-coordinate",
-            base_tag.wrapping_add(3),
-        )),
+        "unfamiliar-field-input-role",
         base_tag.wrapping_add(3),
     );
-    let sector = push_artifact(
+    let field = descriptor(&mut artifacts, "unfamiliar-field", base_tag.wrapping_add(4));
+    let operator_role = descriptor(
         &mut artifacts,
-        ArtifactPayload::InteractionSector(content(
-            "unfamiliar-interaction-sector",
-            base_tag.wrapping_add(4),
-        )),
-        base_tag.wrapping_add(4),
-    );
-    let validity = push_artifact(
-        &mut artifacts,
-        ArtifactPayload::ValidityRegime(content(
-            "unfamiliar-validity-regime",
-            base_tag.wrapping_add(5),
-        )),
+        "unfamiliar-operator-input-role",
         base_tag.wrapping_add(5),
+    );
+    let operator = descriptor(
+        &mut artifacts,
+        "unfamiliar-operator",
+        base_tag.wrapping_add(6),
+    );
+    let state_role = descriptor(
+        &mut artifacts,
+        "state-coordinate-requirement-role",
+        base_tag.wrapping_add(7),
+    );
+    let state = descriptor(
+        &mut artifacts,
+        "unfamiliar-state-coordinate",
+        base_tag.wrapping_add(8),
+    );
+    let sector_role = descriptor(
+        &mut artifacts,
+        "interaction-sector-requirement-role",
+        base_tag.wrapping_add(9),
+    );
+    let sector = descriptor(
+        &mut artifacts,
+        "unfamiliar-interaction-sector",
+        base_tag.wrapping_add(10),
+    );
+    let validity_role = descriptor(
+        &mut artifacts,
+        "validity-regime-requirement-role",
+        base_tag.wrapping_add(11),
+    );
+    let validity = descriptor(
+        &mut artifacts,
+        "unfamiliar-validity-regime",
+        base_tag.wrapping_add(12),
+    );
+    let stability_role = descriptor(
+        &mut artifacts,
+        "stability-constraint-role",
+        base_tag.wrapping_add(13),
+    );
+    let transition_role = descriptor(
+        &mut artifacts,
+        "transition-constraint-role",
+        base_tag.wrapping_add(14),
     );
 
     let projection = push_artifact(
@@ -187,33 +241,25 @@ fn build_fixture(
                 ],
                 output_node: 5,
             },
+            scope: MassProjectionScope::SpeciesRestMass,
         }),
-        base_tag.wrapping_add(6),
-    );
-    let massless_law = push_artifact(
-        &mut artifacts,
-        ArtifactPayload::ExactMasslessLaw(MasslessLawArtifact {
-            state_coordinates: vec![state],
-            active_sectors: vec![sector],
-            validity_regimes: vec![validity],
-        }),
-        base_tag.wrapping_add(7),
+        base_tag.wrapping_add(15),
     );
 
-    let state_reference = if defects.wrong_state_kind {
-        sector
+    let state_relation_role = if defects.wrong_state_kind {
+        scalar
     } else {
-        state
+        state_role
     };
-    let sector_reference = if defects.wrong_sector_kind {
-        state
+    let sector_relation_role = if defects.wrong_sector_kind {
+        scalar
     } else {
-        sector
+        sector_role
     };
-    let validity_reference = if defects.wrong_validity_kind {
-        sector
+    let validity_relation_role = if defects.wrong_validity_kind {
+        scalar
     } else {
-        validity
+        validity_role
     };
     let dependencies = if defects.unexpected_dependency {
         vec![SpeciesContentIdentity([base_tag; 32])]
@@ -221,24 +267,26 @@ fn build_fixture(
         Vec::new()
     };
     let requirements = RequirementSet {
-        state_coordinates: vec![state_reference],
-        active_sectors: vec![sector_reference],
-        validity_regimes: vec![validity_reference],
+        artifact_relations: vec![
+            relation(state_relation_role, state),
+            relation(sector_relation_role, sector),
+            relation(validity_relation_role, validity),
+        ],
         species_dependencies: dependencies,
     };
-    let stability = push_artifact(
+    let massless_law = push_artifact(
         &mut artifacts,
-        ArtifactPayload::StabilityLaw(ConstraintLawArtifact {
+        ArtifactPayload::ExactMasslessLaw(MasslessLawArtifact {
             requirements: requirements.clone(),
         }),
-        base_tag.wrapping_add(8),
+        base_tag.wrapping_add(16),
     );
-    let transition = push_artifact(
+    let shared_constraint = push_artifact(
         &mut artifacts,
-        ArtifactPayload::TransitionLaw(ConstraintLawArtifact {
+        ArtifactPayload::ConstraintLaw(ConstraintLawArtifact {
             requirements: requirements.clone(),
         }),
-        base_tag.wrapping_add(9),
+        base_tag.wrapping_add(17),
     );
     let mass_proof = if defects.wrong_mass_kind {
         MassProofReference::Projection(sector)
@@ -251,25 +299,32 @@ fn build_fixture(
         physical_content: content("unfamiliar-species-state", base_tag.wrapping_add(10)),
         requirements,
         mass_proof,
-        stability_law: stability,
-        transition_law: transition,
+        constraint_laws: vec![
+            relation(stability_role, shared_constraint),
+            relation(transition_role, shared_constraint),
+        ],
     };
     let member =
         producer::derive_member_identity_for_test(&blueprint).expect("fixture member hashes");
-    let rule = match route {
-        FixtureRoute::Direct => {
-            ArtifactPayload::DirectFloorSpecies(DirectFloorSpeciesArtifact { output: blueprint })
-        }
-        FixtureRoute::Elementary => {
-            ArtifactPayload::ElementaryExcitation(ElementaryExcitationArtifact {
-                fields: vec![field],
-                operators: vec![operator],
-                output: blueprint,
-            })
-        }
+    let artifact_inputs = match derivation {
+        FixtureDerivation::FloorLinked => vec![relation(source_role, scalar)],
+        FixtureDerivation::Unfamiliar => vec![
+            relation(field_role, field),
+            relation(operator_role, operator),
+        ],
     };
-    push_artifact(&mut artifacts, rule, base_tag.wrapping_add(11));
+    push_artifact(
+        &mut artifacts,
+        ArtifactPayload::SpeciesDerivation(SpeciesDerivationArtifact {
+            derivation_kind,
+            artifact_inputs,
+            constituents: Vec::new(),
+            output: blueprint,
+        }),
+        base_tag.wrapping_add(19),
+    );
     input.admitted_artifacts = artifacts;
+    refresh_vocabulary_binding(&mut input);
     input.declared_members = vec![member];
     Fixture {
         input,
@@ -281,7 +336,7 @@ fn build_fixture(
 fn elementary_fixture(base_tag: u8) -> Fixture {
     build_fixture(
         base_tag,
-        FixtureRoute::Elementary,
+        FixtureDerivation::Unfamiliar,
         false,
         FixtureDefects::default(),
     )
@@ -290,7 +345,7 @@ fn elementary_fixture(base_tag: u8) -> Fixture {
 fn massless_fixture(base_tag: u8) -> Fixture {
     build_fixture(
         base_tag,
-        FixtureRoute::Elementary,
+        FixtureDerivation::Unfamiliar,
         true,
         FixtureDefects::default(),
     )
@@ -310,34 +365,6 @@ fn composite_fixture() -> Fixture {
         by_identity.insert(artifact.claimed_identity, artifact);
     }
     let mut artifacts = by_identity.into_values().collect::<Vec<_>>();
-    let state = artifacts
-        .iter()
-        .find_map(|artifact| {
-            matches!(&artifact.payload, ArtifactPayload::StateCoordinate(_))
-                .then_some(artifact.claimed_identity)
-        })
-        .expect("state fixture");
-    let sector = artifacts
-        .iter()
-        .find_map(|artifact| {
-            matches!(&artifact.payload, ArtifactPayload::InteractionSector(_))
-                .then_some(artifact.claimed_identity)
-        })
-        .expect("sector fixture");
-    let validity = artifacts
-        .iter()
-        .find_map(|artifact| {
-            matches!(&artifact.payload, ArtifactPayload::ValidityRegime(_))
-                .then_some(artifact.claimed_identity)
-        })
-        .expect("validity fixture");
-    let operator = artifacts
-        .iter()
-        .find_map(|artifact| {
-            matches!(&artifact.payload, ArtifactPayload::Operator(_))
-                .then_some(artifact.claimed_identity)
-        })
-        .expect("operator fixture");
     let projection = artifacts
         .iter()
         .find_map(|artifact| {
@@ -345,45 +372,55 @@ fn composite_fixture() -> Fixture {
                 .then_some(artifact.claimed_identity)
         })
         .expect("projection fixture");
+    let derivation_kind = descriptor(&mut artifacts, "bound-aggregate-derivation-kind", 141);
+    let operator_role = descriptor(&mut artifacts, "aggregate-operator-input-role", 142);
+    let operator = descriptor(&mut artifacts, "unfamiliar-aggregate-operator", 143);
+    let state_role = descriptor(&mut artifacts, "aggregate-state-role", 144);
+    let state = descriptor(&mut artifacts, "aggregate-state", 145);
+    let sector_role = descriptor(&mut artifacts, "aggregate-sector-role", 146);
+    let sector = descriptor(&mut artifacts, "aggregate-sector", 147);
+    let validity_role = descriptor(&mut artifacts, "aggregate-validity-role", 148);
+    let validity = descriptor(&mut artifacts, "aggregate-validity", 149);
+    let stability_role = descriptor(&mut artifacts, "aggregate-stability-role", 150);
+    let transition_role = descriptor(&mut artifacts, "aggregate-transition-role", 151);
     let requirements = RequirementSet {
-        state_coordinates: vec![state],
-        active_sectors: vec![sector],
-        validity_regimes: vec![validity],
+        artifact_relations: vec![
+            relation(state_role, state),
+            relation(sector_role, sector),
+            relation(validity_role, validity),
+        ],
         species_dependencies: vec![first.member, second.member],
     };
-    let stability = push_artifact(
+    let shared_constraint = push_artifact(
         &mut artifacts,
-        ArtifactPayload::StabilityLaw(ConstraintLawArtifact {
+        ArtifactPayload::ConstraintLaw(ConstraintLawArtifact {
             requirements: requirements.clone(),
         }),
-        141,
-    );
-    let transition = push_artifact(
-        &mut artifacts,
-        ArtifactPayload::TransitionLaw(ConstraintLawArtifact {
-            requirements: requirements.clone(),
-        }),
-        142,
+        152,
     );
     let blueprint = MemberBlueprint {
-        physical_content: content("unfamiliar-composite-state", 143),
+        physical_content: content("unfamiliar-composite-state", 154),
         requirements,
         mass_proof: MassProofReference::Projection(projection),
-        stability_law: stability,
-        transition_law: transition,
+        constraint_laws: vec![
+            relation(stability_role, shared_constraint),
+            relation(transition_role, shared_constraint),
+        ],
     };
     let member =
         producer::derive_member_identity_for_test(&blueprint).expect("composite member hashes");
     push_artifact(
         &mut artifacts,
-        ArtifactPayload::CompositeBoundState(CompositeBoundStateArtifact {
+        ArtifactPayload::SpeciesDerivation(SpeciesDerivationArtifact {
+            derivation_kind,
+            artifact_inputs: vec![relation(operator_role, operator)],
             constituents: vec![second.member, first.member],
-            operators: vec![operator],
             output: blueprint,
         }),
-        144,
+        155,
     );
     input.admitted_artifacts = artifacts;
+    refresh_vocabulary_binding(&mut input);
     input.declared_members = vec![member, second.member, first.member];
     Fixture {
         input,
@@ -413,9 +450,67 @@ fn assert_both_refuse_with_caps(
     );
 }
 
+fn minimum_evaluation_budget(input: &PhysicalRegistryInput, producer_path: bool) -> u64 {
+    let mut lower = 0_u64;
+    let mut upper = ValidationCaps::PRODUCTION.evaluation_steps;
+    while lower < upper {
+        let middle = lower + (upper - lower) / 2;
+        let caps = ValidationCaps {
+            evaluation_steps: middle,
+            ..ValidationCaps::PRODUCTION
+        };
+        let result = if producer_path {
+            producer::validate_and_encode_with_caps(input, caps)
+        } else {
+            watchdog::validate_and_encode_with_caps(input, caps)
+        };
+        match result {
+            Ok(_) => upper = middle,
+            Err(PhysicalRegistryRefusalCode::EvaluationStepLimitExceeded) => lower = middle + 1,
+            Err(other) => panic!("unexpected evaluation-budget refusal: {}", other.id()),
+        }
+    }
+    lower
+}
+
+fn minimum_closure_budget(input: &PhysicalRegistryInput, producer_path: bool) -> u64 {
+    let mut lower = 0_u64;
+    let mut upper = ValidationCaps::PRODUCTION.closure_steps;
+    while lower < upper {
+        let middle = lower + (upper - lower) / 2;
+        let caps = ValidationCaps {
+            closure_steps: middle,
+            ..ValidationCaps::PRODUCTION
+        };
+        let result = if producer_path {
+            producer::validate_and_encode_with_caps(input, caps)
+        } else {
+            watchdog::validate_and_encode_with_caps(input, caps)
+        };
+        match result {
+            Ok(_) => upper = middle,
+            Err(PhysicalRegistryRefusalCode::ClosureStepLimitExceeded) => lower = middle + 1,
+            Err(other) => panic!("unexpected closure-budget refusal: {}", other.id()),
+        }
+    }
+    lower
+}
+
 fn replace_elementary_projection(
     input: &mut PhysicalRegistryInput,
     expression: ExactExpression,
+) -> SpeciesContentIdentity {
+    replace_elementary_projection_with_scope(
+        input,
+        expression,
+        MassProjectionScope::SpeciesRestMass,
+    )
+}
+
+fn replace_elementary_projection_with_scope(
+    input: &mut PhysicalRegistryInput,
+    expression: ExactExpression,
+    scope: MassProjectionScope,
 ) -> SpeciesContentIdentity {
     let projection_index = input
         .admitted_artifacts
@@ -424,20 +519,27 @@ fn replace_elementary_projection(
         .expect("projection fixture");
     let prior_projection = input.admitted_artifacts[projection_index].claimed_identity;
     input.admitted_artifacts[projection_index].payload =
-        ArtifactPayload::MassProjection(MassProjectionArtifact { expression });
+        ArtifactPayload::MassProjection(MassProjectionArtifact { expression, scope });
     let projection_identity = producer::derive_artifact_identity_for_test(
         &input.admitted_artifacts[projection_index].payload,
     )
     .expect("replacement projection hashes");
     input.admitted_artifacts[projection_index].claimed_identity = projection_identity;
+    input.admitted_artifacts[projection_index].refresh_exact_test_capability();
 
     let rule = input
         .admitted_artifacts
         .iter_mut()
-        .find(|artifact| matches!(artifact.payload, ArtifactPayload::ElementaryExcitation(_)))
-        .expect("elementary rule fixture");
-    let ArtifactPayload::ElementaryExcitation(rule_payload) = &mut rule.payload else {
-        unreachable!("matched elementary rule")
+        .find(|artifact| {
+            matches!(
+                &artifact.payload,
+                ArtifactPayload::SpeciesDerivation(rule)
+                    if rule.output.mass_proof == MassProofReference::Projection(prior_projection)
+            )
+        })
+        .expect("species derivation fixture");
+    let ArtifactPayload::SpeciesDerivation(rule_payload) = &mut rule.payload else {
+        unreachable!("matched species derivation rule")
     };
     assert_eq!(
         rule_payload.output.mass_proof,
@@ -448,6 +550,7 @@ fn replace_elementary_projection(
         .expect("replacement member hashes");
     rule.claimed_identity = producer::derive_artifact_identity_for_test(&rule.payload)
         .expect("replacement rule hashes");
+    rule.refresh_exact_test_capability();
     input.declared_members = vec![member];
     member
 }
@@ -518,40 +621,139 @@ fn repository_result_is_the_exact_non_admitting_refusal() {
     let refusal = resolve_repository_physical_species_registry().unwrap_err();
     assert_eq!(
         refusal.code,
-        PhysicalRegistryRefusalCode::NoAdmittedSpeciesDerivationRoots
+        PhysicalRegistryRefusalCode::NoAdmittedSpeciesDerivationRules
     );
-    assert_eq!(refusal.code.id(), "no_admitted_species_derivation_roots");
+    assert_eq!(refusal.code.id(), "no_admitted_species_derivation_rules");
     assert_eq!(refusal.member_count, 0);
     assert!(!refusal.coverage_claim);
     assert_eq!(refusal.authority_effect.id(), "none");
     assert_eq!(
         refusal.open_obligations,
         [
-            "floor_species_property_attribution",
-            "admitted_interaction_sector_membership",
-            "admitted_state_coordinate_membership",
-            "stable_excitation_or_bound_state_derivation",
+            "admitted_physical_descriptor_roles",
+            "admitted_constraint_laws",
+            "admitted_species_derivation_rules",
+            "complete_global_physical_vocabulary_coverage",
             "complete_registry_closure_domain",
-            "certified_mass_projection",
+            "species_mass_uncertainty_transport",
         ]
     );
+    let frontier = repository_physical_registry_frontier().expect("repository frontier");
+    assert_eq!(frontier.root_admission_census.len(), 4);
+    assert!(frontier.root_admission_census.iter().all(|admission| {
+        admission.tier_id == "universal"
+            && admission.provenance_tag == "[D]"
+            && admission.route_id == "derived"
+    }));
     let input = repository_input().unwrap();
-    assert!(input.admitted_artifacts.is_empty());
+    assert_eq!(
+        input
+            .admitted_artifacts
+            .iter()
+            .filter(|artifact| {
+                matches!(&artifact.payload, ArtifactPayload::ScalarCoordinate(_))
+            })
+            .count(),
+        3
+    );
+    assert_eq!(
+        input
+            .admitted_artifacts
+            .iter()
+            .filter(|artifact| {
+                matches!(
+                    &artifact.payload,
+                    ArtifactPayload::MassProjection(MassProjectionArtifact {
+                        scope: MassProjectionScope::MembershipNeutral,
+                        ..
+                    })
+                )
+            })
+            .count(),
+        1
+    );
+    assert!(input.admitted_artifacts.iter().all(|artifact| {
+        artifact.admission.provenance == ProvenanceMark::Derived
+            && matches!(&artifact.admission.route, AdmissionRoute::Derived(_))
+            && matches!(
+                &artifact.payload,
+                ArtifactPayload::ScalarCoordinate(_) | ArtifactPayload::MassProjection(_)
+            )
+    }));
     assert!(input.declared_members.is_empty());
+    assert_eq!(input.vocabulary_binding.root_count, 4);
+    assert!(input
+        .vocabulary_binding
+        .descriptor_role_identities
+        .is_empty());
+    assert_eq!(input.vocabulary_binding.relation_target_identities.len(), 4);
+    assert!(input
+        .vocabulary_binding
+        .constraint_law_identities
+        .is_empty());
+    assert!(input.vocabulary_binding.current_input_partition_complete);
+    assert!(!input.vocabulary_binding.global_physical_vocabulary_coverage);
+    assert!(!input.vocabulary_binding.membership_authority);
+
+    let mut changed_binding = input;
+    changed_binding.vocabulary_binding.receipt_sha256[0] ^= 1;
+    assert_both_refuse(
+        &changed_binding,
+        PhysicalRegistryRefusalCode::PhysicalVocabularyBindingMismatch,
+    );
 }
 
 #[test]
-fn all_three_routes_and_massless_unfamiliar_content_are_identity_blind() {
+fn repository_frontier_accepts_each_live_scientific_refusal_only() {
+    assert!(is_repository_scientific_refusal(
+        PhysicalRegistryRefusalCode::NoAdmittedSpeciesDerivationRules
+    ));
+    assert!(is_repository_scientific_refusal(
+        PhysicalRegistryRefusalCode::PhysicalVocabularyCoverageIncomplete
+    ));
+    assert!(!is_repository_scientific_refusal(
+        PhysicalRegistryRefusalCode::CheckerDisagreement
+    ));
+}
+
+#[test]
+fn root_admission_census_preserves_unfamiliar_irreducible_routes() {
+    let mut fixture = elementary_fixture(27);
+    let identity = fixture.input.admitted_artifacts[0].claimed_identity;
+    fixture.input.admitted_artifacts[0].admission =
+        irreducible_admission(230, "synthetic.unfamiliar-root", ProvenanceMark::Measured);
+    fixture.input.admitted_artifacts[0].refresh_exact_test_capability();
+
+    let census = root_admission_census(&fixture.input.admitted_artifacts).expect("exact census");
+    let unfamiliar = census
+        .iter()
+        .find(|admission| admission.identity_sha256 == identity.0)
+        .expect("unfamiliar admission remains represented");
+    assert_eq!(unfamiliar.tier_id, "residue");
+    assert_eq!(unfamiliar.provenance_tag, "[M]");
+    assert_eq!(unfamiliar.route_id, "irreducible");
+}
+
+#[test]
+fn data_defined_derivations_and_massless_unfamiliar_content_are_identity_blind() {
     assert_eq!(
-        MASS_DIMENSION,
-        DimensionVector([0, 1, 0, 0, 0, 0, 0]),
-        "the fixed SI axis order is length, mass, time, current, temperature, amount, luminous intensity"
+        MASS_DIMENSION.terms(),
+        [DimensionTerm {
+            axis: SI_MASS_AXIS,
+            exponent: 1,
+        }],
+        "the current mass floor uses its admitted SI mass-axis identity"
     );
-    let direct = build_fixture(3, FixtureRoute::Direct, false, FixtureDefects::default());
+    let floor_linked = build_fixture(
+        3,
+        FixtureDerivation::FloorLinked,
+        false,
+        FixtureDefects::default(),
+    );
     let elementary = elementary_fixture(31);
     let massless = massless_fixture(91);
     let composite = composite_fixture();
-    for fixture in [&direct, &elementary, &massless, &composite] {
+    for fixture in [&floor_linked, &elementary, &massless, &composite] {
         let verified = inspect_physical_registry(&fixture.input).unwrap();
         assert!(!verified.members.is_empty());
         assert!(!verified.canonical_bytes.is_empty());
@@ -570,7 +772,18 @@ fn all_three_routes_and_massless_unfamiliar_content_are_identity_blind() {
         assert_eq!(verified.producer_id, PRODUCER_ID);
         assert_eq!(verified.watchdog_id, WATCHDOG_ID);
         assert_eq!(verified.authority_effect.id(), "none");
+        assert!(verified.members.iter().all(|member| {
+            fixture.input.admitted_artifacts.iter().any(|artifact| {
+                artifact.claimed_identity == member.derivation_kind
+                    && matches!(artifact.payload, ArtifactPayload::PhysicalDescriptor(_))
+            })
+        }));
     }
+    assert!(inspect_physical_registry(&elementary.input)
+        .unwrap()
+        .canonical_bytes
+        .windows("synthetic.thaumic-law-derivation-kind.v1".len())
+        .any(|window| window == b"synthetic.thaumic-law-derivation-kind.v1"));
     let massless_result = inspect_physical_registry(&massless.input).unwrap();
     assert_eq!(massless_result.members[0].rest_mass_si.numerator_be, [0]);
     assert_eq!(massless_result.members[0].mass_dimension, MASS_DIMENSION);
@@ -582,6 +795,20 @@ fn all_three_routes_and_massless_unfamiliar_content_are_identity_blind() {
             .filter(|identity| **identity == composite.member)
             .count(),
         1
+    );
+}
+
+#[test]
+fn current_si_axis_identities_recompute_from_domain_separated_content() {
+    assert_eq!(
+        SI_DIMENSION_AXES,
+        SI_DIMENSION_AXIS_IDENTITY_INPUTS.map(|content| DimensionAxisIdentity(sha256(content)))
+    );
+    assert!(
+        SI_DIMENSION_AXIS_IDENTITY_INPUTS
+            .iter()
+            .all(|content| content.starts_with(b"civsim.dimension-axis.")
+                && content.ends_with(b".v1"))
     );
 }
 
@@ -614,15 +841,15 @@ fn expression_storage_order_and_reduced_exact_arithmetic_do_not_select_acceptanc
     let mut reduced = elementary_fixture(13).input;
     let dimensionless = push_artifact(
         &mut reduced.admitted_artifacts,
-        ArtifactPayload::ScalarCoordinate(ScalarCoordinateArtifact {
+        ArtifactPayload::ScalarCoordinate(Box::new(ScalarCoordinateArtifact {
             coordinate: content("large-odd-denominator", 238),
             exact_value: ExactRationalWire {
                 negative: false,
                 numerator_be: vec![1],
                 denominator_be: vec![0x80, 0, 0, 1],
             },
-            dimension: DimensionVector([0; 7]),
-        }),
+            dimension: DimensionVector::dimensionless(),
+        })),
         238,
     );
     let mass = reduced
@@ -661,6 +888,330 @@ fn expression_storage_order_and_reduced_exact_arithmetic_do_not_select_acceptanc
 }
 
 #[test]
+fn integer_power_bounds_follow_materialized_components_in_both_validators() {
+    let fixture = elementary_fixture(15);
+    let mass = fixture.scalar;
+    let mut input = fixture.input;
+    let dimensionless_four = push_artifact(
+        &mut input.admitted_artifacts,
+        ArtifactPayload::ScalarCoordinate(Box::new(ScalarCoordinateArtifact {
+            coordinate: content("dimensionless-four", 237),
+            exact_value: rational(4, 1),
+            dimension: DimensionVector::dimensionless(),
+        })),
+        237,
+    );
+    replace_elementary_projection(
+        &mut input,
+        ExactExpression {
+            nodes: vec![
+                ExactExpressionNode::Coordinate(mass),
+                ExactExpressionNode::Coordinate(dimensionless_four),
+                ExactExpressionNode::IntegerPower {
+                    base: 1,
+                    exponent: 10,
+                },
+                ExactExpressionNode::Multiply { left: 0, right: 2 },
+            ],
+            output_node: 3,
+        },
+    );
+    let caps = ValidationCaps {
+        intermediate_component_bits: 25,
+        ..ValidationCaps::PRODUCTION
+    };
+    let produced = producer::validate_and_encode_with_caps(&input, caps)
+        .expect("left-to-right producer accepts the exact in-bound power");
+    let watched = watchdog::validate_and_encode_with_caps(&input, caps)
+        .expect("right-to-left watchdog accepts the exact in-bound power");
+    assert_eq!(produced, watched);
+}
+
+#[test]
+fn production_resource_contracts_are_independently_pinned() {
+    assert_eq!(
+        producer::resource_contract_sha256(),
+        watchdog::resource_contract_sha256()
+    );
+    assert_ne!(producer::resource_contract_sha256(), [0; 32]);
+    let mutated_profile = b"civsim.physical-species.semantic-work-profile.mutant";
+    let produced_mutation =
+        producer::resource_contract_sha256_with_profile_for_test(mutated_profile);
+    let watched_mutation =
+        watchdog::resource_contract_sha256_with_profile_for_test(mutated_profile);
+    assert_eq!(produced_mutation, watched_mutation);
+    assert_ne!(produced_mutation, producer::resource_contract_sha256());
+
+    let mut input = elementary_fixture(16).input;
+    input.resources.max_intermediate_component_bits += 1;
+    assert_both_refuse(
+        &input,
+        PhysicalRegistryRefusalCode::ResourceContractMismatch,
+    );
+}
+
+#[test]
+fn integer_power_uses_one_semantic_work_budget_in_both_validators() {
+    assert_eq!(producer::power_work_units_for_test(32_767).unwrap(), 60);
+    assert_eq!(
+        producer::power_work_units_for_test(32_767),
+        watchdog::power_work_units_for_test(32_767)
+    );
+
+    let fixture = elementary_fixture(17);
+    let mass = fixture.scalar;
+    let mut input = fixture.input;
+    let dimensionless_one = push_artifact(
+        &mut input.admitted_artifacts,
+        ArtifactPayload::ScalarCoordinate(Box::new(ScalarCoordinateArtifact {
+            coordinate: content("dimensionless-one", 236),
+            exact_value: rational(1, 1),
+            dimension: DimensionVector::dimensionless(),
+        })),
+        236,
+    );
+    replace_elementary_projection(
+        &mut input,
+        ExactExpression {
+            nodes: vec![
+                ExactExpressionNode::Coordinate(mass),
+                ExactExpressionNode::Coordinate(dimensionless_one),
+                ExactExpressionNode::IntegerPower {
+                    base: 1,
+                    exponent: 32_767,
+                },
+                ExactExpressionNode::Multiply { left: 0, right: 2 },
+            ],
+            output_node: 3,
+        },
+    );
+
+    let produced = minimum_evaluation_budget(&input, true);
+    let watched = minimum_evaluation_budget(&input, false);
+    assert_eq!(produced, 149);
+    assert_eq!(produced, watched);
+    assert_both_refuse_with_caps(
+        &input,
+        ValidationCaps {
+            evaluation_steps: produced - 1,
+            ..ValidationCaps::PRODUCTION
+        },
+        PhysicalRegistryRefusalCode::EvaluationStepLimitExceeded,
+    );
+    assert!(producer::validate_and_encode_with_caps(
+        &input,
+        ValidationCaps {
+            evaluation_steps: produced,
+            ..ValidationCaps::PRODUCTION
+        }
+    )
+    .is_ok());
+    assert!(watchdog::validate_and_encode_with_caps(
+        &input,
+        ValidationCaps {
+            evaluation_steps: watched,
+            ..ValidationCaps::PRODUCTION
+        }
+    )
+    .is_ok());
+}
+
+#[test]
+fn semantic_evaluation_budget_is_checker_neutral_across_reference_graphs() {
+    for input in [
+        elementary_fixture(19).input,
+        massless_fixture(53).input,
+        composite_fixture().input,
+    ] {
+        assert_eq!(
+            minimum_evaluation_budget(&input, true),
+            minimum_evaluation_budget(&input, false)
+        );
+    }
+
+    let mut multibyte = elementary_fixture(91);
+    let prior_scalar = multibyte.scalar;
+    let scalar_artifact = multibyte
+        .input
+        .admitted_artifacts
+        .iter_mut()
+        .find(|artifact| artifact.claimed_identity == prior_scalar)
+        .expect("scalar fixture");
+    let ArtifactPayload::ScalarCoordinate(coordinate) = &mut scalar_artifact.payload else {
+        panic!("scalar fixture kind")
+    };
+    coordinate.exact_value = rational(257, 3);
+    let scalar =
+        producer::derive_artifact_identity_for_test(&scalar_artifact.payload).expect("scalar hash");
+    scalar_artifact.claimed_identity = scalar;
+    scalar_artifact.refresh_exact_test_capability();
+    let mut expression = multibyte
+        .input
+        .admitted_artifacts
+        .iter()
+        .find_map(|artifact| match &artifact.payload {
+            ArtifactPayload::MassProjection(projection) => Some(projection.expression.clone()),
+            _ => None,
+        })
+        .expect("projection fixture");
+    for node in &mut expression.nodes {
+        if let ExactExpressionNode::Coordinate(identity) = node {
+            if *identity == prior_scalar {
+                *identity = scalar;
+            }
+        }
+    }
+    replace_elementary_projection(&mut multibyte.input, expression);
+    assert_eq!(
+        minimum_evaluation_budget(&multibyte.input, true),
+        minimum_evaluation_budget(&multibyte.input, false)
+    );
+
+    let mut reciprocal = elementary_fixture(117);
+    let mass = reciprocal.scalar;
+    let one = push_artifact(
+        &mut reciprocal.input.admitted_artifacts,
+        ArtifactPayload::ScalarCoordinate(Box::new(ScalarCoordinateArtifact {
+            coordinate: content("reciprocal-one", 237),
+            exact_value: rational(1, 1),
+            dimension: DimensionVector::dimensionless(),
+        })),
+        237,
+    );
+    replace_elementary_projection(
+        &mut reciprocal.input,
+        ExactExpression {
+            nodes: vec![
+                ExactExpressionNode::Coordinate(mass),
+                ExactExpressionNode::Coordinate(one),
+                ExactExpressionNode::IntegerPower {
+                    base: 1,
+                    exponent: -17,
+                },
+                ExactExpressionNode::Multiply { left: 0, right: 2 },
+            ],
+            output_node: 3,
+        },
+    );
+    assert_eq!(
+        minimum_evaluation_budget(&reciprocal.input, true),
+        minimum_evaluation_budget(&reciprocal.input, false)
+    );
+}
+
+#[test]
+fn closure_uses_one_graph_derived_budget_in_both_validators() {
+    let elementary = elementary_fixture(18).input;
+    let produced_elementary = minimum_closure_budget(&elementary, true);
+    let watched_elementary = minimum_closure_budget(&elementary, false);
+    assert_eq!(produced_elementary, 3);
+    assert_eq!(produced_elementary, watched_elementary);
+
+    let mut composite = composite_fixture().input;
+    let produced_composite = minimum_closure_budget(&composite, true);
+    let watched_composite = minimum_closure_budget(&composite, false);
+    assert_eq!(produced_composite, 13);
+    assert_eq!(produced_composite, watched_composite);
+
+    composite.admitted_artifacts.reverse();
+    assert_eq!(minimum_closure_budget(&composite, true), produced_composite);
+    assert_eq!(minimum_closure_budget(&composite, false), watched_composite);
+    assert_both_refuse_with_caps(
+        &composite,
+        ValidationCaps {
+            closure_steps: produced_composite - 1,
+            ..ValidationCaps::PRODUCTION
+        },
+        PhysicalRegistryRefusalCode::ClosureStepLimitExceeded,
+    );
+}
+
+#[test]
+fn ambiguous_over_cap_products_refuse_before_multiplication() {
+    let one = BigUint::from_u64(1);
+    let left = one.shl_bits(40).sub(&one);
+    let right = one.shl_bits(25).sub(&one);
+    assert_eq!(left.bit_len() + right.bit_len(), 65);
+    assert_eq!(left.mul(&right).bit_len(), 65);
+    assert!(!producer::product_fits_component_cap_for_test(
+        &left, &right, 64,
+    ));
+    assert!(!watchdog::product_fits_component_cap_for_test(
+        &left, &right, 64,
+    ));
+
+    let fitting_left = one.shl_bits(39);
+    let fitting_right = one.shl_bits(24);
+    assert_eq!(fitting_left.bit_len() + fitting_right.bit_len(), 65);
+    assert_eq!(fitting_left.mul(&fitting_right).bit_len(), 64);
+    assert!(producer::product_fits_component_cap_for_test(
+        &fitting_left,
+        &fitting_right,
+        64,
+    ));
+    assert!(watchdog::product_fits_component_cap_for_test(
+        &fitting_left,
+        &fitting_right,
+        64,
+    ));
+}
+
+#[test]
+fn variable_cardinality_dimension_basis_accepts_and_cancels_unfamiliar_axes() {
+    let fixture = elementary_fixture(14);
+    let mut input = fixture.input;
+    let unfamiliar_dimension = DimensionVector::from_terms(
+        (1_u8..=8)
+            .map(|tag| DimensionTerm {
+                axis: DimensionAxisIdentity([tag; 32]),
+                exponent: i16::from(tag),
+            })
+            .collect(),
+    )
+    .expect("eight unfamiliar axes fit the admitted resource contract");
+    assert_eq!(unfamiliar_dimension.terms().len(), 8);
+    let unfamiliar = push_artifact(
+        &mut input.admitted_artifacts,
+        ArtifactPayload::ScalarCoordinate(Box::new(ScalarCoordinateArtifact {
+            coordinate: content("thaumic-coordinate-system", 239),
+            exact_value: rational(11, 5),
+            dimension: unfamiliar_dimension,
+        })),
+        239,
+    );
+    replace_elementary_projection(
+        &mut input,
+        ExactExpression {
+            nodes: vec![
+                ExactExpressionNode::Coordinate(fixture.scalar),
+                ExactExpressionNode::Coordinate(unfamiliar),
+                ExactExpressionNode::Divide {
+                    numerator: 1,
+                    denominator: 1,
+                },
+                ExactExpressionNode::Multiply { left: 0, right: 2 },
+            ],
+            output_node: 3,
+        },
+    );
+    let produced = producer::validate_and_encode(&input).expect("producer accepts cancellation");
+    let watched = watchdog::validate_and_encode(&input).expect("watchdog accepts cancellation");
+    assert_eq!(produced, watched);
+    assert_eq!(produced.members[0].mass_dimension, MASS_DIMENSION);
+
+    let too_many = (1_u8..=65)
+        .map(|tag| DimensionTerm {
+            axis: DimensionAxisIdentity([tag; 32]),
+            exponent: 1,
+        })
+        .collect();
+    assert_eq!(
+        DimensionVector::from_terms(too_many),
+        Err(PhysicalRegistryRefusalCode::DimensionTermCapacityExceeded)
+    );
+}
+
+#[test]
 fn a_name_only_mass_coordinate_and_evidence_only_citation_never_create_membership() {
     let fixture = elementary_fixture(17);
     let scalar = fixture
@@ -678,10 +1229,11 @@ fn a_name_only_mass_coordinate_and_evidence_only_citation_never_create_membershi
     coordinate.coordinate.canonical_bytes = b"m_e".to_vec();
     scalar.claimed_identity =
         producer::derive_artifact_identity_for_test(&scalar.payload).expect("name-only hash");
+    scalar.refresh_exact_test_capability();
     name_only.admitted_artifacts = vec![scalar];
     assert_both_refuse(
         &name_only,
-        PhysicalRegistryRefusalCode::NoAdmittedSpeciesDerivationRoots,
+        PhysicalRegistryRefusalCode::NoAdmittedSpeciesDerivationRules,
     );
 
     let mut cited = fixture.input;
@@ -731,6 +1283,7 @@ fn complete_two_route_admission_is_enforced_independently_of_accounting_marks() 
     let mut admitted_citation = elementary_fixture(21).input;
     admitted_citation.admitted_artifacts[0].admission =
         irreducible_admission(201, "synthetic.slot.201", ProvenanceMark::Closure);
+    admitted_citation.admitted_artifacts[0].refresh_exact_test_capability();
     inspect_physical_registry(&admitted_citation).unwrap();
 
     let mut wrong_derived_mark = elementary_fixture(22).input;
@@ -754,6 +1307,8 @@ fn complete_two_route_admission_is_enforced_independently_of_accounting_marks() 
         irreducible_admission(210, "synthetic.same-slot", ProvenanceMark::Measured);
     duplicate_slot.admitted_artifacts[1].admission =
         irreducible_admission(220, "synthetic.same-slot", ProvenanceMark::Estimator);
+    duplicate_slot.admitted_artifacts[0].refresh_exact_test_capability();
+    duplicate_slot.admitted_artifacts[1].refresh_exact_test_capability();
     assert_both_refuse(
         &duplicate_slot,
         PhysicalRegistryRefusalCode::DuplicateResidualSlot,
@@ -781,6 +1336,32 @@ fn complete_two_route_admission_is_enforced_independently_of_accounting_marks() 
 }
 
 #[test]
+fn receipt_shaped_values_cannot_mint_an_admission_capability() {
+    let mut invented_derived = elementary_fixture(119).input;
+    let AdmissionRoute::Derived(route) =
+        &mut invented_derived.admitted_artifacts[0].admission.route
+    else {
+        panic!("derived fixture admission")
+    };
+    route.ancestry_receipt = receipt("invented-ancestry", 241);
+    assert_both_refuse(
+        &invented_derived,
+        PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch,
+    );
+
+    let mut invented_irreducible = elementary_fixture(120).input;
+    invented_irreducible.admitted_artifacts[0].admission = irreducible_admission(
+        242,
+        "synthetic.invented-residual-slot",
+        ProvenanceMark::Estimator,
+    );
+    assert_both_refuse(
+        &invented_irreducible,
+        PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch,
+    );
+}
+
+#[test]
 fn closure_omission_addition_and_descriptor_collision_refuse() {
     let mut missing = elementary_fixture(27).input;
     missing.declared_members.clear();
@@ -794,7 +1375,7 @@ fn closure_omission_addition_and_descriptor_collision_refuse() {
 
     let mut collision = elementary_fixture(29).input;
     let mut second = collision.admitted_artifacts[0].clone();
-    second.payload = ArtifactPayload::FieldContent(content("collision-payload", 250));
+    second.payload = ArtifactPayload::PhysicalDescriptor(content("collision-payload", 250));
     collision.admitted_artifacts.push(second);
     assert_both_refuse(
         &collision,
@@ -808,25 +1389,30 @@ fn closure_omission_addition_and_descriptor_collision_refuse() {
         .input
         .admitted_artifacts
         .iter()
-        .position(|artifact| matches!(artifact.payload, ArtifactPayload::CompositeBoundState(_)))
+        .position(|artifact| {
+            matches!(
+                &artifact.payload,
+                ArtifactPayload::SpeciesDerivation(rule) if !rule.constituents.is_empty()
+            )
+        })
         .expect("composite rule fixture");
-    let (prior_stability, prior_transition) =
-        match &dangling.input.admitted_artifacts[composite_index].payload {
-            ArtifactPayload::CompositeBoundState(rule) => {
-                (rule.output.stability_law, rule.output.transition_law)
-            }
-            _ => unreachable!("matched composite rule"),
-        };
-    let mut replacement_laws = Vec::new();
-    for prior in [prior_stability, prior_transition] {
+    let prior_constraints = match &dangling.input.admitted_artifacts[composite_index].payload {
+        ArtifactPayload::SpeciesDerivation(rule) => rule.output.constraint_laws.clone(),
+        _ => unreachable!("matched composite rule"),
+    };
+    let mut replacement_laws = std::collections::BTreeMap::new();
+    for relation in &prior_constraints {
+        if replacement_laws.contains_key(&relation.target) {
+            continue;
+        }
         let law_index = dangling
             .input
             .admitted_artifacts
             .iter()
-            .position(|artifact| artifact.claimed_identity == prior)
+            .position(|artifact| artifact.claimed_identity == relation.target)
             .expect("composite law fixture");
         match &mut dangling.input.admitted_artifacts[law_index].payload {
-            ArtifactPayload::StabilityLaw(law) | ArtifactPayload::TransitionLaw(law) => {
+            ArtifactPayload::ConstraintLaw(law) => {
                 law.requirements.species_dependencies = vec![unknown];
             }
             _ => panic!("composite law kind"),
@@ -836,19 +1422,22 @@ fn closure_omission_addition_and_descriptor_collision_refuse() {
         )
         .expect("replacement law hashes");
         dangling.input.admitted_artifacts[law_index].claimed_identity = identity;
-        replacement_laws.push(identity);
+        dangling.input.admitted_artifacts[law_index].refresh_exact_test_capability();
+        replacement_laws.insert(relation.target, identity);
     }
     let composite_rule = &mut dangling.input.admitted_artifacts[composite_index];
-    let ArtifactPayload::CompositeBoundState(rule) = &mut composite_rule.payload else {
+    let ArtifactPayload::SpeciesDerivation(rule) = &mut composite_rule.payload else {
         unreachable!("matched composite rule")
     };
     rule.constituents = vec![unknown];
     rule.output.requirements.species_dependencies = vec![unknown];
-    rule.output.stability_law = replacement_laws[0];
-    rule.output.transition_law = replacement_laws[1];
+    for relation in &mut rule.output.constraint_laws {
+        relation.target = replacement_laws[&relation.target];
+    }
     composite_rule.claimed_identity =
         producer::derive_artifact_identity_for_test(&composite_rule.payload)
             .expect("dangling rule hashes");
+    composite_rule.refresh_exact_test_capability();
     dangling
         .input
         .declared_members
@@ -898,7 +1487,7 @@ fn mass_state_sector_validity_and_dependency_swaps_refuse() {
             PhysicalRegistryRefusalCode::DependencyMismatch,
         ),
     ] {
-        let fixture = build_fixture(37, FixtureRoute::Elementary, false, defects);
+        let fixture = build_fixture(37, FixtureDerivation::Unfamiliar, false, defects);
         assert_both_refuse(&fixture.input, expected);
     }
 }
@@ -907,7 +1496,7 @@ fn mass_state_sector_validity_and_dependency_swaps_refuse() {
 fn exact_zero_needs_a_massless_law_and_expression_cycles_refuse() {
     let zero = build_fixture(
         41,
-        FixtureRoute::Elementary,
+        FixtureDerivation::Unfamiliar,
         false,
         FixtureDefects {
             zero_projection: true,
@@ -927,6 +1516,7 @@ fn exact_zero_needs_a_massless_law_and_expression_cycles_refuse() {
             nodes: vec![ExactExpressionNode::Add { left: 0, right: 0 }],
             output_node: 0,
         },
+        scope: MassProjectionScope::SpeciesRestMass,
     });
     assert_both_refuse(&cyclic, PhysicalRegistryRefusalCode::ExpressionCycle);
 
@@ -938,10 +1528,34 @@ fn exact_zero_needs_a_massless_law_and_expression_cycles_refuse() {
         .expect("projection fixture");
     projection.payload = ArtifactPayload::MassProjection(MassProjectionArtifact {
         expression: exponent_one_chain(ArtifactIdentity([1; 32]), 1_026),
+        scope: MassProjectionScope::SpeciesRestMass,
     });
     assert_both_refuse(
         &too_deep,
         PhysicalRegistryRefusalCode::ExpressionDepthExceeded,
+    );
+}
+
+#[test]
+fn a_membership_neutral_mass_projection_cannot_prove_a_species_mass() {
+    let fixture = elementary_fixture(47);
+    let mut input = fixture.input;
+    let expression = input
+        .admitted_artifacts
+        .iter()
+        .find_map(|artifact| match &artifact.payload {
+            ArtifactPayload::MassProjection(projection) => Some(projection.expression.clone()),
+            _ => None,
+        })
+        .expect("projection fixture");
+    replace_elementary_projection_with_scope(
+        &mut input,
+        expression,
+        MassProjectionScope::MembershipNeutral,
+    );
+    assert_both_refuse(
+        &input,
+        PhysicalRegistryRefusalCode::MassProjectionNotAuthorizedForMember,
     );
 }
 
@@ -1032,6 +1646,13 @@ fn floor_schema_and_every_resource_domain_fail_closed() {
                 ..ValidationCaps::PRODUCTION
             },
             PhysicalRegistryRefusalCode::DimensionExponentLimitExceeded,
+        ),
+        (
+            ValidationCaps {
+                dimension_term_count: 0,
+                ..ValidationCaps::PRODUCTION
+            },
+            PhysicalRegistryRefusalCode::DimensionTermCapacityExceeded,
         ),
         (
             ValidationCaps {

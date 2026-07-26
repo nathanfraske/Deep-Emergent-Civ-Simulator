@@ -301,6 +301,15 @@ pub enum ThermoRefusal {
         /// once, and naming one would understate what it would take to bring it in.
         failures: Vec<String>,
     },
+    /// More than one nonidentical source inversion answered on the strongest available rung. A scalar
+    /// response would have to choose one without a selection authority, so callers must consume
+    /// [`ThermoelasticEvaluation`] or carry this refusal.
+    UncollapsedSourceFamilyGap {
+        /// The phase asked for.
+        phase: String,
+        /// The surviving source families, in their banked declaration order.
+        source_families: Vec<String>,
+    },
     /// Every rung declined, and the requested state is outside the only frame that could answer.
     OutsideEveryFrame {
         /// The phase asked for.
@@ -338,6 +347,16 @@ impl core::fmt::Display for ThermoRefusal {
                 "phase {phase} has every {rung:?} anchor banked and its own row declares the fit does not \
                  reach this state: {}. The row said so all along; the loader used to drop the sentence.",
                 failures.join("; ")
+            ),
+            ThermoRefusal::UncollapsedSourceFamilyGap {
+                phase,
+                source_families,
+            } => write!(
+                f,
+                "phase {phase} has more than one nonidentical source inversion on the strongest available \
+                 rung: {}. A scalar response would erase that source-family gap, so consume the branch-aware \
+                 evaluation or propagate this refusal.",
+                source_families.join(", ")
             ),
             ThermoRefusal::OutsideEveryFrame {
                 phase,
@@ -595,80 +614,40 @@ pub fn response_at(
                 });
             }
         } else if missing.is_empty() {
-            // RUNG 3 ANSWERS HERE. This branch was a deliberate tripwire while the solver did not exist:
-            // it refused by naming the solver, so landing the anchor columns failed a test rather than
-            // succeeding silently. It fired, and this is what replaced it.
+            // RUNG 3 ANSWERS THROUGH THE FAMILY-AWARE API. The scalar adapter is deliberately downstream of
+            // `evaluate_at`: scope, solver exclusions, marginal bands, numerical bands, covariance and
+            // branch identities are assembled before a scalar is considered. One surviving determination
+            // may shed that branch wrapper without choosing; more than one has no selection authority and
+            // refuses below.
             //
-            // The pressure crosses from bar to GPa on the way in: the ladder's state is stated in bar
-            // because the registry and moduli rows are, and the equation of state works in GPa.
-            if let Some(a) =
-                crate::mie_gruneisen_debye::MgdAnchors::from_banked(phase, gruneisen, anchors)
-            {
-                let p_gpa = state
-                    .pressure_bar
-                    .checked_div(Fixed::from_int(10_000))
-                    .ok_or_else(|| ThermoRefusal::UnknownPhase {
-                        phase: phase.to_string(),
-                    })?;
-                // THE ROW'S OWN SCOPE IS TESTED BEFORE THE SOLVER RUNS, not after. The anchors are stated
-                // at a reference the solver anchors its thermal pressure against, and a row declaring a
-                // different one may not be evaluated here at all. What the row states in prose rather than
-                // in numbers cannot be tested, and rides the answer as a caveat instead.
-                let scope = anchors
-                    .row(phase)
-                    .map(|r| {
-                        r.scope.verdict_at(
-                            state.temperature_k,
-                            p_gpa,
-                            Fixed::from_int(crate::mie_gruneisen_debye::REFERENCE_TEMPERATURE_K),
-                        )
-                    })
-                    .unwrap_or(ScopeVerdict::InScope {
-                        caveats: Vec::new(),
-                    });
-                if let ScopeVerdict::OutOfScope { failures, .. } = &scope {
-                    return Err(ThermoRefusal::OutsideDeclaredScope {
-                        phase: phase.to_string(),
-                        rung: ThermoRung::MieGruneisenDebye,
-                        failures: failures.iter().map(|f| f.to_string()).collect(),
-                    });
-                }
-                match crate::mie_gruneisen_debye::response_at(&a, p_gpa, state.temperature_k) {
-                    Ok(r) => {
-                        return Ok(ThermoResponse {
-                            alpha_per_k: r.alpha_per_k,
-                            bulk_modulus_gpa: r.bulk_modulus_gpa,
-                            molar_volume_cm3: r.molar_volume_cm3,
-                            c_v_j_per_mol_k: Some(r.c_v_j_per_mol_k),
-                            rung: ThermoRung::MieGruneisenDebye,
-                            // Valid AT THE REQUESTED STATE, which is the whole point of the rung: unlike
-                            // the ambient row below, it does not carry someone else's frame.
-                            valid_at: state,
-                            scope: Some(scope),
-                        });
-                    }
-                    Err(why) => {
-                        // The solver refused for a stated reason, and the two reasons are now distinct
-                        // types rather than one variant carrying both: `PastSpinodal` names a phase with no
-                        // mechanically stable state at these conditions, `Unrepresentable` names a state
-                        // this arithmetic could not carry. Carried through rather than flattened into "no
-                        // rung answered".
-                        return Err(ThermoRefusal::RungUnavailable {
-                            phase: phase.to_string(),
-                            rung: ThermoRung::MieGruneisenDebye,
-                            missing: vec![format!("{why:?}")],
-                        });
-                    }
-                }
+            // This route used to call the pre-gap-law `MgdAnchors::from_banked`, whose prior implementation
+            // selected the first family before any response existed. Calling the ensemble first makes
+            // "surviving" mean a branch that evaluated at this state, and keeps the scalar and branch-aware
+            // APIs from becoming two independent solvers.
+            let evaluation = evaluate_at(phase, state, registry, moduli, gruneisen, anchors)?;
+            let mut branches = evaluation.branches;
+            let excluded = evaluation.excluded;
+            let source_families = branches
+                .iter()
+                .map(|branch| branch.source_family.clone())
+                .collect::<Vec<_>>();
+            if source_families.len() > 1 {
+                return Err(ThermoRefusal::UncollapsedSourceFamilyGap {
+                    phase: phase.to_string(),
+                    source_families,
+                });
             }
-            return Err(ThermoRefusal::RungUnavailable {
-                phase: phase.to_string(),
-                rung: ThermoRung::MieGruneisenDebye,
-                missing: vec![
-                    "a coherent single-fit anchor set: every cell fit rather than \
-                     estimated, and the row's own gamma_0 reproducing the banked one"
-                        .to_string(),
-                ],
+            return branches.pop().map(|branch| branch.response).ok_or_else(|| {
+                ThermoRefusal::RungUnavailable {
+                    phase: phase.to_string(),
+                    rung: ThermoRung::MieGruneisenDebye,
+                    missing: excluded
+                        .into_iter()
+                        .map(|exclusion| {
+                            format!("{}: {}", exclusion.family, exclusion.reasons.join("; "))
+                        })
+                        .collect(),
+                }
             });
         } else {
             return Err(ThermoRefusal::RungUnavailable {
@@ -693,11 +672,14 @@ pub fn response_at(
 
 /// EVERY source inversion's answer at a state, rather than one of them.
 ///
-/// [`response_at`] returns the strongest rung's single response and is what the interior column consumes;
-/// this returns the rung-3 ENSEMBLE, one branch per jointly-fit source family, with the delta between them
-/// visible instead of collapsed. Where the column banks one determination the ensemble holds one branch.
+/// [`response_at`] returns a scalar only when the strongest rung resolves to one distinct determination and
+/// refuses on an uncollapsed source-family gap. This returns the rung-3 ENSEMBLE, one branch per jointly-fit
+/// source family, with the delta between them visible instead of collapsed. Where the column banks one
+/// determination the ensemble holds one branch.
 ///
-/// Refuses exactly where `response_at` refuses on rung 3, and for the same reasons.
+/// Shares `response_at`'s unknown-phase, readiness, declared-scope and solver refusals. The deliberate
+/// exception is an uncollapsed source-family gap: this API returns those surviving families as branches,
+/// while the scalar adapter refuses because it has no authority to select one.
 // @derives: a phase's per-inversion thermoelastic branches at a state <- each banked source family's own jointly-fit anchors
 pub fn evaluate_at(
     phase: &str,
@@ -1199,11 +1181,10 @@ mod tests {
 
     /// THE ENSEMBLE REACHES THE LADDER, with the hull named for what it is.
     ///
-    /// `response_at` returns one answer because the interior column needs one; `evaluate_at` returns the
-    /// branches so a consumer that wants the spread can see it rather than being handed a point. Enstatite
-    /// is the row where that matters, and the hull over its two branches is a REPORTING ENVELOPE: its
-    /// interior holds no model, because the two members are separate published inversions rather than
-    /// samples of one, and the sources are a revision pair rather than independent witnesses.
+    /// `evaluate_at` returns the branches with the information a causal consumer would lose by taking a
+    /// point. Enstatite is the row where that matters, and the hull over its two branches is a REPORTING
+    /// ENVELOPE: its interior holds no model, because the two members are separate published inversions
+    /// rather than samples of one, and the sources are a revision pair rather than independent witnesses.
     #[test]
     fn the_ensemble_carries_both_inversions_with_their_covariance_keys_apart() {
         let (reg, mod_, gr, anc) = tables();
@@ -1241,6 +1222,12 @@ mod tests {
                 b.source_family
             );
             assert!(b.validity.in_scope());
+            assert_eq!(
+                b.response.scope.as_ref(),
+                Some(&b.validity),
+                "{}: the branch and its scalar response must carry the same declared-scope verdict",
+                b.source_family
+            );
         }
 
         let hull = e.response_hull().expect("two branches make a hull");
@@ -1274,12 +1261,47 @@ mod tests {
              claim that the value is exact"
         );
 
-        // AND THE SINGLE-ANSWER PATH IS UNCHANGED: the interior column still gets the primary branch.
-        let single = response_at("enstatite", interior, &reg, &mod_, &gr, &anc)
-            .expect("the single-response path still answers");
+        // AND THE SCALAR PATH CANNOT ERASE THE SAME INFORMATION BY TAKING THE FIRST BRANCH.
+        let refusal = response_at("enstatite", interior, &reg, &mod_, &gr, &anc)
+            .expect_err("two surviving source families have no scalar selection authority");
         assert_eq!(
-            single.bulk_modulus_gpa,
-            e.branches[0].response.bulk_modulus_gpa
+            refusal,
+            ThermoRefusal::UncollapsedSourceFamilyGap {
+                phase: "enstatite".to_string(),
+                source_families: vec!["slb2005".to_string(), "slb2011".to_string()],
+            },
+            "the refusal must carry the exact branch identities rather than flattening them into an \
+             unavailable rung"
+        );
+    }
+
+    /// ONE DISTINCT DETERMINATION STILL RETURNS THE SAME RESPONSE BITS.
+    ///
+    /// Forsterite's successor channel is byte-identical to the primary and therefore records concurrence
+    /// on one branch. The scalar adapter remains valid in that case and must return that branch's complete
+    /// response without recomputation or rounding.
+    #[test]
+    fn a_single_family_scalar_response_is_bit_identical_to_its_branch() {
+        let (reg, mod_, gr, anc) = tables();
+        let interior = ThermoState {
+            temperature_k: Fixed::from_int(1600),
+            pressure_bar: Fixed::from_int(100_000),
+        };
+
+        let evaluation = evaluate_at("forsterite", interior, &reg, &mod_, &gr, &anc)
+            .expect("forsterite's one distinct determination answers");
+        assert_eq!(evaluation.branches.len(), 1);
+        assert_eq!(
+            evaluation.branches[0].concurring_families,
+            vec!["slb2011".to_string()],
+            "one branch means identical source content, not a skipped successor family"
+        );
+
+        let scalar = response_at("forsterite", interior, &reg, &mod_, &gr, &anc)
+            .expect("one distinct determination admits a scalar response");
+        assert_eq!(
+            scalar, evaluation.branches[0].response,
+            "the scalar adapter must preserve every response bit and validity field for an unambiguous family"
         );
     }
 

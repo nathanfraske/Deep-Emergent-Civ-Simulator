@@ -71,7 +71,7 @@ flowchart TB
 
         STRUCTURE["Value-free stellar structure v2<br/>Open components, species, coordinates,<br/>dimensions, sectors, regimes,<br/>histories, and classifications"]
         CENSUS["Exact dimensional census v4<br/>Non-admitting diagnostic<br/>closure_effect = none<br/>coverage_claim = false"]
-        SPECIES_ANALYSIS["Species derivation analysis v1<br/>m_e is a mass-coordinate anchor only<br/>Zero members, zero support,<br/>no value, no residual slot"]
+        SPECIES_ANALYSIS["Species derivation analysis v4<br/>Independent watchdog v5<br/>Live root and vocabulary frontier<br/>Zero members, zero support,<br/>no value, no residual slot"]
         SPECIES_PACKET["CURRENT bounded structural packet pair<br/>Canonical descriptors plus conditioned support<br/>Independent algorithms agree on bytes only<br/>No physical member or authority"]
         CURRENT_PROOFS["CURRENT production resolver<br/>Joint physical measure = None<br/>Coordinate law = None"]
         CURRENT_REFUSAL["CURRENT Stage 1 refusal<br/>stellar_birth.realization_measure<br/>Both open leaves remain visible"]
@@ -87,8 +87,10 @@ flowchart TB
         CENSUS -. "Attached as non-admitting analysis" .-> CURRENT_REFUSAL
         SPECIES_ANALYSIS -. "Attached as non-admitting analysis" .-> CURRENT_REFUSAL
 
-        PHYSICAL_REGISTRY["CURRENT conditional physical registry pair<br/>Bottom-up producer plus top-down watchdog<br/>Exact mass, dimensions, state, sectors,<br/>validity, ancestry, and complete closure<br/>Repository result: no admitted roots"]
-        ROOTS["NEXT admitted species derivation roots<br/>Repository-owned fields, operators, states,<br/>sectors, regimes, constraint laws,<br/>and mass or massless proofs"]
+        ROOT_PROJECTION["CURRENT independent floor-root pair<br/>Three exact scalar coordinates plus<br/>one membership-neutral pure-mass expression<br/>No species membership authority"]
+        VOCABULARY["CURRENT independent physical-vocabulary pair<br/>Exact current-input partition: 0 / 4 / 0<br/>Descriptor roles / relation targets / constraint laws<br/>Global coverage and membership authority: false<br/>Identity-keyed tier, provenance, and route census"]
+        PHYSICAL_REGISTRY["CURRENT conditional physical registry pair<br/>Bottom-up producer plus top-down watchdog<br/>Exact mass, dimensions, state, sectors,<br/>validity, ancestry, and complete closure<br/>Repository result: no admitted species rules"]
+        SPECIES_LAWS["NEXT species-forming derivation roots<br/>Repository-owned fields, operators, states,<br/>sectors, regimes, constraint laws,<br/>excitations, bound states, and mass uncertainty"]
         REGISTRY["FUTURE realized species registry<br/>Complete lawful membership<br/>Familiarity-independent"]
         MECHANISMS["FUTURE admitted mechanism set<br/>Thermal, opacity, EOS, collapse,<br/>transport, spectra, topology,<br/>conservation, and validity laws"]
         JOINT["FUTURE correlation-preserving<br/>joint physical measure proof"]
@@ -109,9 +111,11 @@ flowchart TB
         SYSTEM["Completed Stage 1<br/>stellar-system state"]
 
         SPECIES_PACKET -. "Future conditioned-support envelope" .-> SUPPORT
-        AUDITED --> PHYSICAL_REGISTRY
+        AUDITED --> ROOT_PROJECTION
+        ROOT_PROJECTION --> VOCABULARY
+        VOCABULARY --> PHYSICAL_REGISTRY
         STRUCTURE --> PHYSICAL_REGISTRY
-        ROOTS --> PHYSICAL_REGISTRY
+        SPECIES_LAWS --> PHYSICAL_REGISTRY
         PHYSICAL_REGISTRY -. "Requires roots and separate authority receipt" .-> REGISTRY
         REGISTRY --> MECHANISMS
         AUDITED --> MECHANISMS
@@ -145,7 +149,7 @@ flowchart TB
         DISK --> SYSTEM
     end
 
-    AUTHORITY -. "Required for every future causal arrow" .-> ROOTS
+    AUTHORITY -. "Required for every future causal arrow" .-> SPECIES_LAWS
     AUTHORITY -. "Required for every future causal arrow" .-> MECHANISMS
     LAW_REFUSAL --> CURRENT_REFUSAL
 
@@ -153,17 +157,19 @@ flowchart TB
     %% PLANETARY CHAIN
     %% ============================================================
 
-    subgraph PLANET_CHAIN["C. Derived stellar system to complete immutable planet snapshot"]
+    subgraph PLANET_CHAIN["C. Current Solar-system route to an immutable planet snapshot"]
         direction LR
 
+        ROUTE["Future sealed completion-route receipt<br/>Generic obligation applicability,<br/>typed not-applicable evidence,<br/>and alternate-origin substitutions"]
         STAGE2["Stage 2<br/>System assembly and composition<br/>Body identity, phases, inventories,<br/>mass and angular momentum"]
         STAGE3["Stage 3<br/>Orbital, secular, relativistic,<br/>tidal, moon, and small-body evolution"]
         STAGE4["Stage 4<br/>Young-body thermal evolution<br/>Differentiation, mantle, core,<br/>materials, and crust formation"]
         STAGE5["Stage 5<br/>Stellar aging and deep time<br/>Geodynamics, impacts, volcanism,<br/>atmosphere, hydrology, weathering,<br/>erosion, and recycling"]
         STAGE6["Stage 6<br/>Distributed loading and flexure<br/>Surface fields, conservation,<br/>and moment residuals"]
-        SNAPSHOT["Stage 7<br/>Immutable PlanetSnapshot<br/>Complete state, receipt, transcript,<br/>lineage, and provenance roots"]
+        SNAPSHOT["Immutable PlanetSnapshot<br/>Applicable route fully closed<br/>State, receipt, transcript,<br/>lineage, and provenance roots"]
 
-        SYSTEM --> STAGE2
+        SYSTEM --> ROUTE
+        ROUTE --> STAGE2
         STAGE2 --> STAGE3
         STAGE3 --> STAGE4
         STAGE4 --> STAGE5
@@ -182,7 +188,7 @@ flowchart TB
         OBSERVATION["PlanetObservation<br/>Sealed borrowed projection"]
         REFUSAL_VIEW["Refusal observation<br/>Exact RunReceipt and transcript<br/>No snapshot"]
         SNAPSHOT_VIEW["Completed observation<br/>Immutable PlanetSnapshot<br/>with embedded completion receipt"]
-        EXPLORER["CURRENT useful viewer surface<br/>Typed transcript and floor-event envelope,<br/>stages, open proofs, Gap and Chaos status,<br/>and refusal frontier<br/>Value provenance remains planet-owned"]
+        EXPLORER["CURRENT useful viewer surface<br/>Typed transcript and floor-event envelope,<br/>stages, open proofs, Gap and Chaos status,<br/>root and vocabulary evidence, exact admission census,<br/>and refusal frontier<br/>Value provenance remains planet-owned"]
 
         CURRENT_REFUSAL --> OUTCOME
         SNAPSHOT --> OUTCOME
@@ -306,7 +312,7 @@ flowchart TB
         direction LR
 
         V0["0. DONE in PR #215<br/>Private outcome state and<br/>sealed observation token"]
-        V1["1. DONE<br/>Typed transcript and refusal scenes<br/>Opaque value provenance is explicit<br/>Viewer binary remains unwired"]
+        V1["1. DONE<br/>Typed transcript, root-pair,<br/>and refusal scenes<br/>Viewer binary remains unwired"]
         V2["2. NEXT: artifact identity<br/>Domain-separated typed keys<br/>Byte-neutral receipt key"]
         V3["3. Snapshot manifests<br/>System, body, field,<br/>and provenance roots"]
         V4["4. Paged provenance<br/>Event digests and transcript roots"]
@@ -332,6 +338,23 @@ flowchart TB
   diagnostic, representational, or rejected uses.
 - The only live PR #215 route ends at the typed Stage 1 refusal. Everything
   after the two missing proof capabilities is future work.
+- The drawn seven-stage chain is one Solar-system route, not a universal
+  completion predicate. Snapshot activation also requires a sealed route
+  receipt that proves generic obligation applicability, every typed
+  not-applicable decision, and every alternate-origin substitution.
+- The live floor-root pair supplies coordinate capabilities only. Its pure-mass
+  expression is membership-neutral, and the registry refusal remains
+  `no_admitted_species_derivation_rules`.
+- The live physical-vocabulary pair classifies the exact current input as zero
+  descriptor roles, four relation targets, and zero constraint laws. That is
+  not a closed vocabulary: global coverage and membership authority remain
+  false. The frontier preserves each root's exact identity, tier, provenance
+  tag, and derived or irreducible route without assuming one familiar class.
+- The root projection crosses both independent final verifiers before registry
+  consumption. Each re-extracts and reprojects the sealed floor, reconnects its
+  local resource and canary attestations, and exact-matches the private
+  candidate manifest. The viewer receives only the resulting read-only receipt
+  and frontier.
 - A hash, citation, provenance mark, schema declaration, classification, or
   typed wrapper is never physical authority by itself.
 - The seven provenance marks, `[D]`, `[M]`, `[E]`, `[C]`, `[A]`, `[W]`, and

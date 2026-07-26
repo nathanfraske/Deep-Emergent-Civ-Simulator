@@ -110,6 +110,19 @@ inputs = ["scripts/sources_gate.py", "scripts/sources_baseline.tsv", "sources", 
 path_triggers = ["scripts/sources_gate.py", "scripts/sources_baseline.tsv", "sources/**", "docs/SOURCES.md", "crates/physics/data/**"]
 
 [[gate]]
+id = "canonical.floor-source-evidence"
+order = 64
+description = "Bind each measured floor leaf to independently parsed CODATA source-row evidence."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/codata_floor_evidence_gate.py"]
+self_test = ["{python}", "scripts/codata_floor_evidence_gate.py", "--self-test"]
+timeout_seconds = 120
+cache = "content-hash"
+inputs = ["scripts/codata_floor_evidence_gate.py", "scripts/codata_floor_evidence_watchdog.py", "crates/units/data/codata_2018_floor_facts.tsv", "crates/units/data/codata_2018_floor_evidence_receipt.json", "crates/units/src/fundamentals.rs", "crates/units/src/physics_floor.rs", "crates/units/src/physics_floor_source_evidence.rs", "sources/registry.toml"]
+path_triggers = ["scripts/codata_floor_evidence_gate.py", "scripts/codata_floor_evidence_watchdog.py", "crates/units/data/codata_2018_floor_facts.tsv", "crates/units/data/codata_2018_floor_evidence_receipt.json", "crates/units/src/fundamentals.rs", "crates/units/src/physics_floor.rs", "crates/units/src/physics_floor_source_evidence.rs", "sources/registry.toml"]
+
+[[gate]]
 id = "canonical.authority-watchdog"
 order = 65
 description = "Require independent pairs for active authority-bearing mechanical claims."
@@ -125,6 +138,8 @@ inputs = [
   "scripts/authority_watchdog_gate.py",
   "scripts/authority_registry_watchdog.py",
   "scripts/authority_watchdog.toml",
+  "scripts/codata_floor_evidence_gate.py",
+  "scripts/codata_floor_evidence_watchdog.py",
   "scripts/external_claim_gate.py",
   "scripts/external_claim_watchdog.py",
   "scripts/fixed_math_authority_gate.py",
@@ -134,6 +149,7 @@ inputs = [
   "sources/external_claims.toml",
   "sources/external_claim_approvers",
   "sources/external_claim_revocations.toml",
+  "sources/registry.toml",
   "docs/working/INDEPENDENT_AUTHORITY_RULE.md",
   "docs/working/EXTERNAL_ADVERSE_CLAIM_RULE.md",
   "crates",
@@ -144,6 +160,8 @@ path_triggers = [
   "scripts/authority_watchdog_gate.py",
   "scripts/authority_registry_watchdog.py",
   "scripts/authority_watchdog.toml",
+  "scripts/codata_floor_evidence_gate.py",
+  "scripts/codata_floor_evidence_watchdog.py",
   "scripts/external_claim_gate.py",
   "scripts/external_claim_watchdog.py",
   "scripts/fixed_math_authority_gate.py",
@@ -153,6 +171,7 @@ path_triggers = [
   "sources/external_claims.toml",
   "sources/external_claim_approvers",
   "sources/external_claim_revocations.toml",
+  "sources/registry.toml",
   "docs/working/INDEPENDENT_AUTHORITY_RULE.md",
   "docs/working/EXTERNAL_ADVERSE_CLAIM_RULE.md",
   "crates/**",

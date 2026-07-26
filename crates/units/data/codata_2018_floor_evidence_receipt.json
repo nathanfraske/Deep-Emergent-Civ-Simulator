@@ -1,0 +1,38 @@
+{
+  "claim_id": "floor.codata-factual-row-binding",
+  "evidence_sha256": "9a66f7f00a4822243bdfe8b724ede54807e7d101d73ecb17107560d22fe3144d",
+  "facts": {
+    "path": "crates/units/data/codata_2018_floor_facts.tsv",
+    "row_count": 3,
+    "schema": "civsim.units.codata-2018-floor-facts.v1",
+    "sha256": "c0839f9c3497724f04522b70699c969d225db62baad5507638162f274259da11"
+  },
+  "online_audit": {
+    "archive_url": "https://web.archive.org/web/20241219074053id_/https://physics.nist.gov/cuu/Constants/ArchiveASCII/allascii_2018.txt",
+    "audited_at_utc": "2026-07-25T18:00:00Z",
+    "live_archive_equal": true,
+    "live_url": "https://physics.nist.gov/cuu/Constants/ArchiveASCII/allascii_2018.txt"
+  },
+  "pair_sha256": "7aef3108ee63e017d739be0fd9b229a7d1fac675f35e81fbdfaa7a7844696ee0",
+  "producer": {
+    "canary_count": 13,
+    "canary_schema": "civsim.units.codata-fixed-column-canary-execution.v2",
+    "canary_sha256": "7676fd99754647b79d99f3378081415a1630ec22a830e34b25c1f5dc5418cf75",
+    "implementation": "civsim.units.codata-fixed-column-producer.v2",
+    "result_sha256": "b61f7e6b54466e914b5aa867c0f76713c79b63f4b7b861fa1104b66684254983"
+  },
+  "schema": "civsim.units.codata-2018-floor-evidence-pair.v2",
+  "source": {
+    "bytes": 40689,
+    "id": "nist_codata_2018_ascii",
+    "sha256": "8c47c05db62c4d314a5244db51a47b4831616e55a8d357ced373a8620ff43be1",
+    "text_contract": "ascii-lf-no-carriage-return"
+  },
+  "watchdog": {
+    "canary_count": 14,
+    "canary_schema": "civsim.units.codata-record-scan-canary-execution.v2",
+    "canary_sha256": "e63e9268f2a4c67ea2a0d59a7e94aa6544ff679d840c0c9bc8b7e1e33f940c7b",
+    "implementation": "civsim.units.codata-record-scan-watchdog.v2",
+    "result_sha256": "ec73d8facaf8a250df03657da1789484f2a6752cb2b1b2257431dfa53c87b220"
+  }
+}
