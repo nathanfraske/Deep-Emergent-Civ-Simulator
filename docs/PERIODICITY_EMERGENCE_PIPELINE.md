@@ -19,6 +19,15 @@ so the registry returns `no_admitted_species_derivation_rules`, zero members,
 no support, and no authority effect. No `[W]`, `[X]`, star, element, atom,
 planet, or snapshot follows from that refusal.
 
+A dormant claim-scoped selector now closes one part of the next boundary. A
+law request identifies each premise by opaque semantic-role and
+physical-content identities. A candidate matches only when an upstream
+capability binds the same claim, role, content, applicability, validity, and
+independent semantic evidence. Sole-candidate, name, ordinal, value-shape, and
+catalog-cardinality fallbacks are absent. Exact zero requires a symmetry and
+term-exclusion proof object. Production cannot construct a premise capability,
+and selector agreement has no authority effect.
+
 `crates/physics/data/periodic_table.toml` is a terrestrial reference cache used
 by active-candidate material kernels. It contains authored membership,
 terrestrial isotope-weighted standard atomic weights, valence rows, and other
@@ -31,7 +40,8 @@ alien or Terran realization.
 ```mermaid
 flowchart TB
     FLOOR["CURRENT sealed absolute floor<br/>alpha, G, m_e<br/>plus exact SI representation"]
-    LAW["NEXT claim-scoped law premises<br/>quantum dynamics and statistics<br/>spacetime and kinematics<br/>fields, operators, sectors, charges<br/>vacuum, state, validity, constraints"]
+    SELECT["CURRENT dormant premise selector<br/>exact role plus content matching<br/>proof-bearing exact zero<br/>no cardinality fallback<br/>authority_effect = none"]
+    LAW["NEXT admitted law premises<br/>quantum dynamics and statistics<br/>spacetime and kinematics<br/>fields, operators, sectors, charges<br/>vacuum, state, validity, constraints"]
     PRIMITIVE["FUTURE primitive excitations<br/>mass or exact masslessness<br/>spin and statistics<br/>charges and currents<br/>stability and decay laws"]
     COMPOSITE["FUTURE confining and composite sector<br/>solver-produced level bands<br/>complete separation thresholds<br/>conservation and decay coverage"]
     THRESHOLD["CURRENT dormant exact threshold pair<br/>strictly below all covered thresholds<br/>overlap stays unresolved<br/>open channel remains visible<br/>authority_effect = none"]
@@ -48,7 +58,8 @@ flowchart TB
     VIEW["FUTURE observer-only labels<br/>familiar symbols and names<br/>never causal inputs"]
     REFUSE["Typed refusal<br/>No familiar default or table fill"]
 
-    FLOOR --> LAW
+    FLOOR --> SELECT
+    SELECT -. "Reusable after an upstream mint exists" .-> LAW
     LAW --> PRIMITIVE
     PRIMITIVE --> COMPOSITE
     THRESHOLD -. "Reusable arithmetic after authority closes" .-> COMPOSITE
@@ -85,6 +96,14 @@ It must admit the field content, operator, interaction sector, state,
 applicability, validity regime, conservation laws, and semantic roles consumed
 by a kernel. A value shape, familiar name, catalog cardinality, citation, or
 hardcoded Standard Model graph cannot supply those premises.
+
+The dormant selector now enforces exact role and content matching through two
+different algorithms. Adding an unrelated unfamiliar candidate cannot relabel
+or displace an existing match. A candidate under the wrong role or content
+still fails when it is the only candidate. This establishes selection
+mechanics, not scientific admission. The next authority must mint the opaque
+upstream capability from complete physical evidence and bind its live canary
+transcripts through the watchdog.
 
 The familiar electromagnetic, strong, and weak sectors are one possible
 admitted profile. An unfamiliar or thaumic sector follows the same schema and
@@ -186,6 +205,33 @@ The viewer receives only immutable outputs. Asking for a Terran system is a
 search or conditioning request over completed lawful results. It cannot alter
 the floor, species roster, abundance history, or physical solve.
 
+## Unfamiliar material acceptance canary
+
+The end-to-end path carries a standing falsifier: an unfamiliar matter sector
+must be able to produce a stable or metastable many-body phase with derived
+bulk response even when it has no terrestrial element, isotope, mineral,
+crystal, or material-table identity. The canary advances through the same
+sequence as every other material:
+
+```text
+admitted unfamiliar law premises
+  -> primitive excitations
+  -> bound composite species
+  -> many-body phase and transition solve
+  -> derived transport, elastic, optical, and thermal response
+  -> stellar or planetary material inventory
+  -> neutral viewer label
+```
+
+The new selector test supplies arbitrary role and content identities for a
+material precursor, including one proof-bearing exact-zero premise, and both
+algorithms select the same seven capabilities. This is a structural
+generality canary. It does not admit those synthetic capabilities into
+production. The production canary passes only when every arrow above carries
+its real derivation and authority receipts. If admitted physics does not
+support such a phase, refusal is valid; no desired fantasy property may feed
+back into the law, species, or material solve.
+
 ## Deterministic execution on consumer hardware
 
 The universe does not run a full lattice, nuclear, and atomic many-body solve
@@ -203,33 +249,39 @@ Floating point remains confirmation-only.
 
 ## Ordered implementation slices
 
-1. **Law-premise capability.** Admit one minimal quantum and interaction claim
-   through distinct producer and watchdog semantics. Acceptance requires no
-   familiar name or cardinality dispatch and no production species.
-2. **First primitive excitation.** Produce one content-bound member with mass
+1. **Law-premise selection.** DONE AS A DORMANT NON-AUTHORIZING PAIR: exact
+   claim, role, content, applicability, validity, and semantic-evidence
+   bindings select one premise without a familiar name, value-shape, ordinal,
+   or cardinality fallback. Exact zero carries a symmetry and exclusion proof
+   object. An unfamiliar material precursor passes the same structural path.
+2. **Law-premise capability mint.** Admit one minimal quantum and interaction
+   claim through distinct producer and watchdog semantics. Acceptance requires
+   complete derived or irreducible premise authority, live canary transcripts,
+   no familiar dispatch, and no production species.
+3. **First primitive excitation.** Produce one content-bound member with mass
    or exact masslessness, state, charges, statistics, stability, validity, and
    complete ancestry. Acceptance requires the physical registry to admit that
    member without claiming global registry coverage.
-3. **Bound-state evidence integration.** Bind solver-produced level bands,
+4. **Bound-state evidence integration.** Bind solver-produced level bands,
    complete threshold coverage, conservation, and decay channels into the
    physical registry. Promote the dormant threshold pair only after live
    canaries and the authority-watchdog receipt exist.
-4. **Complete primitive registry and support.** Prove membership coverage,
+5. **Complete primitive registry and support.** Prove membership coverage,
    conditioned support, explicit zeros, normalization, resource bounds, and
    exact mean particle mass.
-5. **Composite core profile.** Add the confining and transition sectors needed
+6. **Composite core profile.** Add the confining and transition sectors needed
    to enumerate stable and metastable cores for one admitted profile, while
    leaving unfamiliar sectors open.
-6. **Atomic solver cache.** Produce certified spectra and shell projections
+7. **Atomic solver cache.** Produce certified spectra and shell projections
    without an exception list.
-7. **Nucleosynthesis and abundance history.** Generate local isotope support,
+8. **Nucleosynthesis and abundance history.** Generate local isotope support,
    atomic weights, opacity, and chemistry from the stellar and disk history.
-8. **Candidate-substrate migration.** Replace each consumer of the terrestrial
+9. **Candidate-substrate migration.** Replace each consumer of the terrestrial
    reference table with a typed derived cache adapter, one invariant at a time.
    The reference table remains validation-only until no canonical consumer
    needs it.
 
-The next code target is slice 1. The exact threshold pair landed early because
-it is value-free with respect to the current run, immediately closes a false
-composite-proof shape in the future design, and gives the bound-state solver a
-precise downstream contract.
+The next code target is slice 2. The selection pair and exact threshold pair
+landed early because both are value-free with respect to the current run. They
+close false proof shapes without claiming scientific truth and give the first
+law authority and later bound-state solver precise downstream contracts.

@@ -17,7 +17,7 @@ observer independence bind the full runpath.
 
 - 2026-07-21  PR #215 is the draft integration base -> branch `claude/thermoelastic-rung3`, `HANDOFFS.md`
 - 2026-07-26  Four neutral floor roots classify as 0 descriptor roles, 4 relation targets, and 0 constraint laws; global vocabulary coverage, species-forming law, and registry membership remain open -> `TODOS.md` P-STELLAR-SPECIES-DERIVATION-ROOTS
-- 2026-07-26  Floor-to-periodicity work is ordered through law premises, species, bound states, cores, atoms, abundances, and chemistry; an exact paired threshold diagnostic lands with no authority or species effect -> `docs/PERIODICITY_EMERGENCE_PIPELINE.md`
+- 2026-07-26  Floor-to-periodicity work now has non-authorizing exact claim-role-content premise selection and bound-state threshold pairs; real law authority, species, cores, atoms, abundances, and chemistry remain ordered blockers -> `docs/PERIODICITY_EMERGENCE_PIPELINE.md`
 - 2026-07-21  Stage 1 SI-native adapters are blocked until both stellar-birth measure leaves close -> `TODOS.md` P-STAGE1-ADAPTERS
 - 2026-07-21  Canonical GPU use remains blocked on typed adapters and exact CPU/GPU Q32.32 parity for every enabled backend -> `TODOS.md` P-GPU-BIT-PARITY
 - 2026-07-20  Stage 1 star, collapse, disk, and embryo-system realization -> `TODOS.md` P-STAR-DISK-SYSTEM
@@ -44,7 +44,7 @@ observer independence bind the full runpath.
 
 - 2026-07-25  V5 root agreement canonicalizes arrival order, refuses stale identity binding, and keeps alien inspection test-only -> `crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/`
 - 2026-07-26  Registry v4 producer v6 and watchdog v5 independently bind caps, semantic work, and the physical-vocabulary receipt; the frontier serializes an exact per-root tier, provenance, and route census while the live registry stays empty -> `crates/planet/src/canonical/stellar_birth_species/physical_registry/`
-- 2026-07-26  Two independent exact algorithms classify a candidate level against a complete covered threshold set, preserve contact and overlap, expose open channels, and remain a dormant non-authorizing diagnostic -> `crates/planet/src/canonical/stellar_birth_species/bound_state_threshold/`
+- 2026-07-26  Paired premise selection rejects sole-candidate and identity substitution, requires proof-bearing exact zero, and carries an unfamiliar-material precursor canary; paired thresholds preserve contact, overlap, and open channels -> `crates/planet/src/canonical/stellar_birth_species/`
 - 2026-07-23  Independent bounded structural validators agree on canonical species descriptors and explicit positive or proved-zero conditioned support without minting physical authority or changing run bytes -> `crates/planet/src/canonical/stellar_birth_species/support_packet/`
 - 2026-07-23  Portable per-gate execution locks prevent cross-process cache stampedes, while one marker-backed build anchor runs Stone 0 per canonical Cargo graph and an independent pair checks its exact wiring -> `scripts/gate_runner.py`, `crates/stone0-build`, `scripts/stone0_build_wiring_gate.py`
 - 2026-07-25  The closed authority inventory binds CODATA v2 exact mutation transcripts and Stone 0's rooted interpreter boundary -> `docs/working/INDEPENDENT_AUTHORITY_RULE.md`

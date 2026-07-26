@@ -21,6 +21,7 @@
 
 mod authority_analysis;
 mod bound_state_threshold;
+mod law_premise;
 mod physical_registry;
 mod support_packet;
 
