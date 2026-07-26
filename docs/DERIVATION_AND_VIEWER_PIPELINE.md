@@ -7,6 +7,11 @@ This page explains dependency direction; it is not a physical-admission
 artifact. The executable receipts, semantic checkers, and sealed capabilities
 remain authoritative.
 
+The separate
+[floor-to-periodicity emergence pipeline](PERIODICITY_EMERGENCE_PIPELINE.md)
+expands the species, bound-state, nuclide, atomic-spectrum, abundance, and
+chemistry dependencies represented here by the Stage 1 species-law frontier.
+
 ```mermaid
 flowchart TB
 

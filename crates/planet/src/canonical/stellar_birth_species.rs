@@ -20,6 +20,7 @@
 )]
 
 mod authority_analysis;
+mod bound_state_threshold;
 mod physical_registry;
 mod support_packet;
 

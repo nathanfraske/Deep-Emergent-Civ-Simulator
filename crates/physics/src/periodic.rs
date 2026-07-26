@@ -12,17 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The basal periodic-table floor: the per-element standard atomic weights (`data/periodic_table.toml`)
-//! and the molar-mass-from-formula derivation over them. This is the primitive that RETIRES per-substance
-//! authored molar masses: a molecule's molar mass is COMPUTED from its atomic composition times the table
-//! ([`PeriodicTable::molar_mass`]), never authored as its own number.
+//! Noncanonical terrestrial periodic-table reference cache.
 //!
-//! The three-way test (AGENTIC_ADDENDUM section 9) places a standard atomic weight as PER-WORLD DATA, not a
-//! universal fundamental constant: it is the isotope-abundance-weighted average of an element's isotope
-//! masses, and that abundance mix is a property of a particular world's material history. The embedded
-//! table is Mirror-calibrated to Earth's terrestrial isotope mix (CIAAW/IUPAC Standard Atomic Weights
-//! 2021). An alien world with a different isotope mix is a DATA ROW (a different weight), not a rewrite: a
-//! world may load its own table or override rows. The molar mass constant that carries the g/mol unit
+//! The per-element rows in `data/periodic_table.toml` support active-candidate
+//! materials kernels and Terran validation. They are not the absolute physics
+//! floor, cannot enter `civsim-planet`, and cannot select a world. The canonical
+//! route derives species, composite cores, atomic spectra, local isotope
+//! support, and local atomic weights under
+//! `docs/PERIODICITY_EMERGENCE_PIPELINE.md`.
+//!
+//! Within this reference-only substrate, molar mass is still reduced from a
+//! formula and the table rather than repeated per substance
+//! ([`PeriodicTable::molar_mass`]).
+//!
+//! A standard atomic weight is not a universal fundamental constant. It is the
+//! isotope-abundance-weighted average of an element's isotope masses, and that
+//! abundance mix is a property of material history. The embedded table records
+//! Earth's terrestrial isotope mix (CIAAW/IUPAC Standard Atomic Weights 2021)
+//! for candidate-kernel validation only. A canonical alien or Terran world
+//! derives its local isotope support inside the run and cannot load or override
+//! these rows. The molar mass constant that carries the g/mol unit
 //! (`M_u = 1 g/mol` to within its CODATA uncertainty) derives from `N_A` and the atomic mass constant, so
 //! it is not authored here; the derivation's numeric output in g/mol equals the abundance-weighted sum of
 //! relative atomic masses.
@@ -39,7 +48,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 
-/// One element's floor row: its symbol, name, atomic number, standard atomic weight (both as the parsed
+/// One element's terrestrial reference row: its symbol, name, atomic number, standard atomic weight (both as the parsed
 /// [`Fixed`] the derivation reads and as the raw decimal string retained verbatim from the data), the
 /// terrestrial interval bounds for an interval element, whether the stored weight is a true abundance-
 /// averaged standard atomic weight (as against a single-isotope reference mass for a radioactive-only

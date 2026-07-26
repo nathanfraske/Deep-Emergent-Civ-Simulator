@@ -1,5 +1,10 @@
 # The periodic table as a cache of layer-1 outputs: the derive-first map (owner-derived, verification-corrected)
 
+> Historical research map. Its authored-table and per-world-data routes predate
+> the absolute-floor two-route rule and cannot authorize canonical input. The
+> current implementation chain and refusal boundaries are in
+> `docs/PERIODICITY_EMERGENCE_PIPELINE.md`.
+
 Owner-derived audit (2026-07-11) that the periodic table's structural content is not an authored axiom but a CACHE of a full many-body Pauli-plus-Coulomb solution, taken through an independent four-hunter verification (`verify-periodic-table-as-cache`, Opus, with an explicit overstatement probe). Verdict: CONFIRMED_WITH_CAVEAT. The central thesis holds and every structural number reproduced; the authored layer is real but measurably thicker than first stated, in eight named places, two of which corrected the manager's own seams. This is the corrected capture, no fabricated value.
 
 ## The thesis (sustained)
