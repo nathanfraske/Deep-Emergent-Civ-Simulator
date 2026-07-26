@@ -1,5 +1,12 @@
 //! Exact stage and refusal-frontier projections.
 
+mod dimensional;
+
+pub use dimensional::{
+    DimensionOnlyTermScene, DimensionalAttemptScene, DimensionalCensusScene,
+    DimensionalPhenomenonScene,
+};
+
 use super::TranscriptScene;
 use crate::RefusalView;
 
@@ -37,79 +44,6 @@ impl StageScene {
     /// Event that reached or refused this stage, when present.
     pub const fn terminal_event_ordinal(self) -> Option<u64> {
         self.terminal_event_ordinal
-    }
-}
-
-/// Summary of the attached exact dimensional census.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DimensionalCensusScene<'a> {
-    computed: bool,
-    representation_schema_id: Option<&'a str>,
-    floor_binding_schema_id: Option<&'a str>,
-    floor_binding_sha256: Option<&'a str>,
-    base_dimension_ids: Vec<&'a str>,
-    structure_schema_id: Option<&'a str>,
-    variable_count: usize,
-    phenomenon_count: usize,
-    coverage_gap_ids: Vec<&'a str>,
-    error_code: Option<&'a str>,
-    error_detail: Option<&'a str>,
-}
-
-impl<'a> DimensionalCensusScene<'a> {
-    /// Whether the census artifact passed its semantic checker.
-    pub const fn is_computed(&self) -> bool {
-        self.computed
-    }
-
-    /// SI representation schema bound by the analysis.
-    pub const fn representation_schema_id(&self) -> Option<&'a str> {
-        self.representation_schema_id
-    }
-
-    /// Physical-floor authority schema bound by the analysis.
-    pub const fn floor_binding_schema_id(&self) -> Option<&'a str> {
-        self.floor_binding_schema_id
-    }
-
-    /// Physical-floor authority digest bound by the analysis.
-    pub const fn floor_binding_sha256(&self) -> Option<&'a str> {
-        self.floor_binding_sha256
-    }
-
-    /// Base dimensions in canonical schema order.
-    pub fn base_dimension_ids(&self) -> &[&'a str] {
-        &self.base_dimension_ids
-    }
-
-    /// Value-free stellar-birth structure schema.
-    pub const fn structure_schema_id(&self) -> Option<&'a str> {
-        self.structure_schema_id
-    }
-
-    /// Number of typed dimensional variables.
-    pub const fn variable_count(&self) -> usize {
-        self.variable_count
-    }
-
-    /// Number of independently analyzed phenomena.
-    pub const fn phenomenon_count(&self) -> usize {
-        self.phenomenon_count
-    }
-
-    /// Explicit coverage gaps in canonical source order.
-    pub fn coverage_gap_ids(&self) -> &[&'a str] {
-        &self.coverage_gap_ids
-    }
-
-    /// Typed checker error when the census is invalid.
-    pub const fn error_code(&self) -> Option<&'a str> {
-        self.error_code
-    }
-
-    /// Checker detail when the census is invalid.
-    pub const fn error_detail(&self) -> Option<&'a str> {
-        self.error_detail
     }
 }
 
@@ -656,7 +590,7 @@ impl<'a> RefusalScene<'a> {
         TranscriptScene::new(self.receipt)
     }
 
-    /// All seven stages in their canonical order.
+    /// All stages in the current repository route order.
     pub fn stages(self) -> impl ExactSizeIterator<Item = StageScene> + 'a {
         self.receipt.stages().iter().map(|stage| StageScene {
             id: stage.stage().id(),
@@ -683,18 +617,48 @@ impl<'a> RefusalScene<'a> {
                             .map(|analysis| {
                                 let dimensional_census = analysis
                                     .exact_dimensional_census_view()
-                                    .map(|view| DimensionalCensusScene {
-                                        computed: view.is_computed(),
-                                        representation_schema_id: view.representation_schema_id(),
-                                        floor_binding_schema_id: view.floor_binding_schema_id(),
-                                        floor_binding_sha256: view.floor_binding_sha256(),
-                                        base_dimension_ids: view.base_dimension_ids().to_vec(),
-                                        structure_schema_id: view.structure_schema_id(),
-                                        variable_count: view.variables().len(),
-                                        phenomenon_count: view.phenomena().len(),
-                                        coverage_gap_ids: borrowed_ids(view.coverage_gap_ids()),
-                                        error_code: view.error_code(),
-                                        error_detail: view.error_detail(),
+                                    .map(|view| {
+                                        let phenomena = view
+                                            .phenomena()
+                                            .map(|phenomenon| {
+                                                let attempts = phenomenon
+                                                    .derivation_attempts()
+                                                    .map(|attempt| {
+                                                        DimensionalAttemptScene::new(
+                                                            attempt.id(),
+                                                            attempt.law_id(),
+                                                            attempt.output_id(),
+                                                            attempt.status_id(),
+                                                            attempt.input_ids(),
+                                                            attempt
+                                                                .dimension_only_projection(),
+                                                            attempt
+                                                                .dimension_only_support_ids(),
+                                                            attempt.missing_dependency_ids(),
+                                                            attempt.dropped_mechanism_ids(),
+                                                        )
+                                                    })
+                                                    .collect();
+                                                DimensionalPhenomenonScene::new(
+                                                    phenomenon.id(),
+                                                    phenomenon.coverage_complete(),
+                                                    attempts,
+                                                )
+                                            })
+                                            .collect();
+                                        DimensionalCensusScene::new(
+                                            view.is_computed(),
+                                            view.representation_schema_id(),
+                                            view.floor_binding_schema_id(),
+                                            view.floor_binding_sha256(),
+                                            view.base_dimension_ids().to_vec(),
+                                            view.structure_schema_id(),
+                                            view.variables().len(),
+                                            phenomena,
+                                            view.coverage_gap_ids(),
+                                            view.error_code(),
+                                            view.error_detail(),
+                                        )
                                     });
                                 let species_derivation = analysis
                                     .species_derivation_analysis_view()

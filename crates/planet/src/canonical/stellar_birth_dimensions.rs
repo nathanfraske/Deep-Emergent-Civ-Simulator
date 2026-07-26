@@ -1142,6 +1142,45 @@ mod tests {
     }
 
     #[test]
+    fn collapse_scale_skeleton_uses_g_without_claiming_physical_closure() {
+        let census = computed_census();
+        let collapse = census
+            .phenomena
+            .iter()
+            .find(|phenomenon| {
+                phenomenon.phenomenon_id == "stellar_birth.phenomenon.collapse_mass_flow"
+            })
+            .expect("collapse phenomenon is present");
+        let attempt = collapse
+            .derivation_attempts
+            .iter()
+            .find(|attempt| {
+                attempt.attempt_id == "stellar_birth.attempt.collapse_flow_from_sound_speed"
+            })
+            .expect("collapse dimensional attempt is present");
+        let exponent = |input_id| {
+            attempt
+                .input_ids
+                .iter()
+                .position(|id| id == input_id)
+                .map(|index| attempt.dimension_only_projection[index])
+                .map(|record| (record.numerator, record.denominator))
+        };
+
+        assert!(!collapse.coverage_complete);
+        assert_eq!(exponent("fundamental.G"), Some((-1, 1)));
+        assert_eq!(exponent("stellar_birth.sound_speed_field"), Some((3, 1)));
+        assert!(attempt
+            .missing_dependency_ids
+            .iter()
+            .any(|id| id == "collapse.dimensionless_similarity_eigenstructure"));
+        assert!(attempt
+            .missing_dependency_ids
+            .iter()
+            .any(|id| id == "collapse.initial_and_boundary_measure"));
+    }
+
+    #[test]
     fn spectral_and_history_semantics_are_explicitly_open() {
         let census = computed_census();
         let radiation = census

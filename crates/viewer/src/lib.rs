@@ -26,7 +26,8 @@ use std::fmt;
 mod scene;
 
 pub use scene::{
-    AnalysisScene, DimensionalCensusScene, FloorEventScene, FloorScene, ObservationScene,
+    AnalysisScene, DimensionOnlyTermScene, DimensionalAttemptScene, DimensionalCensusScene,
+    DimensionalPhenomenonScene, FloorEventScene, FloorScene, ObservationScene,
     ObservationSceneStatus, OpenRequirementScene, PhysicalRootAdmissionScene,
     PhysicalVocabularyCheckerDigests, PhysicalVocabularyPartitions, ProvenanceScene,
     RefusalReasonScene, RefusalScene, RepositoryPhysicalRegistryFrontierScene,

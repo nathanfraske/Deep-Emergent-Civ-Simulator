@@ -350,6 +350,11 @@ flowchart TB
   not a closed vocabulary: global coverage and membership authority remain
   false. The frontier preserves each root's exact identity, tier, provenance
   tag, and derived or irreducible route without assuming one familiar class.
+- The viewer projects exact dimension-only relation terms from the sealed
+  refusal without recomputing physics. The current collapse witness is
+  `G^-1 * sound_speed^3`; its dimensionless similarity eigenstructure, initial
+  and boundary measure, and omitted dynamical branches remain explicit, so the
+  witness grants no law, value, coverage, or completion authority.
 - The root projection crosses both independent final verifiers before registry
   consumption. Each re-extracts and reprojects the sealed floor, reconnects its
   local resource and canary attestations, and exact-matches the private

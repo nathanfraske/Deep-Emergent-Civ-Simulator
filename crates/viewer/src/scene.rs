@@ -4,7 +4,8 @@ mod frontier;
 mod transcript;
 
 pub use frontier::{
-    AnalysisScene, DimensionalCensusScene, OpenRequirementScene, PhysicalRootAdmissionScene,
+    AnalysisScene, DimensionOnlyTermScene, DimensionalAttemptScene, DimensionalCensusScene,
+    DimensionalPhenomenonScene, OpenRequirementScene, PhysicalRootAdmissionScene,
     PhysicalVocabularyCheckerDigests, PhysicalVocabularyPartitions, RefusalReasonScene,
     RefusalScene, RepositoryPhysicalRegistryFrontierScene, SpeciesAttemptScene,
     SpeciesDerivationScene, StageScene,

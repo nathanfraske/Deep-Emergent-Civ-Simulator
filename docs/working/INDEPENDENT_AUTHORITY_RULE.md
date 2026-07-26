@@ -147,6 +147,37 @@ The rule is the common mechanical form of several existing project laws:
   ran over named bytes. They do not turn a structural pass into scientific
   truth.
 
+## Physical-law premise rule
+
+A fixed Rust kernel may encode a reviewed mechanism without becoming a
+value-bearing caller input. That exception does not authorize the kernel to
+construct its own physical premises or admit its own law artifacts.
+
+Before a physical-law kernel can affect the causal run:
+
+- each field, state, interaction sector, validity regime, and semantic input
+  role must arrive through a claim-scoped upstream capability;
+- selection is by admitted role and content identity, never by value shape,
+  familiar name, catalog position, or the fact that only one candidate exists;
+- an exact-zero or exact-massless result carries a replayable proof object,
+  such as an applicable symmetry and mass-term exclusion, rather than a marker
+  variant whose presence is treated as proof;
+- producer and watchdog may share low-level arithmetic and framing primitives,
+  but may not duplicate one authored semantic answer and call equality
+  independence;
+- every advertised production canary executes in the receipt path and binds
+  the complete mutant preimage plus complete observed result; test-only
+  mutations do not count as live attestation; and
+- a failed derivation remains a named seam. An irreducible law premise enters
+  only after derivation exhaustion, Buckingham Pi, Gap Law with its typed Chaos
+  Protocol branch, Residual Law, one unique residual slot, owner admission, and
+  an independent watchdog all close.
+
+This rule is extension-monotone under admit-the-alien: adding an unrelated
+dimensionless invariant or unfamiliar lawful sector cannot relabel an existing
+coordinate, reverse another claim's admission, or make a familiar archetype
+the default.
+
 ## Watchdog classes
 
 Authority-bearing scientific mechanisms require an independent pair. Pure

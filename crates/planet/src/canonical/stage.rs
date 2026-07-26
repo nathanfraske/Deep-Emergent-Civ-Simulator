@@ -1,4 +1,8 @@
-/// The seven fixed causal stages of the full planet arc.
+/// The seven fixed causal stages of the current repository Solar-system route.
+///
+/// This route is not universal completion authority. A future generic route
+/// contract must bind applicability, typed not-applicable evidence, and
+/// alternate-origin substitutions before other formation paths can complete.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Stage {
     StarDiskSystem,
