@@ -18,7 +18,7 @@ observer independence bind the full runpath.
 - 2026-07-21  PR #215 is the draft integration base -> branch `claude/thermoelastic-rung3`, `HANDOFFS.md`
 - 2026-07-26  Four neutral floor roots classify as 0 descriptor roles, 4 relation targets, and 0 constraint laws; global vocabulary coverage, species-forming law, and registry membership remain open -> `TODOS.md` P-STELLAR-SPECIES-DERIVATION-ROOTS
 - 2026-07-26  Floor-to-periodicity work now has the first live claim-scoped derived premise for the sealed `eps_0` relation plus generic selection and dormant bound-state threshold pairs; species-forming law authority, species, cores, atoms, abundances, and chemistry remain ordered blockers -> `docs/PERIODICITY_EMERGENCE_PIPELINE.md`
-- 2026-07-27  Conditional symmetry algebra landed; admitted action, applicability, basis coverage, and irreducible evidence are next -> `TODOS.md` P-PHYSICAL-LAW-PREMISE-AUTHORITY
+- 2026-07-27  Complete scoped quadratic basis landed; action, applicability, physical family closure, and irreducible evidence remain -> `TODOS.md` P-PHYSICAL-LAW-PREMISE-AUTHORITY
 - 2026-07-21  Stage 1 SI-native adapters are blocked until both stellar-birth measure leaves close -> `TODOS.md` P-STAGE1-ADAPTERS
 - 2026-07-21  Canonical GPU use remains blocked on typed adapters and exact CPU/GPU Q32.32 parity for every enabled backend -> `TODOS.md` P-GPU-BIT-PARITY
 - 2026-07-20  Stage 1 star, collapse, disk, and embryo-system realization -> `TODOS.md` P-STAR-DISK-SYSTEM

@@ -261,6 +261,43 @@ fn canonical_expansion_budget_refuses_before_either_algorithm_expands() {
 }
 
 #[test]
+fn aggregate_expansion_budget_refuses_a_large_complete_request_preflight() {
+    let field = identity(10);
+    let action_terms = (1_u64..=128)
+        .map(|number| AffineActionTerm {
+            field_component: field,
+            shift_generator: numbered_identity(number),
+            coefficient: 1,
+        })
+        .collect();
+    let operators = (1_u64..=16)
+        .map(|number| QuadraticOperatorCandidate {
+            operator_identity: numbered_identity(10_000 + number),
+            terms: vec![QuadraticOperatorTerm {
+                left_field: field,
+                right_field: field,
+                coefficient: 1,
+            }],
+        })
+        .collect();
+    let input = SymmetryOperatorExclusionInput {
+        claim_identity: identity(1),
+        subject_identity: identity(2),
+        applicability_domain_identity: identity(3),
+        field_components: vec![field],
+        action: AffineSymmetryAction {
+            symmetry_identity: identity(4),
+            terms: action_terms,
+        },
+        operators,
+    };
+    assert_both_refuse(
+        &input,
+        SymmetryOperatorExclusionRefusal::TotalVariationCapacityExceeded,
+    );
+}
+
+#[test]
 fn independent_algorithms_agree_over_small_integer_action_grid() {
     for action_coefficient in -3_i64..=3 {
         if action_coefficient == 0 {
@@ -298,4 +335,33 @@ fn production_has_no_admitted_action_or_authority_effect() {
         SymmetryOperatorExclusionRefusal::NoAdmittedSymmetryActionInput
     );
     assert_eq!(refusal.id(), "no_admitted_symmetry_action_input");
+    assert_eq!(
+        repository_complete_quadratic_symmetry().unwrap_err(),
+        CompleteQuadraticSymmetryRefusal::NoAdmittedSymmetryActionInput
+    );
+}
+
+#[test]
+fn complete_quadratic_runner_evaluates_every_derived_basis_element() {
+    let input = ScopedSymmetryActionInput {
+        claim_identity: identity(1),
+        subject_identity: identity(2),
+        applicability_domain_identity: identity(3),
+        field_components: vec![identity(10), identity(11)],
+        action: AffineSymmetryAction {
+            symmetry_identity: identity(4),
+            terms: vec![action_term(10, 20, 1)],
+        },
+    };
+    let report = inspect_complete_quadratic_symmetry(&input).unwrap();
+    assert_eq!(report.basis_element_count(), 3);
+    assert_eq!(report.excluded_operator_count(), 2);
+    assert_eq!(report.invariant_operator_count(), 1);
+    assert!(report.scoped_homogeneous_quadratic_basis_coverage());
+    assert!(!report.global_operator_basis_coverage());
+    assert!(!report.field_ontology_authority());
+    assert!(!report.action_admission_authority());
+    assert!(!report.applicability_authority());
+    assert!(!report.species_membership_authority());
+    assert_eq!(report.authority_effect(), "none");
 }

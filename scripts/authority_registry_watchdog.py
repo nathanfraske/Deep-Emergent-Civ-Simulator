@@ -139,7 +139,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "authority",
         "scientific",
         "blocked",
-        "0dfee195f41694cf5b8e8802cdb63ff12faa003e8c4a66001a6026f6cbdd8872",
+        "904fa9f0e89676b588cad12793854d0f16cff189a26b7b3efda2f19912276c58",
     ),
     (
         "units.certified-formula-projection",

@@ -359,12 +359,17 @@ claimed applicability domain.
 
 The blocked `planet.symmetry-operator-exclusion` mechanism now supplies that
 conditional calculation through independent substitution and direct-variation
-algorithms over affine actions and quadratic candidates. Its exact agreement
-grants requested-candidate coverage only. It denies action admission,
-applicability authority, global operator-basis coverage, species membership,
-and every authority effect. Activation still requires those separate
-capabilities, production canary transcripts, and the complete irreducible
-protocol.
+algorithms over affine actions and quadratic candidates. A second independent
+pair derives all unordered degree-two monomials from a supplied opaque finite
+field set through nested-pair and triangular-index constructions. The wired
+conditional runner therefore grants complete coverage of that homogeneous
+commutative quadratic polynomial space without caller-authored operator
+identities. Aggregate variation work is capped before expansion. It still
+denies field and action admission, applicability authority, proof that this
+operator family is physically exhaustive, global operator-basis coverage,
+species membership, and every authority effect. Activation still requires
+those separate capabilities, production canary transcripts, and the complete
+irreducible protocol.
 
 A distinct future non-root mint and registry-to-support boundary remain
 blocked. Before a species-forming rule may authorize a derived or irreducible

@@ -16,6 +16,7 @@
 //! input constructor and returns a typed refusal.
 
 mod producer;
+mod quadratic_basis;
 mod watchdog;
 
 #[cfg(test)]
@@ -33,6 +34,7 @@ const MAX_OPERATORS: usize = 1_024;
 const MAX_OPERATOR_TERMS: usize = 4_096;
 const MAX_TOTAL_OPERATOR_TERMS: usize = 16_384;
 const MAX_VARIATION_TERMS: usize = 65_536;
+const MAX_TOTAL_VARIATION_TERMS: usize = MAX_VARIATION_TERMS * 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct AlgebraIdentity([u8; 32]);
@@ -83,6 +85,20 @@ struct SymmetryOperatorExclusionInput {
     field_components: Vec<AlgebraIdentity>,
     action: AffineSymmetryAction,
     operators: Vec<QuadraticOperatorCandidate>,
+}
+
+/// One conditional action without a caller-authored operator catalog.
+///
+/// The complete quadratic runner derives its operator basis from the field
+/// components. This shape still carries no field-ontology, action-admission,
+/// applicability, or validity capability.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ScopedSymmetryActionInput {
+    claim_identity: AlgebraIdentity,
+    subject_identity: AlgebraIdentity,
+    applicability_domain_identity: AlgebraIdentity,
+    field_components: Vec<AlgebraIdentity>,
+    action: AffineSymmetryAction,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -166,6 +182,54 @@ impl SymmetryOperatorExclusionReport {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CompleteQuadraticSymmetryReport {
+    basis: quadratic_basis::QuadraticOperatorBasisReport,
+    exclusion: SymmetryOperatorExclusionReport,
+}
+
+impl CompleteQuadraticSymmetryReport {
+    fn basis_element_count(&self) -> usize {
+        self.basis.element_count()
+    }
+
+    fn excluded_operator_count(&self) -> usize {
+        self.exclusion.excluded_operator_count()
+    }
+
+    fn invariant_operator_count(&self) -> usize {
+        self.exclusion.invariant_operator_count()
+    }
+
+    const fn scoped_homogeneous_quadratic_basis_coverage(&self) -> bool {
+        true
+    }
+
+    const fn global_operator_basis_coverage(&self) -> bool {
+        false
+    }
+
+    const fn field_ontology_authority(&self) -> bool {
+        false
+    }
+
+    const fn action_admission_authority(&self) -> bool {
+        false
+    }
+
+    const fn applicability_authority(&self) -> bool {
+        false
+    }
+
+    const fn species_membership_authority(&self) -> bool {
+        false
+    }
+
+    const fn authority_effect(&self) -> &'static str {
+        "none"
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SymmetryOperatorExclusionRefusal {
     NoAdmittedSymmetryActionInput,
@@ -191,6 +255,7 @@ enum SymmetryOperatorExclusionRefusal {
     ZeroOperator,
     ArithmeticOverflow,
     VariationCapacityExceeded,
+    TotalVariationCapacityExceeded,
     CheckerDisagreement,
 }
 
@@ -220,9 +285,17 @@ impl SymmetryOperatorExclusionRefusal {
             Self::ZeroOperator => "zero_operator",
             Self::ArithmeticOverflow => "arithmetic_overflow",
             Self::VariationCapacityExceeded => "variation_capacity_exceeded",
+            Self::TotalVariationCapacityExceeded => "total_variation_capacity_exceeded",
             Self::CheckerDisagreement => "checker_disagreement",
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompleteQuadraticSymmetryRefusal {
+    NoAdmittedSymmetryActionInput,
+    Basis(quadratic_basis::QuadraticOperatorBasisRefusal),
+    Exclusion(SymmetryOperatorExclusionRefusal),
 }
 
 fn inspect_symmetry_operator_exclusion(
@@ -250,7 +323,36 @@ fn inspect_symmetry_operator_exclusion(
     }
 }
 
+fn inspect_complete_quadratic_symmetry(
+    input: &ScopedSymmetryActionInput,
+) -> Result<CompleteQuadraticSymmetryReport, CompleteQuadraticSymmetryRefusal> {
+    let basis = quadratic_basis::inspect_quadratic_operator_basis(
+        &quadratic_basis::QuadraticOperatorBasisInput {
+            claim_identity: input.claim_identity,
+            subject_identity: input.subject_identity,
+            applicability_domain_identity: input.applicability_domain_identity,
+            field_components: input.field_components.clone(),
+        },
+    )
+    .map_err(CompleteQuadraticSymmetryRefusal::Basis)?;
+    let exclusion = inspect_symmetry_operator_exclusion(&SymmetryOperatorExclusionInput {
+        claim_identity: input.claim_identity,
+        subject_identity: input.subject_identity,
+        applicability_domain_identity: input.applicability_domain_identity,
+        field_components: input.field_components.clone(),
+        action: input.action.clone(),
+        operators: basis.operator_candidates(),
+    })
+    .map_err(CompleteQuadraticSymmetryRefusal::Exclusion)?;
+    Ok(CompleteQuadraticSymmetryReport { basis, exclusion })
+}
+
 fn repository_symmetry_operator_exclusion(
 ) -> Result<SymmetryOperatorExclusionReport, SymmetryOperatorExclusionRefusal> {
     Err(SymmetryOperatorExclusionRefusal::NoAdmittedSymmetryActionInput)
+}
+
+fn repository_complete_quadratic_symmetry(
+) -> Result<CompleteQuadraticSymmetryReport, CompleteQuadraticSymmetryRefusal> {
+    Err(CompleteQuadraticSymmetryRefusal::NoAdmittedSymmetryActionInput)
 }

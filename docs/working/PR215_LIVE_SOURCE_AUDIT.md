@@ -1408,3 +1408,57 @@ documentation change. The complete `check-pr` receipt passes in 1,320.4
 seconds, including all canonical packages and targets, detector self-tests,
 Stone 0, deterministic CPU and GPU integer parity, private-item documentation,
 and doctests.
+
+## 2026-07-27 scoped quadratic-basis and aggregate-work audit
+
+The source was checked before extending the authority claim. The current
+sealed floor exposes three scalar physical invariants and four
+membership-neutral relation roots, but no admitted field descriptor,
+constraint law, symmetry action, or applicability capability. It therefore
+cannot select a real action ontology without an authored physical premise. The
+next mechanical seam that can close without that premise is narrower: derive
+the complete finite homogeneous commutative quadratic monomial space from a
+supplied opaque field set, then evaluate every generated element under the
+already conditional action.
+
+The recommendation was to derive operator identities from field-content pairs,
+use two construction orders, preserve identities under unrelated field
+extension, and state the coverage domain precisely. The result must not claim
+that the field set is physically complete or that quadratic commuting
+monomials cover derivative, tensor, noncommutative, higher-order, or unfamiliar
+operators. A second recommendation followed from the resource review: add a
+whole-request variation preflight because the existing per-operator limit
+could permit many individually legal expansions to accumulate into one long
+run.
+
+The producer sorts the field set and enumerates nested unordered pairs. The
+watchdog reconstructs an ordered set, walks triangular prefixes in the opposite
+orientation, indexes elements independently, and sorts the final pairs into
+canonical order. Both hash the fixed-width pair under the same identity domain,
+reject a zero digest or collision, bind the claim, subject, applicability
+identity, complete field set, and all generated elements, and agree on exact
+canonical bytes. The complete conditional runner converts each element into
+one exact unit-coefficient operator and passes the full set through the
+substitution and direct-variation pair.
+
+The report grants complete coverage only for the supplied finite homogeneous
+commutative quadratic polynomial space. It denies field-ontology authority,
+action admission, applicability authority, global operator-basis coverage,
+species membership, and every authority effect. Production still has no
+admitted action input. Both evaluator implementations now accumulate total
+preflight work after enforcing the per-operator bound and return
+`total_variation_capacity_exceeded` before expansion when the aggregate limit
+is crossed.
+
+Twenty focused symmetry tests pass. They cover six exact monomials for three
+fields, every supported triangular cardinality, arrival-order neutrality,
+unfamiliar extension monotonicity, content-derived operator construction,
+small-grid collision absence, complete-run invariant and excluded counts,
+malformed identities, empty and duplicate fields, field and basis capacity,
+per-operator capacity, aggregate capacity, and checked arithmetic overflow.
+Planet warnings-denied Clippy and the live authority-inventory agreement pass.
+The authority stays blocked at the existing census of 10 active, 9 blocked,
+and 2 diagnostic mechanisms. The complete `check-pr` route passes in 1,199.5
+seconds, including every canonical package and target, authority and gate
+self-tests, Stone 0, deterministic CPU and GPU integer parity, private-item
+documentation, and doctests.

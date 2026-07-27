@@ -8,7 +8,7 @@ use super::{
     AlgebraIdentity, CheckerOutput, ExactVariationTerm, GeneratorKind, OperatorVariation,
     SymmetryOperatorEvaluation, SymmetryOperatorExclusionInput, SymmetryOperatorExclusionRefusal,
     VariationGenerator, MAX_ACTION_TERMS, MAX_FIELD_COMPONENTS, MAX_OPERATORS, MAX_OPERATOR_TERMS,
-    MAX_TOTAL_OPERATOR_TERMS, MAX_VARIATION_TERMS, RESULT_SCHEMA_ID,
+    MAX_TOTAL_OPERATOR_TERMS, MAX_TOTAL_VARIATION_TERMS, MAX_VARIATION_TERMS, RESULT_SCHEMA_ID,
 };
 use std::collections::BTreeMap;
 
@@ -320,6 +320,7 @@ fn inspect_variation_cost(
     shifts: &ShiftMap,
     operators: &[CanonicalOperator],
 ) -> Result<(), SymmetryOperatorExclusionRefusal> {
+    let mut total_expansion_terms = 0_usize;
     for (_, terms) in operators {
         let mut expansion_terms = 0_usize;
         for (left, right, _) in terms {
@@ -339,6 +340,12 @@ fn inspect_variation_cost(
             if expansion_terms > MAX_VARIATION_TERMS {
                 return Err(SymmetryOperatorExclusionRefusal::VariationCapacityExceeded);
             }
+        }
+        total_expansion_terms = total_expansion_terms
+            .checked_add(expansion_terms)
+            .ok_or(SymmetryOperatorExclusionRefusal::TotalVariationCapacityExceeded)?;
+        if total_expansion_terms > MAX_TOTAL_VARIATION_TERMS {
+            return Err(SymmetryOperatorExclusionRefusal::TotalVariationCapacityExceeded);
         }
     }
     Ok(())
