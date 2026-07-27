@@ -13,11 +13,12 @@ use std::{
     collections::{BTreeMap, BTreeSet},
 };
 
-const ARTIFACT_DOMAIN: &[u8] = b"civsim.physical-species.artifact.v3";
+const ARTIFACT_DOMAIN_V3: &[u8] = b"civsim.physical-species.artifact.v3";
+const EXACT_MASSLESS_ARTIFACT_DOMAIN_V4: &[u8] = b"civsim.physical-species.artifact.v4";
 const MEMBER_DOMAIN: &[u8] = b"civsim.physical-species.member.v2";
 const EXPRESSION_DOMAIN: &[u8] = b"civsim.physical-species.expression.v1";
 const EXPRESSION_NODE_DOMAIN: &[u8] = b"civsim.physical-species.expression-node.v1";
-const REGISTRY_DOMAIN: &[u8] = b"civsim.physical-species.registry.v4";
+const REGISTRY_DOMAIN: &[u8] = b"civsim.physical-species.registry.v5";
 
 #[derive(Debug, Clone)]
 struct Fraction {
@@ -167,7 +168,6 @@ pub(super) fn validate_and_encode_with_caps(
     {
         return Err(PhysicalRegistryRefusalCode::PhysicalVocabularyCoverageIncomplete);
     }
-
     let dependency_count = rules.iter().try_fold(0_usize, |total, rule| {
         total
             .checked_add(rule.constituents.len())
@@ -195,12 +195,24 @@ pub(super) fn validate_and_encode_with_caps(
 pub(super) fn derive_artifact_identity_for_test(
     payload: &ArtifactPayload,
 ) -> Result<ArtifactIdentity, PhysicalRegistryRefusalCode> {
+    derive_artifact_identity_for_authority(payload)
+}
+
+pub(super) fn derive_artifact_identity_for_authority(
+    payload: &ArtifactPayload,
+) -> Result<ArtifactIdentity, PhysicalRegistryRefusalCode> {
     let mut meter = WorkMeter::new(ValidationCaps::PRODUCTION);
     derive_artifact_identity(payload, ValidationCaps::PRODUCTION, &mut meter)
 }
 
 #[cfg(test)]
 pub(super) fn derive_member_identity_for_test(
+    member: &MemberBlueprint,
+) -> Result<SpeciesContentIdentity, PhysicalRegistryRefusalCode> {
+    derive_member_identity_for_authority(member)
+}
+
+pub(super) fn derive_member_identity_for_authority(
     member: &MemberBlueprint,
 ) -> Result<SpeciesContentIdentity, PhysicalRegistryRefusalCode> {
     let mut meter = WorkMeter::new(ValidationCaps::PRODUCTION);
@@ -494,7 +506,9 @@ fn artifact_reference_count(payload: &ArtifactPayload) -> Result<u32, PhysicalRe
                     })
                     .ok_or(PhysicalRegistryRefusalCode::ReferenceCapacityExceeded)
             })?,
-        ArtifactPayload::ExactMasslessLaw(law) => requirement_reference_count(&law.requirements)?,
+        ArtifactPayload::ExactMasslessLaw(law) => {
+            checked_reference_lengths(&[requirement_reference_count(&law.requirements)?, 2])?
+        }
         ArtifactPayload::SpeciesDerivation(rule) => checked_reference_lengths(&[
             1,
             relation_reference_count(&rule.artifact_inputs)?,
@@ -709,6 +723,7 @@ fn validate_member(
             if normalize_requirements(&massless.requirements, caps)? != requirements {
                 return Err(PhysicalRegistryRefusalCode::UnprovedExactZero);
             }
+            validate_exact_zero_mass_proof(&massless.proof, &requirements, artifacts, caps)?;
             (
                 ExactRationalWire {
                     negative: false,
@@ -729,6 +744,46 @@ fn validate_member(
         derivation_kind,
         requirements,
     })
+}
+
+fn validate_exact_zero_mass_proof(
+    proof: &ExactZeroMassProof,
+    requirements: &RequirementSet,
+    artifacts: &BTreeMap<ArtifactIdentity, &AdmittedArtifact>,
+    caps: ValidationCaps,
+) -> Result<(), PhysicalRegistryRefusalCode> {
+    if proof.subject == proof.symmetry {
+        return Err(PhysicalRegistryRefusalCode::UnprovedExactZero);
+    }
+    validate_descriptor_reference(proof.subject, artifacts)
+        .map_err(|_| PhysicalRegistryRefusalCode::UnprovedExactZero)?;
+    validate_descriptor_reference(proof.symmetry, artifacts)
+        .map_err(|_| PhysicalRegistryRefusalCode::UnprovedExactZero)?;
+    validate_content(&proof.excluded_term, caps)
+        .map_err(|_| PhysicalRegistryRefusalCode::UnprovedExactZero)?;
+    for receipt in [
+        &proof.applicability_receipt,
+        &proof.exclusion_producer_receipt,
+        &proof.exclusion_watchdog_receipt,
+    ] {
+        validate_receipt(receipt, caps)
+            .map_err(|_| PhysicalRegistryRefusalCode::UnprovedExactZero)?;
+    }
+    validate_distinct_receipts([
+        &proof.applicability_receipt,
+        &proof.exclusion_producer_receipt,
+        &proof.exclusion_watchdog_receipt,
+    ])
+    .map_err(|_| PhysicalRegistryRefusalCode::UnprovedExactZero)?;
+    let targets = requirements
+        .artifact_relations
+        .iter()
+        .map(|relation| relation.target)
+        .collect::<BTreeSet<_>>();
+    if !targets.contains(&proof.subject) || !targets.contains(&proof.symmetry) {
+        return Err(PhysicalRegistryRefusalCode::UnprovedExactZero);
+    }
+    Ok(())
 }
 
 fn normalize_requirements(
@@ -1659,7 +1714,11 @@ fn encode_artifact_payload(
     caps: ValidationCaps,
     meter: &mut WorkMeter,
 ) -> Result<Vec<u8>, PhysicalRegistryRefusalCode> {
-    let mut output = RecordBuilder::new(ARTIFACT_DOMAIN, caps)?;
+    let identity_domain = match payload {
+        ArtifactPayload::ExactMasslessLaw(_) => EXACT_MASSLESS_ARTIFACT_DOMAIN_V4,
+        _ => ARTIFACT_DOMAIN_V3,
+    };
+    let mut output = RecordBuilder::new(identity_domain, caps)?;
     match payload {
         ArtifactPayload::ScalarCoordinate(coordinate) => {
             validate_content(&coordinate.coordinate, caps)?;
@@ -1687,6 +1746,18 @@ fn encode_artifact_payload(
         ArtifactPayload::ExactMasslessLaw(law) => {
             output.field(1, b"exact-massless-law")?;
             output.field(2, &encode_requirements(&law.requirements, caps)?)?;
+            output.field(3, &law.proof.subject.0)?;
+            output.field(4, &encode_content(&law.proof.excluded_term, caps)?)?;
+            output.field(5, &law.proof.symmetry.0)?;
+            output.field(6, &encode_receipt(&law.proof.applicability_receipt, caps)?)?;
+            output.field(
+                7,
+                &encode_receipt(&law.proof.exclusion_producer_receipt, caps)?,
+            )?;
+            output.field(
+                8,
+                &encode_receipt(&law.proof.exclusion_watchdog_receipt, caps)?,
+            )?;
         }
         ArtifactPayload::SpeciesDerivation(rule) => {
             output.field(1, b"species-derivation")?;

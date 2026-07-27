@@ -74,6 +74,44 @@ licence = "The paper states copyright 2021 by the U.S. Secretary of Commerce on 
 note = "Live and archived bytes were fetched independently on 2026-07-20 and were byte-identical at 2,312,070 bytes with the recorded SHA-256."
 
 # ---------------------------------------------------------------------------------------------------
+# Documentary custody for one narrow Standard Model statement. This source record and the held bytes
+# grant no project authority and admit no primitive physical profile.
+# ---------------------------------------------------------------------------------------------------
+
+[[source]]
+id = "pdg_2024_higgs_boson_review"
+citation = "Carena, M., Grojean, C., Kado, M. and Sharma, V., 2024, Status of Higgs Boson Physics, in Navas, S. et al. (Particle Data Group), Review of Particle Physics, Physical Review D 110, 030001, DOI 10.1103/PhysRevD.110.030001. Review revised August 2023 and dated 31 May 2024."
+url = "https://pdg.lbl.gov/2024/reviews/rpp2024-rev-higgs-boson.pdf"
+archived_url = "https://web.archive.org/web/20251201133646id_/https://pdg.lbl.gov/2024/reviews/rpp2024-rev-higgs-boson.pdf"
+
+sha256 = "61381048888c9a00b51fc2607d1b95e60af2665a45f322e01d991599c14d1327"
+bytes = 648589
+pages = 2
+sha256_fetched = "1850dcead11d3e885c76ee9e9eb21b474668fc75cca7a19c602d23e7be73c8a3"
+bytes_fetched = 13226461
+pages_fetched = 117
+
+recipe = "Fetch the official PDG PDF at the recorded URL, then keep zero-based PDF pages 0 and 3 with pypdf.PdfWriter. The held slim reports pypdf as its Producer. The full-fetch and held-slim receipts are recorded separately above."
+grade = "theory review (documentary source, not project authority)"
+scope = "Section 11.2 of the Standard Model Higgs review, limited to printed page 4: electroweak breaking leaves the conserved U(1)_em direction unbroken, and the review identifies its corresponding gauge field, the photon, as massless. This source does not establish a repository primitive profile, a complete gauge theory, or applicability outside the Standard Model account it reviews."
+anchor = "Printed page 4, paragraph immediately after equation (11.5), together with the symmetry-breaking statement and covariant derivative surrounding equation (11.4)."
+
+custody = "in_repo"
+holding = "sources/pdg_2024_higgs_boson_review/navas_et_al_2024_pdg_higgs_SLIM_p1_p4.pdf"
+
+licence = "Creative Commons Attribution 4.0 International (CC BY 4.0). The official PDG 2024 copyright page states that, except where otherwise noted, content of the 2024 Review of Particle Physics carries this licence. No exception is marked on either held review page. Redistribution and slimming are permitted with attribution."
+redistributable = true
+licence_evidence = "https://pdg.lbl.gov/2024/copyright-1.html and https://journals.aps.org/prd/abstract/10.1103/PhysRevD.110.030001"
+free_route = "https://pdg.lbl.gov/2024/reviews/rpp2024-rev-higgs-boson.pdf"
+free_route_kind = "publisher-open"
+reviewed = "2026-07-26"
+
+slim = "KEPT: printed page 1, which carries the review identity, revision authors, contents, PDG citation and date; printed page 4, which carries the symmetry-breaking account, the Higgs Lagrangian and covariant derivative in equation (11.4), the W and Z mass relations in equation (11.5), the massless-photon statement, and the Yukawa interaction in equation (11.6). DROPPED: printed pages 2-3 and 5-117, which are outside this narrow documentary claim. The full document is recoverable from the official and archived URLs and checkable against the full-fetch receipt."
+read_channels = "Text extraction with pypdfium2 plus visual renders of both held pages at 180 dpi. The printed-page-4 render was visually checked for legibility and complete equations and prose; it is 588,567 bytes at SHA-256 762d46d25cac693159e49a4ae959dea1b776dbf1980b070b580c82cbc18e0cd4, byte-identical to the prior local page-4 render. The extracted paragraph and visual page agree on the unbroken U(1)_em and massless-gauge-field statement."
+archive_verification = "A HEAD request to the archived URL on 2026-07-26 returned HTTP 200, application/pdf, and Content-Length 13226461. The archive bytes were not downloaded or hash-compared during this enrollment."
+note = "DOCUMENTARY CUSTODY ONLY. This entry proves that the held review states the scoped Standard Model claim. It admits no field, operator, state, sector, excitation, species, profile, exact-masslessness law, value, or canonical premise. Any project admission requires a separate owner-reviewed authority route."
+
+# ---------------------------------------------------------------------------------------------------
 # Migrated from docs/working/VENDORING_CHECKLIST.md, which held this as its single prose entry and is the
 # fullest-discipline record the repo had. Every field of that entry is carried here verbatim, including
 # both checksums and the kept-versus-dropped slim record. The checklist's recorded slim sha256 and byte

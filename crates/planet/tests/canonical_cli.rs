@@ -16,7 +16,7 @@ fn the_no_argument_binary_enters_the_floor_only_runner_and_refuses() {
 
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stderr.is_empty());
-    assert!(stdout.starts_with("receipt=civsim.planet.run.v12\ncomplete=false\n"));
+    assert!(stdout.starts_with("receipt=civsim.planet.run.v13\ncomplete=false\n"));
     assert!(stdout.contains("absolute_floor_entries=3\n"));
     assert!(stdout.contains("representation.schema=\"civsim.units.si-representation.v1\"\n"));
     assert!(stdout.contains("event_count=6\n"));

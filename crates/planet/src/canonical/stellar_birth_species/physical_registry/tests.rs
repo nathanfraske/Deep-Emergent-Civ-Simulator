@@ -20,6 +20,10 @@ struct FixtureDefects {
     wrong_validity_kind: bool,
     unexpected_dependency: bool,
     zero_projection: bool,
+    massless_subject_outside_requirements: bool,
+    massless_symmetry_outside_requirements: bool,
+    massless_subject_equals_symmetry: bool,
+    massless_duplicate_receipts: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -268,16 +272,45 @@ fn build_fixture(
     };
     let requirements = RequirementSet {
         artifact_relations: vec![
+            relation(field_role, field),
             relation(state_relation_role, state),
             relation(sector_relation_role, sector),
             relation(validity_relation_role, validity),
         ],
         species_dependencies: dependencies,
     };
+    let massless_subject = if defects.massless_subject_outside_requirements {
+        operator
+    } else {
+        field
+    };
+    let massless_symmetry = if defects.massless_subject_equals_symmetry {
+        massless_subject
+    } else if defects.massless_symmetry_outside_requirements {
+        operator
+    } else {
+        sector
+    };
+    let excluded_term = content("rest-mass-term", base_tag.wrapping_add(20));
+    let exclusion_producer_receipt =
+        receipt("massless-exclusion-producer", base_tag.wrapping_add(22));
+    let exclusion_watchdog_receipt = if defects.massless_duplicate_receipts {
+        exclusion_producer_receipt.clone()
+    } else {
+        receipt("massless-exclusion-watchdog", base_tag.wrapping_add(23))
+    };
     let massless_law = push_artifact(
         &mut artifacts,
         ArtifactPayload::ExactMasslessLaw(MasslessLawArtifact {
             requirements: requirements.clone(),
+            proof: ExactZeroMassProof {
+                subject: massless_subject,
+                excluded_term,
+                symmetry: massless_symmetry,
+                applicability_receipt: receipt("massless-applicability", base_tag.wrapping_add(21)),
+                exclusion_producer_receipt,
+                exclusion_watchdog_receipt,
+            },
         }),
         base_tag.wrapping_add(16),
     );
@@ -717,6 +750,31 @@ fn repository_frontier_accepts_each_live_scientific_refusal_only() {
 }
 
 #[test]
+fn repository_roots_with_species_rules_execute_the_global_vocabulary_refusal() {
+    let mut fixture = elementary_fixture(29);
+    let repository = repository_input().expect("repository roots are available");
+    fixture
+        .input
+        .admitted_artifacts
+        .extend(repository.admitted_artifacts);
+    refresh_vocabulary_binding(&mut fixture.input);
+
+    assert!(fixture.input.admitted_artifacts.iter().any(|artifact| {
+        artifact.admission_capability_kind() == AdmissionCapabilityKind::RepositoryRoot
+    }));
+    assert!(
+        !fixture
+            .input
+            .vocabulary_binding
+            .global_physical_vocabulary_coverage
+    );
+    assert_both_refuse(
+        &fixture.input,
+        PhysicalRegistryRefusalCode::PhysicalVocabularyCoverageIncomplete,
+    );
+}
+
+#[test]
 fn root_admission_census_preserves_unfamiliar_irreducible_routes() {
     let mut fixture = elementary_fixture(27);
     let identity = fixture.input.admitted_artifacts[0].claimed_identity;
@@ -822,6 +880,29 @@ fn graph_and_registry_order_do_not_select_the_result() {
     let reversed = inspect_physical_registry(&permuted).unwrap();
     assert_eq!(forward.members, reversed.members);
     assert_eq!(forward.canonical_bytes, reversed.canonical_bytes);
+}
+
+#[test]
+fn unrelated_unfamiliar_descriptor_is_extension_monotone_for_the_requested_member() {
+    let mut fixture = massless_fixture(93);
+    let baseline = inspect_physical_registry(&fixture.input).expect("baseline member closes");
+    descriptor(
+        &mut fixture.input.admitted_artifacts,
+        "unrelated-thaumic-sector-descriptor",
+        241,
+    );
+    refresh_vocabulary_binding(&mut fixture.input);
+
+    let extended =
+        inspect_physical_registry(&fixture.input).expect("unrelated descriptor does not steer");
+    assert_eq!(extended.members, baseline.members);
+    assert!(
+        !fixture
+            .input
+            .vocabulary_binding
+            .global_physical_vocabulary_coverage
+    );
+    assert!(!fixture.input.vocabulary_binding.membership_authority);
 }
 
 #[test]
@@ -1449,6 +1530,22 @@ fn closure_omission_addition_and_descriptor_collision_refuse() {
 }
 
 #[test]
+fn an_unrequested_species_rule_island_cannot_enter_the_local_cone() {
+    let mut requested = massless_fixture(55);
+    let unrequested = elementary_fixture(155);
+    requested
+        .input
+        .admitted_artifacts
+        .extend(unrequested.input.admitted_artifacts);
+    refresh_vocabulary_binding(&mut requested.input);
+
+    assert_both_refuse(
+        &requested.input,
+        PhysicalRegistryRefusalCode::MissingClosureMember,
+    );
+}
+
+#[test]
 fn mass_state_sector_validity_and_dependency_swaps_refuse() {
     for (defects, expected) in [
         (
@@ -1533,6 +1630,59 @@ fn exact_zero_needs_a_massless_law_and_expression_cycles_refuse() {
     assert_both_refuse(
         &too_deep,
         PhysicalRegistryRefusalCode::ExpressionDepthExceeded,
+    );
+}
+
+#[test]
+fn exact_zero_requires_scoped_content_and_independent_receipts() {
+    for defects in [
+        FixtureDefects {
+            massless_subject_outside_requirements: true,
+            ..FixtureDefects::default()
+        },
+        FixtureDefects {
+            massless_symmetry_outside_requirements: true,
+            ..FixtureDefects::default()
+        },
+        FixtureDefects {
+            massless_subject_equals_symmetry: true,
+            ..FixtureDefects::default()
+        },
+        FixtureDefects {
+            massless_duplicate_receipts: true,
+            ..FixtureDefects::default()
+        },
+    ] {
+        let fixture = build_fixture(45, FixtureDerivation::Unfamiliar, true, defects);
+        assert_both_refuse(
+            &fixture.input,
+            PhysicalRegistryRefusalCode::UnprovedExactZero,
+        );
+    }
+
+    let fixture = massless_fixture(46);
+    let mut invalid_payload = fixture
+        .input
+        .admitted_artifacts
+        .iter()
+        .find_map(|artifact| match &artifact.payload {
+            ArtifactPayload::ExactMasslessLaw(law) => {
+                Some(ArtifactPayload::ExactMasslessLaw(law.clone()))
+            }
+            _ => None,
+        })
+        .expect("massless fixture carries its exact-zero law");
+    let ArtifactPayload::ExactMasslessLaw(law) = &mut invalid_payload else {
+        unreachable!("selected an exact-zero law")
+    };
+    law.proof.excluded_term.canonical_bytes.clear();
+    assert_eq!(
+        producer::derive_artifact_identity_for_test(&invalid_payload),
+        Err(PhysicalRegistryRefusalCode::ContentByteLimitExceeded)
+    );
+    assert_eq!(
+        watchdog::derive_artifact_identity_for_authority(&invalid_payload),
+        Err(PhysicalRegistryRefusalCode::ContentByteLimitExceeded)
     );
 }
 

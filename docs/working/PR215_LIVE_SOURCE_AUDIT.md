@@ -1270,3 +1270,84 @@ byte-identical 393,806-byte stdout receipts at SHA-256
 The physical registry remains at four roots,
 the vocabulary partition remains `0 / 4 / 0`, species membership remains zero,
 and Stage 1 still refuses with `no_admitted_species_derivation_rules`.
+
+## 2026-07-26 first primitive-profile hostile audit
+
+The first attempted primitive profile assembled a compact rank-one unbroken
+abelian field, operator, state, sector, validity domain, constraint, exact-zero
+law, and one proposed excitation member. Before publication, one bounded
+admit-the-alien lens source-checked the complete authority path.
+
+Three material findings were confirmed:
+
+1. Producer and watchdog reconstructed the same shared authored theory
+   constants. Different traversal and byte framing did not provide independent
+   semantic authority.
+2. The proposed derive-first, Buckingham-Pi, Gap, Chaos, Residual, and unique
+   slot receipts were hashes of conclusion strings. The extractor checked
+   schema identities and distinct nonzero digests, but no executable
+   derivation attempts, dimensional analysis, gap evidence, residual
+   minimization, or collision search existed.
+3. The exact-zero object bound a subject, excluded-term label, sector,
+   applicability digest, and two differently framed receipts. Neither path
+   evaluated a symmetry transformation or proved that the candidate mass
+   operator was forbidden in the claimed domain.
+
+The documentary source `pdg_2024_higgs_boson_review` was separately verified.
+It supports only the scoped Standard Model statement recorded in the source
+registry. It explicitly supplies no project profile, exact-masslessness law,
+member, or admission authority. This audit makes no adverse claim about that
+source or its authors.
+
+The recommendations were recorded before repair: do not add hashes or repeat
+the same checker loop; demote the profile; preserve only general structural
+substrate; restore the live scientific refusal; and make executable symmetry
+exclusion plus real irreducible-route evidence the next bounded slice.
+
+The repair follows those recommendations. The profile module is compiled only
+for tests and its protocol statuses are `assertion_only_not_admitted`. It
+retains raw candidate artifacts only and defines no registry capability or
+`AdmittedArtifact` conversion. The live physical registry again receives only
+four membership-neutral coordinate roots and returns
+`no_admitted_species_derivation_rules` with zero members, no coverage claim,
+and no authority effect.
+
+The reusable structural improvement remains in registry v5, proof graph v4,
+producer v7, and watchdog v6. An exact-zero artifact must now carry a nonempty
+excluded term, distinct subject and symmetry identities present in its
+requirements, an applicability receipt, and distinct producer and watchdog
+exclusion receipts. Tests reject missing scope, collapsed identities, duplicate
+receipts, and empty excluded-term content. Exact-massless payloads use
+`civsim.physical-species.artifact.v4`; unchanged artifact variants retain v3
+identities. These checks prove proof-object shape only. They do not establish
+physical truth.
+
+The final bounded smoke pass found four additional seams after demotion:
+
+1. the exact-massless artifact identity domain had not advanced with its new
+   proof fields;
+2. test builds still let the rejected fixture mint a capability accepted by
+   both physical validators;
+3. both executable global-vocabulary coverage refusals had been removed to
+   permit that fixture; and
+4. one contract sentence retained the old root-refusal receipt version.
+
+The recommendations were again recorded before repair. The exact-massless
+identity domain is now versioned without changing existing root identities.
+The rejected capability and every physical and vocabulary validator match arm
+for it are deleted. Both global-coverage checks are restored, and a mixed live
+root plus synthetic-rule test reaches
+`physical_vocabulary_coverage_incomplete` through both validators. The
+contract now records root refusal receipt v5.
+
+Focused validation passes 68 physical-registry tests, nine authority-analysis
+tests, five viewer-frontier tests, all eight canonical CLI tests,
+warnings-denied focused Clippy, both authority-inventory self-tests and live
+agreement gates, the source gate, and generated-source freshness. The repaired
+packet passes its exact bounded smoke confirmation. `check-fast` passes in
+91.0 seconds. The complete PR route passes in 1,298.7 seconds, including every
+declared gate, all canonical tests, deterministic CPU/GPU parity checks,
+private-item documentation, and doctests. Two direct runner executions each
+exit `2`, write no stderr, and produce byte-identical 393,806-byte receipt v13
+output at SHA-256
+`3da00e63a98cb78c09c2c2acb6fe212e6660580b249dd4780d27ccd0558bd3b5`.

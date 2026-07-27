@@ -11,10 +11,10 @@ use super::repository_roots::RepositoryRootAdmissionCapability;
 pub(super) use civsim_ledger::{Provenance as ProvenanceMark, Tier as LedgerTier};
 
 pub(super) const REGISTRY_SCHEMA_ID: &str =
-    "civsim.planet.stellar-birth-physical-species-registry.v4";
-pub(super) const PROOF_GRAPH_SCHEMA_ID: &str = "civsim.planet.stellar-birth-species-proof-graph.v3";
-pub(super) const PRODUCER_ID: &str = "civsim.planet.stellar-birth-physical-species-producer.v6";
-pub(super) const WATCHDOG_ID: &str = "civsim.planet.stellar-birth-physical-species-watchdog.v5";
+    "civsim.planet.stellar-birth-physical-species-registry.v5";
+pub(super) const PROOF_GRAPH_SCHEMA_ID: &str = "civsim.planet.stellar-birth-species-proof-graph.v4";
+pub(super) const PRODUCER_ID: &str = "civsim.planet.stellar-birth-physical-species-producer.v7";
+pub(super) const WATCHDOG_ID: &str = "civsim.planet.stellar-birth-physical-species-watchdog.v6";
 
 pub(super) const MAX_ARTIFACT_COUNT: u32 = 4_096;
 pub(super) const MAX_REGISTRY_MEMBER_COUNT: u32 = 4_096;
@@ -319,6 +319,22 @@ impl MassProjectionScope {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct MasslessLawArtifact {
     pub(super) requirements: RequirementSet,
+    pub(super) proof: ExactZeroMassProof,
+}
+
+/// Claim-scoped proof object for an exact zero rest-mass term.
+///
+/// A missing mass term is not a proof. The subject, excluded term, preserving
+/// symmetry, applicability domain, and independent exclusion receipts are all
+/// identity-bound into the massless-law artifact.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct ExactZeroMassProof {
+    pub(super) subject: ArtifactIdentity,
+    pub(super) excluded_term: CanonicalArtifact,
+    pub(super) symmetry: ArtifactIdentity,
+    pub(super) applicability_receipt: ReceiptBinding,
+    pub(super) exclusion_producer_receipt: ReceiptBinding,
+    pub(super) exclusion_watchdog_receipt: ReceiptBinding,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

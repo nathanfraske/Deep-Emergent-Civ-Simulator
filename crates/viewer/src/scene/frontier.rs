@@ -1089,8 +1089,8 @@ mod tests {
     #[test]
     fn repository_physical_frontier_preserves_the_read_only_receipt() {
         let frontier = RepositoryPhysicalRegistryFrontierScene {
-            registry_schema_id: "civsim.planet.stellar-birth-physical-species-registry.v4",
-            proof_graph_schema_id: "civsim.planet.stellar-birth-species-proof-graph.v3",
+            registry_schema_id: "civsim.planet.stellar-birth-physical-species-registry.v5",
+            proof_graph_schema_id: "civsim.planet.stellar-birth-species-proof-graph.v4",
             root_receipt_schema_id:
                 "civsim.planet.stellar-birth-repository-physical-root-receipt.v5",
             root_claim_id: "planet.stellar-species-floor-coordinate-projection",
@@ -1151,8 +1151,8 @@ mod tests {
         assert_eq!(
             frontier.registry_schema_identity(),
             (
-                "civsim.planet.stellar-birth-physical-species-registry.v4",
-                "civsim.planet.stellar-birth-species-proof-graph.v3"
+                "civsim.planet.stellar-birth-physical-species-registry.v5",
+                "civsim.planet.stellar-birth-species-proof-graph.v4"
             )
         );
         assert_eq!(

@@ -19,6 +19,15 @@ so the registry returns `no_admitted_species_derivation_rules`, zero members,
 no support, and no authority effect. No `[W]`, `[X]`, star, element, atom,
 planet, or snapshot follows from that refusal.
 
+The first attempted primitive profile did not pass its hostile audit. Its two
+implementations reconstructed the same authored ontology, its derive-first,
+Buckingham-Pi, Gap, Chaos, and Residual receipts hashed assertions rather than
+executing the required evidence, and its exact-zero object did not prove that
+the stated symmetry excluded the mass operator. The useful graph shape and
+stronger exact-zero data contract remain as test-only substrate. The candidate
+is labeled `assertion_only_not_admitted`, retains no registry capability or
+`AdmittedArtifact` conversion, and has no production path.
+
 The first live claim-scoped derived premise now closes one narrow part of the
 next boundary. Two independent checkers reconstruct the sealed
 `eps_0 = e^2 / (2 * alpha * h * c)` execution coordinate from floor ancestry,
@@ -51,7 +60,7 @@ flowchart TB
     FLOOR["CURRENT sealed absolute floor<br/>alpha, G, m_e<br/>plus exact SI representation"]
     EPS0["CURRENT first derived premise<br/>sealed eps_0 relation and local scale<br/>dual result and canary evidence<br/>no field or species authority"]
     SELECT["CURRENT premise selector<br/>exact role plus content matching<br/>proof-bearing exact zero<br/>no cardinality fallback<br/>authority_effect = none"]
-    LAW["NEXT species-forming law premises<br/>quantum dynamics and statistics<br/>spacetime and kinematics<br/>fields, operators, sectors, charges<br/>vacuum, state, validity, constraints"]
+    LAW["NEXT executable law authority<br/>independent symmetry action and operator checks<br/>real derive-first, Pi, Gap plus Chaos,<br/>Residual-minimality and unique-slot evidence"]
     PRIMITIVE["FUTURE primitive excitations<br/>mass or exact masslessness<br/>spin and statistics<br/>charges and currents<br/>stability and decay laws"]
     COMPOSITE["FUTURE confining and composite sector<br/>solver-produced level bands<br/>complete separation thresholds<br/>conservation and decay coverage"]
     THRESHOLD["CURRENT dormant exact threshold pair<br/>strictly below all covered thresholds<br/>overlap stays unresolved<br/>open channel remains visible<br/>authority_effect = none"]
@@ -112,6 +121,16 @@ law authority. It must admit the field content, operator, interaction sector,
 state, applicability, validity regime, conservation laws, and semantic roles
 consumed by a kernel. A value shape, familiar name, catalog cardinality,
 citation, or hardcoded Standard Model graph cannot supply those premises.
+
+The rejected unbroken-abelian candidate makes the next acceptance test
+concrete. A valid exact-zero authority must encode the symmetry action and
+candidate mass operator, evaluate invariance under that action, prove the
+operator is forbidden throughout the claimed applicability domain, and bind
+two independently implemented evaluations. The irreducible route must carry
+the derivation attempts, dimensional matrix or proof of inapplicability, typed
+Gap and Chaos evidence, residual minimization, and collision-checked slot
+uniqueness. Hashing a sentence that says one of those steps happened is not
+evidence that it happened.
 
 The selector enforces exact role and content matching through two
 different algorithms. Adding an unrelated unfamiliar candidate cannot relabel
@@ -271,34 +290,37 @@ Floating point remains confirmation-only.
    bindings select one premise without a familiar name, value-shape, ordinal,
    or cardinality fallback. Exact zero carries a symmetry and exclusion proof
    object. An unfamiliar material precursor passes the same structural path.
-2. **Law-premise capability mint.** Admit one minimal quantum and interaction
-   claim through distinct producer and watchdog semantics. Acceptance requires
-   complete derived or irreducible premise authority, live canary transcripts,
-   no familiar dispatch, and no production species.
-3. **First primitive excitation.** Produce one content-bound member with mass
+2. **Derived premise capability mint.** DONE FOR ONE NON-SPECIES RELATION:
+   `eps_0` proves a narrow derived capability route without admitting an
+   electromagnetic ontology or member.
+3. **Executable theory-seam and exact-zero authority.** NEXT: encode derivation
+   attempts, Buckingham-Pi analysis, typed Gap and Chaos evidence, residual
+   minimization, unique-slot checking, symmetry action, candidate operator,
+   applicability, and independent operator-exclusion algorithms. The rejected
+   profile fixture cannot satisfy this slice.
+4. **First primitive excitation.** Produce one content-bound member with mass
    or exact masslessness, state, charges, statistics, stability, validity, and
    complete ancestry. Acceptance requires the physical registry to admit that
    member without claiming global registry coverage.
-4. **Bound-state evidence integration.** Bind solver-produced level bands,
+5. **Bound-state evidence integration.** Bind solver-produced level bands,
    complete threshold coverage, conservation, and decay channels into the
    physical registry. Promote the dormant threshold pair only after live
    canaries and the authority-watchdog receipt exist.
-5. **Complete primitive registry and support.** Prove membership coverage,
+6. **Complete primitive registry and support.** Prove membership coverage,
    conditioned support, explicit zeros, normalization, resource bounds, and
    exact mean particle mass.
-6. **Composite core profile.** Add the confining and transition sectors needed
+7. **Composite core profile.** Add the confining and transition sectors needed
    to enumerate stable and metastable cores for one admitted profile, while
    leaving unfamiliar sectors open.
-7. **Atomic solver cache.** Produce certified spectra and shell projections
+8. **Atomic solver cache.** Produce certified spectra and shell projections
    without an exception list.
-8. **Nucleosynthesis and abundance history.** Generate local isotope support,
+9. **Nucleosynthesis and abundance history.** Generate local isotope support,
    atomic weights, opacity, and chemistry from the stellar and disk history.
-9. **Candidate-substrate migration.** Replace each consumer of the terrestrial
+10. **Candidate-substrate migration.** Replace each consumer of the terrestrial
    reference table with a typed derived cache adapter, one invariant at a time.
    The reference table remains validation-only until no canonical consumer
    needs it.
 
-The next code target is slice 2. The selection pair and exact threshold pair
-landed early because both are value-free with respect to the current run. They
-close false proof shapes without claiming scientific truth and give the first
-law authority and later bound-state solver precise downstream contracts.
+The next code target is slice 3. The failed primitive attempt established the
+precise negative boundary: independent serialization, owner review, citations,
+and nonzero digests do not substitute for executable physical evidence.

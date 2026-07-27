@@ -322,7 +322,7 @@ alien-coordinate projector exists only under `cfg(test)`, returns checker
 output only, and grants no admission capability. It tests the admit-the-alien
 invariant without creating an authored-coordinate authority. The authority
 inventory pins this mechanism's semantic profile as SHA-256
-`7963fbd5fb857fb2516e11579e76409c5bdfc3cc53d172b15251016b87d80750`.
+`5c67629ed706fe636ca0d10c09953cdc65f24d424822db3f4bfaa14836db5ee9`.
 
 The current projection-to-registry boundary now performs that complete paired
 verification. An admitted artifact cannot be constructed in production from a
@@ -334,7 +334,7 @@ identity, admission, capability, or receipt drift. Test-only exact capabilities
 exercise unfamiliar, derived, irreducible, and massless graphs without
 creating a production mint.
 
-The v5 physical-registry producer and v4 watchdog each own a complete local
+The v7 physical-registry producer and v6 watchdog each own a complete local
 production cap table, resource-contract constructor, semantic-work schedule,
 and digest encoder. The resource digest covers both the caps and semantic work
 profile. Canonical rational bytes, expression nodes and edges, executed
@@ -349,6 +349,13 @@ refusal on both sides. The current pair computes, validates, and compares those
 digests but does not mint a production species-authority receipt. Before any
 species registry activates, its production receipt must retain both local
 resource digests and bind separately executed full-registry canary transcripts.
+
+Registry v5 and proof graph v4 also require an exact-zero object to bind its
+subject, nonempty excluded term, distinct symmetry, applicability receipt, and
+distinct producer and watchdog exclusion receipts. This is a structural
+precondition, not an authority. A future scientific mint must independently
+evaluate the symmetry action and prove operator exclusion throughout the
+claimed applicability domain.
 
 A distinct future non-root mint and registry-to-support boundary remain
 blocked. Before a species-forming rule may authorize a derived or irreducible

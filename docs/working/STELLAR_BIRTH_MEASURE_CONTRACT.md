@@ -285,11 +285,27 @@ identities, canonical provenance marks, complete receipt roles, exact
 bounded variable-cardinality dimensions over domain-separated axis identities,
 resource ceilings, physical content, and the complete reachable registry. The
 seven SI axes are the current admitted basis, not a closed physical basis in the
-type or wire. The registry, proof graph, producer, and watchdog are v3. Their
-graph walks, rational decoders, budget accounting, and canonical encoders are
-independently implemented. Synthetic unfamiliar axes, species, and lawful
+type or wire. Their graph walks, rational decoders, budget accounting, and
+canonical encoders are independently implemented. Synthetic unfamiliar axes, species, and lawful
 massless graphs can exercise agreement, but the result carries
 `authority_effect=none` and has no path to conditioned support or the reducer.
+
+The current registry, proof graph, producer, and watchdog schema identities are
+v5, v4, v7, and v6. The bump adds a structural exact-zero contract containing
+the subject, excluded term, symmetry, applicability receipt, and distinct
+producer and watchdog exclusion receipts. Those fields prevent a marker-only
+zero from passing the graph validators. They do not prove the physical
+exclusion claim by themselves.
+
+A proposed unbroken-abelian primitive profile failed its hostile audit. Both
+paths reconstructed one shared authored ontology; the derive-first,
+Buckingham-Pi, Gap, Chaos, and Residual records hashed conclusions rather than
+executing their evidence; and the exact-zero records did not evaluate a
+symmetry action against the candidate mass operator. The proposal is retained
+only under the test configuration as raw candidate artifacts with
+`assertion_only_not_admitted` status. It defines no registry capability or
+`AdmittedArtifact` conversion. Production still supplies four coordinate
+roots, no species-forming law, and zero members.
 
 The repository supplies four admitted coordinate roots. Two independent
 paths extract the exact sealed floor leaves, canonicalize source arrival order
@@ -297,7 +313,7 @@ by semantic coordinate identity, and project three scalar coordinates plus one
 pure-mass expression from `m_e`. The latter has
 `scope=membership-neutral`; all four artifacts are Universal `[D]` and grant
 no species membership authority. The packet and projection schemas, producer,
-watchdog, and success receipt are v5; the refusal receipt is v4, root ancestry
+watchdog, success receipt, and refusal receipt are v5; root ancestry
 is v2, and coordinate content is v3. The root-pair v5 success receipt binds the
 claim, canonicalized semantic input, separate producer and watchdog result
 digests, separate resource-contract digests, runtime canary digest, neutral
@@ -415,12 +431,12 @@ floor records, one derived-value record, one Stage 1 entry, and one refusal.
 It emits no `[X]`, no `[W]` realization, and no snapshot. Two direct runs after
 the first active derived-relation premise and its independent-authority repair
 are byte-identical at `393,806` stdout bytes and SHA-256
-`f6814b0036217723d7e763b38f993a6479cc6fd6c816c54ac6e42d30af6159a4`,
+`3da00e63a98cb78c09c2c2acb6fe212e6660580b249dd4780d27ccd0558bd3b5`,
 with exit `2` and empty stderr. A direct `--readiness` run has the same exit,
 stdout, stderr, and digest. It is an observer alias for the canonical front
 door, not a separate readiness result or evidence source. The changed bytes
 bind authority evidence, not a changed physical outcome. The current receipt
-is `civsim.planet.run.v12`; its transcript schema major is `10`.
+is `civsim.planet.run.v13`; its transcript schema major is `10`.
 
 The complete PR route passes in 1,485.8 seconds. It covers every declared gate,
 all canonical all-target tests, deterministic integer and CPU/GPU parity

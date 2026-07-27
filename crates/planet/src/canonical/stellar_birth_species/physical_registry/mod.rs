@@ -1,12 +1,14 @@
 //! Conditional physical species proof graph and independent closure pair.
 //!
 //! The current repository supplies independently projected physical
-//! coordinates but no species-forming law. The executable production result is
-//! therefore a structured refusal after root validation. Synthetic tests can
-//! exercise full closure, but agreement cannot construct the dormant registry
+//! coordinates but no admitted species-forming law. The executable production
+//! result is therefore a structured refusal after root validation. A dormant
+//! test-only candidate exercises graph shape, but it cannot construct registry
 //! authority or enter conditioned support.
 
 mod model;
+#[cfg(test)]
+mod primitive_profile;
 mod producer;
 mod repository_roots;
 mod vocabulary;

@@ -20,11 +20,12 @@ use std::{
     collections::{BTreeMap, BTreeSet},
 };
 
-const ARTIFACT_DOMAIN: &[u8] = b"civsim.physical-species.artifact.v3";
+const ARTIFACT_DOMAIN_V3: &[u8] = b"civsim.physical-species.artifact.v3";
+const EXACT_MASSLESS_ARTIFACT_DOMAIN_V4: &[u8] = b"civsim.physical-species.artifact.v4";
 const MEMBER_DOMAIN: &[u8] = b"civsim.physical-species.member.v2";
 const EXPRESSION_DOMAIN: &[u8] = b"civsim.physical-species.expression.v1";
 const EXPRESSION_NODE_DOMAIN: &[u8] = b"civsim.physical-species.expression-node.v1";
-const REGISTRY_DOMAIN: &[u8] = b"civsim.physical-species.registry.v4";
+const REGISTRY_DOMAIN: &[u8] = b"civsim.physical-species.registry.v5";
 
 #[derive(Debug, Clone)]
 struct Rational {
@@ -143,6 +144,24 @@ pub(super) fn validate_and_encode(
     validate_and_encode_with_caps(input, resource::PRODUCTION_CAPS)
 }
 
+pub(super) fn derive_artifact_identity_for_authority(
+    payload: &ArtifactPayload,
+) -> Result<ArtifactIdentity, PhysicalRegistryRefusalCode> {
+    let mut budget = Budget::new(ValidationCaps::PRODUCTION);
+    recompute_artifact_identity(payload, ValidationCaps::PRODUCTION, &mut budget)
+}
+
+pub(super) fn derive_member_identity_for_authority(
+    member: &MemberBlueprint,
+) -> Result<SpeciesContentIdentity, PhysicalRegistryRefusalCode> {
+    let mut budget = Budget::new(ValidationCaps::PRODUCTION);
+    budget.evaluation(resource::member_identity_work_units())?;
+    Ok(SpeciesContentIdentity(sha256(&write_member_blueprint(
+        member,
+        ValidationCaps::PRODUCTION,
+    )?)))
+}
+
 pub(super) fn validate_and_encode_with_caps(
     input: &PhysicalRegistryInput,
     caps: ValidationCaps,
@@ -175,7 +194,6 @@ pub(super) fn validate_and_encode_with_caps(
     {
         return Err(PhysicalRegistryRefusalCode::PhysicalVocabularyCoverageIncomplete);
     }
-
     let declared = normalize_declared_members(&input.declared_members, caps)?;
     let dependency_count = rules.values().try_fold(0_usize, |total, rule| {
         total
@@ -554,7 +572,9 @@ fn count_artifact_references(
             }
             total
         }
-        ArtifactPayload::ExactMasslessLaw(law) => count_requirements(&law.requirements)?,
+        ArtifactPayload::ExactMasslessLaw(law) => count_requirements(&law.requirements)?
+            .checked_add(2)
+            .ok_or(PhysicalRegistryRefusalCode::ReferenceCapacityExceeded)?,
         ArtifactPayload::SpeciesDerivation(rule) => checked_lengths(&[
             1,
             usize::try_from(count_relation_references(&rule.artifact_inputs)?)
@@ -720,6 +740,7 @@ fn validate_member_blueprint(
             if normalize_requirements(&law.requirements, caps)? != requirements {
                 return Err(PhysicalRegistryRefusalCode::UnprovedExactZero);
             }
+            inspect_exact_zero_mass_proof(&law.proof, &requirements, artifacts, caps)?;
             (
                 ExactRationalWire {
                     negative: false,
@@ -741,6 +762,46 @@ fn validate_member_blueprint(
         derivation_kind,
         requirements,
     })
+}
+
+fn inspect_exact_zero_mass_proof(
+    proof: &ExactZeroMassProof,
+    requirements: &RequirementSet,
+    artifacts: &BTreeMap<ArtifactIdentity, &AdmittedArtifact>,
+    caps: ValidationCaps,
+) -> Result<(), PhysicalRegistryRefusalCode> {
+    if proof.subject == proof.symmetry {
+        return Err(PhysicalRegistryRefusalCode::UnprovedExactZero);
+    }
+    validate_descriptor(proof.subject, artifacts)
+        .map_err(|_| PhysicalRegistryRefusalCode::UnprovedExactZero)?;
+    validate_descriptor(proof.symmetry, artifacts)
+        .map_err(|_| PhysicalRegistryRefusalCode::UnprovedExactZero)?;
+    validate_content(&proof.excluded_term, caps)
+        .map_err(|_| PhysicalRegistryRefusalCode::UnprovedExactZero)?;
+    let receipts = [
+        &proof.applicability_receipt,
+        &proof.exclusion_producer_receipt,
+        &proof.exclusion_watchdog_receipt,
+    ];
+    for receipt in &receipts {
+        validate_receipt(receipt, caps)
+            .map_err(|_| PhysicalRegistryRefusalCode::UnprovedExactZero)?;
+    }
+    let receipt_set = receipts.into_iter().collect::<BTreeSet<_>>();
+    if receipt_set.len() != receipts.len() {
+        return Err(PhysicalRegistryRefusalCode::UnprovedExactZero);
+    }
+    let targets = requirements
+        .artifact_relations
+        .iter()
+        .rev()
+        .map(|relation| relation.target)
+        .collect::<BTreeSet<_>>();
+    if !(targets.contains(&proof.subject) && targets.contains(&proof.symmetry)) {
+        return Err(PhysicalRegistryRefusalCode::UnprovedExactZero);
+    }
+    Ok(())
 }
 
 fn normalize_requirements(
@@ -1779,7 +1840,11 @@ fn write_artifact_payload(
     caps: ValidationCaps,
     budget: &mut Budget,
 ) -> Result<Vec<u8>, PhysicalRegistryRefusalCode> {
-    let mut record = WireRecord::start(ARTIFACT_DOMAIN, caps)?;
+    let identity_domain = match payload {
+        ArtifactPayload::ExactMasslessLaw(_) => EXACT_MASSLESS_ARTIFACT_DOMAIN_V4,
+        _ => ARTIFACT_DOMAIN_V3,
+    };
+    let mut record = WireRecord::start(identity_domain, caps)?;
     match payload {
         ArtifactPayload::ScalarCoordinate(coordinate) => {
             validate_content(&coordinate.coordinate, caps)?;
@@ -1806,6 +1871,18 @@ fn write_artifact_payload(
         ArtifactPayload::ExactMasslessLaw(law) => {
             record.push(1, b"exact-massless-law")?;
             record.push(2, &write_requirements(&law.requirements, caps)?)?;
+            record.push(3, &law.proof.subject.0)?;
+            record.push(4, &write_content(&law.proof.excluded_term, caps)?)?;
+            record.push(5, &law.proof.symmetry.0)?;
+            record.push(6, &write_receipt(&law.proof.applicability_receipt, caps)?)?;
+            record.push(
+                7,
+                &write_receipt(&law.proof.exclusion_producer_receipt, caps)?,
+            )?;
+            record.push(
+                8,
+                &write_receipt(&law.proof.exclusion_watchdog_receipt, caps)?,
+            )?;
         }
         ArtifactPayload::SpeciesDerivation(rule) => {
             record.push(1, b"species-derivation")?;

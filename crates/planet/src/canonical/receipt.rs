@@ -441,7 +441,7 @@ fn stage_index(stage: Stage) -> usize {
 
 impl fmt::Display for RunReceipt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "receipt=civsim.planet.run.v12")?;
+        writeln!(f, "receipt=civsim.planet.run.v13")?;
         writeln!(f, "complete={}", self.is_complete())?;
         writeln!(
             f,

@@ -86,6 +86,11 @@ carry no provenance tag; runtime-derived execution values do not masquerade as
 floor inputs. The inventory generator emits each tag, count, tier total, and
 stable member identity, so no hand-maintained summary can drift silently.
 
+Rejected or test-only physical-profile artifacts do not appear in this
+inventory. A proposed `[A]` seam and its `[D]` descendants are accounting
+descriptions only after a valid authority path exists. Labeling a fixture with
+a tier or provenance mark cannot admit it into the floor or live registry.
+
 The retired calibration-era ledger specification is preserved at
 `parked/docs/PROVENANCE_LEDGER_LEGACY.md`. It is historical evidence only and
 does not define the canonical runpath.

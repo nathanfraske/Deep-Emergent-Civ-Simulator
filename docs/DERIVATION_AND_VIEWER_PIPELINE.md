@@ -96,7 +96,8 @@ flowchart TB
         ROOT_PROJECTION["CURRENT independent floor-root pair<br/>Three exact scalar coordinates plus<br/>one membership-neutral pure-mass expression<br/>No species membership authority"]
         VOCABULARY["CURRENT independent physical-vocabulary pair<br/>Exact current-input partition: 0 / 4 / 0<br/>Descriptor roles / relation targets / constraint laws<br/>Global coverage and membership authority: false<br/>Identity-keyed tier, provenance, and route census"]
         PHYSICAL_REGISTRY["CURRENT conditional physical registry pair<br/>Bottom-up producer plus top-down watchdog<br/>Exact mass, dimensions, state, sectors,<br/>validity, ancestry, and complete closure<br/>Repository result: no admitted species rules"]
-        SPECIES_LAWS["NEXT species-forming derivation roots<br/>Repository-owned fields, operators, states,<br/>sectors, regimes, constraint laws,<br/>excitations, bound states, and mass uncertainty"]
+        REJECTED_PROFILE["AUDITED rejected primitive candidate<br/>Shared authored ontology<br/>Assertion hashes instead of executable evidence<br/>Raw test fixture, no registry capability"]
+        SPECIES_LAWS["NEXT executable species-forming authority<br/>Independent symmetry and operator evaluation<br/>Real derive-first, Pi, Gap plus Chaos,<br/>Residual-minimality and unique-slot evidence"]
         REGISTRY["FUTURE realized species registry<br/>Complete lawful membership<br/>Familiarity-independent"]
         MECHANISMS["FUTURE admitted mechanism set<br/>Thermal, opacity, EOS, collapse,<br/>transport, spectra, topology,<br/>conservation, and validity laws"]
         JOINT["FUTURE correlation-preserving<br/>joint physical measure proof"]
@@ -121,6 +122,9 @@ flowchart TB
         ROOT_PROJECTION --> VOCABULARY
         VOCABULARY --> PHYSICAL_REGISTRY
         STRUCTURE --> PHYSICAL_REGISTRY
+        EPS0 -. "Does not select ontology" .-> REJECTED_PROFILE
+        REJECTED_PROFILE -. "No production authority edge" .-> CURRENT_REFUSAL
+        REJECTED_PROFILE -. "Defines the missing proof" .-> SPECIES_LAWS
         SPECIES_LAWS --> PHYSICAL_REGISTRY
         PHYSICAL_REGISTRY -. "Requires roots and separate authority receipt" .-> REGISTRY
         REGISTRY --> MECHANISMS
@@ -351,6 +355,11 @@ flowchart TB
 - The live floor-root pair supplies coordinate capabilities only. Its pure-mass
   expression is membership-neutral, and the registry refusal remains
   `no_admitted_species_derivation_rules`.
+- The rejected primitive candidate is retained only as raw hostile-audit data.
+  It cannot construct a registry capability or `AdmittedArtifact`.
+  Its hashes prove byte identity, not derivation exhaustion, residual
+  minimality, or symmetry exclusion. It cannot mint an artifact or member in
+  the production registry.
 - The live physical-vocabulary pair classifies the exact current input as zero
   descriptor roles, four relation targets, and zero constraint laws. That is
   not a closed vocabulary: global coverage and membership authority remain

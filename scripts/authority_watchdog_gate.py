@@ -88,7 +88,7 @@ REQUIRED_PROFILE_DIGESTS: dict[str, str] = {
     "planet.species-state-support": "3ff574bcd1a9e19f95bfaafb3fcd472422531d4a2ac2dcc7655943c93a9d34f0",
     "planet.stage1-dimensional-census": "21140b26c937f9cca7a8066b98e9fa75e9366f483ca44ffd1cc5206315f2b5dc",
     "planet.stellar-birth-proof-tokens": "68f58f019ab4f620194133e673c64240d4ad066f97404698ba0bfbf8b96935d1",
-    "planet.stellar-species-floor-coordinate-projection": "7963fbd5fb857fb2516e11579e76409c5bdfc3cc53d172b15251016b87d80750",
+    "planet.stellar-species-floor-coordinate-projection": "5c67629ed706fe636ca0d10c09953cdc65f24d424822db3f4bfaa14836db5ee9",
     "units.certified-formula-projection": "7ee2a9a60f102d0ea34bc5700d2070b079390c050d10c2d685e1525a0f091005",
     "units.si-execution-table": "2eca0ae6da0ad4483e3038e5aa6bbf1cd3d158bf3ca49df78aab7224b8927d5e",
     "units.si-representation-policy": "db7449a52dbf7f56b598828fe3888d0505e833c170c89de99a6b390a8057698b",
