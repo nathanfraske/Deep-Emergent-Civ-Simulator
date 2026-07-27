@@ -18,7 +18,7 @@ observer independence bind the full runpath.
 - 2026-07-21  PR #215 is the draft integration base -> branch `claude/thermoelastic-rung3`, `HANDOFFS.md`
 - 2026-07-26  Four neutral floor roots classify as 0 descriptor roles, 4 relation targets, and 0 constraint laws; global vocabulary coverage, species-forming law, and registry membership remain open -> `TODOS.md` P-STELLAR-SPECIES-DERIVATION-ROOTS
 - 2026-07-26  Floor-to-periodicity work now has the first live claim-scoped derived premise for the sealed `eps_0` relation plus generic selection and dormant bound-state threshold pairs; species-forming law authority, species, cores, atoms, abundances, and chemistry remain ordered blockers -> `docs/PERIODICITY_EMERGENCE_PIPELINE.md`
-- 2026-07-26  A hostile audit rejected and capability-quarantined the first primitive profile because shared authored ontology, assertion-only protocol hashes, and unevaluated symmetry exclusion cannot mint physical authority; executable symmetry and irreducible-route evidence are the next rung -> `TODOS.md` P-PHYSICAL-LAW-PREMISE-AUTHORITY
+- 2026-07-26  First primitive-profile attempt is quarantined; executable symmetry and irreducible-route evidence are next -> `TODOS.md` P-PHYSICAL-LAW-PREMISE-AUTHORITY
 - 2026-07-21  Stage 1 SI-native adapters are blocked until both stellar-birth measure leaves close -> `TODOS.md` P-STAGE1-ADAPTERS
 - 2026-07-21  Canonical GPU use remains blocked on typed adapters and exact CPU/GPU Q32.32 parity for every enabled backend -> `TODOS.md` P-GPU-BIT-PARITY
 - 2026-07-20  Stage 1 star, collapse, disk, and embryo-system realization -> `TODOS.md` P-STAR-DISK-SYSTEM
@@ -44,9 +44,9 @@ observer independence bind the full runpath.
 ## Recent landings
 
 - 2026-07-25  V5 root agreement canonicalizes arrival order, refuses stale identity binding, and keeps alien inspection test-only -> `crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/`
-- 2026-07-26  Registry v5 producer v7 and watchdog v6 require exact-zero subject, excluded term, symmetry, applicability, and distinct exclusion receipts; these are structural requirements only, while the live registry stays empty -> `crates/planet/src/canonical/stellar_birth_species/physical_registry/`
-- 2026-07-26  The rejected unbroken-abelian graph remains test-only as `assertion_only_not_admitted`; its documentary PDG source is custody only and no production module calls the fixture -> `crates/planet/src/canonical/stellar_birth_species/physical_registry/primitive_profile/`
-- 2026-07-26  The active `eps_0` pair independently reconstructs floor ancestry and claim-local scale, binds two results and two complete 12-case canary transcripts, and mints one non-species `VerifiedDerivedContent` capability; generic selection remains identity-bound and unfamiliar-material monotone -> `crates/planet/src/canonical/stellar_birth_species/law_premise/`
+- 2026-07-26  Registry v5 requires scoped exact-zero evidence from distinct encoders; live membership remains empty -> `crates/planet/src/canonical/stellar_birth_species/physical_registry/`
+- 2026-07-26  Rejected abelian profile is test-only; PDG bytes prove custody, not membership -> `crates/planet/src/canonical/stellar_birth_species/physical_registry/primitive_profile/`
+- 2026-07-26  The `eps_0` pair independently binds floor ancestry, claim-local scale, results, and canaries into one non-species capability -> `crates/planet/src/canonical/stellar_birth_species/law_premise/`
 - 2026-07-23  Independent bounded structural validators agree on canonical species descriptors and explicit positive or proved-zero conditioned support without minting physical authority or changing run bytes -> `crates/planet/src/canonical/stellar_birth_species/support_packet/`
 - 2026-07-23  Portable per-gate execution locks prevent cross-process cache stampedes, while one marker-backed build anchor runs Stone 0 per canonical Cargo graph and an independent pair checks its exact wiring -> `scripts/gate_runner.py`, `crates/stone0-build`, `scripts/stone0_build_wiring_gate.py`
 - 2026-07-25  The closed authority inventory binds CODATA v2 exact mutation transcripts and Stone 0's rooted interpreter boundary -> `docs/working/INDEPENDENT_AUTHORITY_RULE.md`
