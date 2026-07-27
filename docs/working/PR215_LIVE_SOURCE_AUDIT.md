@@ -1524,3 +1524,83 @@ every canonical package and target, authority and detector self-tests, Stone
 0, deterministic CPU and GPU integer parity, private-item documentation, and
 doctests. This slice produces no physical species and does not reactivate the
 rejected profile.
+
+## 2026-07-27 generic derive-first premise-route audit
+
+The source-confirmed finding and recommendation were stated before
+implementation. The current floor yields four membership-neutral relation
+targets and the narrow admitted `eps_0` premise, but zero physical descriptor
+roles and zero constraint laws. A digest of a failed search cannot prove that
+the search universe was complete. Likewise, typed Pi, Gap, Chaos, Residual,
+and slot fields cannot authorize themselves merely because a structurally
+valid record exists.
+
+The recommendation was a bounded generic proof-graph route over opaque
+admitted premise and rule capabilities. Derivation and irreducibility must be
+separate states. A failed search stays open until an independent target-bound
+coverage capability proves the exact admitted rule universe complete. Only
+then may a distinct typed irreducible protocol bind Buckingham Pi or its
+semantic inapplicability, Gap Law with Chaos Protocol, Residual Law, unique
+residual-slot review, and owner admission. The route must mint no physical
+authority until live canaries, a claim-scoped pair receipt, and a private
+premise-capability constructor exist.
+
+The implementation uses two bounded algorithms. The producer performs
+synchronous minimal-level closure. The watchdog constructs a dependency index
+and processes reachable identities by level through a priority traversal. Both
+select rules only when every premise has a lower grounded level than the
+conclusion. The direct source audit found and repaired an earlier witness
+reconstruction edge case in which a lexically earlier cyclic rule could mask
+a valid grounded route. A regression now requires both algorithms to select
+the grounded rule while excluding the cyclic rule from the witness.
+
+The second direct resource and generality review found two additional
+implementation defects before merge-grade validation. The producer preflight
+omitted one final premise scan at a narrow exact work boundary, so the
+watchdog could accept an input that the producer refused at runtime. The
+catalog digest also included unrelated rule islands even though derivation
+coverage is target-bound. The recommended repair was the exact worst-case
+producer bound `(rule_count + 1) * (premise_count + rule_count)` plus
+independent reverse-cone extraction before closure and encoding. Both paths
+now scope seeds and rules to the requested target while still validating the
+complete supplied envelope. Unrelated reachable and unreachable alien islands
+leave the complete target report unchanged.
+
+Tests cover unfamiliar targets, exact ancestry, arrival-order neutrality,
+unrelated alien extension, unrelated unreachable islands, the exact semantic
+work boundary, role and content mismatch, incomplete searches,
+separate coverage, both Pi and Chaos branches, stale coverage, duplicate
+protocol or coverage evidence, cycles, the grounded-cycle regression,
+malformed and capacity refusal, and a small cross-algorithm graph grid. Even a
+structurally complete test protocol returns `authority_effect=none`.
+
+Production fresh-verifies the existing `eps_0` capability, replays it as one
+grounded seed, and reads the live physical-vocabulary frontier. It records one
+derived replay, zero descriptor roles, four relation targets, zero constraint
+laws, and `no_admitted_semantic_target_role`. It does not choose a target from
+the four relation roots or the familiar interpretation of `eps_0`. Search
+completeness is false, the irreducible protocol has not started, and both
+premise and species authority are false.
+
+Species analysis v7 and watchdog v8 independently re-query the premise route
+and serialize its schema, checker identities, complete result digests, exact
+grounded claim, role, and content identities, current partition counts,
+decisions, and non-authority scope. The observer-only viewer projects the same
+fields without a target, rule, protocol, or causal return edge. The authority
+inventory enrolls `planet.law-premise-admission-route` as blocked. Its exact
+census is now 10 active authorities, 11 blocked authorities, and 2
+diagnostics.
+
+The focused 32-test law-premise suite and viewer projection test pass under
+the canonical WSL trust root. The producer and watchdog authority-inventory
+mutation self-tests pass in parallel. The bounded confirmation route passes in
+222.7 seconds with every live stop-tier gate and warnings-denied planet
+Clippy. The final complete `check-pr` route passes in 1,518.1 seconds,
+including every declared gate, all canonical all-target tests, deterministic
+integer and CPU/GPU parity checks, warnings-denied Clippy, private-item
+documentation, and doctests. Two final direct runs and the readiness alias
+each exit 2, write no stderr, and emit the same 398,946-byte refusal bitstream
+at SHA-256
+`0706ce497538c2d5e71c1ecd810b5ccfc456228ce789b54e313dbc7dde096b4a`.
+Publication, remote checks, and the exact Stop gate remain for the end of this
+slice.

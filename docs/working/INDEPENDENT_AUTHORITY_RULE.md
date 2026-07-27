@@ -384,6 +384,34 @@ premise constructor and returns `no_admitted_scope_premise_input`. Negation,
 uncertainty, temporal regimes, and nonmonotonic inference remain outside this
 positive rule language and require typed extension or refusal.
 
+The blocked `planet.law-premise-admission-route` mechanism now makes the
+derive-first order executable without claiming a physical premise. Its
+synchronous producer assigns minimal grounded derivation levels. Its
+dependency-indexed watchdog reaches the same levels through a priority
+traversal. The canonical witness may use only rules whose premises have lower
+levels, so a cycle cannot create a premise or mask a grounded route. Exact role
+and content matching, input-order neutrality, unfamiliar extensions, capacity
+limits, incomplete searches, stale coverage, and typed irreducible branches
+are direct tests.
+
+Failure to derive remains `open_derivation_frontier` unless a separate
+target-bound capability proves that the supplied rule catalog is complete.
+Each implementation independently extracts the requested target's reverse
+dependency cone before closure and canonical encoding. An unrelated reachable
+or unreachable alien rule island therefore cannot change the target report.
+The common semantic work contract covers every synchronous producer pass,
+including the final no-change pass; the dependency watchdog remains a
+separate near-linear execution.
+Only then can the route request the typed irreducible protocol. Buckingham Pi,
+Gap Law with Chaos Protocol, Residual Law, unique residual-slot review, and
+owner admission are separate capability bindings. A complete structural test
+fixture still mints no authority. Production can only replay the already
+admitted exact `eps_0` premise as one grounded seed. It then reads the live
+physical-vocabulary partition and stops at
+`no_admitted_semantic_target_role`: zero descriptor roles, four relation
+targets, and zero constraint laws. The route has no production target-role,
+rule, coverage, protocol, or premise-capability constructor.
+
 A distinct future non-root mint and registry-to-support boundary remain
 blocked. Before a species-forming rule may authorize a derived or irreducible
 artifact, a claim-specific independent pair must verify its complete ancestry
@@ -428,7 +456,7 @@ Both receipts bind the registry SHA-256, schema and closed-world marker,
 ordered mechanism profiles with their complete-profile SHA-256 pins, exact
 active, blocked, and diagnostic counts, and a sorted semantic-closure
 path-to-SHA-256 manifest. The current closed profile contains ten active
-authorities, nine blocked authorities, and two diagnostics. The agreement
+authorities, eleven blocked authorities, and two diagnostics. The agreement
 receipt therefore changes when a semantic field changes, when any closure
 implementation, adapter, shared primitive, or orchestrator changes, or when a
 structural classification changes. Agreement remains structural. It does not

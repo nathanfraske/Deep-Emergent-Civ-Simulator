@@ -67,16 +67,18 @@ flowchart TB
         RUN["run_planet<br/>Only accepted input: sealed floor"]
         AUDITED["AuditedFloorView<br/>Exact typed magnitudes plus<br/>independent floor-authority digest"]
         EPS0["CURRENT derived eps_0 premise<br/>Exact floor ancestry plus local scale<br/>Independent results and canaries<br/>Claim-scoped capability only"]
+        PREMISE_ROUTE["CURRENT paired derive-first route<br/>Minimal grounded proof levels<br/>Cycles cannot create a premise<br/>Separate completeness before irreducibility<br/>Next blocker: no semantic target role"]
 
         FLOOR --> LEDGER
         FLOOR --> RUN
         RUN --> AUDITED
         SI -. "Coordinate representation only" .-> AUDITED
         AUDITED --> EPS0
+        EPS0 --> PREMISE_ROUTE
 
         STRUCTURE["Value-free stellar structure v2<br/>Open components, species, coordinates,<br/>dimensions, sectors, regimes,<br/>histories, and classifications"]
         CENSUS["Exact dimensional census v4<br/>Non-admitting diagnostic<br/>closure_effect = none<br/>coverage_claim = false"]
-        SPECIES_ANALYSIS["Species derivation analysis v6<br/>Independent watchdog v7<br/>Live claim, root, and vocabulary frontiers<br/>Zero members and zero species support,<br/>no residual slot"]
+        SPECIES_ANALYSIS["Species derivation analysis v7<br/>Independent watchdog v8<br/>Live premise, route, root, and vocabulary frontiers<br/>Zero members and zero species support,<br/>no residual slot"]
         SPECIES_PACKET["CURRENT bounded structural packet pair<br/>Canonical descriptors plus conditioned support<br/>Independent algorithms agree on bytes only<br/>No physical member or authority"]
         CURRENT_PROOFS["CURRENT production resolver<br/>Joint physical measure = None<br/>Coordinate law = None"]
         CURRENT_REFUSAL["CURRENT Stage 1 refusal<br/>stellar_birth.realization_measure<br/>Both open leaves remain visible"]
@@ -87,6 +89,7 @@ flowchart TB
         STRUCTURE -. "Binds analysis" .-> SPECIES_ANALYSIS
         AUDITED -. "Binds exact m_e anchor" .-> SPECIES_ANALYSIS
         EPS0 -. "Adjacent claim-scoped premise" .-> SPECIES_ANALYSIS
+        PREMISE_ROUTE -. "Paired non-authorizing blocker" .-> SPECIES_ANALYSIS
         STRUCTURE -. "Constrains packet schemas" .-> SPECIES_PACKET
 
         CURRENT_PROOFS --> CURRENT_REFUSAL
@@ -97,6 +100,7 @@ flowchart TB
         VOCABULARY["CURRENT independent physical-vocabulary pair<br/>Exact current-input partition: 0 / 4 / 0<br/>Descriptor roles / relation targets / constraint laws<br/>Global coverage and membership authority: false<br/>Identity-keyed tier, provenance, and route census"]
         PHYSICAL_REGISTRY["CURRENT conditional physical registry pair<br/>Bottom-up producer plus top-down watchdog<br/>Exact mass, dimensions, state, sectors,<br/>validity, ancestry, and complete closure<br/>Repository result: no admitted species rules"]
         REJECTED_PROFILE["AUDITED rejected primitive candidate<br/>Shared authored ontology<br/>Assertion hashes instead of executable evidence<br/>Raw test fixture, no registry capability"]
+        PREMISE_AUTHORITY["CURRENT blocked premise authority<br/>Target and rule capabilities<br/>Complete rule-universe coverage<br/>Paired Pi, Gap plus Chaos, Residual,<br/>unique slot, live canaries, and mint"]
         SPECIES_LAWS["NEXT executable species-forming authority<br/>Independent symmetry and operator evaluation<br/>Real derive-first, Pi, Gap plus Chaos,<br/>Residual-minimality and unique-slot evidence"]
         REGISTRY["FUTURE realized species registry<br/>Complete lawful membership<br/>Familiarity-independent"]
         MECHANISMS["FUTURE admitted mechanism set<br/>Thermal, opacity, EOS, collapse,<br/>transport, spectra, topology,<br/>conservation, and validity laws"]
@@ -123,8 +127,10 @@ flowchart TB
         VOCABULARY --> PHYSICAL_REGISTRY
         STRUCTURE --> PHYSICAL_REGISTRY
         EPS0 -. "Does not select ontology" .-> REJECTED_PROFILE
+        PREMISE_ROUTE -. "Names the missing capability classes" .-> PREMISE_AUTHORITY
         REJECTED_PROFILE -. "No production authority edge" .-> CURRENT_REFUSAL
         REJECTED_PROFILE -. "Defines the missing proof" .-> SPECIES_LAWS
+        PREMISE_AUTHORITY --> SPECIES_LAWS
         SPECIES_LAWS --> PHYSICAL_REGISTRY
         PHYSICAL_REGISTRY -. "Requires roots and separate authority receipt" .-> REGISTRY
         REGISTRY --> MECHANISMS
@@ -198,7 +204,7 @@ flowchart TB
         OBSERVATION["PlanetObservation<br/>Sealed borrowed projection"]
         REFUSAL_VIEW["Refusal observation<br/>Exact RunReceipt and transcript<br/>No snapshot"]
         SNAPSHOT_VIEW["Completed observation<br/>Immutable PlanetSnapshot<br/>with embedded completion receipt"]
-        EXPLORER["CURRENT useful viewer surface<br/>Typed transcript and floor-event envelope,<br/>stages, open proofs, Gap and Chaos status,<br/>root and vocabulary evidence, exact admission census,<br/>and refusal frontier<br/>Value provenance remains planet-owned"]
+        EXPLORER["CURRENT useful viewer surface<br/>Typed transcript and floor-event envelope,<br/>stages, open proofs, Gap and Chaos status,<br/>paired derive-first blocker, root and vocabulary evidence,<br/>exact admission census, and refusal frontier<br/>Value provenance remains planet-owned"]
 
         CURRENT_REFUSAL --> OUTCOME
         SNAPSHOT --> OUTCOME
@@ -365,6 +371,12 @@ flowchart TB
   not a closed vocabulary: global coverage and membership authority remain
   false. The frontier preserves each root's exact identity, tier, provenance
   tag, and derived or irreducible route without assuming one familiar class.
+- The paired derive-first route replays the exact admitted `eps_0` capability
+  as a grounded seed. It does not use that seed to invent the next target. A
+  failed rule search remains open unless a separate capability proves the
+  target-bound rule universe complete. The current exact blocker is the
+  absence of an admitted semantic target role, before any irreducible protocol
+  may start.
 - The viewer projects exact dimension-only relation terms from the sealed
   refusal without recomputing physics. The current collapse witness is
   `G^-1 * sound_speed^3`; its dimensionless similarity eigenstructure, initial

@@ -31,8 +31,9 @@ pub use scene::{
     LawPremiseCanaryEvidencePair, ObservationScene, ObservationSceneStatus, OpenRequirementScene,
     PhysicalRootAdmissionScene, PhysicalVocabularyCheckerDigests, PhysicalVocabularyPartitions,
     ProvenanceScene, RefusalReasonScene, RefusalScene, RepositoryLawPremiseFrontierScene,
-    RepositoryPhysicalRegistryFrontierScene, RepresentationStatusScene, RepresentationValueScene,
-    SpeciesAttemptScene, SpeciesDerivationScene, StageScene, TranscriptEventScene, TranscriptScene,
+    RepositoryPhysicalRegistryFrontierScene, RepositoryPremiseAdmissionFrontierScene,
+    RepresentationStatusScene, RepresentationValueScene, SpeciesAttemptScene,
+    SpeciesDerivationScene, StageScene, TranscriptEventScene, TranscriptScene,
     ValuePayloadVisibility,
 };
 

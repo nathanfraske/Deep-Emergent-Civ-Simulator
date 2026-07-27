@@ -200,6 +200,38 @@ semantic_closure = [
 ]
 
 [[mechanism]]
+id = "planet.law-premise-admission-route"
+kind = "authority"
+domain = "scientific"
+status = "blocked"
+claim = "For one exact claim and semantic target, opaque admitted premise and derivation-rule capabilities produce a canonical grounded derivation witness, or a failed complete search enters the typed irreducible protocol only after separately authorized derivation coverage, Buckingham Pi, Gap Law with Chaos Protocol, Residual Law, unique residual-slot, and owner-admission bindings."
+producer_path = "crates/planet/src/canonical/stellar_birth_species/law_premise/admission_route/producer.rs"
+refusal_path = "crates/planet/src/canonical/stellar_birth_species/law_premise/admission_route/mod.rs"
+activation_guard = "A synchronous minimal-level producer and dependency-indexed priority watchdog independently extract the target reverse-dependency cone, enforce the full producer work bound including its final no-change pass, and agree over bounded supplied capability graphs, exact role and content identities, unrelated reachable and unreachable unfamiliar extensions, cycles, malformed inputs, stale coverage, and typed protocol branches. Production can only replay the already admitted exact eps0 premise as a seed, then reports no_admitted_semantic_target_role from the current 0/4/0 physical-vocabulary partition. Production has no target-role minter, admitted rule constructor, derivation-coverage constructor, irreducible-protocol constructor, live canary receipt, or premise-capability mint. Every route report denies premise authority, species authority, global derivation coverage, and every authority effect."
+open_cross_checker_requirements = ["claim-scoped semantic target roles and target contents derived from admitted physical-registry capabilities rather than names, shapes, or sole-candidate fallback", "opaque derivation-rule capabilities whose semantic producer and watchdog, applicability pair, validity pair, and exact ancestry are live and independently receipted", "independent closed-world authority for the exact derivation-rule universe and target-bound search coverage, including unfamiliar-rule and omitted-rule falsifiers", "separately paired Buckingham Pi, Gap Law with typed Chaos Protocol, Residual Law, and unique residual-slot authorities plus owner admission for every irreducible survivor", "live producer-owned and watchdog-owned mutation transcripts over complete inputs, outputs, resource limits, cycles, ancestry substitutions, coverage substitutions, and protocol substitutions", "claim-scoped production premise-capability mint and receipt that bind both route implementations, the exact grounded witness or irreducible protocol, semantic target, rule catalog, resource contract, and current sealed ancestry"]
+owner_boundary = "The pair proves bounded grounded reachability and exact structural protocol binding only for supplied opaque capabilities. The owner reviews semantic target admission, rule meaning and completeness, physical applicability and validity, derivation exhaustion, every irreducible protocol authority, and any downstream physical premise or species claim."
+semantic_closure = [
+    "crates/planet/src/canonical/stellar_birth_species/law_premise/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/law_premise/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/law_premise/watchdog.rs",
+    "crates/planet/src/canonical/stellar_birth_species/law_premise/admission_route/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/law_premise/admission_route/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/law_premise/admission_route/tests.rs",
+    "crates/planet/src/canonical/stellar_birth_species/law_premise/admission_route/watchdog.rs",
+    "crates/planet/src/canonical/stellar_birth_species/law_premise/derived_relation/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/law_premise/derived_relation/model.rs",
+    "crates/planet/src/canonical/stellar_birth_species/law_premise/derived_relation/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/law_premise/derived_relation/watchdog.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/model.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/model.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/tests.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/vocabulary/watchdog.rs",
+]
+
+[[mechanism]]
 id = "planet.physical-vocabulary-partition"
 kind = "diagnostic"
 status = "diagnostic"
@@ -236,16 +268,16 @@ semantic_closure = [
 id = "planet.species-derivation-frontier"
 kind = "diagnostic"
 status = "diagnostic"
-observation = "The producer reports only the first executable live physical-registry refusal, while the surrounding analysis carries the separately minted exact `eps_0` derived-coordinate premise beside that registry. The checker independently re-queries both live frontiers. The diagnostic binds the floor, structure, claim-scoped premise receipt, root receipt, exact identity-keyed root admission census, bounded physical-vocabulary receipt and partitions, and live obligations while making no global vocabulary or frontier-completeness claim."
+observation = "The producer reports only the first executable live physical-registry refusal, while the surrounding analysis carries the separately minted exact `eps_0` derived-coordinate premise and a paired bounded derive-first route beside that registry. The route replays the exact premise as one grounded seed, binds both checker results, and stops at no_admitted_semantic_target_role against the current zero descriptor roles, four relation targets, and zero constraint laws. The checker independently re-queries the law premise, route, and physical-registry frontiers. The diagnostic binds the floor, structure, claim-scoped premise receipt, route identities and decisions, root receipt, exact identity-keyed root admission census, bounded physical-vocabulary receipt and partitions, and live obligations while making no global vocabulary or frontier-completeness claim."
 authority_effect = "none"
 diagnostic_producer_path = "crates/planet/src/canonical/stellar_birth_species/authority_analysis/producer.rs"
-diagnostic_producer_implementation = "civsim.planet.stellar-birth-species-frontier-producer.v5"
+diagnostic_producer_implementation = "civsim.planet.stellar-birth-species-frontier-producer.v6"
 diagnostic_checker_path = "crates/planet/src/canonical/stellar_birth_species/authority_analysis/watchdog.rs"
-diagnostic_checker_implementation = "civsim.planet.stellar-birth-species-derivation-watchdog.v7"
-diagnostic_schema = "civsim.planet.stellar-birth-species-derivation-analysis.v6"
-shared_material = ["sealed physical-floor authority and audited execution view", "canonical structure schema", "live claim-scoped derived-coordinate premise with checker identities, complete-result digests, canary evidence, claim-scope evidence, and pair receipt", "live physical-root pair receipt and identity-keyed admission census", "bounded physical-vocabulary agreement receipt and exact partitions", "exact physical-registry refusal and open obligations", "ordered proof identifiers"]
-canaries = ["omitted live obligation", "injected authored downstream path", "frontier completeness escalation", "unfamiliar live obligation", "changed floor authority or anchor", "changed law-premise output or pair receipt", "law-premise species-authority or global-coverage escalation", "changed root-pair schema, implementation identity, receipt, or paired result", "changed root identity, tier, provenance, admission route, or membership-neutral scope", "changed vocabulary schema, implementation identity, receipt, partition, scope, or checker digest", "changed physical-registry scientific refusal", "integrity failure substituted for a scientific refusal", "changed non-admitting status"]
-non_authority_guard = "The analysis carries closure_effect=none, coverage_claim=false, frontier.completeness_claim=false, vocabulary.global_coverage=false, vocabulary.membership_authority=false, zero species members, zero species-support value payloads, and no residual slot. The adjacent law premise has exact-claim coverage only, species_membership_authority=false, global_physical_premise_coverage=false, and authority_effect=none. Diagnostic agreement cannot broaden that capability or close Stage 1."
+diagnostic_checker_implementation = "civsim.planet.stellar-birth-species-derivation-watchdog.v8"
+diagnostic_schema = "civsim.planet.stellar-birth-species-derivation-analysis.v7"
+shared_material = ["sealed physical-floor authority and audited execution view", "canonical structure schema", "live claim-scoped derived-coordinate premise with checker identities, complete-result digests, canary evidence, claim-scope evidence, and pair receipt", "paired bounded premise-admission route with grounded ancestry, exact target identity, physical-vocabulary counts, next blocker, and explicit non-authority scope", "live physical-root pair receipt and identity-keyed admission census", "bounded physical-vocabulary agreement receipt and exact partitions", "exact physical-registry refusal and open obligations", "ordered proof identifiers"]
+canaries = ["omitted live obligation", "injected authored downstream path", "frontier completeness escalation", "unfamiliar live obligation", "changed floor authority or anchor", "changed law-premise output or pair receipt", "law-premise species-authority or global-coverage escalation", "changed premise-route schema, implementation identity, checker result, grounded identity, count, or decision", "premise-route derivation-coverage, irreducible-protocol, premise-authority, species-authority, or authority-effect escalation", "changed root-pair schema, implementation identity, receipt, or paired result", "changed root identity, tier, provenance, admission route, or membership-neutral scope", "changed vocabulary schema, implementation identity, receipt, partition, scope, or checker digest", "changed physical-registry scientific refusal", "integrity failure substituted for a scientific refusal", "changed non-admitting status"]
+non_authority_guard = "The analysis carries closure_effect=none, coverage_claim=false, frontier.completeness_claim=false, vocabulary.global_coverage=false, vocabulary.membership_authority=false, zero species members, zero species-support value payloads, and no residual slot. The adjacent law premise has exact-claim coverage only, species_membership_authority=false, global_physical_premise_coverage=false, and authority_effect=none. The paired route has derivation_frontier_complete=false, irreducible_protocol_started=false, premise_admission_authority=false, species_membership_authority=false, and authority_effect=none. Diagnostic agreement cannot broaden either capability or close Stage 1."
 owner_boundary = "The diagnostic reports a refusal frontier only. Physical species membership and completeness require a future authority pair over independently derived inputs."
 semantic_closure = [
     "crates/ledger/src/admission.rs",
@@ -267,6 +299,10 @@ semantic_closure = [
     "crates/planet/src/canonical/stellar_birth_species/law_premise/mod.rs",
     "crates/planet/src/canonical/stellar_birth_species/law_premise/producer.rs",
     "crates/planet/src/canonical/stellar_birth_species/law_premise/watchdog.rs",
+    "crates/planet/src/canonical/stellar_birth_species/law_premise/admission_route/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/law_premise/admission_route/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/law_premise/admission_route/tests.rs",
+    "crates/planet/src/canonical/stellar_birth_species/law_premise/admission_route/watchdog.rs",
     "crates/planet/src/canonical/stellar_birth_species/law_premise/derived_relation/mod.rs",
     "crates/planet/src/canonical/stellar_birth_species/law_premise/derived_relation/model.rs",
     "crates/planet/src/canonical/stellar_birth_species/law_premise/derived_relation/producer.rs",

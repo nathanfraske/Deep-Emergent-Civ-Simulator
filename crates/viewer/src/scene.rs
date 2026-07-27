@@ -9,7 +9,8 @@ pub use frontier::{
     OpenRequirementScene, PhysicalRootAdmissionScene, PhysicalVocabularyCheckerDigests,
     PhysicalVocabularyPartitions, RefusalReasonScene, RefusalScene,
     RepositoryLawPremiseFrontierScene, RepositoryPhysicalRegistryFrontierScene,
-    SpeciesAttemptScene, SpeciesDerivationScene, StageScene,
+    RepositoryPremiseAdmissionFrontierScene, SpeciesAttemptScene, SpeciesDerivationScene,
+    StageScene,
 };
 pub use transcript::{
     FloorEventScene, FloorScene, ProvenanceScene, RepresentationStatusScene,

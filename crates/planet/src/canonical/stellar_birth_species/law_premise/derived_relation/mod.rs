@@ -117,6 +117,10 @@ impl DerivedRelationPremiseArtifact {
         self.pair_receipt_sha256
     }
 
+    pub(super) const fn capability(&self) -> ClaimScopedPremiseCapability {
+        self.capability
+    }
+
     pub(super) const fn producer_canary_sha256(&self) -> [u8; 32] {
         self.producer_canary_sha256
     }
@@ -218,6 +222,11 @@ fn resolve_repository_derived_relation_premise(
         pair_receipt_sha256: producer_receipt,
         capability,
     })
+}
+
+pub(super) fn repository_derived_relation_capability() -> Option<ClaimScopedPremiseCapability> {
+    let artifact = resolve_repository_derived_relation_premise().ok()?;
+    verify_current_artifact(&artifact).then_some(artifact.capability())
 }
 
 pub(in crate::canonical::stellar_birth_species) fn repository_derived_relation_premise_frontier(

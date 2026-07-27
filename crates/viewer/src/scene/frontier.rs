@@ -414,6 +414,53 @@ impl<'a> RepositoryLawPremiseFrontierScene<'a> {
     }
 }
 
+/// Read-only derive-first route over admitted law-premise capabilities.
+///
+/// The scene reports one replayed derived route and the exact next blocker. It
+/// cannot supply a target, rule, protocol receipt, or authority capability.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepositoryPremiseAdmissionFrontierScene<'a> {
+    identity: (&'a str, &'a str, &'a str),
+    checker_result_sha256: ([u8; 32], [u8; 32]),
+    derived_identity_sha256: ([u8; 32], [u8; 32], [u8; 32]),
+    counts: (u32, u32, u32, u32),
+    decisions: (&'a str, &'a str),
+    scope: (bool, bool, bool, bool, &'a str),
+}
+
+impl<'a> RepositoryPremiseAdmissionFrontierScene<'a> {
+    /// Route schema plus independent producer and watchdog identities.
+    pub const fn identity(&self) -> (&'a str, &'a str, &'a str) {
+        self.identity
+    }
+
+    /// Complete producer and watchdog result digests.
+    pub const fn checker_result_digests(&self) -> ([u8; 32], [u8; 32]) {
+        self.checker_result_sha256
+    }
+
+    /// Claim, role, and content identities of the replayed derived route.
+    pub const fn derived_identity_digests(&self) -> ([u8; 32], [u8; 32], [u8; 32]) {
+        self.derived_identity_sha256
+    }
+
+    /// Derived routes, descriptor roles, relation targets, and constraint laws.
+    pub const fn counts(&self) -> (u32, u32, u32, u32) {
+        self.counts
+    }
+
+    /// Replayed derived decision and the exact next-target blocker.
+    pub const fn decisions(&self) -> (&'a str, &'a str) {
+        self.decisions
+    }
+
+    /// Derivation completeness, protocol start, premise authority, species
+    /// authority, and authority effect.
+    pub const fn scope(&self) -> (bool, bool, bool, bool, &'a str) {
+        self.scope
+    }
+}
+
 /// Exact non-admitting species derivation analysis attached to Stage 1.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpeciesDerivationScene<'a> {
@@ -431,6 +478,7 @@ pub struct SpeciesDerivationScene<'a> {
     floor_anchor_membership_authority: Option<bool>,
     floor_anchor_role: Option<&'a str>,
     law_premise_frontier: Option<RepositoryLawPremiseFrontierScene<'a>>,
+    premise_admission_frontier: Option<RepositoryPremiseAdmissionFrontierScene<'a>>,
     physical_registry_frontier: Option<RepositoryPhysicalRegistryFrontierScene<'a>>,
     frontier_source_id: Option<&'a str>,
     frontier_scope_id: Option<&'a str>,
@@ -506,6 +554,13 @@ impl<'a> SpeciesDerivationScene<'a> {
     /// Sealed claim-scoped coordinate premise adjacent to the registry.
     pub const fn law_premise_frontier(&self) -> Option<&RepositoryLawPremiseFrontierScene<'a>> {
         self.law_premise_frontier.as_ref()
+    }
+
+    /// Paired derive-first route and exact next-target blocker.
+    pub const fn premise_admission_frontier(
+        &self,
+    ) -> Option<&RepositoryPremiseAdmissionFrontierScene<'a>> {
+        self.premise_admission_frontier.as_ref()
     }
 
     /// Live source, bounded scope, and explicit absence of a completeness claim.
@@ -819,6 +874,22 @@ impl<'a> RefusalScene<'a> {
                                                 scope: view.law_premise_scope()?,
                                             })
                                         })();
+                                        let premise_admission_frontier = (|| {
+                                            Some(RepositoryPremiseAdmissionFrontierScene {
+                                                identity: view
+                                                    .premise_admission_route_identity()?,
+                                                checker_result_sha256: view
+                                                    .premise_admission_route_result_sha256()?,
+                                                derived_identity_sha256: view
+                                                    .premise_admission_derived_identity()?,
+                                                counts: view
+                                                    .premise_admission_route_counts()?,
+                                                decisions: view
+                                                    .premise_admission_route_decisions()?,
+                                                scope: view
+                                                    .premise_admission_route_scope()?,
+                                            })
+                                        })();
                                         let physical_registry_frontier = (|| {
                                             Some(RepositoryPhysicalRegistryFrontierScene {
                                                 registry_schema_id: view
@@ -937,6 +1008,7 @@ impl<'a> RefusalScene<'a> {
                                             .floor_anchor_membership_authority(),
                                         floor_anchor_role: view.floor_anchor_role(),
                                         law_premise_frontier,
+                                        premise_admission_frontier,
                                         physical_registry_frontier,
                                         frontier_source_id: view.frontier_source_id(),
                                         frontier_scope_id: view.frontier_scope_id(),
@@ -1084,6 +1156,31 @@ mod tests {
             ("universal", "[D]", "verified_derived_content")
         );
         assert_eq!(frontier.scope(), (true, false, false, "none"));
+    }
+
+    #[test]
+    fn premise_admission_frontier_exposes_the_next_blocker_without_a_control_edge() {
+        let frontier = RepositoryPremiseAdmissionFrontierScene {
+            identity: ("route.v1", "producer.v1", "watchdog.v1"),
+            checker_result_sha256: ([1; 32], [1; 32]),
+            derived_identity_sha256: ([2; 32], [3; 32], [4; 32]),
+            counts: (1, 0, 4, 0),
+            decisions: ("derived", "no_admitted_semantic_target_role"),
+            scope: (false, false, false, false, "none"),
+        };
+
+        assert_ne!(frontier.identity().1, frontier.identity().2);
+        assert_eq!(frontier.checker_result_digests(), ([1; 32], [1; 32]));
+        assert_eq!(
+            frontier.derived_identity_digests(),
+            ([2; 32], [3; 32], [4; 32])
+        );
+        assert_eq!(frontier.counts(), (1, 0, 4, 0));
+        assert_eq!(
+            frontier.decisions(),
+            ("derived", "no_admitted_semantic_target_role")
+        );
+        assert_eq!(frontier.scope(), (false, false, false, false, "none"));
     }
 
     #[test]

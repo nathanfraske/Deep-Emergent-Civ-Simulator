@@ -16,6 +16,7 @@
 //! authority pair. Every successful selection report has
 //! `authority_effect=none`.
 
+mod admission_route;
 mod derived_relation;
 mod producer;
 mod watchdog;
@@ -23,6 +24,9 @@ mod watchdog;
 #[cfg(test)]
 mod tests;
 
+pub(super) use admission_route::{
+    repository_premise_admission_frontier, RepositoryPremiseAdmissionFrontier,
+};
 pub(super) use derived_relation::{
     repository_derived_relation_premise_frontier, RepositoryDerivedRelationPremiseFrontier,
 };

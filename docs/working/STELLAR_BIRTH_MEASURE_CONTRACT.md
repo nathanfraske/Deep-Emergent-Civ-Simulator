@@ -216,8 +216,8 @@ registry authority in this slice are structural seals with no production
 constructors, bound payloads, or semantic checkers. The repository resolver
 returns `None`, so no production path can call the reducer. The joint-measure
 refusal includes
-`civsim.planet.stellar-birth-species-derivation-analysis.v6`, checked by
-`civsim.planet.stellar-birth-species-derivation-watchdog.v7`. Its private
+`civsim.planet.stellar-birth-species-derivation-analysis.v7`, checked by
+`civsim.planet.stellar-birth-species-derivation-watchdog.v8`. Its private
 authority is constructible only from the audited floor, the independently
 sealed floor digest, the validated structure schemas, and the live physical
 root pair. The analysis also binds the adjacent claim-scoped premise's
@@ -230,6 +230,26 @@ three scalar coordinates, one membership-neutral pure-mass expression, zero
 candidate members, zero verified support members, no species-support value
 payload, and no residual-slot claim. Its only attempt is the first executable
 refusal reached by the live physical registry.
+
+The same analysis now carries a paired bounded premise-admission route. Its
+synchronous producer and dependency-indexed watchdog independently compute
+minimal grounded derivation levels and exact ancestry. A cyclic rule has no
+grounding and cannot create a premise or displace the canonical grounded
+witness. Each checker independently extracts the target reverse-dependency
+cone, so an unrelated alien seed or rule island cannot change the target
+report. Production replays the admitted `eps_0` capability as one seed, then
+stops at `no_admitted_semantic_target_role` against the current `0 / 4 / 0`
+partition. The route records
+`derivation_frontier_complete=false`,
+`irreducible_protocol_started=false`,
+`premise_admission_authority=false`, and `authority_effect=none`.
+
+A failed search remains an open frontier. It cannot become an irreducible
+claim until a separate capability binds complete target-scoped coverage of the
+admitted rule universe. The typed protocol then requires distinct Buckingham
+Pi, Gap Law with Chaos Protocol, Residual Law, unique residual-slot, and owner
+admission bindings. No production constructor for the semantic target, rules,
+coverage, protocol, or resulting premise exists in this slice.
 
 Before that refusal, two bounded classifiers independently partition the exact
 admitted input into physical descriptor roles, relation targets, and constraint
@@ -429,16 +449,16 @@ three physical floor values, derives `eps_0`, enters Stage 1, and returns
 `stellar_birth.realization_measure`. It emits six transcript events: three
 floor records, one derived-value record, one Stage 1 entry, and one refusal.
 It emits no `[X]`, no `[W]` realization, and no snapshot. Two direct runs after
-the first active derived-relation premise and its independent-authority repair
-are byte-identical at `393,806` stdout bytes and SHA-256
-`3da00e63a98cb78c09c2c2acb6fe212e6660580b249dd4780d27ccd0558bd3b5`,
+the grounded derive-first route and analysis v7 integration are byte-identical
+at `398,946` stdout bytes and SHA-256
+`0706ce497538c2d5e71c1ecd810b5ccfc456228ce789b54e313dbc7dde096b4a`,
 with exit `2` and empty stderr. A direct `--readiness` run has the same exit,
 stdout, stderr, and digest. It is an observer alias for the canonical front
 door, not a separate readiness result or evidence source. The changed bytes
 bind authority evidence, not a changed physical outcome. The current receipt
 is `civsim.planet.run.v13`; its transcript schema major is `10`.
 
-The complete PR route passes in 1,485.8 seconds. It covers every declared gate,
+The complete PR route passes in 1,518.1 seconds. It covers every declared gate,
 all canonical all-target tests, deterministic integer and CPU/GPU parity
 checks, warnings-denied Clippy, private-item documentation, and doctests.
 
@@ -494,6 +514,10 @@ other dropped mechanism remain explicit residual or refusal obligations.
    constraint-law, excitation, bound-state, species mass-uncertainty, and
    massless-law roots consumed by the conditional physical registry pair. The
    four current roots are membership-neutral and grant no species authority.
+   Route each premise through the landed grounded derive-first pair. A failed
+   search stays open until independent target-bound rule-universe coverage
+   closes. Only a surviving irreducible may enter the paired Buckingham Pi,
+   Gap plus Chaos, Residual, unique-slot, and owner-admission protocol.
    Preserve the landed downstream schema-specific root-capability verification
    before any member can close. After a separate production registry authority
    binds, close conditioned support behind the landed packet. Only then may

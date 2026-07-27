@@ -5,7 +5,9 @@
 
 use super::{AnalysisBuildError, AnalysisProgress, SpeciesDerivationAnalysis};
 use crate::canonical::stellar_birth_species::{
-    law_premise::repository_derived_relation_premise_frontier,
+    law_premise::{
+        repository_derived_relation_premise_frontier, repository_premise_admission_frontier,
+    },
     physical_registry::repository_physical_registry_frontier,
 };
 use crate::canonical::{
@@ -33,6 +35,8 @@ pub(super) fn validate_analysis(
         .map_err(|error| AnalysisBuildError::PhysicalRegistryFrontier(error.code.to_owned()))?;
     let expected_law_premise_frontier = repository_derived_relation_premise_frontier()
         .map_err(|error| AnalysisBuildError::LawPremiseFrontier(error.code.to_owned()))?;
+    let expected_premise_admission_frontier = repository_premise_admission_frontier()
+        .map_err(|error| AnalysisBuildError::PremiseAdmissionFrontier(error.code.to_owned()))?;
     let floor = crate::canonical::sealed_absolute_physics_floor()
         .map_err(|error| AnalysisBuildError::FloorAuthority(error.to_string()))?;
     let floor_view = AuditedFloorView::from_floor(&floor)
@@ -89,6 +93,53 @@ pub(super) fn validate_analysis(
         || analysis.law_premise_frontier.authority_effect != "none"
     {
         return invariant("law premise gained unsupported scope or authority");
+    }
+    if analysis.premise_admission_frontier != expected_premise_admission_frontier {
+        return invariant("premise-admission frontier differs from its live paired result");
+    }
+    if analysis.premise_admission_frontier.derived_route_count != 1
+        || analysis
+            .premise_admission_frontier
+            .derived_claim_identity_sha256
+            != analysis.law_premise_frontier.claim_identity_sha256
+        || analysis
+            .premise_admission_frontier
+            .derived_role_identity_sha256
+            != analysis.law_premise_frontier.role_identity_sha256
+        || analysis
+            .premise_admission_frontier
+            .derived_content_identity_sha256
+            != analysis.law_premise_frontier.content_identity_sha256
+        || analysis.premise_admission_frontier.derived_decision_id != "derived"
+        || analysis
+            .premise_admission_frontier
+            .current_descriptor_role_count
+            != expected_physical_frontier.vocabulary_descriptor_role_count
+        || analysis
+            .premise_admission_frontier
+            .current_relation_target_count
+            != expected_physical_frontier.vocabulary_relation_target_count
+        || analysis
+            .premise_admission_frontier
+            .current_constraint_law_count
+            != expected_physical_frontier.vocabulary_constraint_law_count
+        || analysis.premise_admission_frontier.next_target_decision_id
+            != "no_admitted_semantic_target_role"
+        || analysis
+            .premise_admission_frontier
+            .derivation_frontier_complete
+        || analysis
+            .premise_admission_frontier
+            .irreducible_protocol_started
+        || analysis
+            .premise_admission_frontier
+            .premise_admission_authority
+        || analysis
+            .premise_admission_frontier
+            .species_membership_authority
+        || analysis.premise_admission_frontier.authority_effect != "none"
+    {
+        return invariant("premise-admission frontier gained unsupported closure or authority");
     }
     if analysis.frontier_source_id != CHECKED_FRONTIER_SOURCE_ID
         || analysis.frontier_scope_id != CHECKED_FRONTIER_SCOPE_ID

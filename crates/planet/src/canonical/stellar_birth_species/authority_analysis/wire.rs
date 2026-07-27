@@ -22,6 +22,7 @@ pub(in crate::canonical) fn write_species_derivation_analysis(
             write_schema_bindings(f, prefix, analysis)?;
             write_floor_anchor(f, prefix, analysis)?;
             write_law_premise_frontier(f, prefix, analysis)?;
+            write_premise_admission_frontier(f, prefix, analysis)?;
             write_physical_registry_frontier(f, prefix, analysis)?;
             writeln!(
                 f,
@@ -71,6 +72,83 @@ pub(in crate::canonical) fn write_species_derivation_analysis(
             Ok(())
         }
     }
+}
+
+fn write_premise_admission_frontier(
+    f: &mut fmt::Formatter<'_>,
+    prefix: &str,
+    analysis: &super::SpeciesDerivationAnalysis,
+) -> fmt::Result {
+    let frontier = &analysis.premise_admission_frontier;
+    let route_prefix = format!("{prefix}.premise_admission_frontier");
+    for (field, value) in [
+        ("schema", frontier.schema_id),
+        ("producer_id", frontier.producer_id),
+        ("watchdog_id", frontier.watchdog_id),
+        ("derived_decision_id", frontier.derived_decision_id),
+        ("next_target_decision_id", frontier.next_target_decision_id),
+        ("authority_effect", frontier.authority_effect),
+    ] {
+        writeln!(f, "{route_prefix}.{field}={}", canonical_text(value))?;
+    }
+    for (field, digest) in [
+        ("producer_result.sha256", frontier.producer_result_sha256),
+        ("watchdog_result.sha256", frontier.watchdog_result_sha256),
+        (
+            "derived_claim_identity.sha256",
+            frontier.derived_claim_identity_sha256,
+        ),
+        (
+            "derived_role_identity.sha256",
+            frontier.derived_role_identity_sha256,
+        ),
+        (
+            "derived_content_identity.sha256",
+            frontier.derived_content_identity_sha256,
+        ),
+    ] {
+        write_digest(f, &route_prefix, field, digest)?;
+    }
+    writeln!(
+        f,
+        "{route_prefix}.derived_route_count={}",
+        frontier.derived_route_count
+    )?;
+    writeln!(
+        f,
+        "{route_prefix}.current_descriptor_role_count={}",
+        frontier.current_descriptor_role_count
+    )?;
+    writeln!(
+        f,
+        "{route_prefix}.current_relation_target_count={}",
+        frontier.current_relation_target_count
+    )?;
+    writeln!(
+        f,
+        "{route_prefix}.current_constraint_law_count={}",
+        frontier.current_constraint_law_count
+    )?;
+    writeln!(
+        f,
+        "{route_prefix}.derivation_frontier_complete={}",
+        frontier.derivation_frontier_complete
+    )?;
+    writeln!(
+        f,
+        "{route_prefix}.irreducible_protocol_started={}",
+        frontier.irreducible_protocol_started
+    )?;
+    writeln!(
+        f,
+        "{route_prefix}.premise_admission_authority={}",
+        frontier.premise_admission_authority
+    )?;
+    writeln!(
+        f,
+        "{route_prefix}.species_membership_authority={}",
+        frontier.species_membership_authority
+    )
 }
 
 fn write_law_premise_frontier(

@@ -267,6 +267,73 @@ impl<'a> SpeciesDerivationAnalysisView<'a> {
         })
     }
 
+    pub fn premise_admission_route_identity(self) -> Option<(&'a str, &'a str, &'a str)> {
+        self.computed().map(|analysis| {
+            let frontier = &analysis.premise_admission_frontier;
+            (
+                frontier.schema_id,
+                frontier.producer_id,
+                frontier.watchdog_id,
+            )
+        })
+    }
+
+    pub fn premise_admission_route_result_sha256(self) -> Option<([u8; 32], [u8; 32])> {
+        self.computed().map(|analysis| {
+            let frontier = &analysis.premise_admission_frontier;
+            (
+                frontier.producer_result_sha256,
+                frontier.watchdog_result_sha256,
+            )
+        })
+    }
+
+    pub fn premise_admission_derived_identity(self) -> Option<([u8; 32], [u8; 32], [u8; 32])> {
+        self.computed().map(|analysis| {
+            let frontier = &analysis.premise_admission_frontier;
+            (
+                frontier.derived_claim_identity_sha256,
+                frontier.derived_role_identity_sha256,
+                frontier.derived_content_identity_sha256,
+            )
+        })
+    }
+
+    pub fn premise_admission_route_counts(self) -> Option<(u32, u32, u32, u32)> {
+        self.computed().map(|analysis| {
+            let frontier = &analysis.premise_admission_frontier;
+            (
+                frontier.derived_route_count,
+                frontier.current_descriptor_role_count,
+                frontier.current_relation_target_count,
+                frontier.current_constraint_law_count,
+            )
+        })
+    }
+
+    pub fn premise_admission_route_decisions(self) -> Option<(&'a str, &'a str)> {
+        self.computed().map(|analysis| {
+            let frontier = &analysis.premise_admission_frontier;
+            (
+                frontier.derived_decision_id,
+                frontier.next_target_decision_id,
+            )
+        })
+    }
+
+    pub fn premise_admission_route_scope(self) -> Option<(bool, bool, bool, bool, &'a str)> {
+        self.computed().map(|analysis| {
+            let frontier = &analysis.premise_admission_frontier;
+            (
+                frontier.derivation_frontier_complete,
+                frontier.irreducible_protocol_started,
+                frontier.premise_admission_authority,
+                frontier.species_membership_authority,
+                frontier.authority_effect,
+            )
+        })
+    }
+
     pub fn physical_registry_root_receipt_schema_id(self) -> Option<&'a str> {
         self.computed()
             .map(|analysis| analysis.physical_registry_frontier.root_receipt_schema_id)
