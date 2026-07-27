@@ -339,6 +339,10 @@ fn production_has_no_admitted_action_or_authority_effect() {
         repository_complete_quadratic_symmetry().unwrap_err(),
         CompleteQuadraticSymmetryRefusal::NoAdmittedSymmetryActionInput
     );
+    assert_eq!(
+        repository_conditional_quadratic_symmetry().unwrap_err(),
+        ConditionalQuadraticSymmetryRefusal::NoAdmittedScopePremiseInput
+    );
 }
 
 #[test]
@@ -362,6 +366,67 @@ fn complete_quadratic_runner_evaluates_every_derived_basis_element() {
     assert!(!report.field_ontology_authority());
     assert!(!report.action_admission_authority());
     assert!(!report.applicability_authority());
+    assert!(!report.species_membership_authority());
+    assert_eq!(report.authority_effect(), "none");
+}
+
+#[test]
+fn conditional_runner_binds_scope_proofs_to_the_exact_evaluated_action() {
+    let input = ConditionalQuadraticSymmetryInput {
+        symmetry: ScopedSymmetryActionInput {
+            claim_identity: identity(1),
+            subject_identity: identity(2),
+            applicability_domain_identity: identity(3),
+            field_components: vec![identity(10), identity(11)],
+            action: AffineSymmetryAction {
+                symmetry_identity: identity(4),
+                terms: vec![action_term(10, 20, 1)],
+            },
+        },
+        premise_facts: vec![identity(70)],
+        inference_rules: vec![
+            applicability_proof::ScopeInferenceRule {
+                premises: vec![
+                    applicability_proof::ScopeRulePremise::EvaluatedAction,
+                    applicability_proof::ScopeRulePremise::Fact(identity(70)),
+                ],
+                conclusion: identity(71),
+            },
+            applicability_proof::ScopeInferenceRule {
+                premises: vec![applicability_proof::ScopeRulePremise::Fact(identity(71))],
+                conclusion: identity(72),
+            },
+            applicability_proof::ScopeInferenceRule {
+                premises: vec![applicability_proof::ScopeRulePremise::Fact(identity(71))],
+                conclusion: identity(73),
+            },
+        ],
+        required_applicability_fact: identity(72),
+        required_validity_fact: identity(73),
+    };
+    let report = inspect_conditional_quadratic_symmetry(&input).unwrap();
+    let mut altered_action = input.clone();
+    altered_action.symmetry.action.terms[0].coefficient = 2;
+    let altered_report = inspect_conditional_quadratic_symmetry(&altered_action).unwrap();
+    assert_eq!(report.basis_element_count(), 3);
+    assert_eq!(report.excluded_operator_count(), 2);
+    assert_eq!(report.invariant_operator_count(), 1);
+    assert_eq!(report.scope.reachable_fact_count(), 4);
+    assert_eq!(
+        report.scope.action_binding_fact(),
+        report.symmetry.action_binding_identity()
+    );
+    assert_ne!(
+        report.scope.action_binding_fact(),
+        altered_report.scope.action_binding_fact()
+    );
+    assert!(report.conditional_applicability_proved());
+    assert!(report.conditional_validity_proved());
+    assert!(report.exact_action_binding_proved());
+    assert!(!report.premise_admission_authority());
+    assert!(!report.field_ontology_authority());
+    assert!(!report.action_admission_authority());
+    assert!(!report.physical_operator_family_authority());
     assert!(!report.species_membership_authority());
     assert_eq!(report.authority_effect(), "none");
 }

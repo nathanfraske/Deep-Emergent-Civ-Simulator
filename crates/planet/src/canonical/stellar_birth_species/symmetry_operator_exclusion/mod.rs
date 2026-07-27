@@ -15,6 +15,7 @@
 //! complete operator basis, or mint a species. Production therefore has no
 //! input constructor and returns a typed refusal.
 
+mod applicability_proof;
 mod producer;
 mod quadratic_basis;
 mod watchdog;
@@ -27,6 +28,8 @@ use civsim_units::digest::sha256;
 const RESULT_SCHEMA_ID: &str = "civsim.planet.symmetry-operator-exclusion-evaluation.v1";
 const PRODUCER_ID: &str = "civsim.planet.symmetry-operator-exclusion.substitution-producer.v1";
 const WATCHDOG_ID: &str = "civsim.planet.symmetry-operator-exclusion.direct-variation-watchdog.v1";
+const SCOPE_ACTION_BINDING_DOMAIN: &[u8] =
+    b"civsim.planet.symmetry-operator-exclusion.scope-action-binding.v1";
 
 const MAX_FIELD_COMPONENTS: usize = 64;
 const MAX_ACTION_TERMS: usize = 4_096;
@@ -99,6 +102,20 @@ struct ScopedSymmetryActionInput {
     applicability_domain_identity: AlgebraIdentity,
     field_components: Vec<AlgebraIdentity>,
     action: AffineSymmetryAction,
+}
+
+/// Conditional scope evidence for one exact complete quadratic evaluation.
+///
+/// Facts and rules remain caller-supplied diagnostics. The combined runner
+/// derives the action-binding fact from the independently agreed algebra
+/// result, so a proof for another action cannot be substituted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ConditionalQuadraticSymmetryInput {
+    symmetry: ScopedSymmetryActionInput,
+    premise_facts: Vec<AlgebraIdentity>,
+    inference_rules: Vec<applicability_proof::ScopeInferenceRule>,
+    required_applicability_fact: AlgebraIdentity,
+    required_validity_fact: AlgebraIdentity,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -228,6 +245,88 @@ impl CompleteQuadraticSymmetryReport {
     const fn authority_effect(&self) -> &'static str {
         "none"
     }
+
+    fn action_binding_identity(&self) -> AlgebraIdentity {
+        let mut bytes = Vec::with_capacity(SCOPE_ACTION_BINDING_DOMAIN.len() + 512);
+        bytes.extend_from_slice(SCOPE_ACTION_BINDING_DOMAIN);
+        append_scope_binding_field(&mut bytes, 1, self.basis.schema_id().as_bytes());
+        append_scope_binding_field(&mut bytes, 2, self.basis.producer_id().as_bytes());
+        append_scope_binding_field(&mut bytes, 3, self.basis.watchdog_id().as_bytes());
+        append_scope_binding_field(&mut bytes, 4, &self.basis.producer_result_sha256());
+        append_scope_binding_field(&mut bytes, 5, &self.basis.watchdog_result_sha256());
+        append_scope_binding_field(&mut bytes, 6, RESULT_SCHEMA_ID.as_bytes());
+        append_scope_binding_field(&mut bytes, 7, self.exclusion.producer_id.as_bytes());
+        append_scope_binding_field(&mut bytes, 8, self.exclusion.watchdog_id.as_bytes());
+        append_scope_binding_field(&mut bytes, 9, &self.exclusion.producer_result_sha256);
+        append_scope_binding_field(&mut bytes, 10, &self.exclusion.watchdog_result_sha256);
+        AlgebraIdentity(sha256(&bytes))
+    }
+}
+
+fn append_scope_binding_field(bytes: &mut Vec<u8>, tag: u16, payload: &[u8]) {
+    bytes.extend_from_slice(&tag.to_be_bytes());
+    bytes.extend_from_slice(
+        &u64::try_from(payload.len())
+            .unwrap_or(u64::MAX)
+            .to_be_bytes(),
+    );
+    bytes.extend_from_slice(payload);
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ConditionalQuadraticSymmetryReport {
+    scope: applicability_proof::ScopeProofReport,
+    symmetry: CompleteQuadraticSymmetryReport,
+}
+
+impl ConditionalQuadraticSymmetryReport {
+    fn basis_element_count(&self) -> usize {
+        self.symmetry.basis_element_count()
+    }
+
+    fn excluded_operator_count(&self) -> usize {
+        self.symmetry.excluded_operator_count()
+    }
+
+    fn invariant_operator_count(&self) -> usize {
+        self.symmetry.invariant_operator_count()
+    }
+
+    const fn conditional_applicability_proved(&self) -> bool {
+        true
+    }
+
+    const fn conditional_validity_proved(&self) -> bool {
+        true
+    }
+
+    const fn exact_action_binding_proved(&self) -> bool {
+        true
+    }
+
+    const fn premise_admission_authority(&self) -> bool {
+        false
+    }
+
+    const fn field_ontology_authority(&self) -> bool {
+        false
+    }
+
+    const fn action_admission_authority(&self) -> bool {
+        false
+    }
+
+    const fn physical_operator_family_authority(&self) -> bool {
+        false
+    }
+
+    const fn species_membership_authority(&self) -> bool {
+        false
+    }
+
+    const fn authority_effect(&self) -> &'static str {
+        "none"
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -298,6 +397,13 @@ enum CompleteQuadraticSymmetryRefusal {
     Exclusion(SymmetryOperatorExclusionRefusal),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConditionalQuadraticSymmetryRefusal {
+    NoAdmittedScopePremiseInput,
+    Symmetry(CompleteQuadraticSymmetryRefusal),
+    Scope(applicability_proof::ScopeProofRefusal),
+}
+
 fn inspect_symmetry_operator_exclusion(
     input: &SymmetryOperatorExclusionInput,
 ) -> Result<SymmetryOperatorExclusionReport, SymmetryOperatorExclusionRefusal> {
@@ -347,6 +453,25 @@ fn inspect_complete_quadratic_symmetry(
     Ok(CompleteQuadraticSymmetryReport { basis, exclusion })
 }
 
+fn inspect_conditional_quadratic_symmetry(
+    input: &ConditionalQuadraticSymmetryInput,
+) -> Result<ConditionalQuadraticSymmetryReport, ConditionalQuadraticSymmetryRefusal> {
+    let symmetry = inspect_complete_quadratic_symmetry(&input.symmetry)
+        .map_err(ConditionalQuadraticSymmetryRefusal::Symmetry)?;
+    let scope = applicability_proof::inspect_scope_proof(&applicability_proof::ScopeProofInput {
+        claim_identity: input.symmetry.claim_identity,
+        subject_identity: input.symmetry.subject_identity,
+        applicability_domain_identity: input.symmetry.applicability_domain_identity,
+        action_binding_fact: symmetry.action_binding_identity(),
+        premise_facts: input.premise_facts.clone(),
+        inference_rules: input.inference_rules.clone(),
+        required_applicability_fact: input.required_applicability_fact,
+        required_validity_fact: input.required_validity_fact,
+    })
+    .map_err(ConditionalQuadraticSymmetryRefusal::Scope)?;
+    Ok(ConditionalQuadraticSymmetryReport { scope, symmetry })
+}
+
 fn repository_symmetry_operator_exclusion(
 ) -> Result<SymmetryOperatorExclusionReport, SymmetryOperatorExclusionRefusal> {
     Err(SymmetryOperatorExclusionRefusal::NoAdmittedSymmetryActionInput)
@@ -355,4 +480,9 @@ fn repository_symmetry_operator_exclusion(
 fn repository_complete_quadratic_symmetry(
 ) -> Result<CompleteQuadraticSymmetryReport, CompleteQuadraticSymmetryRefusal> {
     Err(CompleteQuadraticSymmetryRefusal::NoAdmittedSymmetryActionInput)
+}
+
+fn repository_conditional_quadratic_symmetry(
+) -> Result<ConditionalQuadraticSymmetryReport, ConditionalQuadraticSymmetryRefusal> {
+    Err(ConditionalQuadraticSymmetryRefusal::NoAdmittedScopePremiseInput)
 }

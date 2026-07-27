@@ -1462,3 +1462,65 @@ and 2 diagnostic mechanisms. The complete `check-pr` route passes in 1,199.5
 seconds, including every canonical package and target, authority and gate
 self-tests, Stone 0, deterministic CPU and GPU integer parity, private-item
 documentation, and doctests.
+
+## 2026-07-27 action-bound applicability and validity audit
+
+The source-confirmed finding was recorded before implementation. The sealed
+floor and live derived `eps_0` relation still provide no admitted field
+descriptor, symmetry action, constraint law, applicability premise, or
+validity capability. The conditional quadratic runner therefore cannot infer
+physical applicability from its algebra result. The rejected primitive
+fixture only hashes prose that says constants do not select a field ontology;
+it remains test-only and cannot supply the missing premise.
+
+The recommendation was to leave ontology admission blocked and close only the
+generic calculation that can be checked today. Two independent algorithms
+should accept opaque positive facts and rules, bind the proof to the complete
+evaluated action, prove the requested applicability and validity facts, then
+repeat without the evaluated-action premise. Success should require both
+facts to disappear in that counterfactual. Supplied facts and rules must remain
+non-admitted diagnostics, production must have no constructor, and the
+authority inventory must track this as a separate blocked mechanism.
+
+The implementation follows that boundary. The producer validates and sorts
+its input, then performs bounded fixed-point saturation. The watchdog
+independently builds a premise-to-rule dependency index and closes unresolved
+premise counts. Both use a typed `EvaluatedAction` premise rather than letting
+an opaque fact collide with the action marker. The action identity commits the
+complete quadratic-basis schema, producer and watchdog identities, both basis
+result digests, the algebra schema, both algebra checker identities, and both
+algebra result digests. A changed action therefore changes the scope binding
+even when the supplied inference graph is unchanged.
+
+Both paths enforce the same algorithm-neutral resource contract before
+closure: at most 4,096 premise facts, 256 rules, 256 premises per rule, 4,096
+total rule premises, 1,100,000 worst-case work units, and 2,097,152 canonical
+bytes. They independently canonicalize fact, premise, and rule arrival order
+and must agree on the complete evaluation and canonical bytes. Production
+returns `no_admitted_scope_premise_input`; successful conditional reports
+grant no premise-admission, applicability, validity, field, action,
+operator-family, species, or authority capability.
+
+The bounded source audit used five direct lenses without rebuilding an audit
+packet. The confirmation lens found that reachability must not be described as
+physical truth. The derive-versus-author lens confirmed every fact and rule is
+still supplied and no production adapter exists. The admit-the-alien lens
+confirmed order neutrality and unrelated extension monotonicity while noting
+that positive Horn closure cannot represent negation, uncertainty, temporal
+regimes, or nonmonotonic inference. Such a theory must receive a typed
+extension or refusal. The Terran-bias lens found no particle name, gauge group,
+field cardinality, catalog position, or familiar fallback. The
+steering-and-observer lens found no viewer input or causal return path.
+
+Thirty focused symmetry tests pass. They include exact action substitution,
+action-removal counterfactuals, action-independent alternate-proof refusal,
+arrival-order neutrality, unrelated unfamiliar extension, supported cycles,
+malformed-input agreement, resource preflight, and production refusal. The
+two authority-inventory implementations agree on 10 active authorities, 10
+blocked authorities, and 2 diagnostics. The bounded confirmation route passes
+in 178.5 seconds, including all live stop-tier gates and warnings-denied planet
+Clippy. The complete `check-pr` route passes in 1,304.1 seconds, including
+every canonical package and target, authority and detector self-tests, Stone
+0, deterministic CPU and GPU integer parity, private-item documentation, and
+doctests. This slice produces no physical species and does not reactivate the
+rejected profile.

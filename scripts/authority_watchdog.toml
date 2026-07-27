@@ -470,7 +470,7 @@ status = "blocked"
 claim = "An admitted affine symmetry action over a complete applicable quadratic operator basis excludes exactly the operators whose exact transformed polynomial differs from the original."
 producer_path = "crates/planet/src/canonical/stellar_birth_species/symmetry_operator_exclusion/producer.rs"
 refusal_path = "crates/planet/src/canonical/stellar_birth_species/symmetry_operator_exclusion/mod.rs"
-activation_guard = "Two independent exact bounded implementations agree for supplied affine actions and supplied quadratic candidates. A second independent pair now derives every unordered degree-two monomial over a supplied opaque field-component set, and the wired conditional runner evaluates that complete homogeneous commutative quadratic space without caller-authored operator identities. Aggregate variation work refuses in preflight. The repository still supplies no admitted field or action ontology, applicability or validity authority, proof that this polynomial family exhausts the physically applicable operator family, production receipt, or complete irreducible route and returns no_admitted_symmetry_action_input. Every report denies global operator-basis coverage, species membership, and authority effect."
+activation_guard = "Two independent exact bounded implementations agree for supplied affine actions and supplied quadratic candidates. A second independent pair derives every unordered degree-two monomial over a supplied opaque field-component set, and the wired conditional runner evaluates that complete homogeneous commutative quadratic space without caller-authored operator identities. Aggregate variation work refuses in preflight. A separate blocked pair can conditionally prove action-bound applicability and validity facts, but does not admit its facts or rules. The repository still supplies no admitted field or action ontology, applicability or validity authority, proof that this polynomial family exhausts the physically applicable operator family, production receipt, or complete irreducible route and returns no_admitted_symmetry_action_input. Every report denies global operator-basis coverage, species membership, and authority effect."
 open_cross_checker_requirements = ["independently admitted field and symmetry-action ontology derived from the sealed floor", "independent applicability and validity authority for the exact subject and domain", "independent proof that the generated homogeneous commutative quadratic space exhausts the physically applicable operator family, including typed handling for unfamiliar noncommutative, derivative, tensor, or higher-order operators", "claim-scoped production capability mint and receipt bound to both basis and evaluator identities, exact canonical results, resource contracts, and live mutation canaries", "full derive-first, Buckingham Pi, Gap plus Chaos, Residual, and unique-slot protocol for every non-floor premise"]
 owner_boundary = "The pairs prove conditional affine substitution algebra for supplied quadratic candidates and complete monomial coverage of one supplied finite homogeneous commutative quadratic field space. The owner reviews field and action ontology admission, physical applicability, whether the generated family is physically exhaustive, and any downstream species claim."
 semantic_closure = [
@@ -483,6 +483,25 @@ semantic_closure = [
     "crates/planet/src/canonical/stellar_birth_species/symmetry_operator_exclusion/quadratic_basis/watchdog.rs",
     "crates/planet/src/canonical/stellar_birth_species/symmetry_operator_exclusion/tests.rs",
     "crates/planet/src/canonical/stellar_birth_species/symmetry_operator_exclusion/watchdog.rs",
+]
+
+[[mechanism]]
+id = "planet.symmetry-scope-applicability"
+kind = "authority"
+domain = "scientific"
+status = "blocked"
+claim = "For supplied opaque positive facts and inference rules, two independent bounded closures prove required applicability and validity facts for one exact complete symmetry evaluation, and both conclusions become unproved when that evaluated-action premise is removed."
+producer_path = "crates/planet/src/canonical/stellar_birth_species/symmetry_operator_exclusion/applicability_proof/producer.rs"
+refusal_path = "crates/planet/src/canonical/stellar_birth_species/symmetry_operator_exclusion/mod.rs"
+activation_guard = "The civsim.planet.symmetry-scope-applicability.fixed-point-producer.v1 and civsim.planet.symmetry-scope-applicability.dependency-watchdog.v1 implementations independently execute civsim.planet.symmetry-scope-applicability-proof-evaluation.v1 exact conditional positive-rule closure and an action-removal counterfactual. The combined runner derives its action binding from both complete basis results and both exact algebra results plus their schema and checker identities. Its facts and rules remain supplied diagnostics rather than admitted physical premises. Production has no scope-premise constructor and returns no_admitted_scope_premise_input. The report denies premise admission, applicability authority, validity authority, species membership, and every authority effect."
+open_cross_checker_requirements = ["independently admitted field and symmetry-action ontology", "claim-scoped admitted premise facts and inference rules with semantic roles derived from the physical registry", "independent proof that the required facts mean physical applicability and validity for the exact subject and domain rather than structural reachability only", "production capability and receipt binding both scope implementations, the complete symmetry evaluation, resource contracts, and live mutation transcripts", "full derive-first, Buckingham Pi, Gap plus Chaos, Residual, and unique-slot protocol for every non-floor premise"]
+owner_boundary = "The pair proves positive-rule reachability and exact dependence on one evaluated action for supplied opaque facts and rules. The owner reviews admission and physical meaning of the field, action, premises, rules, applicability domain, validity claim, and every downstream species assertion."
+semantic_closure = [
+    "crates/planet/src/canonical/stellar_birth_species/symmetry_operator_exclusion/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/symmetry_operator_exclusion/applicability_proof/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/symmetry_operator_exclusion/applicability_proof/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/symmetry_operator_exclusion/applicability_proof/tests.rs",
+    "crates/planet/src/canonical/stellar_birth_species/symmetry_operator_exclusion/applicability_proof/watchdog.rs",
 ]
 
 [[mechanism]]

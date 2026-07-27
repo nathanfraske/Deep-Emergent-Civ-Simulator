@@ -61,6 +61,11 @@ REQUIRED_PROFILES: dict[str, tuple[str, str | None, str]] = {
         "scientific",
         "blocked",
     ),
+    "planet.symmetry-scope-applicability": (
+        "authority",
+        "scientific",
+        "blocked",
+    ),
     "units.certified-formula-projection": (
         "authority",
         "scientific",
@@ -94,7 +99,8 @@ REQUIRED_PROFILE_DIGESTS: dict[str, str] = {
     "planet.stage1-dimensional-census": "21140b26c937f9cca7a8066b98e9fa75e9366f483ca44ffd1cc5206315f2b5dc",
     "planet.stellar-birth-proof-tokens": "68f58f019ab4f620194133e673c64240d4ad066f97404698ba0bfbf8b96935d1",
     "planet.stellar-species-floor-coordinate-projection": "5c67629ed706fe636ca0d10c09953cdc65f24d424822db3f4bfaa14836db5ee9",
-    "planet.symmetry-operator-exclusion": "904fa9f0e89676b588cad12793854d0f16cff189a26b7b3efda2f19912276c58",
+    "planet.symmetry-operator-exclusion": "e5dc84106b148569a835b616ec8dc15595ecd5c6321e282234ce3895eb750116",
+    "planet.symmetry-scope-applicability": "1ab66defe77dd4532c3a306f905fdfb09d867427db48b1d0ce4ba0e1dc625298",
     "units.certified-formula-projection": "7ee2a9a60f102d0ea34bc5700d2070b079390c050d10c2d685e1525a0f091005",
     "units.si-execution-table": "2eca0ae6da0ad4483e3038e5aa6bbf1cd3d158bf3ca49df78aab7224b8927d5e",
     "units.si-representation-policy": "db7449a52dbf7f56b598828fe3888d0505e833c170c89de99a6b390a8057698b",
@@ -102,9 +108,9 @@ REQUIRED_PROFILE_DIGESTS: dict[str, str] = {
 }
 REQUIRED_COUNTS = {
     "active": 10,
-    "blocked": 9,
+    "blocked": 10,
     "diagnostic": 2,
-    "total": 21,
+    "total": 22,
 }
 META_PAIR = {
     "producer_path": "scripts/authority_watchdog_gate.py",

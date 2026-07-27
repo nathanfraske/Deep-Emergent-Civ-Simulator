@@ -67,6 +67,18 @@ pub(super) struct QuadraticOperatorBasisReport {
 }
 
 impl QuadraticOperatorBasisReport {
+    pub(super) const fn schema_id(&self) -> &'static str {
+        BASIS_SCHEMA_ID
+    }
+
+    pub(super) const fn producer_id(&self) -> &'static str {
+        self.producer_id
+    }
+
+    pub(super) const fn watchdog_id(&self) -> &'static str {
+        self.watchdog_id
+    }
+
     pub(super) fn element_count(&self) -> usize {
         self.basis.elements.len()
     }
@@ -84,6 +96,14 @@ impl QuadraticOperatorBasisReport {
                 }],
             })
             .collect()
+    }
+
+    pub(super) const fn producer_result_sha256(&self) -> [u8; 32] {
+        self.producer_result_sha256
+    }
+
+    pub(super) const fn watchdog_result_sha256(&self) -> [u8; 32] {
+        self.watchdog_result_sha256
     }
 
     pub(super) const fn scoped_homogeneous_quadratic_basis_coverage(&self) -> bool {

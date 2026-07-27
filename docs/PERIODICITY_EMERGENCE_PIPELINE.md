@@ -41,6 +41,17 @@ identities. This does not prove that the fields are physically complete, that
 the action is admitted or applicable, or that every relevant operator is in
 that polynomial family. No production authority receipt or species follows.
 
+A third independent pair now closes the mechanical applicability seam without
+claiming its physical premises. A fixed-point producer and dependency-index
+watchdog start from supplied opaque positive facts and rules. Both must prove
+the requested applicability and validity facts, then repeat the calculation
+without the typed evaluated-action premise. A conclusion that remains
+reachable without the action is refused. The evaluated-action identity binds
+both basis results, both algebra results, and every schema and implementation
+identity in those pairs. The facts and rules remain unaudited inputs, so this
+proves conditional reachability and action dependence rather than physical
+applicability or validity.
+
 The first live claim-scoped derived premise now closes one narrow part of the
 next boundary. Two independent checkers reconstruct the sealed
 `eps_0 = e^2 / (2 * alpha * h * c)` execution coordinate from floor ancestry,
@@ -73,7 +84,7 @@ flowchart TB
     FLOOR["CURRENT sealed absolute floor<br/>alpha, G, m_e<br/>plus exact SI representation"]
     EPS0["CURRENT first derived premise<br/>sealed eps_0 relation and local scale<br/>dual result and canary evidence<br/>no field or species authority"]
     SELECT["CURRENT premise selector<br/>exact role plus content matching<br/>proof-bearing exact zero<br/>no cardinality fallback<br/>authority_effect = none"]
-    LAW["CURRENT conditional symmetry algebra<br/>complete scoped quadratic monomials<br/>NEXT admitted action and applicability,<br/>physical family closure and authority receipt"]
+    LAW["CURRENT conditional symmetry proof<br/>complete scoped quadratic monomials<br/>action-bound scope reachability<br/>NEXT admitted premise semantics and authority"]
     PRIMITIVE["FUTURE primitive excitations<br/>mass or exact masslessness<br/>spin and statistics<br/>charges and currents<br/>stability and decay laws"]
     COMPOSITE["FUTURE confining and composite sector<br/>solver-produced level bands<br/>complete separation thresholds<br/>conservation and decay coverage"]
     THRESHOLD["CURRENT dormant exact threshold pair<br/>strictly below all covered thresholds<br/>overlap stays unresolved<br/>open channel remains visible<br/>authority_effect = none"]
@@ -149,6 +160,17 @@ a dimensional matrix or proof of inapplicability, typed Gap and Chaos evidence,
 residual minimization, and collision-checked slot uniqueness. Hashing a
 sentence that says one of those steps happened is not evidence that it
 happened.
+
+The action-bound scope pair takes the next calculation step. It proves that
+supplied applicability and validity conclusions are reachable under supplied
+positive inference rules and that each conclusion becomes unreachable when
+the exact evaluated-action premise is removed. This prevents a proof for one
+action from being reused for another and rejects an alternate
+action-independent proof. It still cannot establish what any opaque fact or
+rule means or whether it belongs in the physical canon. Positive monotonic
+closure also cannot represent negation, uncertainty, time-dependent regimes,
+or nonmonotonic exceptions. An unfamiliar theory that needs those forms must
+receive a typed extension or refusal, never be coerced into this rule language.
 
 The selector enforces exact role and content matching through two
 different algorithms. Adding an unrelated unfamiliar candidate cannot relabel
@@ -313,13 +335,14 @@ Floating point remains confirmation-only.
    electromagnetic ontology or member.
 3. **Executable theory seam and exact-zero authority.** IN PROGRESS:
    independent exact affine-action and quadratic-operator algorithms plus an
-   independent complete homogeneous commutative quadratic basis pair are
-   landed behind one blocked conditional runner. Next admit the field and
-   action ontology, prove applicability and physical operator-family closure,
-   bind a production receipt and live canaries, and execute derivation
-   attempts, Buckingham-Pi, typed Gap and Chaos evidence, residual
-   minimization, and unique-slot checking. The rejected profile fixture cannot
-   satisfy this slice.
+   independent complete homogeneous commutative quadratic basis pair and an
+   independent action-bound scope-closure pair are landed behind one blocked
+   conditional runner. Next derive or admit the field, action, applicability,
+   and validity semantics, prove physical operator-family closure, bind a
+   production receipt and live canaries, and execute derivation attempts,
+   Buckingham-Pi, typed Gap and Chaos evidence, residual minimization, and
+   unique-slot checking. The rejected profile fixture cannot satisfy this
+   slice.
 4. **First primitive excitation.** Produce one content-bound member with mass
    or exact masslessness, state, charges, statistics, stability, validity, and
    complete ancestry. Acceptance requires the physical registry to admit that
@@ -344,8 +367,13 @@ Floating point remains confirmation-only.
    needs it.
 
 The next code target remains the authority half of slice 3. The conditional
-algebra and scoped homogeneous commutative quadratic basis are complete.
-Admitted ontology, applicability, proof that this family is physically
-exhaustive, live receipt canaries, and the irreducible protocol remain the
-precise blockers. Independent serialization, owner review, citations, and
-nonzero digests do not substitute for executable physical evidence.
+algebra, scoped homogeneous commutative quadratic basis, and action-bound
+positive scope calculation are complete. The next bounded unit is a generic
+claim-scoped premise-admission route: execute derivation attempts from the
+sealed floor first, then route only an irreducible survivor through Buckingham
+Pi, Gap with its typed Chaos branch, Residual minimality, collision-checked
+unique-slot review, and an independent checker. Admitted ontology and premise
+semantics, proof that the operator family is physically exhaustive, and live
+production canaries remain separate blockers. Independent serialization,
+owner review, citations, and nonzero digests do not substitute for executable
+physical evidence.

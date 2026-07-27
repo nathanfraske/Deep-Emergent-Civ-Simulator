@@ -371,6 +371,19 @@ species membership, and every authority effect. Activation still requires
 those separate capabilities, production canary transcripts, and the complete
 irreducible protocol.
 
+The separate blocked `planet.symmetry-scope-applicability` mechanism closes
+only the next mechanical calculation. A fixed-point producer and an
+independent dependency-index watchdog prove supplied positive applicability
+and validity facts, then rerun without the typed exact-action premise. Both
+conclusions must become unreachable. The exact action binding commits both
+basis results, both algebra results, and all associated schema and checker
+identities. This rejects action substitution and any alternate
+action-independent proof, but it does not admit a premise or prove that an
+opaque fact or rule has the asserted physical meaning. Production has no
+premise constructor and returns `no_admitted_scope_premise_input`. Negation,
+uncertainty, temporal regimes, and nonmonotonic inference remain outside this
+positive rule language and require typed extension or refusal.
+
 A distinct future non-root mint and registry-to-support boundary remain
 blocked. Before a species-forming rule may authorize a derived or irreducible
 artifact, a claim-specific independent pair must verify its complete ancestry
