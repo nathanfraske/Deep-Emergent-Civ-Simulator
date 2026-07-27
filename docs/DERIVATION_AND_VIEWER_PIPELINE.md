@@ -66,7 +66,7 @@ flowchart TB
         LEDGER["Auto-generated accounting census<br/>Four tiers by seven provenance marks<br/>Reports authority; never creates it"]
         RUN["run_planet<br/>Only accepted input: sealed floor"]
         AUDITED["AuditedFloorView<br/>Exact typed magnitudes plus<br/>independent floor-authority digest"]
-        EPS0["Derived example: eps_0<br/>Exact ancestry from floor plus<br/>representation definitions"]
+        EPS0["CURRENT derived eps_0 premise<br/>Exact floor ancestry plus local scale<br/>Independent results and canaries<br/>Claim-scoped capability only"]
 
         FLOOR --> LEDGER
         FLOOR --> RUN
@@ -76,7 +76,7 @@ flowchart TB
 
         STRUCTURE["Value-free stellar structure v2<br/>Open components, species, coordinates,<br/>dimensions, sectors, regimes,<br/>histories, and classifications"]
         CENSUS["Exact dimensional census v4<br/>Non-admitting diagnostic<br/>closure_effect = none<br/>coverage_claim = false"]
-        SPECIES_ANALYSIS["Species derivation analysis v4<br/>Independent watchdog v5<br/>Live root and vocabulary frontier<br/>Zero members, zero support,<br/>no value, no residual slot"]
+        SPECIES_ANALYSIS["Species derivation analysis v6<br/>Independent watchdog v7<br/>Live claim, root, and vocabulary frontiers<br/>Zero members and zero species support,<br/>no residual slot"]
         SPECIES_PACKET["CURRENT bounded structural packet pair<br/>Canonical descriptors plus conditioned support<br/>Independent algorithms agree on bytes only<br/>No physical member or authority"]
         CURRENT_PROOFS["CURRENT production resolver<br/>Joint physical measure = None<br/>Coordinate law = None"]
         CURRENT_REFUSAL["CURRENT Stage 1 refusal<br/>stellar_birth.realization_measure<br/>Both open leaves remain visible"]
@@ -86,6 +86,7 @@ flowchart TB
         AUDITED -. "Binds analysis" .-> CENSUS
         STRUCTURE -. "Binds analysis" .-> SPECIES_ANALYSIS
         AUDITED -. "Binds exact m_e anchor" .-> SPECIES_ANALYSIS
+        EPS0 -. "Adjacent claim-scoped premise" .-> SPECIES_ANALYSIS
         STRUCTURE -. "Constrains packet schemas" .-> SPECIES_PACKET
 
         CURRENT_PROOFS --> CURRENT_REFUSAL

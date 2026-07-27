@@ -311,6 +311,109 @@ impl<'a> RepositoryPhysicalRegistryFrontierScene<'a> {
     }
 }
 
+/// Case count and complete transcript digest for one law-premise canary suite.
+pub type LawPremiseCanaryEvidence = (u32, [u8; 32]);
+
+/// Producer and watchdog canary evidence in that order.
+pub type LawPremiseCanaryEvidencePair = [LawPremiseCanaryEvidence; 2];
+
+/// Read-only projection of one claim-scoped derived-coordinate premise.
+///
+/// This is diagnostic evidence adjacent to the registry. It cannot become a
+/// registry input, admit a species, or alter canonical execution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepositoryLawPremiseFrontierScene<'a> {
+    identity: (&'a str, &'a str, &'a str, &'a str),
+    output_symbol: &'a str,
+    output_bits: i128,
+    output_scale_bits: u32,
+    output_projection_receipt_sha256: [u8; 32],
+    canonical_relation_sha256: [u8; 32],
+    checker_identities: (&'a str, &'a str, &'a str),
+    checker_result_sha256: ([u8; 32], [u8; 32]),
+    canary_transcript_ids: (&'a str, &'a str),
+    canary_evidence: LawPremiseCanaryEvidencePair,
+    claim_identity_sha256: [u8; 32],
+    role_identity_sha256: [u8; 32],
+    content_identity_sha256: [u8; 32],
+    upstream_capability_sha256: [u8; 32],
+    applicability_receipt_sha256: [u8; 32],
+    validity_receipt_sha256: [u8; 32],
+    ancestry_receipt_sha256: [u8; 32],
+    pair_receipt_sha256: [u8; 32],
+    capability_sha256: [u8; 32],
+    ledger_classification: (&'a str, &'a str, &'a str),
+    scope: (bool, bool, bool, &'a str),
+}
+
+impl<'a> RepositoryLawPremiseFrontierScene<'a> {
+    /// Premise, artifact, pair-receipt, and canary-suite identities.
+    pub const fn identity(&self) -> (&'a str, &'a str, &'a str, &'a str) {
+        self.identity
+    }
+
+    /// Exact scaled execution coordinate emitted by the sealed relation.
+    pub const fn output_coordinate(&self) -> (&'a str, i128, u32) {
+        (self.output_symbol, self.output_bits, self.output_scale_bits)
+    }
+
+    /// Output projection receipt and canonical relation digest.
+    pub const fn derivation_digests(&self) -> ([u8; 32], [u8; 32]) {
+        (
+            self.output_projection_receipt_sha256,
+            self.canonical_relation_sha256,
+        )
+    }
+
+    /// Producer, watchdog, and explicit agreement-decision identities.
+    pub const fn checker_identities(&self) -> (&'a str, &'a str, &'a str) {
+        self.checker_identities
+    }
+
+    /// Producer and watchdog complete-result digests.
+    pub const fn checker_result_digests(&self) -> ([u8; 32], [u8; 32]) {
+        self.checker_result_sha256
+    }
+
+    /// Independent producer and watchdog canary transcript identities.
+    pub const fn canary_transcript_ids(&self) -> (&'a str, &'a str) {
+        self.canary_transcript_ids
+    }
+
+    /// Producer and watchdog live-canary case counts and transcript digests.
+    pub const fn canary_evidence(&self) -> LawPremiseCanaryEvidencePair {
+        self.canary_evidence
+    }
+
+    /// Claim, role, content, upstream, applicability, validity, and ancestry digests.
+    pub const fn claim_scope_digests(&self) -> [[u8; 32]; 7] {
+        [
+            self.claim_identity_sha256,
+            self.role_identity_sha256,
+            self.content_identity_sha256,
+            self.upstream_capability_sha256,
+            self.applicability_receipt_sha256,
+            self.validity_receipt_sha256,
+            self.ancestry_receipt_sha256,
+        ]
+    }
+
+    /// Pair receipt and private capability digests.
+    pub const fn authority_digests(&self) -> ([u8; 32], [u8; 32]) {
+        (self.pair_receipt_sha256, self.capability_sha256)
+    }
+
+    /// Universal tier, derived provenance tag, and derived proof kind.
+    pub const fn ledger_classification(&self) -> (&'a str, &'a str, &'a str) {
+        self.ledger_classification
+    }
+
+    /// Exact-claim coverage, species authority, global coverage, and effect.
+    pub const fn scope(&self) -> (bool, bool, bool, &'a str) {
+        self.scope
+    }
+}
+
 /// Exact non-admitting species derivation analysis attached to Stage 1.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpeciesDerivationScene<'a> {
@@ -327,13 +430,14 @@ pub struct SpeciesDerivationScene<'a> {
     floor_anchor_scale_bits: Option<u32>,
     floor_anchor_membership_authority: Option<bool>,
     floor_anchor_role: Option<&'a str>,
+    law_premise_frontier: Option<RepositoryLawPremiseFrontierScene<'a>>,
     physical_registry_frontier: Option<RepositoryPhysicalRegistryFrontierScene<'a>>,
     frontier_source_id: Option<&'a str>,
     frontier_scope_id: Option<&'a str>,
     frontier_completeness_claim: Option<bool>,
     candidate_member_count: Option<usize>,
     verified_support_member_count: Option<usize>,
-    value_payload_present: Option<bool>,
+    species_support_value_payload_present: Option<bool>,
     residual_slot_claim: Option<bool>,
     derive_first_status_id: Option<&'static str>,
     buckingham_pi_status_id: Option<&'static str>,
@@ -399,6 +503,11 @@ impl<'a> SpeciesDerivationScene<'a> {
         self.physical_registry_frontier.as_ref()
     }
 
+    /// Sealed claim-scoped coordinate premise adjacent to the registry.
+    pub const fn law_premise_frontier(&self) -> Option<&RepositoryLawPremiseFrontierScene<'a>> {
+        self.law_premise_frontier.as_ref()
+    }
+
     /// Live source, bounded scope, and explicit absence of a completeness claim.
     pub const fn frontier_contract(&self) -> (Option<&'a str>, Option<&'a str>, Option<bool>) {
         (
@@ -416,9 +525,12 @@ impl<'a> SpeciesDerivationScene<'a> {
         )
     }
 
-    /// Whether a physical value or residual-slot claim is present.
+    /// Whether a species-support value or residual-slot claim is present.
     pub const fn admission_claims(&self) -> (Option<bool>, Option<bool>) {
-        (self.value_payload_present, self.residual_slot_claim)
+        (
+            self.species_support_value_payload_present,
+            self.residual_slot_claim,
+        )
     }
 
     /// Ordered derive-first, Buckingham Pi, Gap, Chaos, Residual, and slot status.
@@ -663,6 +775,50 @@ impl<'a> RefusalScene<'a> {
                                 let species_derivation = analysis
                                     .species_derivation_analysis_view()
                                     .map(|view| {
+                                        let law_premise_frontier = (|| {
+                                            Some(RepositoryLawPremiseFrontierScene {
+                                                identity: view.law_premise_identity()?,
+                                                output_symbol: view
+                                                    .law_premise_output_symbol()?,
+                                                output_bits: view.law_premise_output_bits()?,
+                                                output_scale_bits: view
+                                                    .law_premise_output_scale_bits()?,
+                                                output_projection_receipt_sha256: view
+                                                    .law_premise_output_projection_receipt_sha256(
+                                                    )?,
+                                                canonical_relation_sha256: view
+                                                    .law_premise_relation_sha256()?,
+                                                checker_identities: view
+                                                    .law_premise_checker_identities()?,
+                                                checker_result_sha256: view
+                                                    .law_premise_checker_result_sha256()?,
+                                                canary_transcript_ids: view
+                                                    .law_premise_canary_transcript_ids()?,
+                                                canary_evidence: view
+                                                    .law_premise_canary_evidence()?,
+                                                claim_identity_sha256: view
+                                                    .law_premise_claim_identity_sha256()?,
+                                                role_identity_sha256: view
+                                                    .law_premise_role_identity_sha256()?,
+                                                content_identity_sha256: view
+                                                    .law_premise_content_identity_sha256()?,
+                                                upstream_capability_sha256: view
+                                                    .law_premise_upstream_capability_sha256()?,
+                                                applicability_receipt_sha256: view
+                                                    .law_premise_applicability_receipt_sha256()?,
+                                                validity_receipt_sha256: view
+                                                    .law_premise_validity_receipt_sha256()?,
+                                                ancestry_receipt_sha256: view
+                                                    .law_premise_ancestry_receipt_sha256()?,
+                                                pair_receipt_sha256: view
+                                                    .law_premise_pair_receipt_sha256()?,
+                                                capability_sha256: view
+                                                    .law_premise_capability_sha256()?,
+                                                ledger_classification: view
+                                                    .law_premise_ledger_classification()?,
+                                                scope: view.law_premise_scope()?,
+                                            })
+                                        })();
                                         let physical_registry_frontier = (|| {
                                             Some(RepositoryPhysicalRegistryFrontierScene {
                                                 registry_schema_id: view
@@ -780,6 +936,7 @@ impl<'a> RefusalScene<'a> {
                                         floor_anchor_membership_authority: view
                                             .floor_anchor_membership_authority(),
                                         floor_anchor_role: view.floor_anchor_role(),
+                                        law_premise_frontier,
                                         physical_registry_frontier,
                                         frontier_source_id: view.frontier_source_id(),
                                         frontier_scope_id: view.frontier_scope_id(),
@@ -788,7 +945,8 @@ impl<'a> RefusalScene<'a> {
                                         candidate_member_count: view.candidate_member_count(),
                                         verified_support_member_count: view
                                             .verified_support_member_count(),
-                                        value_payload_present: view.value_payload_present(),
+                                        species_support_value_payload_present: view
+                                            .species_support_value_payload_present(),
                                         residual_slot_claim: view.residual_slot_claim(),
                                         derive_first_status_id: view.derive_first_status_id(),
                                         buckingham_pi_status_id: view.buckingham_pi_status_id(),
@@ -871,6 +1029,61 @@ mod tests {
                 "unfamiliar.proof.z"
             ]
         );
+    }
+
+    #[test]
+    fn repository_law_premise_frontier_is_read_only_and_non_authorizing() {
+        let frontier = RepositoryLawPremiseFrontierScene {
+            identity: (
+                "planet.derived-law-premise-eps0",
+                "artifact",
+                "receipt",
+                "canaries",
+            ),
+            output_symbol: "eps_0",
+            output_bits: 11,
+            output_scale_bits: 32,
+            output_projection_receipt_sha256: [1; 32],
+            canonical_relation_sha256: [2; 32],
+            checker_identities: ("producer", "watchdog", "agreed"),
+            checker_result_sha256: ([3; 32], [4; 32]),
+            canary_transcript_ids: ("producer-canaries", "watchdog-canaries"),
+            canary_evidence: [(12, [5; 32]), (12, [15; 32])],
+            claim_identity_sha256: [6; 32],
+            role_identity_sha256: [7; 32],
+            content_identity_sha256: [8; 32],
+            upstream_capability_sha256: [9; 32],
+            applicability_receipt_sha256: [10; 32],
+            validity_receipt_sha256: [11; 32],
+            ancestry_receipt_sha256: [12; 32],
+            pair_receipt_sha256: [13; 32],
+            capability_sha256: [14; 32],
+            ledger_classification: ("universal", "[D]", "verified_derived_content"),
+            scope: (true, false, false, "none"),
+        };
+
+        assert_eq!(frontier.output_coordinate(), ("eps_0", 11, 32));
+        assert_eq!(frontier.derivation_digests(), ([1; 32], [2; 32]));
+        assert_eq!(
+            frontier.checker_identities(),
+            ("producer", "watchdog", "agreed")
+        );
+        assert_eq!(frontier.checker_result_digests(), ([3; 32], [4; 32]));
+        assert_eq!(
+            frontier.canary_transcript_ids(),
+            ("producer-canaries", "watchdog-canaries")
+        );
+        assert_eq!(frontier.canary_evidence(), [(12, [5; 32]), (12, [15; 32])]);
+        assert_eq!(
+            frontier.claim_scope_digests(),
+            [[6; 32], [7; 32], [8; 32], [9; 32], [10; 32], [11; 32], [12; 32]]
+        );
+        assert_eq!(frontier.authority_digests(), ([13; 32], [14; 32]));
+        assert_eq!(
+            frontier.ledger_classification(),
+            ("universal", "[D]", "verified_derived_content")
+        );
+        assert_eq!(frontier.scope(), (true, false, false, "none"));
     }
 
     #[test]

@@ -112,6 +112,161 @@ impl<'a> SpeciesDerivationAnalysisView<'a> {
             .map(|analysis| analysis.floor_mass_anchor.role)
     }
 
+    pub fn law_premise_identity(self) -> Option<(&'a str, &'a str, &'a str, &'a str)> {
+        self.computed().map(|analysis| {
+            let frontier = &analysis.law_premise_frontier;
+            (
+                frontier.premise_id,
+                frontier.artifact_schema_id,
+                frontier.receipt_schema_id,
+                frontier.canary_suite_id,
+            )
+        })
+    }
+
+    pub fn law_premise_output_symbol(self) -> Option<&'a str> {
+        self.computed()
+            .map(|analysis| analysis.law_premise_frontier.output_symbol)
+    }
+
+    pub fn law_premise_output_bits(self) -> Option<i128> {
+        self.computed()
+            .map(|analysis| analysis.law_premise_frontier.output_bits)
+    }
+
+    pub fn law_premise_output_scale_bits(self) -> Option<u32> {
+        self.computed()
+            .map(|analysis| analysis.law_premise_frontier.output_scale_bits)
+    }
+
+    pub fn law_premise_output_projection_receipt_sha256(self) -> Option<[u8; 32]> {
+        self.computed().map(|analysis| {
+            analysis
+                .law_premise_frontier
+                .output_projection_receipt_sha256
+        })
+    }
+
+    pub fn law_premise_relation_sha256(self) -> Option<[u8; 32]> {
+        self.computed()
+            .map(|analysis| analysis.law_premise_frontier.canonical_relation_sha256)
+    }
+
+    pub fn law_premise_checker_identities(self) -> Option<(&'a str, &'a str, &'a str)> {
+        self.computed().map(|analysis| {
+            let frontier = &analysis.law_premise_frontier;
+            (
+                frontier.producer_implementation_id,
+                frontier.watchdog_implementation_id,
+                frontier.decision_id,
+            )
+        })
+    }
+
+    pub fn law_premise_checker_result_sha256(self) -> Option<([u8; 32], [u8; 32])> {
+        self.computed().map(|analysis| {
+            let frontier = &analysis.law_premise_frontier;
+            (
+                frontier.producer_result_sha256,
+                frontier.watchdog_result_sha256,
+            )
+        })
+    }
+
+    pub fn law_premise_canary_transcript_ids(self) -> Option<(&'a str, &'a str)> {
+        self.computed().map(|analysis| {
+            let frontier = &analysis.law_premise_frontier;
+            (
+                frontier.producer_canary_transcript_id,
+                frontier.watchdog_canary_transcript_id,
+            )
+        })
+    }
+
+    pub fn law_premise_canary_evidence(self) -> Option<[(u32, [u8; 32]); 2]> {
+        self.computed().map(|analysis| {
+            let frontier = &analysis.law_premise_frontier;
+            [
+                (
+                    frontier.producer_canary_case_count,
+                    frontier.producer_canary_sha256,
+                ),
+                (
+                    frontier.watchdog_canary_case_count,
+                    frontier.watchdog_canary_sha256,
+                ),
+            ]
+        })
+    }
+
+    pub fn law_premise_claim_identity_sha256(self) -> Option<[u8; 32]> {
+        self.computed()
+            .map(|analysis| analysis.law_premise_frontier.claim_identity_sha256)
+    }
+
+    pub fn law_premise_role_identity_sha256(self) -> Option<[u8; 32]> {
+        self.computed()
+            .map(|analysis| analysis.law_premise_frontier.role_identity_sha256)
+    }
+
+    pub fn law_premise_content_identity_sha256(self) -> Option<[u8; 32]> {
+        self.computed()
+            .map(|analysis| analysis.law_premise_frontier.content_identity_sha256)
+    }
+
+    pub fn law_premise_upstream_capability_sha256(self) -> Option<[u8; 32]> {
+        self.computed()
+            .map(|analysis| analysis.law_premise_frontier.upstream_capability_sha256)
+    }
+
+    pub fn law_premise_applicability_receipt_sha256(self) -> Option<[u8; 32]> {
+        self.computed()
+            .map(|analysis| analysis.law_premise_frontier.applicability_receipt_sha256)
+    }
+
+    pub fn law_premise_validity_receipt_sha256(self) -> Option<[u8; 32]> {
+        self.computed()
+            .map(|analysis| analysis.law_premise_frontier.validity_receipt_sha256)
+    }
+
+    pub fn law_premise_ancestry_receipt_sha256(self) -> Option<[u8; 32]> {
+        self.computed()
+            .map(|analysis| analysis.law_premise_frontier.ancestry_receipt_sha256)
+    }
+
+    pub fn law_premise_pair_receipt_sha256(self) -> Option<[u8; 32]> {
+        self.computed()
+            .map(|analysis| analysis.law_premise_frontier.pair_receipt_sha256)
+    }
+
+    pub fn law_premise_capability_sha256(self) -> Option<[u8; 32]> {
+        self.computed()
+            .map(|analysis| analysis.law_premise_frontier.capability_sha256)
+    }
+
+    pub fn law_premise_ledger_classification(self) -> Option<(&'a str, &'a str, &'a str)> {
+        self.computed().map(|analysis| {
+            let frontier = &analysis.law_premise_frontier;
+            (
+                frontier.tier_id,
+                frontier.provenance_tag,
+                frontier.content_proof_kind,
+            )
+        })
+    }
+
+    pub fn law_premise_scope(self) -> Option<(bool, bool, bool, &'a str)> {
+        self.computed().map(|analysis| {
+            let frontier = &analysis.law_premise_frontier;
+            (
+                frontier.requested_premise_coverage,
+                frontier.species_membership_authority,
+                frontier.global_physical_premise_coverage,
+                frontier.authority_effect,
+            )
+        })
+    }
+
     pub fn physical_registry_root_receipt_schema_id(self) -> Option<&'a str> {
         self.computed()
             .map(|analysis| analysis.physical_registry_frontier.root_receipt_schema_id)
@@ -408,9 +563,9 @@ impl<'a> SpeciesDerivationAnalysisView<'a> {
             .map(|analysis| analysis.verified_support_member_count)
     }
 
-    pub fn value_payload_present(self) -> Option<bool> {
+    pub fn species_support_value_payload_present(self) -> Option<bool> {
         self.computed()
-            .map(|analysis| analysis.value_payload_present)
+            .map(|analysis| analysis.species_support_value_payload_present)
     }
 
     pub fn residual_slot_claim(self) -> Option<bool> {

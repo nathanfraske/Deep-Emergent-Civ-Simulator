@@ -31,7 +31,9 @@ pub(super) fn select(
         requirement.key.role.0.iter().all(|byte| *byte == 0)
             || requirement.key.content.0.iter().all(|byte| *byte == 0)
             || match requirement.proof {
-                RequirementProof::AdmittedContent => false,
+                RequirementProof::AdmittedContent | RequirementProof::VerifiedDerivedContent => {
+                    false
+                }
                 RequirementProof::ExactZero {
                     subject_identity,
                     excluded_term_identity,
@@ -104,6 +106,9 @@ pub(super) fn select(
             (RequirementProof::AdmittedContent, CandidateProof::AdmittedContent) => {
                 SelectedProof::AdmittedContent
             }
+            (RequirementProof::VerifiedDerivedContent, CandidateProof::VerifiedDerivedContent) => {
+                SelectedProof::VerifiedDerivedContent
+            }
             (
                 RequirementProof::ExactZero {
                     subject_identity,
@@ -163,7 +168,7 @@ fn evidence_is_independent(candidate: &ClaimScopedPremiseCapability) -> bool {
         }
     }
     match candidate.proof {
-        CandidateProof::AdmittedContent => true,
+        CandidateProof::AdmittedContent | CandidateProof::VerifiedDerivedContent => true,
         CandidateProof::ExactZero(proof) => {
             !proof.exclusion_receipt_sha256.iter().all(|byte| *byte == 0)
                 && receipts.insert(proof.exclusion_receipt_sha256)
@@ -174,10 +179,13 @@ fn evidence_is_independent(candidate: &ClaimScopedPremiseCapability) -> bool {
 pub(super) fn capability_digest(candidate: &ClaimScopedPremiseCapability) -> [u8; 32] {
     let proof_kind = match candidate.proof {
         CandidateProof::AdmittedContent => vec![0],
+        CandidateProof::VerifiedDerivedContent => vec![2],
         CandidateProof::ExactZero(_) => vec![1],
     };
     let (subject, excluded_term, symmetry, exclusion_receipt) = match candidate.proof {
-        CandidateProof::AdmittedContent => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+        CandidateProof::AdmittedContent | CandidateProof::VerifiedDerivedContent => {
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new())
+        }
         CandidateProof::ExactZero(proof) => (
             proof.subject_identity.to_vec(),
             proof.excluded_term_identity.to_vec(),

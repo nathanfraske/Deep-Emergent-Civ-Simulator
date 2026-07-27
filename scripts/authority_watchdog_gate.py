@@ -41,6 +41,7 @@ REQUIRED_PROFILES: dict[str, tuple[str, str | None, str]] = {
     ),
     "governance.stone0-build-wiring": ("authority", "governance", "active"),
     "planet.completed-snapshot": ("authority", "scientific", "blocked"),
+    "planet.derived-law-premise-eps0": ("authority", "scientific", "active"),
     "planet.physical-vocabulary-partition": ("diagnostic", None, "diagnostic"),
     "planet.species-derivation-frontier": ("diagnostic", None, "diagnostic"),
     "planet.species-state-support": ("authority", "scientific", "blocked"),
@@ -81,8 +82,9 @@ REQUIRED_PROFILE_DIGESTS: dict[str, str] = {
     "governance.external-adverse-claim-release": "a8a74e0c6032ee15d125b7c2e00e4accf77de2c9ac7f9e675f5848f80f38295d",
     "governance.stone0-build-wiring": "ff8dc217d4473b4264bc1a15ed6ad541e78455e0e95dedae5b3fdd89aba197c8",
     "planet.completed-snapshot": "5c09a8d95b7de145110a9f97f773bb0e0a63d6d6dc0f964eeb8beb62efff5575",
+    "planet.derived-law-premise-eps0": "9ce5e04b3cf043616148062cb4f7eada303fe03a421aef004fa02970d41e26c2",
     "planet.physical-vocabulary-partition": "fcd35a3c4997fde2be067a86172894a7b1f1d983afd21abddf1b130feac33f0d",
-    "planet.species-derivation-frontier": "44fb171f11d42aaa2be122891aff3374c6f0ad56a3de0cb07058f6170f0d2f92",
+    "planet.species-derivation-frontier": "e59b9d794e0c4fc9b9e1e6b2ac586fca8b54700d30dfa24eb637c7b1e6522780",
     "planet.species-state-support": "3ff574bcd1a9e19f95bfaafb3fcd472422531d4a2ac2dcc7655943c93a9d34f0",
     "planet.stage1-dimensional-census": "21140b26c937f9cca7a8066b98e9fa75e9366f483ca44ffd1cc5206315f2b5dc",
     "planet.stellar-birth-proof-tokens": "68f58f019ab4f620194133e673c64240d4ad066f97404698ba0bfbf8b96935d1",
@@ -93,10 +95,10 @@ REQUIRED_PROFILE_DIGESTS: dict[str, str] = {
     "units.wide-integer-arithmetic": "3bfb94aa0c3f507ad8ba9762e91ca9009284becc9d9752d7b7b896cb9a26ca7d",
 }
 REQUIRED_COUNTS = {
-    "active": 9,
+    "active": 10,
     "blocked": 8,
     "diagnostic": 2,
-    "total": 19,
+    "total": 20,
 }
 META_PAIR = {
     "producer_path": "scripts/authority_watchdog_gate.py",

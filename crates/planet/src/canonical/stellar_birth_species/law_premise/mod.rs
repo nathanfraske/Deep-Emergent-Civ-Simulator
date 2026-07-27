@@ -11,15 +11,21 @@
 //!
 //! This module checks selection mechanics only. It cannot prove that the
 //! requested roles are physically sufficient, that an upstream capability is
-//! scientifically sound, or that a law is true. Production has no constructor
-//! for [`ClaimScopedPremiseCapability`], and every successful report has
+//! scientifically sound, or that a law is true. Production can mint a
+//! [`ClaimScopedPremiseCapability`] only through an enrolled, exact-claim
+//! authority pair. Every successful selection report has
 //! `authority_effect=none`.
 
+mod derived_relation;
 mod producer;
 mod watchdog;
 
 #[cfg(test)]
 mod tests;
+
+pub(super) use derived_relation::{
+    repository_derived_relation_premise_frontier, RepositoryDerivedRelationPremiseFrontier,
+};
 
 const MAX_REQUIREMENT_COUNT: usize = 4_096;
 const MAX_CANDIDATE_COUNT: usize = 8_192;
@@ -43,6 +49,7 @@ struct PremiseKey {
 /// Evidence forms at this boundary, not a closed list of physical law kinds.
 enum RequirementProof {
     AdmittedContent,
+    VerifiedDerivedContent,
     ExactZero {
         subject_identity: [u8; 32],
         excluded_term_identity: [u8; 32],
@@ -68,14 +75,14 @@ struct ExactZeroProof {
 /// Candidate evidence forms, independent of the opaque physical role.
 enum CandidateProof {
     AdmittedContent,
+    VerifiedDerivedContent,
     ExactZero(ExactZeroProof),
 }
 
 /// Opaque upstream evidence for one exact claim-role-content tuple.
 ///
-/// There is intentionally no production constructor. A future authority pair
-/// must mint this object from a complete derived or irreducible admission
-/// route and enroll that narrow claim in the authority watchdog.
+/// The only production constructor is private to an enrolled exact-claim
+/// authority pair. Derived and irreducibly admitted evidence remain distinct.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ClaimScopedPremiseCapability {
     claim_identity: LawClaimIdentity,
@@ -103,6 +110,7 @@ struct LawPremiseRequest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SelectedProof {
     AdmittedContent,
+    VerifiedDerivedContent,
     ExactZero(ExactZeroProof),
 }
 

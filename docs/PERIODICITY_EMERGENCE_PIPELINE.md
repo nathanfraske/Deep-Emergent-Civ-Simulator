@@ -19,14 +19,23 @@ so the registry returns `no_admitted_species_derivation_rules`, zero members,
 no support, and no authority effect. No `[W]`, `[X]`, star, element, atom,
 planet, or snapshot follows from that refusal.
 
-A dormant claim-scoped selector now closes one part of the next boundary. A
-law request identifies each premise by opaque semantic-role and
+The first live claim-scoped derived premise now closes one narrow part of the
+next boundary. Two independent checkers reconstruct the sealed
+`eps_0 = e^2 / (2 * alpha * h * c)` execution coordinate from floor ancestry,
+derive its claim-local scale, execute complete mutation transcripts, and bind
+their identities, results, canary evidence, and agreement into one pair
+receipt. A private `VerifiedDerivedContent` capability then passes the generic
+selector. The capability authorizes only this execution-coordinate relation.
+It does not admit an electromagnetic field, operator, sector, excitation, or
+species and does not activate the global SI representation policy.
+
+A law request identifies each premise by opaque semantic-role and
 physical-content identities. A candidate matches only when an upstream
 capability binds the same claim, role, content, applicability, validity, and
 independent semantic evidence. Sole-candidate, name, ordinal, value-shape, and
 catalog-cardinality fallbacks are absent. Exact zero requires a symmetry and
-term-exclusion proof object. Production cannot construct a premise capability,
-and selector agreement has no authority effect.
+term-exclusion proof object. Selector agreement is a non-authorizing post-mint
+validation.
 
 `crates/physics/data/periodic_table.toml` is a terrestrial reference cache used
 by active-candidate material kernels. It contains authored membership,
@@ -40,8 +49,9 @@ alien or Terran realization.
 ```mermaid
 flowchart TB
     FLOOR["CURRENT sealed absolute floor<br/>alpha, G, m_e<br/>plus exact SI representation"]
-    SELECT["CURRENT dormant premise selector<br/>exact role plus content matching<br/>proof-bearing exact zero<br/>no cardinality fallback<br/>authority_effect = none"]
-    LAW["NEXT admitted law premises<br/>quantum dynamics and statistics<br/>spacetime and kinematics<br/>fields, operators, sectors, charges<br/>vacuum, state, validity, constraints"]
+    EPS0["CURRENT first derived premise<br/>sealed eps_0 relation and local scale<br/>dual result and canary evidence<br/>no field or species authority"]
+    SELECT["CURRENT premise selector<br/>exact role plus content matching<br/>proof-bearing exact zero<br/>no cardinality fallback<br/>authority_effect = none"]
+    LAW["NEXT species-forming law premises<br/>quantum dynamics and statistics<br/>spacetime and kinematics<br/>fields, operators, sectors, charges<br/>vacuum, state, validity, constraints"]
     PRIMITIVE["FUTURE primitive excitations<br/>mass or exact masslessness<br/>spin and statistics<br/>charges and currents<br/>stability and decay laws"]
     COMPOSITE["FUTURE confining and composite sector<br/>solver-produced level bands<br/>complete separation thresholds<br/>conservation and decay coverage"]
     THRESHOLD["CURRENT dormant exact threshold pair<br/>strictly below all covered thresholds<br/>overlap stays unresolved<br/>open channel remains visible<br/>authority_effect = none"]
@@ -58,8 +68,9 @@ flowchart TB
     VIEW["FUTURE observer-only labels<br/>familiar symbols and names<br/>never causal inputs"]
     REFUSE["Typed refusal<br/>No familiar default or table fill"]
 
-    FLOOR --> SELECT
-    SELECT -. "Reusable after an upstream mint exists" .-> LAW
+    FLOOR --> EPS0
+    EPS0 --> SELECT
+    SELECT -. "Same path for each proved premise" .-> LAW
     LAW --> PRIMITIVE
     PRIMITIVE --> COMPOSITE
     THRESHOLD -. "Reusable arithmetic after authority closes" .-> COMPOSITE
@@ -91,19 +102,25 @@ flowchart TB
 
 ### 1. Law premises
 
-The first live addition is a claim-scoped, role-bound physical-law authority.
-It must admit the field content, operator, interaction sector, state,
-applicability, validity regime, conservation laws, and semantic roles consumed
-by a kernel. A value shape, familiar name, catalog cardinality, citation, or
-hardcoded Standard Model graph cannot supply those premises.
+The first live addition is the narrow derived `eps_0` execution relation. It
+proves that a non-root value can inherit the sealed floor, derive its own
+representation coordinate, survive independent mutation checking, and mint a
+claim-scoped capability without broadening the floor or registry.
 
-The dormant selector now enforces exact role and content matching through two
+The next addition must be a claim-scoped, role-bound species-forming physical
+law authority. It must admit the field content, operator, interaction sector,
+state, applicability, validity regime, conservation laws, and semantic roles
+consumed by a kernel. A value shape, familiar name, catalog cardinality,
+citation, or hardcoded Standard Model graph cannot supply those premises.
+
+The selector enforces exact role and content matching through two
 different algorithms. Adding an unrelated unfamiliar candidate cannot relabel
 or displace an existing match. A candidate under the wrong role or content
-still fails when it is the only candidate. This establishes selection
-mechanics, not scientific admission. The next authority must mint the opaque
-upstream capability from complete physical evidence and bind its live canary
-transcripts through the watchdog.
+still fails when it is the only candidate. The `eps_0` mint establishes one
+derived scientific admission and selection route, not electromagnetic
+ontology. Every next premise must mint its own opaque upstream capability from
+complete physical evidence and bind its live canary transcripts through the
+watchdog.
 
 The familiar electromagnetic, strong, and weak sectors are one possible
 admitted profile. An unfamiliar or thaumic sector follows the same schema and

@@ -4,7 +4,10 @@
 //! It does not certify completeness of the registry's diagnostic vocabulary.
 
 use super::{AnalysisBuildError, AnalysisProgress, SpeciesDerivationAnalysis};
-use crate::canonical::stellar_birth_species::physical_registry::repository_physical_registry_frontier;
+use crate::canonical::stellar_birth_species::{
+    law_premise::repository_derived_relation_premise_frontier,
+    physical_registry::repository_physical_registry_frontier,
+};
 use crate::canonical::{
     floor_magnitudes::AuditedFloorView, stellar_birth_structure::stellar_birth_structure_schema,
 };
@@ -28,6 +31,8 @@ pub(super) fn validate_analysis(
     let structure = stellar_birth_structure_schema()?;
     let expected_physical_frontier = repository_physical_registry_frontier()
         .map_err(|error| AnalysisBuildError::PhysicalRegistryFrontier(error.code.to_owned()))?;
+    let expected_law_premise_frontier = repository_derived_relation_premise_frontier()
+        .map_err(|error| AnalysisBuildError::LawPremiseFrontier(error.code.to_owned()))?;
     let floor = crate::canonical::sealed_absolute_physics_floor()
         .map_err(|error| AnalysisBuildError::FloorAuthority(error.to_string()))?;
     let floor_view = AuditedFloorView::from_floor(&floor)
@@ -73,6 +78,18 @@ pub(super) fn validate_analysis(
     if analysis.physical_registry_frontier != expected_physical_frontier {
         return invariant("physical-registry frontier differs from its live authority result");
     }
+    if analysis.law_premise_frontier != expected_law_premise_frontier {
+        return invariant("law-premise frontier differs from its live authority result");
+    }
+    if !analysis.law_premise_frontier.requested_premise_coverage
+        || analysis.law_premise_frontier.species_membership_authority
+        || analysis
+            .law_premise_frontier
+            .global_physical_premise_coverage
+        || analysis.law_premise_frontier.authority_effect != "none"
+    {
+        return invariant("law premise gained unsupported scope or authority");
+    }
     if analysis.frontier_source_id != CHECKED_FRONTIER_SOURCE_ID
         || analysis.frontier_scope_id != CHECKED_FRONTIER_SCOPE_ID
         || analysis.frontier_completeness_claim
@@ -85,7 +102,7 @@ pub(super) fn validate_analysis(
         })?
         || analysis.candidate_member_count != 0
         || analysis.verified_support_member_count != 0
-        || analysis.value_payload_present
+        || analysis.species_support_value_payload_present
         || analysis.residual_slot_claim
         || analysis.derive_first_status != AnalysisProgress::OpenDependencies
         || analysis.buckingham_pi_status

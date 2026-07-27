@@ -20,8 +20,8 @@ carry no provenance mark. `eps_0` derives at runtime from `alpha`, `e`, `h`,
 and `c`; `sigma`, `R`, and the atomic-volume conversion are also execution
 derivations rather than physical leaves. These form a ten-identity noncausal
 representation view and a fourteen-identity verified execution capability.
-The floor contains no
-stellar-population scale, joint birth measure, or realization-coordinate law.
+The floor contains no stellar-population scale, joint birth measure, or
+realization-coordinate law.
 A provenance mark, ledger tier, citation, historical draw, world identity, or
 evidence file cannot fill that absence.
 
@@ -70,6 +70,17 @@ dimensions and exact-symbol ancestry checked from the formula. Physical helper
 APIs require the same sealed execution capability and cannot bind or mutate its
 values. This closes the representation and API reachability seams; it does not
 close either stellar-birth leaf.
+
+One active non-root premise now derives the sealed `eps_0` execution
+coordinate from `e`, `alpha`, `h`, and `c`. Independent producer and watchdog
+paths reconstruct the exact relation and alpha admission ancestry, derive the
+claim-local scale under the Q32.32 significand floor and signed-i128 bound, and
+bind separate result digests plus complete 12-case mutation transcripts into a
+v2 pair receipt. The resulting private `VerifiedDerivedContent` capability is
+scoped to that relation. It admits no electromagnetic field, operator, sector,
+species, support value, global vocabulary, uncertainty closure, or snapshot.
+This proves one upward derivation and capability-mint route, not a
+species-forming law.
 
 ## Joint physical measure
 
@@ -205,16 +216,20 @@ registry authority in this slice are structural seals with no production
 constructors, bound payloads, or semantic checkers. The repository resolver
 returns `None`, so no production path can call the reducer. The joint-measure
 refusal includes
-`civsim.planet.stellar-birth-species-derivation-analysis.v4`, checked by
-`civsim.planet.stellar-birth-species-derivation-watchdog.v5`. Its private
+`civsim.planet.stellar-birth-species-derivation-analysis.v6`, checked by
+`civsim.planet.stellar-birth-species-derivation-watchdog.v7`. Its private
 authority is constructible only from the audited floor, the independently
 sealed floor digest, the validated structure schemas, and the live physical
-root pair. It retains the exact `m_e` compatibility anchor with
+root pair. The analysis also binds the adjacent claim-scoped premise's
+producer and watchdog identities, result digests, separate canary transcript
+identities, canary counts and digests,
+claim, role, content, upstream, applicability, validity, ancestry, pair, and
+capability evidence. It retains the exact `m_e` compatibility anchor with
 `membership_authority=false`, then records the paired root claim and receipt,
 three scalar coordinates, one membership-neutral pure-mass expression, zero
-candidate members, zero verified support members, no value payload, and no
-residual-slot claim. Its only attempt is the first executable refusal reached
-by the live physical registry.
+candidate members, zero verified support members, no species-support value
+payload, and no residual-slot claim. Its only attempt is the first executable
+refusal reached by the live physical registry.
 
 Before that refusal, two bounded classifiers independently partition the exact
 admitted input into physical descriptor roles, relation targets, and constraint
@@ -340,6 +355,8 @@ The next bounded physical sub-rung is the rest of
 `P-STELLAR-SPECIES-DERIVATION-ROOTS`: derive or fully admit the field,
 operator, state, sector, validity, constraint-law, excitation, bound-state,
 species mass-uncertainty, or massless-law artifacts consumed by the pair.
+The live `eps_0` premise is a template for that claim-scoped route, not one of
+those missing ontology or membership proofs.
 Production artifacts now carry a private opaque
 `VerifiedAdmissionCapability` rather than accepting receipt-shaped fields as
 authority. The repository-root pair is the only production minter. The
@@ -396,15 +413,18 @@ three physical floor values, derives `eps_0`, enters Stage 1, and returns
 `stellar_birth.realization_measure`. It emits six transcript events: three
 floor records, one derived-value record, one Stage 1 entry, and one refusal.
 It emits no `[X]`, no `[W]` realization, and no snapshot. Two direct runs after
-the v5 root agreement and refusal, CODATA custody, variable-axis support,
-paired final-verifier repair, physical-vocabulary binding, and identity-keyed
-root census are byte-identical at `383,680` stdout bytes and SHA-256
-`02c4e48c5f56a54ed1429bea82d96dffdd38722d7ed23456ef0b64fa070153b5`,
+the first active derived-relation premise and its independent-authority repair
+are byte-identical at `393,806` stdout bytes and SHA-256
+`f6814b0036217723d7e763b38f993a6479cc6fd6c816c54ac6e42d30af6159a4`,
 with exit `2` and empty stderr. A direct `--readiness` run has the same exit,
 stdout, stderr, and digest. It is an observer alias for the canonical front
 door, not a separate readiness result or evidence source. The changed bytes
 bind authority evidence, not a changed physical outcome. The current receipt
 is `civsim.planet.run.v12`; its transcript schema major is `10`.
+
+The complete PR route passes in 1,485.8 seconds. It covers every declared gate,
+all canonical all-target tests, deterministic integer and CPU/GPU parity
+checks, warnings-denied Clippy, private-item documentation, and doctests.
 
 The three-node graph now executes as a fixed-order conjunction over two opaque
 repository-owned proof capabilities. The production resolver currently

@@ -784,6 +784,25 @@ civilization, authored world generation, and the old causal viewer remain in
 
 ## Validation
 
+The 2026-07-26 final-slice audit confirms one active claim-scoped
+`eps_0 = e^2 / (2 * alpha * h * c)` derived relation and no species-forming
+authority. The bounded panel found and repaired supplied-scale authority,
+pair-receipt, mutation-transcript, semantic-closure, observer wording, viewer
+evidence, and replay-cost defects. A frozen repair replay found one remaining
+shared canary-transcript identity. Producer and watchdog now use distinct
+transcript identities and domains, and pair receipt v2 independently binds
+both identities, case counts, and complete transcript digests. The authority
+and observer replay lenses pass with no further source-confirmed defect. Five
+focused relation tests, nine Stage 1 authority tests, and the typed viewer
+projection test pass. Two direct canonical runs from the explicitly rebuilt
+binary each exit `2`, write no stderr, and produce byte-identical 393,806-byte
+receipts at SHA-256
+`f6814b0036217723d7e763b38f993a6479cc6fd6c816c54ac6e42d30af6159a4`.
+Warnings-denied planet and viewer Clippy and the 101.1-second `check-fast`
+pass. The complete PR route passes in 1,485.8 seconds with every declared gate,
+all canonical all-target tests, deterministic integer and CPU/GPU parity
+checks, private-item documentation, and doctests.
+
 The 2026-07-23 baseline had 71 planet library tests, eight CLI tests, three
 viewer tests, a 1,178.5-second complete Linux `check-pr`, and a 78.3-second warm
 `check-fast`. Those timings and counts describe that earlier candidate, not the
@@ -1169,9 +1188,10 @@ the repaired stellar-state packet.
    correlation-carrying joint measure. Before activating any unfamiliar
    dimension axis, close its semantic identity and algebra through a
    repository-owned basis registry and independent admission pair.
-2. Preserve the four membership-neutral floor-coordinate capabilities, then
-   derive or fully admit the repository-owned field, operator, state, sector,
-   validity, constraint-law, excitation, bound-state, species
+2. Preserve the four membership-neutral floor-coordinate capabilities and the
+   claim-scoped `eps_0` relation without treating either as species authority.
+   Then derive or fully admit the repository-owned field, operator, state,
+   sector, validity, constraint-law, excitation, bound-state, species
    mass-uncertainty, and massless-law roots consumed by the landed physical
    registry pair. Every non-root admission needs a claim-specific capability
    mint backed by its own independent authority pair. Bind the resulting
@@ -1195,3 +1215,58 @@ the repaired stellar-state packet.
    composition, orbits, moons, young thermal state, crust, mantle,
    geodynamics, atmosphere, hydrology, loads, flexure, and immutable snapshot
    transport.
+
+## 2026-07-26 first derived-premise capability audit
+
+The first active non-root law-premise pair reconstructs the sealed
+`eps_0 = e^2 / (2 * alpha * h * c)` execution coordinate. It consumes no
+recorded `eps_0` decimal and no calibration target. Its output remains a
+claim-scoped execution relation, not an electromagnetic field, operator,
+sector, excitation, or species.
+
+One bounded five-lens panel passed admit-the-alien and familiar-outcome review
+and failed confirmation-bias, derive-vs-admit, and observer review. Source
+verification confirmed eight repair classes:
+
+1. the supplied output scale was not independently authorized;
+2. the pair receipt omitted implementation identities, canary counts, and the
+   explicit agreement decision;
+3. accepted canaries did not bind complete checker outputs;
+4. the advertised output-dimension canary changed relation dimension instead;
+5. output scale had no mutation canary;
+6. the active semantic closure omitted transitive adapters and primitives;
+7. viewer wording conflated a species-support value with the adjacent derived
+   coordinate and omitted claim-scope evidence;
+8. production and rendering repeated sealed authority work that had already
+   been checked.
+
+The repaired v2 pair independently derives the claim-local scale under the
+Q32.32 significand floor and signed-i128 capacity bound. Producer and watchdog
+each execute 12 mutations, bind each complete mutant preimage and complete
+observed result, and expose separate implementation, result, transcript,
+case-count, and digest identities. The pair receipt binds the distinct
+producer and watchdog transcript domains plus those fields and `agreed`
+before capability minting. The generic selector is a non-authorizing post-mint
+validation. The active inventory closure now names core fixed-point,
+ledger-admission, planet-catalog, units-computation, dimensional, floor
+admission, and source-evidence dependencies.
+
+Stage 1 analysis v6 under watchdog v7 carries every claim, role, content,
+upstream, applicability, validity, ancestry, checker, canary, pair, and
+capability digest. The viewer exposes the same immutable evidence and labels
+the false payload bit as
+`species_support_value_payload_present`. Rendering is now a pure projection of
+the private construction-time-validated artifact. The production frontier
+resolves once, and both adapters use the cached sealed SI candidate view while
+retaining independent semantic checks.
+
+Five focused derived-relation tests, nine Stage 1 authority tests, the viewer
+premise test, planet-boundary gate, and both authority-inventory checks pass.
+The frozen repair audit found and then confirmed closure of the shared
+canary-transcript identity defect. Two direct runner replays from the
+explicitly rebuilt binary each exit `2`, write no stderr, and produce
+byte-identical 393,806-byte stdout receipts at SHA-256
+`f6814b0036217723d7e763b38f993a6479cc6fd6c816c54ac6e42d30af6159a4`.
+The physical registry remains at four roots,
+the vocabulary partition remains `0 / 4 / 0`, species membership remains zero,
+and Stage 1 still refuses with `no_admitted_species_derivation_rules`.

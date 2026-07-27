@@ -27,12 +27,12 @@ mod scene;
 
 pub use scene::{
     AnalysisScene, DimensionOnlyTermScene, DimensionalAttemptScene, DimensionalCensusScene,
-    DimensionalPhenomenonScene, FloorEventScene, FloorScene, ObservationScene,
-    ObservationSceneStatus, OpenRequirementScene, PhysicalRootAdmissionScene,
-    PhysicalVocabularyCheckerDigests, PhysicalVocabularyPartitions, ProvenanceScene,
-    RefusalReasonScene, RefusalScene, RepositoryPhysicalRegistryFrontierScene,
-    RepresentationStatusScene, RepresentationValueScene, SpeciesAttemptScene,
-    SpeciesDerivationScene, StageScene, TranscriptEventScene, TranscriptScene,
+    DimensionalPhenomenonScene, FloorEventScene, FloorScene, LawPremiseCanaryEvidence,
+    LawPremiseCanaryEvidencePair, ObservationScene, ObservationSceneStatus, OpenRequirementScene,
+    PhysicalRootAdmissionScene, PhysicalVocabularyCheckerDigests, PhysicalVocabularyPartitions,
+    ProvenanceScene, RefusalReasonScene, RefusalScene, RepositoryLawPremiseFrontierScene,
+    RepositoryPhysicalRegistryFrontierScene, RepresentationStatusScene, RepresentationValueScene,
+    SpeciesAttemptScene, SpeciesDerivationScene, StageScene, TranscriptEventScene, TranscriptScene,
     ValuePayloadVisibility,
 };
 

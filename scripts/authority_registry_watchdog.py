@@ -86,6 +86,13 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "5c09a8d95b7de145110a9f97f773bb0e0a63d6d6dc0f964eeb8beb62efff5575",
     ),
     (
+        "planet.derived-law-premise-eps0",
+        "authority",
+        "scientific",
+        "active",
+        "9ce5e04b3cf043616148062cb4f7eada303fe03a421aef004fa02970d41e26c2",
+    ),
+    (
         "planet.physical-vocabulary-partition",
         "diagnostic",
         None,
@@ -97,7 +104,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "diagnostic",
         None,
         "diagnostic",
-        "44fb171f11d42aaa2be122891aff3374c6f0ad56a3de0cb07058f6170f0d2f92",
+        "e59b9d794e0c4fc9b9e1e6b2ac586fca8b54700d30dfa24eb637c7b1e6522780",
     ),
     (
         "planet.species-state-support",
@@ -156,7 +163,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "3bfb94aa0c3f507ad8ba9762e91ca9009284becc9d9752d7b7b896cb9a26ca7d",
     ),
 )
-EXPECTED_COUNTS = (9, 8, 2, 19)
+EXPECTED_COUNTS = (10, 8, 2, 20)
 
 META_EXPECTATIONS = (
     ("producer_path", "scripts/authority_watchdog_gate.py"),

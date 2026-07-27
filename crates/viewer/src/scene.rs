@@ -5,10 +5,11 @@ mod transcript;
 
 pub use frontier::{
     AnalysisScene, DimensionOnlyTermScene, DimensionalAttemptScene, DimensionalCensusScene,
-    DimensionalPhenomenonScene, OpenRequirementScene, PhysicalRootAdmissionScene,
-    PhysicalVocabularyCheckerDigests, PhysicalVocabularyPartitions, RefusalReasonScene,
-    RefusalScene, RepositoryPhysicalRegistryFrontierScene, SpeciesAttemptScene,
-    SpeciesDerivationScene, StageScene,
+    DimensionalPhenomenonScene, LawPremiseCanaryEvidence, LawPremiseCanaryEvidencePair,
+    OpenRequirementScene, PhysicalRootAdmissionScene, PhysicalVocabularyCheckerDigests,
+    PhysicalVocabularyPartitions, RefusalReasonScene, RefusalScene,
+    RepositoryLawPremiseFrontierScene, RepositoryPhysicalRegistryFrontierScene,
+    SpeciesAttemptScene, SpeciesDerivationScene, StageScene,
 };
 pub use transcript::{
     FloorEventScene, FloorScene, ProvenanceScene, RepresentationStatusScene,

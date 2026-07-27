@@ -471,7 +471,7 @@ mod tests {
             species.physical_registry_membership_authority(),
             Some(false)
         );
-        assert_eq!(species.value_payload_present(), Some(false));
+        assert_eq!(species.species_support_value_payload_present(), Some(false));
         assert_eq!(species.residual_slot_claim(), Some(false));
         assert!(coordinate.analyses().is_empty());
     }

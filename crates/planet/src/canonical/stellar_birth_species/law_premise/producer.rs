@@ -28,7 +28,9 @@ pub(super) fn select(
     if request.requirements.iter().any(|requirement| {
         invalid_key(requirement.key)
             || match requirement.proof {
-                RequirementProof::AdmittedContent => false,
+                RequirementProof::AdmittedContent | RequirementProof::VerifiedDerivedContent => {
+                    false
+                }
                 RequirementProof::ExactZero {
                     subject_identity,
                     excluded_term_identity,
@@ -103,6 +105,9 @@ pub(super) fn select(
             (RequirementProof::AdmittedContent, CandidateProof::AdmittedContent) => {
                 SelectedProof::AdmittedContent
             }
+            (RequirementProof::VerifiedDerivedContent, CandidateProof::VerifiedDerivedContent) => {
+                SelectedProof::VerifiedDerivedContent
+            }
             (
                 RequirementProof::ExactZero {
                     subject_identity,
@@ -141,7 +146,7 @@ fn invalid_candidate(candidate: &ClaimScopedPremiseCapability) -> bool {
         return true;
     }
     match candidate.proof {
-        CandidateProof::AdmittedContent => false,
+        CandidateProof::AdmittedContent | CandidateProof::VerifiedDerivedContent => false,
         CandidateProof::ExactZero(proof) => {
             proof.subject_identity == [0; 32]
                 || proof.excluded_term_identity == [0; 32]
@@ -202,6 +207,12 @@ pub(super) fn capability_digest(candidate: &ClaimScopedPremiseCapability) -> [u8
     match candidate.proof {
         CandidateProof::AdmittedContent => {
             append_field(&mut preimage, 9, &[0]);
+            for tag in 10..=13 {
+                append_field(&mut preimage, tag, &[]);
+            }
+        }
+        CandidateProof::VerifiedDerivedContent => {
+            append_field(&mut preimage, 9, &[2]);
             for tag in 10..=13 {
                 append_field(&mut preimage, tag, &[]);
             }

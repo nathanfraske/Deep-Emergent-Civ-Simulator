@@ -96,6 +96,12 @@ fn the_no_argument_binary_enters_the_floor_only_runner_and_refuses() {
         "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.root_decision_id=\"agreed_projected\"\n"
     ));
     assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.law_premise_frontier.producer_canary.transcript_id=\"civsim.planet.derived-law-premise-eps0.producer-canary-transcript.v1\"\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.law_premise_frontier.watchdog_canary.transcript_id=\"civsim.planet.derived-law-premise-eps0.watchdog-canary-transcript.v1\"\n"
+    ));
+    assert!(stdout.contains(
         "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.vocabulary_receipt_schema=\"civsim.planet.stellar-birth-physical-vocabulary-agreement.v1\"\n"
     ));
     assert!(stdout.contains(
@@ -418,7 +424,7 @@ fn species_live_refusal_has_a_typed_read_only_api() {
     );
     assert_eq!(species.candidate_member_count(), Some(0));
     assert_eq!(species.verified_support_member_count(), Some(0));
-    assert_eq!(species.value_payload_present(), Some(false));
+    assert_eq!(species.species_support_value_payload_present(), Some(false));
     assert_eq!(species.residual_slot_claim(), Some(false));
     assert_eq!(
         species.buckingham_pi_status_id(),

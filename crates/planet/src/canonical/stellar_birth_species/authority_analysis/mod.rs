@@ -12,6 +12,9 @@ pub(in crate::canonical) use wire::write_species_derivation_analysis;
 
 use crate::canonical::{
     floor_magnitudes::AuditedFloorView,
+    stellar_birth_species::law_premise::{
+        repository_derived_relation_premise_frontier, RepositoryDerivedRelationPremiseFrontier,
+    },
     stellar_birth_species::physical_registry::{
         repository_physical_registry_frontier, RepositoryPhysicalRegistryFrontier,
     },
@@ -28,9 +31,9 @@ use watchdog::validate_analysis;
 use super::COMPLETE_SPECIES_STATE_MEAN_PARTICLE_MASS_LAW_ID;
 
 pub(in crate::canonical) const SPECIES_DERIVATION_ANALYSIS_SCHEMA_ID: &str =
-    "civsim.planet.stellar-birth-species-derivation-analysis.v4";
+    "civsim.planet.stellar-birth-species-derivation-analysis.v6";
 pub(in crate::canonical) const SPECIES_DERIVATION_ANALYSIS_CHECKER_ID: &str =
-    "civsim.planet.stellar-birth-species-derivation-watchdog.v5";
+    "civsim.planet.stellar-birth-species-derivation-watchdog.v7";
 
 const FLOOR_ANCHOR_ID: &str = "fundamental.m_e";
 const FLOOR_ANCHOR_SYMBOL: &str = "m_e";
@@ -93,6 +96,7 @@ pub(in crate::canonical) struct SpeciesDerivationAnalysis {
     physical_regime_registry_schema_id: &'static str,
     reducer_law_id: &'static str,
     floor_mass_anchor: FloorMassAnchor,
+    law_premise_frontier: RepositoryDerivedRelationPremiseFrontier,
     physical_registry_frontier: RepositoryPhysicalRegistryFrontier,
     frontier_source_id: &'static str,
     frontier_scope_id: &'static str,
@@ -101,7 +105,7 @@ pub(in crate::canonical) struct SpeciesDerivationAnalysis {
     open_proof_ids: Vec<String>,
     candidate_member_count: usize,
     verified_support_member_count: usize,
-    value_payload_present: bool,
+    species_support_value_payload_present: bool,
     residual_slot_claim: bool,
     derive_first_status: AnalysisProgress,
     buckingham_pi_status: AnalysisProgress,
@@ -128,6 +132,7 @@ struct SpeciesDerivationAnalysisAuthority {
     floor_binding_sha256: String,
     structure: StellarBirthStructureSchema,
     floor_mass_anchor: FloorMassAnchor,
+    law_premise_frontier: RepositoryDerivedRelationPremiseFrontier,
     physical_registry_frontier: RepositoryPhysicalRegistryFrontier,
 }
 
@@ -138,6 +143,8 @@ impl SpeciesDerivationAnalysisAuthority {
         let structure = stellar_birth_structure_schema()?;
         let physical_registry_frontier = repository_physical_registry_frontier()
             .map_err(|error| AnalysisBuildError::PhysicalRegistryFrontier(error.code.to_owned()))?;
+        let law_premise_frontier = repository_derived_relation_premise_frontier()
+            .map_err(|error| AnalysisBuildError::LawPremiseFrontier(error.code.to_owned()))?;
         let electron_mass = floor.magnitudes.electron_mass;
         if electron_mass.symbol() != FLOOR_ANCHOR_SYMBOL || electron_mass.bits() == 0 {
             return Err(AnalysisBuildError::FloorAnchorMismatch);
@@ -155,6 +162,7 @@ impl SpeciesDerivationAnalysisAuthority {
                 role: FLOOR_ANCHOR_ROLE,
                 membership_authority: false,
             },
+            law_premise_frontier,
             physical_registry_frontier,
         })
     }
@@ -165,6 +173,7 @@ enum AnalysisBuildError {
     FloorAuthority(String),
     Structure(StructureSchemaError),
     FloorAnchorMismatch,
+    LawPremiseFrontier(String),
     PhysicalRegistryFrontier(String),
     InternalInvariant(String),
 }
@@ -175,6 +184,7 @@ impl AnalysisBuildError {
             Self::FloorAuthority(_) => "floor_authority_unavailable",
             Self::Structure(_) => "structure_schema_unavailable",
             Self::FloorAnchorMismatch => "floor_mass_anchor_mismatch",
+            Self::LawPremiseFrontier(_) => "law_premise_frontier_unavailable",
             Self::PhysicalRegistryFrontier(_) => "physical_registry_frontier_unavailable",
             Self::InternalInvariant(_) => "analysis_invariant_violation",
         }
@@ -194,6 +204,9 @@ impl fmt::Display for AnalysisBuildError {
             Self::Structure(error) => write!(f, "stellar-birth structure: {error}"),
             Self::FloorAnchorMismatch => {
                 f.write_str("audited electron-mass coordinate does not match its sealed anchor")
+            }
+            Self::LawPremiseFrontier(detail) => {
+                write!(f, "derived law-premise frontier: {detail}")
             }
             Self::PhysicalRegistryFrontier(detail) => {
                 write!(f, "physical-registry frontier: {detail}")
@@ -230,6 +243,7 @@ fn build_analysis(
             .schema_id,
         reducer_law_id: COMPLETE_SPECIES_STATE_MEAN_PARTICLE_MASS_LAW_ID,
         floor_mass_anchor: authority.floor_mass_anchor,
+        law_premise_frontier: authority.law_premise_frontier,
         physical_registry_frontier: authority.physical_registry_frontier,
         frontier_source_id: FRONTIER_SOURCE_ID,
         frontier_scope_id: FRONTIER_SCOPE_ID,
@@ -238,7 +252,7 @@ fn build_analysis(
         open_proof_ids: frontier.open_proof_ids,
         candidate_member_count: frontier.candidate_member_count,
         verified_support_member_count: frontier.verified_support_member_count,
-        value_payload_present: frontier.value_payload_present,
+        species_support_value_payload_present: frontier.species_support_value_payload_present,
         residual_slot_claim: frontier.residual_slot_claim,
         derive_first_status: frontier.derive_first_status,
         buckingham_pi_status: frontier.buckingham_pi_status,
@@ -319,6 +333,59 @@ mod tests {
         );
         assert_eq!(view.floor_anchor_membership_authority(), Some(false));
         assert_eq!(
+            view.law_premise_identity(),
+            Some((
+                "planet.derived-law-premise-eps0",
+                "civsim.planet.derived-law-premise-execution-relation.v2",
+                "civsim.planet.derived-law-premise-eps0-pair-receipt.v2",
+                "civsim.planet.derived-law-premise-eps0-canaries.v2",
+            ))
+        );
+        assert_eq!(view.law_premise_output_symbol(), Some("eps_0"));
+        assert!(view.law_premise_output_bits().is_some_and(|bits| bits > 0));
+        assert!(view
+            .law_premise_output_scale_bits()
+            .is_some_and(|scale| scale > 0));
+        assert_eq!(
+            view.law_premise_checker_identities(),
+            Some((
+                "civsim.planet.derived-law-premise-eps0.sorted-vector-producer.v2",
+                "civsim.planet.derived-law-premise-eps0.map-reconstruction-watchdog.v2",
+                "agreed",
+            ))
+        );
+        let (producer_result, watchdog_result) = view
+            .law_premise_checker_result_sha256()
+            .expect("both result digests are visible");
+        assert_ne!(producer_result, [0; 32]);
+        assert_ne!(watchdog_result, [0; 32]);
+        let (producer_transcript_id, watchdog_transcript_id) = view
+            .law_premise_canary_transcript_ids()
+            .expect("both transcript identities are visible");
+        assert_ne!(producer_transcript_id, watchdog_transcript_id);
+        let [(producer_cases, producer_canary), (watchdog_cases, watchdog_canary)] =
+            view.law_premise_canary_evidence().unwrap();
+        assert_eq!((producer_cases, watchdog_cases), (12, 12));
+        assert_ne!(producer_canary, [0; 32]);
+        assert_ne!(producer_canary, watchdog_canary);
+        for digest in [
+            view.law_premise_claim_identity_sha256(),
+            view.law_premise_role_identity_sha256(),
+            view.law_premise_content_identity_sha256(),
+            view.law_premise_upstream_capability_sha256(),
+            view.law_premise_applicability_receipt_sha256(),
+            view.law_premise_validity_receipt_sha256(),
+            view.law_premise_ancestry_receipt_sha256(),
+        ] {
+            assert!(digest.is_some_and(|digest| digest != [0; 32]));
+        }
+        assert_ne!(view.law_premise_pair_receipt_sha256(), Some([0; 32]));
+        assert_eq!(
+            view.law_premise_ledger_classification(),
+            Some(("universal", "[D]", "verified_derived_content"))
+        );
+        assert_eq!(view.law_premise_scope(), Some((true, false, false, "none")));
+        assert_eq!(
             view.physical_registry_root_claim_id(),
             Some("planet.stellar-species-floor-coordinate-projection")
         );
@@ -362,7 +429,7 @@ mod tests {
         assert_eq!(view.frontier_completeness_claim(), Some(false));
         assert_eq!(view.candidate_member_count(), Some(0));
         assert_eq!(view.verified_support_member_count(), Some(0));
-        assert_eq!(view.value_payload_present(), Some(false));
+        assert_eq!(view.species_support_value_payload_present(), Some(false));
         assert_eq!(view.residual_slot_claim(), Some(false));
         assert_eq!(view.gap_law_status_id(), Some("not_reached"));
         assert_eq!(view.chaos_protocol_status_id(), Some("not_reached"));
@@ -422,6 +489,16 @@ mod tests {
             panic!("the production analysis should compute");
         };
         analysis.attempts[0].id = "producer-selected-replacement";
+        assert!(validate_analysis(&analysis).is_err());
+    }
+
+    #[test]
+    fn a_law_premise_mutation_fails_the_independent_seal() {
+        let SpeciesDerivationAnalysisArtifact::Computed(mut analysis) = analysis() else {
+            panic!("the production analysis should compute");
+        };
+        analysis.law_premise_frontier.output_bits += 1;
+
         assert!(validate_analysis(&analysis).is_err());
     }
 

@@ -1,6 +1,6 @@
 //! Canonical text encoding for the bounded live species derivation diagnostic.
 
-use super::{validate_analysis, SpeciesDerivationAnalysisArtifact};
+use super::SpeciesDerivationAnalysisArtifact;
 use crate::canonical::transcript::canonical_text;
 use std::fmt;
 
@@ -19,9 +19,9 @@ pub(in crate::canonical) fn write_species_derivation_analysis(
             )
         }
         SpeciesDerivationAnalysisArtifact::Computed(analysis) => {
-            validate_analysis(analysis).map_err(|_| fmt::Error)?;
             write_schema_bindings(f, prefix, analysis)?;
             write_floor_anchor(f, prefix, analysis)?;
+            write_law_premise_frontier(f, prefix, analysis)?;
             write_physical_registry_frontier(f, prefix, analysis)?;
             writeln!(
                 f,
@@ -50,8 +50,8 @@ pub(in crate::canonical) fn write_species_derivation_analysis(
             )?;
             writeln!(
                 f,
-                "{prefix}.value_payload_present={}",
-                analysis.value_payload_present
+                "{prefix}.species_support_value_payload_present={}",
+                analysis.species_support_value_payload_present
             )?;
             writeln!(
                 f,
@@ -71,6 +71,107 @@ pub(in crate::canonical) fn write_species_derivation_analysis(
             Ok(())
         }
     }
+}
+
+fn write_law_premise_frontier(
+    f: &mut fmt::Formatter<'_>,
+    prefix: &str,
+    analysis: &super::SpeciesDerivationAnalysis,
+) -> fmt::Result {
+    let frontier = &analysis.law_premise_frontier;
+    let premise_prefix = format!("{prefix}.law_premise_frontier");
+    for (field, value) in [
+        ("premise_id", frontier.premise_id),
+        ("artifact_schema", frontier.artifact_schema_id),
+        ("receipt_schema", frontier.receipt_schema_id),
+        ("canary_suite_id", frontier.canary_suite_id),
+        (
+            "producer_implementation_id",
+            frontier.producer_implementation_id,
+        ),
+        (
+            "watchdog_implementation_id",
+            frontier.watchdog_implementation_id,
+        ),
+        (
+            "producer_canary.transcript_id",
+            frontier.producer_canary_transcript_id,
+        ),
+        (
+            "watchdog_canary.transcript_id",
+            frontier.watchdog_canary_transcript_id,
+        ),
+        ("decision_id", frontier.decision_id),
+        ("output.symbol", frontier.output_symbol),
+        ("tier", frontier.tier_id),
+        ("provenance", frontier.provenance_tag),
+        ("content_proof_kind", frontier.content_proof_kind),
+        ("authority_effect", frontier.authority_effect),
+    ] {
+        writeln!(f, "{premise_prefix}.{field}={}", canonical_text(value))?;
+    }
+    writeln!(f, "{premise_prefix}.output.bits={}", frontier.output_bits)?;
+    writeln!(
+        f,
+        "{premise_prefix}.output.scale_bits={}",
+        frontier.output_scale_bits
+    )?;
+    for (field, digest) in [
+        (
+            "output.projection_receipt.sha256",
+            frontier.output_projection_receipt_sha256,
+        ),
+        (
+            "canonical_relation.sha256",
+            frontier.canonical_relation_sha256,
+        ),
+        ("producer_result.sha256", frontier.producer_result_sha256),
+        ("watchdog_result.sha256", frontier.watchdog_result_sha256),
+        ("claim_identity.sha256", frontier.claim_identity_sha256),
+        ("role_identity.sha256", frontier.role_identity_sha256),
+        ("content_identity.sha256", frontier.content_identity_sha256),
+        (
+            "upstream_capability.sha256",
+            frontier.upstream_capability_sha256,
+        ),
+        (
+            "applicability_receipt.sha256",
+            frontier.applicability_receipt_sha256,
+        ),
+        ("validity_receipt.sha256", frontier.validity_receipt_sha256),
+        ("ancestry_receipt.sha256", frontier.ancestry_receipt_sha256),
+        ("pair_receipt.sha256", frontier.pair_receipt_sha256),
+        ("producer_canary.sha256", frontier.producer_canary_sha256),
+        ("watchdog_canary.sha256", frontier.watchdog_canary_sha256),
+        ("capability.sha256", frontier.capability_sha256),
+    ] {
+        write_digest(f, &premise_prefix, field, digest)?;
+    }
+    writeln!(
+        f,
+        "{premise_prefix}.producer_canary.case_count={}",
+        frontier.producer_canary_case_count
+    )?;
+    writeln!(
+        f,
+        "{premise_prefix}.watchdog_canary.case_count={}",
+        frontier.watchdog_canary_case_count
+    )?;
+    writeln!(
+        f,
+        "{premise_prefix}.requested_premise_coverage={}",
+        frontier.requested_premise_coverage
+    )?;
+    writeln!(
+        f,
+        "{premise_prefix}.species_membership_authority={}",
+        frontier.species_membership_authority
+    )?;
+    writeln!(
+        f,
+        "{premise_prefix}.global_physical_premise_coverage={}",
+        frontier.global_physical_premise_coverage
+    )
 }
 
 fn write_physical_registry_frontier(
