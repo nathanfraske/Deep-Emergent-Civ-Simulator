@@ -24,6 +24,7 @@ mod bound_state_threshold;
 mod law_premise;
 mod physical_registry;
 mod support_packet;
+mod symmetry_operator_exclusion;
 
 pub(super) use authority_analysis::{
     analyze_repository_species_state_support, write_species_derivation_analysis,

@@ -1351,3 +1351,60 @@ private-item documentation, and doctests. Two direct runner executions each
 exit `2`, write no stderr, and produce byte-identical 393,806-byte receipt v13
 output at SHA-256
 `3da00e63a98cb78c09c2c2acb6fe212e6660580b249dd4780d27ccd0558bd3b5`.
+
+## 2026-07-27 conditional symmetry algebra and confirmation-cost audit
+
+The source-confirmed boundary was recorded before implementation. The failed
+primitive profile lacked an executable operator-exclusion calculation, but a
+generic affine action over opaque field identities and a generic quadratic
+candidate set can be evaluated without choosing a familiar ontology. That
+calculation cannot admit its action, prove applicability, establish complete
+operator coverage, or mint a species. Separately, timing showed that authority
+mutation self-tests repeatedly walked the same mounted filesystem after one
+complete validation, while the live receipt and semantic-closure hashes still
+needed exhaustive reads.
+
+The recommendations were to implement only the conditional algebra through
+two semantically distinct exact algorithms, enroll it as blocked, keep every
+physical and completeness capability absent, and optimize only redundant
+self-test filesystem work. A bounded non-certifying planet confirmation route
+would pay live gates and the affected crate while reserving the complete
+workspace, detector self-tests, documentation, and doctest receipt for
+`check-pr`.
+
+The implementation follows that boundary. A sparse polynomial producer
+substitutes the complete affine action and subtracts the original operator. An
+independent watchdog constructs only direct linear and quadratic variation
+terms. Both canonicalize field, action, and operator order through different
+data paths, use checked `i128`, bind complete canonical input and output bytes,
+and agree on typed malformed, arithmetic, and resource refusals. A shared
+algorithm-neutral expansion limit is independently preflighted before either
+algorithm allocates its variation. Tests cover permutation, commutative term
+orientation, an unchanged spectator, unrelated unfamiliar extension,
+malformed identities, unknown fields, duplicate and zero operators, overflow,
+capacity, and a small coefficient grid.
+
+The report states requested-candidate coverage only and denies global
+operator-basis coverage, applicability authority, species membership, and
+every authority effect. Production has no input constructor and returns
+`no_admitted_symmetry_action_input`. The authority inventory enrolls
+`planet.symmetry-operator-exclusion` as blocked, bringing the exact census to
+10 active authorities, 9 blocked authorities, and 2 diagnostics.
+
+The performance change leaves default and live validation unchanged. Mutation
+self-tests use schema and complete-profile pins without repeated path reads
+after a full baseline; the missing-path mutation still runs the full path
+validator, and semantic-closure mutation tests still copy, change, omit, and
+rehash real files. The independent watchdog self-test fell from 45.9 to 17.7
+seconds. The paired producer self-test, including the independent watchdog
+self-test, fell from 105.1 to 37.4 seconds.
+
+`just confirm-planet [filter]` and matching Make and PowerShell aliases now run
+formatting, all live structural and provenance gates, planet tests, and
+planet-only warnings-denied Clippy. The route is explicitly non-certifying.
+The exact slice passed in 126.0 seconds after a source edit, 65.2 seconds with
+warm content and Cargo caches, and 199.9 seconds after the final code plus
+documentation change. The complete `check-pr` receipt passes in 1,320.4
+seconds, including all canonical packages and targets, detector self-tests,
+Stone 0, deterministic CPU and GPU integer parity, private-item documentation,
+and doctests.

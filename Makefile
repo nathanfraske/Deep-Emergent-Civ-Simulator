@@ -1,6 +1,6 @@
 # Thin development aliases. The Just recipes and scripts remain the command source of truth.
 
-.PHONY: help hooks-install hooks-check doctor gates-list gates-run gates-self-tests floor-source-evidence-check floor-source-evidence-audit run run-derived readiness run-dawn-legacy run-living-legacy view view-gpu view-living-legacy view-living-gpu-legacy ledger-inventory ledger-inventory-check verify check-fast check check-pr check-full check-nightly check-legacy ci ci-local ci-list ci-legacy ci-list-legacy test test-gpu-cpu-sparse test-gpu-vulkan-sparse test-gpu-cuda-cpu-cross test-legacy test-legacy-routine audit-parked fmt fmt-check fmt-legacy fmt-check-legacy lint lint-legacy pins-dawn-legacy stop-gate cache-info gc gc-dry trim-wsl
+.PHONY: help hooks-install hooks-check doctor gates-list gates-run gates-self-tests floor-source-evidence-check floor-source-evidence-audit run run-derived readiness run-dawn-legacy run-living-legacy view view-gpu view-living-legacy view-living-gpu-legacy ledger-inventory ledger-inventory-check verify check-fast confirm-planet check check-pr check-full check-nightly check-legacy ci ci-local ci-list ci-legacy ci-list-legacy test test-gpu-cpu-sparse test-gpu-vulkan-sparse test-gpu-cuda-cpu-cross test-legacy test-legacy-routine audit-parked fmt fmt-check fmt-legacy fmt-check-legacy lint lint-legacy pins-dawn-legacy stop-gate cache-info gc gc-dry trim-wsl
 
 GATE_TIER ?= pr
 
@@ -16,6 +16,7 @@ FLOOR_SOURCE_EVIDENCE_CHECK_CMD := $(DEV) floor-source-evidence-check
 FLOOR_SOURCE_EVIDENCE_AUDIT_CMD := $(DEV) floor-source-evidence-audit
 VERIFY_CMD := $(DEV) verify
 CHECK_FAST_CMD := $(DEV) check-fast
+CONFIRM_PLANET_CMD := $(DEV) confirm-planet
 CHECK_CMD := $(DEV) check
 CHECK_PR_CMD := $(DEV) check-pr
 CHECK_FULL_CMD := $(DEV) check-full
@@ -67,6 +68,7 @@ FLOOR_SOURCE_EVIDENCE_CHECK_CMD := just floor-source-evidence-check
 FLOOR_SOURCE_EVIDENCE_AUDIT_CMD := just floor-source-evidence-audit
 VERIFY_CMD := just verify
 CHECK_FAST_CMD := just check-fast
+CONFIRM_PLANET_CMD := just confirm-planet
 CHECK_CMD := just check-pr
 CHECK_PR_CMD := just check-pr
 CHECK_FULL_CMD := just check-full
@@ -132,6 +134,7 @@ help:
 	  'make ledger-inventory-check verify the checked-in inventory' \
 	  'make verify           document and prose gate' \
 	  'make check-fast       non-certifying developer compile loop' \
+	  'make confirm-planet TEST_ARGS=... bounded non-certifying planet confirmation' \
 	  'make check            canonical PR tier' \
 	  'make check-full       canonical full CPU tier' \
 	  'make check-nightly    scheduled canonical tier' \
@@ -223,6 +226,9 @@ verify:
 
 check-fast:
 	@$(CHECK_FAST_CMD)
+
+confirm-planet:
+	@$(CONFIRM_PLANET_CMD) $(TEST_ARGS)
 
 check:
 	@$(CHECK_CMD)

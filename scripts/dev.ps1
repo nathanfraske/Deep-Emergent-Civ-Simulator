@@ -37,6 +37,7 @@ param(
         "ledger-inventory-check",
         "verify",
         "check-fast",
+        "confirm-planet",
         "check",
         "check-pr",
         "check-full",
@@ -149,6 +150,7 @@ just doctor
     "ledger-inventory-check" = "just ledger-inventory-check"
     "verify"           = "just verify"
     "check-fast"       = "just check-fast"
+    "confirm-planet"   = "just confirm-planet"
     "check"            = "just check-pr"
     "check-pr"         = "just check-pr"
     "check-full"       = "just check-full"

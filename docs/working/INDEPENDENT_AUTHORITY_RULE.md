@@ -357,6 +357,15 @@ precondition, not an authority. A future scientific mint must independently
 evaluate the symmetry action and prove operator exclusion throughout the
 claimed applicability domain.
 
+The blocked `planet.symmetry-operator-exclusion` mechanism now supplies that
+conditional calculation through independent substitution and direct-variation
+algorithms over affine actions and quadratic candidates. Its exact agreement
+grants requested-candidate coverage only. It denies action admission,
+applicability authority, global operator-basis coverage, species membership,
+and every authority effect. Activation still requires those separate
+capabilities, production canary transcripts, and the complete irreducible
+protocol.
+
 A distinct future non-root mint and registry-to-support boundary remain
 blocked. Before a species-forming rule may authorize a derived or irreducible
 artifact, a claim-specific independent pair must verify its complete ancestry
@@ -400,8 +409,8 @@ booleans from the other.
 Both receipts bind the registry SHA-256, schema and closed-world marker,
 ordered mechanism profiles with their complete-profile SHA-256 pins, exact
 active, blocked, and diagnostic counts, and a sorted semantic-closure
-path-to-SHA-256 manifest. The current closed profile contains nine active
-authorities, eight blocked authorities, and one diagnostic. The agreement
+path-to-SHA-256 manifest. The current closed profile contains ten active
+authorities, nine blocked authorities, and two diagnostics. The agreement
 receipt therefore changes when a semantic field changes, when any closure
 implementation, adapter, shared primitive, or orchestrator changes, or when a
 structural classification changes. Agreement remains structural. It does not

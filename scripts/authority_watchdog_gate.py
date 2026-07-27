@@ -56,6 +56,11 @@ REQUIRED_PROFILES: dict[str, tuple[str, str | None, str]] = {
         "scientific",
         "active",
     ),
+    "planet.symmetry-operator-exclusion": (
+        "authority",
+        "scientific",
+        "blocked",
+    ),
     "units.certified-formula-projection": (
         "authority",
         "scientific",
@@ -89,6 +94,7 @@ REQUIRED_PROFILE_DIGESTS: dict[str, str] = {
     "planet.stage1-dimensional-census": "21140b26c937f9cca7a8066b98e9fa75e9366f483ca44ffd1cc5206315f2b5dc",
     "planet.stellar-birth-proof-tokens": "68f58f019ab4f620194133e673c64240d4ad066f97404698ba0bfbf8b96935d1",
     "planet.stellar-species-floor-coordinate-projection": "5c67629ed706fe636ca0d10c09953cdc65f24d424822db3f4bfaa14836db5ee9",
+    "planet.symmetry-operator-exclusion": "0dfee195f41694cf5b8e8802cdb63ff12faa003e8c4a66001a6026f6cbdd8872",
     "units.certified-formula-projection": "7ee2a9a60f102d0ea34bc5700d2070b079390c050d10c2d685e1525a0f091005",
     "units.si-execution-table": "2eca0ae6da0ad4483e3038e5aa6bbf1cd3d158bf3ca49df78aab7224b8927d5e",
     "units.si-representation-policy": "db7449a52dbf7f56b598828fe3888d0505e833c170c89de99a6b390a8057698b",
@@ -96,9 +102,9 @@ REQUIRED_PROFILE_DIGESTS: dict[str, str] = {
 }
 REQUIRED_COUNTS = {
     "active": 10,
-    "blocked": 8,
+    "blocked": 9,
     "diagnostic": 2,
-    "total": 20,
+    "total": 21,
 }
 META_PAIR = {
     "producer_path": "scripts/authority_watchdog_gate.py",
@@ -194,7 +200,13 @@ def _exact_fields(row: dict[str, Any], expected: set[str], label: str) -> None:
     )
 
 
-def _repo_file(root: pathlib.Path, value: str, label: str) -> pathlib.Path:
+def _repo_file(
+    root: pathlib.Path,
+    value: str,
+    label: str,
+    *,
+    verify_file: bool = True,
+) -> pathlib.Path:
     components = value.split("/")
     if (
         not value
@@ -203,6 +215,8 @@ def _repo_file(root: pathlib.Path, value: str, label: str) -> pathlib.Path:
         or any(component in {"", ".", ".."} for component in components)
     ):
         raise AuthorityInventoryError(f"{label} must be a canonical repository path")
+    if not verify_file:
+        return root.joinpath(*components)
     root_resolved = root.resolve()
     try:
         path = root.joinpath(*components).resolve(strict=True)
@@ -230,6 +244,8 @@ def _validate_semantic_closure(
     root: pathlib.Path,
     label: str,
     required_paths: set[str],
+    *,
+    verify_files: bool,
 ) -> None:
     closure = _required_text_list(row, "semantic_closure", label)
     if not closure:
@@ -244,18 +260,30 @@ def _validate_semantic_closure(
             root,
             relative,
             f"{label}.semantic_closure[{index}]",
+            verify_file=verify_files,
         )
 
 
 def _validate_active(
-    row: dict[str, Any], root: pathlib.Path, label: str, mechanism_id: str
+    row: dict[str, Any],
+    root: pathlib.Path,
+    label: str,
+    mechanism_id: str,
+    *,
+    verify_files: bool,
 ) -> None:
     _exact_fields(row, AUTHORITY_COMMON_FIELDS | ACTIVE_AUTHORITY_FIELDS, label)
     producer = _repo_file(
-        root, _required_text(row, "producer_path", label), f"{label}.producer_path"
+        root,
+        _required_text(row, "producer_path", label),
+        f"{label}.producer_path",
+        verify_file=verify_files,
     )
     checker = _repo_file(
-        root, _required_text(row, "checker_path", label), f"{label}.checker_path"
+        root,
+        _required_text(row, "checker_path", label),
+        f"{label}.checker_path",
+        verify_file=verify_files,
     )
     if producer == checker:
         raise AuthorityInventoryError(
@@ -288,6 +316,7 @@ def _validate_active(
             _required_text(row, "producer_path", label),
             _required_text(row, "checker_path", label),
         },
+        verify_files=verify_files,
     )
     if mechanism_id == "governance.authority-inventory":
         for key, expected in META_PAIR.items():
@@ -298,14 +327,24 @@ def _validate_active(
 
 
 def _validate_blocked(
-    row: dict[str, Any], root: pathlib.Path, label: str
+    row: dict[str, Any],
+    root: pathlib.Path,
+    label: str,
+    *,
+    verify_files: bool,
 ) -> None:
     _exact_fields(row, AUTHORITY_COMMON_FIELDS | BLOCKED_AUTHORITY_FIELDS, label)
     _repo_file(
-        root, _required_text(row, "producer_path", label), f"{label}.producer_path"
+        root,
+        _required_text(row, "producer_path", label),
+        f"{label}.producer_path",
+        verify_file=verify_files,
     )
     _repo_file(
-        root, _required_text(row, "refusal_path", label), f"{label}.refusal_path"
+        root,
+        _required_text(row, "refusal_path", label),
+        f"{label}.refusal_path",
+        verify_file=verify_files,
     )
     _required_text(row, "activation_guard", label)
     if not _required_text_list(row, "open_cross_checker_requirements", label):
@@ -320,11 +359,16 @@ def _validate_blocked(
             _required_text(row, "producer_path", label),
             _required_text(row, "refusal_path", label),
         },
+        verify_files=verify_files,
     )
 
 
 def _validate_diagnostic(
-    row: dict[str, Any], root: pathlib.Path, label: str
+    row: dict[str, Any],
+    root: pathlib.Path,
+    label: str,
+    *,
+    verify_files: bool,
 ) -> None:
     _exact_fields(row, DIAGNOSTIC_FIELDS, label)
     if row.get("authority_effect") != "none":
@@ -335,11 +379,13 @@ def _validate_diagnostic(
         root,
         _required_text(row, "diagnostic_producer_path", label),
         f"{label}.diagnostic_producer_path",
+        verify_file=verify_files,
     )
     checker = _repo_file(
         root,
         _required_text(row, "diagnostic_checker_path", label),
         f"{label}.diagnostic_checker_path",
+        verify_file=verify_files,
     )
     if producer == checker:
         raise AuthorityInventoryError(
@@ -368,6 +414,7 @@ def _validate_diagnostic(
             _required_text(row, "diagnostic_producer_path", label),
             _required_text(row, "diagnostic_checker_path", label),
         },
+        verify_files=verify_files,
     )
 
 
@@ -381,7 +428,12 @@ def parse_registry(raw: bytes) -> dict[str, Any]:
     return data
 
 
-def validate_inventory(data: dict[str, Any], root: pathlib.Path) -> None:
+def validate_inventory(
+    data: dict[str, Any],
+    root: pathlib.Path,
+    *,
+    verify_files: bool = True,
+) -> None:
     if set(data) != {"inventory", "mechanism"}:
         raise AuthorityInventoryError(
             "registry top-level fields must equal inventory and mechanism"
@@ -403,6 +455,7 @@ def validate_inventory(data: dict[str, Any], root: pathlib.Path) -> None:
         root,
         _required_text(inventory, "rule", "inventory"),
         "inventory.rule",
+        verify_file=verify_files,
     )
 
     rows = data.get("mechanism")
@@ -437,11 +490,17 @@ def validate_inventory(data: dict[str, Any], root: pathlib.Path) -> None:
                 )
             _required_text(row, "claim", label)
             if required_status == "active":
-                _validate_active(row, root, label, mechanism_id)
+                _validate_active(
+                    row,
+                    root,
+                    label,
+                    mechanism_id,
+                    verify_files=verify_files,
+                )
             else:
-                _validate_blocked(row, root, label)
+                _validate_blocked(row, root, label, verify_files=verify_files)
         else:
-            _validate_diagnostic(row, root, label)
+            _validate_diagnostic(row, root, label, verify_files=verify_files)
         found_digest = _profile_digest(row)
         expected_digest = REQUIRED_PROFILE_DIGESTS[mechanism_id]
         if found_digest != expected_digest:
@@ -866,8 +925,15 @@ def self_test() -> None:
     validate_inventory(data, ROOT)
 
     for name, mutation in _required_mutations(data):
+        # The baseline above verifies every repository path. Complete profile
+        # digests still pin every mutation. Rewalk only the mutation whose
+        # purpose is to exercise missing-file refusal.
         try:
-            validate_inventory(mutation, ROOT)
+            validate_inventory(
+                mutation,
+                ROOT,
+                verify_files=name == "missing referenced path",
+            )
         except AuthorityInventoryError:
             continue
         raise AssertionError(f"self-test mutation passed: {name}")

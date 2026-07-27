@@ -222,6 +222,19 @@ check-fast:
     {{cargo_dev}} check {{canonical_packages}} --all-targets
     python3 scripts/gate_runner.py run --tier stop --phase post
 
+# An optional Cargo test filter may follow the recipe name. This is non-certifying;
+# `just check-pr` remains the merge-grade receipt.
+# Confirm one planet slice with live structural gates, planet tests, and planet Clippy.
+confirm-planet *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just fmt-check
+    python3 scripts/gate_runner.py run --tier stop --phase pre
+    python3 scripts/gate_runner.py run --tier stop --phase provenance
+    {{cargo_dev}} test -p civsim-planet --all-targets {{args}}
+    {{cargo_dev}} clippy -p civsim-planet --all-targets -- -D warnings
+    python3 scripts/gate_runner.py run --tier stop --phase post
+
 # Run the same canonical recipe used by CI through the portable local wrapper.
 ci-local:
     bash scripts/ci_local.sh

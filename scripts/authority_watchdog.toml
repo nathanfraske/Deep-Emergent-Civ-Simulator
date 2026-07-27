@@ -463,6 +463,25 @@ semantic_closure = [
 ]
 
 [[mechanism]]
+id = "planet.symmetry-operator-exclusion"
+kind = "authority"
+domain = "scientific"
+status = "blocked"
+claim = "An admitted affine symmetry action over a complete applicable quadratic operator basis excludes exactly the operators whose exact transformed polynomial differs from the original."
+producer_path = "crates/planet/src/canonical/stellar_birth_species/symmetry_operator_exclusion/producer.rs"
+refusal_path = "crates/planet/src/canonical/stellar_birth_species/symmetry_operator_exclusion/mod.rs"
+activation_guard = "Two independent exact bounded implementations agree for supplied affine actions and supplied quadratic candidates, but the result grants requested-candidate coverage only. The repository supplies no admitted symmetry action, applicability domain, or complete operator basis and returns no_admitted_symmetry_action_input. The evaluator denies applicability authority, global operator-basis coverage, species membership, and every authority effect."
+open_cross_checker_requirements = ["independently admitted field and symmetry-action ontology derived from the sealed floor", "independent applicability and validity authority for the exact subject and domain", "independent scoped operator-basis completeness authority that remains open to unfamiliar operators", "claim-scoped production capability mint and receipt bound to both evaluator identities, exact canonical result, resource contract, and mutation canaries", "full derive-first, Buckingham Pi, Gap plus Chaos, Residual, and unique-slot protocol for every non-floor premise"]
+owner_boundary = "The pair proves conditional affine substitution algebra for the supplied quadratic candidates only. The owner reviews physical applicability, operator-basis completeness, ontology admission, and any downstream species claim."
+semantic_closure = [
+    "crates/planet/src/canonical/stellar_birth_species.rs",
+    "crates/planet/src/canonical/stellar_birth_species/symmetry_operator_exclusion/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/symmetry_operator_exclusion/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/symmetry_operator_exclusion/tests.rs",
+    "crates/planet/src/canonical/stellar_birth_species/symmetry_operator_exclusion/watchdog.rs",
+]
+
+[[mechanism]]
 id = "units.certified-formula-projection"
 kind = "authority"
 domain = "scientific"

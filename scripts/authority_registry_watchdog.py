@@ -135,6 +135,13 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "5c67629ed706fe636ca0d10c09953cdc65f24d424822db3f4bfaa14836db5ee9",
     ),
     (
+        "planet.symmetry-operator-exclusion",
+        "authority",
+        "scientific",
+        "blocked",
+        "0dfee195f41694cf5b8e8802cdb63ff12faa003e8c4a66001a6026f6cbdd8872",
+    ),
+    (
         "units.certified-formula-projection",
         "authority",
         "scientific",
@@ -163,7 +170,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "3bfb94aa0c3f507ad8ba9762e91ca9009284becc9d9752d7b7b896cb9a26ca7d",
     ),
 )
-EXPECTED_COUNTS = (10, 8, 2, 20)
+EXPECTED_COUNTS = (10, 9, 2, 21)
 
 META_EXPECTATIONS = (
     ("producer_path", "scripts/authority_watchdog_gate.py"),
@@ -271,6 +278,8 @@ def _open_repository_file(
     relative: str,
     context: str,
     repository: pathlib.Path = REPOSITORY,
+    *,
+    verify_file: bool = True,
 ) -> pathlib.Path:
     if (
         relative == ""
@@ -281,6 +290,8 @@ def _open_repository_file(
         raise RegistryWatchdogFailure(
             f"{context} is not a canonical repository-relative path"
         )
+    if not verify_file:
+        return repository / pathlib.PurePosixPath(relative)
     base = repository.resolve()
     try:
         candidate = (repository / pathlib.PurePosixPath(relative)).resolve(strict=True)
@@ -306,6 +317,8 @@ def _semantic_files(
     context: str,
     required: frozenset[str],
     repository: pathlib.Path,
+    *,
+    verify_files: bool,
 ) -> None:
     closure = _word_vector(entry, "semantic_closure", context)
     if len(closure) == 0:
@@ -320,6 +333,7 @@ def _semantic_files(
             relative,
             f"{context}.semantic_closure[{position}]",
             repository,
+            verify_file=verify_files,
         )
 
 
@@ -337,6 +351,8 @@ def decode_inventory(raw: bytes) -> dict[str, Any]:
 def inspect_inventory(
     document: dict[str, Any],
     repository: pathlib.Path = REPOSITORY,
+    *,
+    verify_files: bool = True,
 ) -> None:
     if tuple(sorted(document)) != ("inventory", "mechanism"):
         raise RegistryWatchdogFailure(
@@ -368,6 +384,7 @@ def inspect_inventory(
         header["rule"],
         "inventory.rule",
         repository,
+        verify_file=verify_files,
     )
     if not isinstance(entries, list):
         raise RegistryWatchdogFailure("mechanism collection is not an array")
@@ -408,7 +425,12 @@ def inspect_inventory(
         _word(entry, "owner_boundary", context)
         if expected_kind == "diagnostic":
             diagnostic_count += 1
-            _inspect_diagnostic(entry, context, repository)
+            _inspect_diagnostic(
+                entry,
+                context,
+                repository,
+                verify_files=verify_files,
+            )
         else:
             if entry.get("domain") != expected_domain:
                 raise RegistryWatchdogFailure(
@@ -417,10 +439,21 @@ def inspect_inventory(
             _word(entry, "claim", context)
             if expected_status == "active":
                 active_count += 1
-                _inspect_active(entry, context, expected_id, repository)
+                _inspect_active(
+                    entry,
+                    context,
+                    expected_id,
+                    repository,
+                    verify_files=verify_files,
+                )
             else:
                 blocked_count += 1
-                _inspect_blocked(entry, context, repository)
+                _inspect_blocked(
+                    entry,
+                    context,
+                    repository,
+                    verify_files=verify_files,
+                )
         if _profile_fingerprint(entry) != expected_fingerprint:
             raise RegistryWatchdogFailure(
                 f"{context} differs from its full reviewed semantic profile"
@@ -443,15 +476,23 @@ def _inspect_active(
     context: str,
     mechanism_id: str,
     repository: pathlib.Path,
+    *,
+    verify_files: bool,
 ) -> None:
     _schema(entry, AUTHORITY_BASE | ACTIVE_KEYS, context)
     producer_name = _word(entry, "producer_path", context)
     checker_name = _word(entry, "checker_path", context)
     producer_file = _open_repository_file(
-        producer_name, f"{context}.producer_path", repository
+        producer_name,
+        f"{context}.producer_path",
+        repository,
+        verify_file=verify_files,
     )
     checker_file = _open_repository_file(
-        checker_name, f"{context}.checker_path", repository
+        checker_name,
+        f"{context}.checker_path",
+        repository,
+        verify_file=verify_files,
     )
     if producer_file.samefile(checker_file):
         raise RegistryWatchdogFailure(f"{context} aliases one file for both sides")
@@ -475,6 +516,7 @@ def _inspect_active(
         context,
         frozenset((producer_name, checker_name)),
         repository,
+        verify_files=verify_files,
     )
     if mechanism_id == "governance.authority-inventory":
         for field, pinned in META_EXPECTATIONS:
@@ -488,6 +530,8 @@ def _inspect_blocked(
     entry: dict[str, Any],
     context: str,
     repository: pathlib.Path,
+    *,
+    verify_files: bool,
 ) -> None:
     _schema(entry, AUTHORITY_BASE | BLOCKED_KEYS, context)
     producer_name = _word(entry, "producer_path", context)
@@ -496,11 +540,13 @@ def _inspect_blocked(
         producer_name,
         f"{context}.producer_path",
         repository,
+        verify_file=verify_files,
     )
     _open_repository_file(
         refusal_name,
         f"{context}.refusal_path",
         repository,
+        verify_file=verify_files,
     )
     _word(entry, "activation_guard", context)
     if len(_word_vector(entry, "open_cross_checker_requirements", context)) == 0:
@@ -512,6 +558,7 @@ def _inspect_blocked(
         context,
         frozenset((producer_name, refusal_name)),
         repository,
+        verify_files=verify_files,
     )
 
 
@@ -519,6 +566,8 @@ def _inspect_diagnostic(
     entry: dict[str, Any],
     context: str,
     repository: pathlib.Path,
+    *,
+    verify_files: bool,
 ) -> None:
     _schema(entry, DIAGNOSTIC_KEYS, context)
     if entry.get("authority_effect") != "none":
@@ -533,11 +582,13 @@ def _inspect_diagnostic(
         producer_name,
         f"{context}.diagnostic_producer_path",
         repository,
+        verify_file=verify_files,
     )
     checker = _open_repository_file(
         checker_name,
         f"{context}.diagnostic_checker_path",
         repository,
+        verify_file=verify_files,
     )
     if producer.samefile(checker):
         raise RegistryWatchdogFailure(
@@ -561,6 +612,7 @@ def _inspect_diagnostic(
         context,
         frozenset((producer_name, checker_name)),
         repository,
+        verify_files=verify_files,
     )
 
 
@@ -898,8 +950,14 @@ def self_test() -> None:
     document = decode_inventory(original)
     inspect_inventory(document)
     for label, corrupt in _mandatory_corruptions(document):
+        # The baseline above verifies every repository path. Complete profile
+        # fingerprints still pin every corruption. Rewalk only the corruption
+        # whose purpose is to exercise missing-file refusal.
         try:
-            inspect_inventory(corrupt)
+            inspect_inventory(
+                corrupt,
+                verify_files=label == "missing referenced path",
+            )
         except RegistryWatchdogFailure:
             pass
         else:

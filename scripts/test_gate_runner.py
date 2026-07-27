@@ -1035,7 +1035,7 @@ cat > "$STONE_STDIN_LOG"
         self.assertIn(
             '"gates-self-tests" = "just gates-self-tests"', powershell
         )
-        for task in ("check-fast", "cache-info", "trim-wsl"):
+        for task in ("check-fast", "confirm-planet", "cache-info", "trim-wsl"):
             self.assertIn(f'"{task}"', powershell)
         self.assertIn("source scripts/wsl_dev_env.sh --quiet", powershell)
 
@@ -1047,7 +1047,12 @@ cat > "$STONE_STDIN_LOG"
         self.assertIn('env_var_or_default("CIVSIM_PARKED_TARGET_DIR"', justfile)
         self.assertIn('cargo_dev := "bash scripts/cargo_dev.sh"', justfile)
         self.assertNotRegex(justfile, r"(?m)^\s+cargo (?:run|test|check|clippy|doc|build)")
-        for recipe in ("check-fast:", "cache-info:", "trim-wsl:"):
+        for recipe in (
+            "check-fast:",
+            "confirm-planet *args:",
+            "cache-info:",
+            "trim-wsl:",
+        ):
             self.assertIn(recipe, justfile)
 
     def test_just_and_local_ci_print_the_same_pr_ids(self) -> None:

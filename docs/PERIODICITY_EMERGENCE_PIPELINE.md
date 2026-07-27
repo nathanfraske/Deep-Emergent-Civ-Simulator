@@ -28,6 +28,15 @@ stronger exact-zero data contract remain as test-only substrate. The candidate
 is labeled `assertion_only_not_admitted`, retains no registry capability or
 `AdmittedArtifact` conversion, and has no production path.
 
+The conditional calculation seam now exists without restoring that profile.
+A sparse-substitution producer and direct-variation watchdog independently
+evaluate an opaque affine symmetry action against supplied quadratic operator
+candidates with exact checked integer arithmetic. They agree on complete
+canonical input and result bytes, preserve unrelated alien candidates, and
+refuse malformed or over-budget requests. This proves only the supplied
+algebra. No admitted action, physical applicability, complete operator basis,
+production authority receipt, or species follows from it.
+
 The first live claim-scoped derived premise now closes one narrow part of the
 next boundary. Two independent checkers reconstruct the sealed
 `eps_0 = e^2 / (2 * alpha * h * c)` execution coordinate from floor ancestry,
@@ -60,7 +69,7 @@ flowchart TB
     FLOOR["CURRENT sealed absolute floor<br/>alpha, G, m_e<br/>plus exact SI representation"]
     EPS0["CURRENT first derived premise<br/>sealed eps_0 relation and local scale<br/>dual result and canary evidence<br/>no field or species authority"]
     SELECT["CURRENT premise selector<br/>exact role plus content matching<br/>proof-bearing exact zero<br/>no cardinality fallback<br/>authority_effect = none"]
-    LAW["NEXT executable law authority<br/>independent symmetry action and operator checks<br/>real derive-first, Pi, Gap plus Chaos,<br/>Residual-minimality and unique-slot evidence"]
+    LAW["CURRENT conditional symmetry algebra<br/>independent affine and quadratic checks<br/>NEXT admitted inputs, basis coverage,<br/>irreducible protocol and authority receipt"]
     PRIMITIVE["FUTURE primitive excitations<br/>mass or exact masslessness<br/>spin and statistics<br/>charges and currents<br/>stability and decay laws"]
     COMPOSITE["FUTURE confining and composite sector<br/>solver-produced level bands<br/>complete separation thresholds<br/>conservation and decay coverage"]
     THRESHOLD["CURRENT dormant exact threshold pair<br/>strictly below all covered thresholds<br/>overlap stays unresolved<br/>open channel remains visible<br/>authority_effect = none"]
@@ -122,15 +131,16 @@ state, applicability, validity regime, conservation laws, and semantic roles
 consumed by a kernel. A value shape, familiar name, catalog cardinality,
 citation, or hardcoded Standard Model graph cannot supply those premises.
 
-The rejected unbroken-abelian candidate makes the next acceptance test
-concrete. A valid exact-zero authority must encode the symmetry action and
-candidate mass operator, evaluate invariance under that action, prove the
-operator is forbidden throughout the claimed applicability domain, and bind
-two independently implemented evaluations. The irreducible route must carry
-the derivation attempts, dimensional matrix or proof of inapplicability, typed
-Gap and Chaos evidence, residual minimization, and collision-checked slot
-uniqueness. Hashing a sentence that says one of those steps happened is not
-evidence that it happened.
+The rejected unbroken-abelian candidate makes the acceptance test concrete.
+The conditional evaluator now encodes the action and candidate operator,
+evaluates exact invariance, and binds two independently implemented results.
+It cannot prove that the supplied action is physically admitted, that the
+applicability identity is true, or that the candidate set is a complete
+operator basis. Those capabilities and a production authority receipt remain
+open. The irreducible route must also carry derivation attempts, a dimensional
+matrix or proof of inapplicability, typed Gap and Chaos evidence, residual
+minimization, and collision-checked slot uniqueness. Hashing a sentence that
+says one of those steps happened is not evidence that it happened.
 
 The selector enforces exact role and content matching through two
 different algorithms. Adding an unrelated unfamiliar candidate cannot relabel
@@ -293,11 +303,13 @@ Floating point remains confirmation-only.
 2. **Derived premise capability mint.** DONE FOR ONE NON-SPECIES RELATION:
    `eps_0` proves a narrow derived capability route without admitting an
    electromagnetic ontology or member.
-3. **Executable theory-seam and exact-zero authority.** NEXT: encode derivation
-   attempts, Buckingham-Pi analysis, typed Gap and Chaos evidence, residual
-   minimization, unique-slot checking, symmetry action, candidate operator,
-   applicability, and independent operator-exclusion algorithms. The rejected
-   profile fixture cannot satisfy this slice.
+3. **Executable theory seam and exact-zero authority.** IN PROGRESS:
+   independent exact affine-action and quadratic-operator algorithms are
+   landed as a blocked conditional pair. Next admit the action and
+   applicability, prove scoped operator-basis completeness, bind a production
+   receipt and live canaries, and execute derivation attempts, Buckingham-Pi,
+   typed Gap and Chaos evidence, residual minimization, and unique-slot
+   checking. The rejected profile fixture cannot satisfy this slice.
 4. **First primitive excitation.** Produce one content-bound member with mass
    or exact masslessness, state, charges, statistics, stability, validity, and
    complete ancestry. Acceptance requires the physical registry to admit that
@@ -321,6 +333,8 @@ Floating point remains confirmation-only.
    The reference table remains validation-only until no canonical consumer
    needs it.
 
-The next code target is slice 3. The failed primitive attempt established the
-precise negative boundary: independent serialization, owner review, citations,
-and nonzero digests do not substitute for executable physical evidence.
+The next code target remains the authority half of slice 3. The conditional
+algebra half is complete. Admitted ontology, applicability, complete scoped
+operator coverage, live receipt canaries, and the irreducible protocol remain
+the precise blockers. Independent serialization, owner review, citations, and
+nonzero digests do not substitute for executable physical evidence.
