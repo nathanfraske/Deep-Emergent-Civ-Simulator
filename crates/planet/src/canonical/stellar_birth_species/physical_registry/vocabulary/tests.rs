@@ -75,7 +75,7 @@ fn alien_roots() -> Vec<AdmittedArtifact> {
 }
 
 #[test]
-fn physical_vocabulary_current_repository_is_zero_four_zero_without_authority() {
+fn physical_vocabulary_current_floor_roots_are_zero_four_zero_without_authority() {
     let projection = match decide_repository_roots() {
         RepositoryRootDecision::Projected(projection) => projection,
         RepositoryRootDecision::Refused(refusal) => {

@@ -7,88 +7,51 @@ cannot admit a law, value, species, or world state.
 
 ## Current truth
 
-No physical species has emerged. The canonical floor contains three Universal
-`[M]` invariants, `alpha`, `G`, and `m_e`. The exact SI definitions are engine
-coordinates with no provenance mark or physical freedom. The `m_e` coordinate
-does not establish an electron degree of freedom, field, spin, charge,
-interaction, stable excitation, or registry membership.
+One physical species member has now emerged, but only inside one narrow local
+profile. The canonical floor still contains three Universal `[M]` invariants,
+`alpha`, `G`, and `m_e`. Exact SI definitions remain engine coordinates with
+no provenance mark or physical freedom. None of those values selects a field
+ontology, a gauge group, a particle name, or a desired Solar outcome.
 
-The live physical-registry pair can represent unfamiliar primitive, massless,
-and composite species. Production supplies no species-forming law artifacts,
-so the registry returns `no_admitted_species_derivation_rules`, zero members,
-no support, and no authority effect. No `[W]`, `[X]`, star, element, atom,
-planet, or snapshot follows from that refusal.
+The first primitive attempt failed its hostile audit because it hashed
+assertions about derive-first exhaustion and symmetry exclusion. That attempt
+remains rejected. The replacement production route executes the missing work:
 
-The first attempted primitive profile did not pass its hostile audit. Its two
-implementations reconstructed the same authored ontology, its derive-first,
-Buckingham-Pi, Gap, Chaos, and Residual receipts hashed assertions rather than
-executing the required evidence, and its exact-zero object did not prove that
-the stated symmetry excluded the mass operator. The useful graph shape and
-stronger exact-zero data contract remain as test-only substrate. The candidate
-is labeled `assertion_only_not_admitted`, retains no registry capability or
-`AdmittedArtifact` conversion, and has no production path.
+1. Two independent registered-catalog scans find no admitted seed or rule for
+   the exact categorical profile target.
+2. Both classify Buckingham Pi as semantically inapplicable to that
+   nondimensional categorical request.
+3. Both execute Gap Law, classify the Chaos Protocol as nondynamical, execute
+   Residual Law, scan every occupied residual slot, and agree that one
+   owner-reviewed slot is collision-free.
+4. Separate quadratic-basis, affine-action, and action-bound scope pairs prove
+   the exact consequences used by the profile.
+5. Independent outer producer and watchdog implementations reconstruct the
+   complete artifact set and must agree before any production capability is
+   minted.
 
-The conditional calculation seam now exists without restoring that profile.
-A sparse-substitution producer and direct-variation watchdog independently
-evaluate an opaque affine symmetry action against supplied quadratic operator
-candidates with exact checked integer arithmetic. They agree on complete
-canonical input and result bytes, preserve unrelated alien candidates, and
-refuse malformed or over-budget requests. A second pair derives every
-unordered degree-two monomial over a supplied opaque field-component set.
-The wired conditional runner therefore evaluates the complete homogeneous
-commutative quadratic polynomial space without caller-authored operator
-identities. This does not prove that the fields are physically complete, that
-the action is admitted or applicable, or that every relevant operator is in
-that polynomial family. No production authority receipt or species follows.
+The resulting census is one Residue `[A]` irreducible profile claim and 28
+Residue `[D]` consequences. The physical registry closes one generic,
+source-free, unbroken rank-one abelian null excitation. Within its exact
+validity domain it has zero rest mass, a minus-one and plus-one helicity pair,
+integer-spin Bose statistics, zero self-charge under the unbroken symmetry, a
+conserved-current coupling, stability, and no lower-profile transition.
+These are structural identities. A familiar particle label does not enter the
+causal path.
 
-A third independent pair now closes the mechanical applicability seam without
-claiming its physical premises. A fixed-point producer and dependency-index
-watchdog start from supplied opaque positive facts and rules. Both must prove
-the requested applicability and validity facts, then repeat the calculation
-without the typed evaluated-action premise. A conclusion that remains
-reachable without the action is refused. The evaluated-action identity binds
-both basis results, both algebra results, and every schema and implementation
-identity in those pairs. The facts and rules remain unaudited inputs, so this
-proves conditional reachability and action dependence rather than physical
-applicability or validity.
+The live vocabulary now partitions 33 admitted artifacts into 26 descriptor
+roles, 33 relation targets, and one constraint law. This is complete only for
+the current input. Global physical-vocabulary coverage, global membership
+authority, and conditioned support remain false. There is still no charged
+matter profile, composite sector, nucleus, atom, element, periodic table,
+star, planet, or snapshot.
 
-The first live claim-scoped derived premise now closes one narrow part of the
-next boundary. Two independent checkers reconstruct the sealed
-`eps_0 = e^2 / (2 * alpha * h * c)` execution coordinate from floor ancestry,
-derive its claim-local scale, execute complete mutation transcripts, and bind
-their identities, results, canary evidence, and agreement into one pair
-receipt. A private `VerifiedDerivedContent` capability then passes the generic
-selector. The capability authorizes only this execution-coordinate relation.
-It does not admit an electromagnetic field, operator, sector, excitation, or
-species and does not activate the global SI representation policy.
-
-A law request identifies each premise by opaque semantic-role and
-physical-content identities. A candidate matches only when an upstream
-capability binds the same claim, role, content, applicability, validity, and
-independent semantic evidence. Sole-candidate, name, ordinal, value-shape, and
-catalog-cardinality fallbacks are absent. Exact zero requires a symmetry and
-term-exclusion proof object. Selector agreement is a non-authorizing post-mint
-validation.
-
-A paired generic derive-first route now consumes those opaque capabilities.
-The producer uses synchronous minimal grounded levels. The watchdog uses a
-dependency-indexed priority traversal. Both emit the same canonical ancestry,
-and a cyclic rule cannot create a premise or mask a grounded path. A failed
-search remains an open frontier unless a separate target-bound capability
-proves the admitted rule universe complete. Only then may Buckingham Pi, Gap
-Law with Chaos Protocol, Residual Law, unique residual-slot review, and owner
-admission begin. Structurally supplying that protocol in tests still grants no
-authority. Each checker extracts the target reverse-dependency cone through a
-separate algorithm, so an unrelated reachable or unreachable alien rule island
-does not change the target report.
-
-Production replays the exact admitted `eps_0` capability as one grounded seed
-and does not infer another premise from its value or familiar interpretation.
-The live physical vocabulary has zero descriptor roles, four relation targets,
-and zero constraint laws, so the exact next blocker is
-`no_admitted_semantic_target_role`. No route constructor can author that role,
-an admitted rule, complete search coverage, the irreducible protocol, or a new
-premise capability.
+The generic law router remains available for every later premise. Its
+synchronous producer and dependency-indexed watchdog accept only grounded
+capability ancestry, keep incomplete searches open, and require independent
+target-bound rule-universe coverage before an unfamiliar irreducible branch
+may begin. The one local profile does not turn this generic router into a
+closed ontology.
 
 `crates/physics/data/periodic_table.toml` is a terrestrial reference cache used
 by active-candidate material kernels. It contains authored membership,
@@ -104,9 +67,10 @@ flowchart TB
     FLOOR["CURRENT sealed absolute floor<br/>alpha, G, m_e<br/>plus exact SI representation"]
     EPS0["CURRENT first derived premise<br/>sealed eps_0 relation and local scale<br/>dual result and canary evidence<br/>no field or species authority"]
     SELECT["CURRENT premise selector<br/>exact role plus content matching<br/>proof-bearing exact zero<br/>no cardinality fallback<br/>authority_effect = none"]
-    ROUTE["CURRENT paired derive-first route<br/>grounded ancestry only<br/>separate search completeness<br/>before irreducibility<br/>next blocker: semantic target role"]
-    LAW["CURRENT conditional symmetry proof<br/>complete scoped quadratic monomials<br/>action-bound scope reachability<br/>NEXT admitted target, rules, and authority"]
-    PRIMITIVE["FUTURE primitive excitations<br/>mass or exact masslessness<br/>spin and statistics<br/>charges and currents<br/>stability and decay laws"]
+    ROUTE["CURRENT paired generic derive-first route<br/>grounded ancestry only<br/>separate search completeness<br/>before irreducibility"]
+    LAW["CURRENT local profile admission<br/>paired catalog and protocol scan<br/>complete scoped quadratic basis<br/>exact symmetry exclusion and scope"]
+    PRIMITIVE["CURRENT one local primitive excitation<br/>exact zero mass and helicity pair<br/>Bose statistics, zero self-charge,<br/>conserved current and scoped stability"]
+    CHARGED["NEXT charged-matter profile<br/>opposite-charge mobile excitation<br/>mass, statistics, currents,<br/>stability and transition coverage"]
     COMPOSITE["FUTURE confining and composite sector<br/>solver-produced level bands<br/>complete separation thresholds<br/>conservation and decay coverage"]
     THRESHOLD["CURRENT dormant exact threshold pair<br/>strictly below all covered thresholds<br/>overlap stays unresolved<br/>open channel remains visible<br/>authority_effect = none"]
     NUCLEAR["FUTURE stable and metastable cores<br/>binding spectra, decay channels<br/>charge and neutral conserved content"]
@@ -128,12 +92,13 @@ flowchart TB
     SELECT -. "Exact capability contract" .-> ROUTE
     ROUTE -. "Same path for each proved premise" .-> LAW
     LAW --> PRIMITIVE
-    PRIMITIVE --> COMPOSITE
+    PRIMITIVE --> CHARGED
+    CHARGED --> COMPOSITE
     THRESHOLD -. "Reusable arithmetic after authority closes" .-> COMPOSITE
     COMPOSITE --> NUCLEAR
     NUCLEAR --> ELEMENT
     ELEMENT --> ATOM
-    PRIMITIVE --> ATOM
+    CHARGED --> ATOM
     ATOM --> PERIODICITY
     NUCLEAR --> NUCLEOSYNTHESIS
     NUCLEOSYNTHESIS --> ABUNDANCE
@@ -147,8 +112,8 @@ flowchart TB
     PLANETS --> VIEW
     PERIODICITY --> VIEW
 
-    LAW -. "Missing premise" .-> REFUSE
-    PRIMITIVE -. "Incomplete registry" .-> REFUSE
+    LAW -. "Unfamiliar incomplete premise" .-> REFUSE
+    CHARGED -. "Incomplete registry" .-> REFUSE
     COMPOSITE -. "Incomplete channels or overlapping bands" .-> REFUSE
     NUCLEAR -. "Unresolved strong or weak sector" .-> REFUSE
     ATOM -. "Unconverged many-body solve" .-> REFUSE
@@ -163,11 +128,12 @@ proves that a non-root value can inherit the sealed floor, derive its own
 representation coordinate, survive independent mutation checking, and mint a
 claim-scoped capability without broadening the floor or registry.
 
-The next addition must be a claim-scoped, role-bound species-forming physical
-law authority. It must admit the field content, operator, interaction sector,
-state, applicability, validity regime, conservation laws, and semantic roles
-consumed by a kernel. A value shape, familiar name, catalog cardinality,
-citation, or hardcoded Standard Model graph cannot supply those premises.
+The first claim-scoped species-forming authority is now active for one exact
+profile. It admits the required field content, operator, interaction sector,
+state, applicability, validity regime, conservation fact, and semantic roles
+only inside the source-free unbroken rank-one abelian scope. A value shape,
+familiar name, catalog cardinality, citation, or hardcoded Standard Model
+graph supplied none of those premises.
 
 The generic router now makes the order enforceable. It finds only grounded
 consequences of admitted seeds and admitted rules. It does not enumerate
@@ -177,31 +143,21 @@ derivation frontier. Irreducibility is unreachable until an independent
 coverage capability binds the exact target, seed set, rule catalog, and both
 coverage checkers.
 
-The rejected unbroken-abelian candidate makes the acceptance test concrete.
-The conditional evaluator now encodes the action and operators, evaluates
-exact invariance, and binds two independently implemented results. The basis
-pair independently constructs all `n(n+1)/2` unordered degree-two monomials
-from opaque field identities, and the complete runner evaluates those derived
-operators. It cannot prove that the supplied fields form an admitted physical
-ontology, that the action is admitted, that the applicability identity is
-true, or that homogeneous commutative quadratic polynomials exhaust every
-physically relevant operator. Those capabilities and a production authority
-receipt remain open. The irreducible route must also carry derivation attempts,
-a dimensional matrix or proof of inapplicability, typed Gap and Chaos evidence,
-residual minimization, and collision-checked slot uniqueness. Hashing a
-sentence that says one of those steps happened is not evidence that it
-happened.
+The rejected first attempt made the acceptance test concrete. The replacement
+route executes the registered-catalog protocol and independently admits the
+profile packet before the conditional calculations can contribute evidence.
+The basis pair constructs all `n(n+1)/2` unordered degree-two monomials from
+four opaque field identities. The algebra pair evaluates every derived
+operator. The action-bound scope pair proves that the exact applicability and
+validity conclusions disappear when the evaluated action is removed. The
+outer producer and watchdog then independently reconstruct the complete
+29-artifact profile and one registry member.
 
-The action-bound scope pair takes the next calculation step. It proves that
-supplied applicability and validity conclusions are reachable under supplied
-positive inference rules and that each conclusion becomes unreachable when
-the exact evaluated-action premise is removed. This prevents a proof for one
-action from being reused for another and rejects an alternate
-action-independent proof. It still cannot establish what any opaque fact or
-rule means or whether it belongs in the physical canon. Positive monotonic
-closure also cannot represent negation, uncertainty, time-dependent regimes,
-or nonmonotonic exceptions. An unfamiliar theory that needs those forms must
-receive a typed extension or refusal, never be coerced into this rule language.
+That success is local, not a proof that homogeneous commutative quadratic
+polynomials exhaust every operator family. An unfamiliar theory that needs
+noncommutative, derivative, tensor, higher-order, negative, uncertain,
+time-dependent, or nonmonotonic forms must receive a typed extension or
+refusal. It cannot be coerced into the admitted profile.
 
 The selector enforces exact role and content matching through two
 different algorithms. Adding an unrelated unfamiliar candidate cannot relabel
@@ -226,15 +182,17 @@ the result but never authorize it.
 
 ### 2. Primitive excitations
 
-The admitted laws must produce a complete registry of stable or applicable
-field excitations. Each member needs content identity, mass or a replayable
-exact-masslessness proof, spin and statistics, conserved charges and currents,
-active sectors, state, validity, uncertainty, stability, transition laws, and
-dependency ancestry.
+The first local member now supplies content identity, replayable exact
+masslessness, helicity, statistics, current structure, sector, state,
+validity, stability, transition disposition, and complete dependency
+ancestry. It does not prove a complete primitive registry.
 
-This is where an electron-like carrier could emerge. The current `m_e` floor
-coordinate could become one input to its mass proof only after the degree of
-freedom and every other required role are independently established.
+The next required member is an opposite-charge mobile carrier. An
+electron-like carrier is one possible result, but no familiar label may select
+it. The current `m_e` floor coordinate can become one input to its mass proof
+only after its degree of freedom, mass relation, charge, spin, statistics,
+current, stability, validity, and every other required role are independently
+established.
 
 ### 3. Composite and nuclear states
 
@@ -370,46 +328,42 @@ Floating point remains confirmation-only.
    require separate target-bound rule-universe coverage before the typed
    irreducible protocol. Production replays one admitted relation and stops at
    the missing semantic target role.
-4. **Executable theory seam and exact-zero authority.** IN PROGRESS:
-   independent exact affine-action and quadratic-operator algorithms plus an
-   independent complete homogeneous commutative quadratic basis pair and an
-   independent action-bound scope-closure pair are landed behind one blocked
-   conditional runner. Next derive or admit the field, action, applicability,
-   and validity semantics, prove physical operator-family closure, bind a
-   production receipt and live canaries, and execute derivation attempts,
-   Buckingham-Pi, typed Gap and Chaos evidence, residual minimization, and
-   unique-slot checking. The rejected profile fixture cannot satisfy this
-   slice.
-5. **First primitive excitation.** Produce one content-bound member with mass
-   or exact masslessness, state, charges, statistics, stability, validity, and
-   complete ancestry. Acceptance requires the physical registry to admit that
-   member without claiming global registry coverage.
-6. **Bound-state evidence integration.** Bind solver-produced level bands,
+4. **Executable theory seam and exact-zero authority.** DONE FOR ONE LOCAL
+   PROFILE: the registered-catalog protocol pair, complete quadratic basis,
+   exact affine-action pair, action-bound scope pair, outer profile pair, live
+   canaries, and claim-scoped capability mint agree. The global theory and
+   operator-family authorities remain blocked.
+5. **First primitive excitation.** DONE FOR ONE LOCAL MEMBER: the registry
+   closes one massless unbroken abelian excitation without claiming global
+   registry coverage or conditioned support.
+6. **Charged-matter profile.** NEXT: derive or fully admit one opposite-charge
+   mobile excitation with mass or exact masslessness, spin, statistics,
+   currents, stability, transitions, validity, and complete ancestry. Reuse
+   the same registered-catalog and irreducible protocol without assuming a
+   familiar particle or gauge class.
+7. **Bound-state evidence integration.** Bind solver-produced level bands,
    complete threshold coverage, conservation, and decay channels into the
    physical registry. Promote the dormant threshold pair only after live
    canaries and the authority-watchdog receipt exist.
-7. **Complete primitive registry and support.** Prove membership coverage,
+8. **Complete primitive registry and support.** Prove membership coverage,
    conditioned support, explicit zeros, normalization, resource bounds, and
    exact mean particle mass.
-8. **Composite core profile.** Add the confining and transition sectors needed
+9. **Composite core profile.** Add the confining and transition sectors needed
    to enumerate stable and metastable cores for one admitted profile, while
    leaving unfamiliar sectors open.
-9. **Atomic solver cache.** Produce certified spectra and shell projections
+10. **Atomic solver cache.** Produce certified spectra and shell projections
    without an exception list.
-10. **Nucleosynthesis and abundance history.** Generate local isotope support,
+11. **Nucleosynthesis and abundance history.** Generate local isotope support,
    atomic weights, opacity, and chemistry from the stellar and disk history.
-11. **Candidate-substrate migration.** Replace each consumer of the terrestrial
+12. **Candidate-substrate migration.** Replace each consumer of the terrestrial
    reference table with a typed derived cache adapter, one invariant at a time.
    The reference table remains validation-only until no canonical consumer
    needs it.
 
-The next code target is the first semantic target and rule authority for slice
-4. The generic route, conditional algebra, scoped homogeneous commutative
-quadratic basis, and action-bound positive scope calculation are present. The
-next bounded unit must derive or fully admit one target role and content plus
-the exact rule capabilities that can reach it, with independent proof that the
-target-bound rule universe is complete before any irreducible claim. Admitted
-ontology and premise semantics, proof that the operator family is physically
-exhaustive, live canaries, and a claim-scoped capability mint remain separate
-blockers. Independent serialization, owner review, citations, and nonzero
-digests do not substitute for executable physical evidence.
+The next code target is slice 6, one charged-matter profile. It should begin
+with a new opaque target and registered rule-catalog scan, reuse the paired
+derive-first and irreducible protocol, and mint no member until its independent
+outer producer and watchdog agree on every artifact and canary. The existing
+null excitation may participate only through its admitted capabilities.
+Independent serialization, owner review, citations, and nonzero digests do
+not substitute for executable physical evidence.

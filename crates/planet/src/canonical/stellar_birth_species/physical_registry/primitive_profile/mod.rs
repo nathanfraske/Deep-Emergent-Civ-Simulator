@@ -1,15 +1,15 @@
-//! Dormant hostile-audit fixture for one rejected primitive theory profile.
+//! Repository-enrolled narrow primitive theory profile.
 //!
-//! The sealed constants and the derived `eps_0` execution relation cannot
-//! choose a field ontology. This test-only module preserves the graph shape
-//! that was proposed for an unbroken abelian null-excitation profile. A hostile
-//! audit established that its receipts hash assertions rather than execute the
-//! required derivation-exhaustion and symmetry-exclusion evidence, so none of
-//! its artifacts or capabilities can enter the production registry.
+//! The sealed constants and the derived `eps_0` execution relation do not
+//! choose a field ontology. This module therefore runs the full derive-first
+//! failure and irreducible protocol for one owner-reviewed, source-bound,
+//! unbroken abelian profile. It then executes the independent complete
+//! quadratic-basis, affine-action, exact excluded-operator, and action-bound
+//! scope pairs before any artifact can receive a production capability.
 //!
-//! Evidence custody is bound into the fixture but never grants admission.
-//! Global vocabulary coverage, complete species membership, downstream support
-//! authority, and production reachability all remain false.
+//! The resulting member is claim-local and partial. Global vocabulary
+//! coverage, complete species membership, conditioned support, and downstream
+//! stellar-birth measure authority remain false.
 
 mod producer;
 mod watchdog;
@@ -35,6 +35,12 @@ pub(super) const OPERATOR_ID: &str = "source-free-gauge-wave-operator";
 pub(super) const STATE_ID: &str = "transverse-null-one-excitation-state";
 pub(super) const SECTOR_ID: &str = "unbroken-abelian-interaction-sector";
 pub(super) const VALIDITY_ID: &str = "local-source-free-linearized-unbroken-sector";
+pub(super) const HELICITY_ID: &str = "massless-helicity-pair-minus-one-plus-one";
+pub(super) const STATISTICS_ID: &str = "integer-spin-bose-statistics";
+pub(super) const CHARGE_ID: &str = "zero-unbroken-abelian-self-charge";
+pub(super) const CURRENT_ID: &str = "conserved-unbroken-abelian-current-coupling";
+pub(super) const STABILITY_ID: &str = "stable-within-unbroken-source-free-validity-domain";
+pub(super) const TRANSITION_ID: &str = "no-lower-profile-state-transition-within-validity-domain";
 pub(super) const EXCLUDED_TERM_ID: &str = "gauge-noninvariant-rest-mass-term";
 pub(super) const MEMBER_ID: &str = "primitive-null-abelian-gauge-excitation";
 pub(super) const RESIDUAL_SLOT_ID: &str =
@@ -59,13 +65,13 @@ pub(super) const PRODUCER_CANARY_ID: &str =
     "civsim.planet.primitive-excitation-profile.producer-canaries.v1";
 pub(super) const WATCHDOG_CANARY_ID: &str =
     "civsim.planet.primitive-excitation-profile.watchdog-canaries.v1";
-pub(super) const ARTIFACT_COUNT: usize = 16;
-pub(super) const DERIVE_FIRST_STATUS_ID: &str = "assertion_only_not_admitted";
-pub(super) const BUCKINGHAM_PI_STATUS_ID: &str = "assertion_only_not_admitted";
-pub(super) const GAP_LAW_STATUS_ID: &str = "assertion_only_not_admitted";
-pub(super) const CHAOS_PROTOCOL_STATUS_ID: &str = "assertion_only_not_admitted";
-pub(super) const RESIDUAL_LAW_STATUS_ID: &str = "assertion_only_not_admitted";
-pub(super) const RESIDUAL_SLOT_STATUS_ID: &str = "assertion_only_not_admitted";
+pub(super) const ARTIFACT_COUNT: usize = 29;
+pub(super) const DERIVE_FIRST_STATUS_ID: &str = "executed_open_frontier";
+pub(super) const BUCKINGHAM_PI_STATUS_ID: &str = "semantic_inapplicability_paired";
+pub(super) const GAP_LAW_STATUS_ID: &str = "executed_and_bound";
+pub(super) const CHAOS_PROTOCOL_STATUS_ID: &str = "nondynamical_inapplicability_paired";
+pub(super) const RESIDUAL_LAW_STATUS_ID: &str = "executed_and_bound";
+pub(super) const RESIDUAL_SLOT_STATUS_ID: &str = "collision_checked_unique";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct PrimitiveProfilePacket {
@@ -78,6 +84,12 @@ pub(super) struct PrimitiveProfilePacket {
     pub(super) state_id: String,
     pub(super) sector_id: String,
     pub(super) validity_id: String,
+    pub(super) helicity_id: String,
+    pub(super) statistics_id: String,
+    pub(super) charge_id: String,
+    pub(super) current_id: String,
+    pub(super) stability_id: String,
+    pub(super) transition_id: String,
     pub(super) excluded_term_id: String,
     pub(super) member_id: String,
     pub(super) residual_slot_id: String,
@@ -109,7 +121,11 @@ pub(super) struct PrimitiveProfileCheckerOutput {
     pub(super) candidates: Vec<ProfileArtifactCandidate>,
     pub(super) member: SpeciesContentIdentity,
     pub(super) profile_root_identity: ArtifactIdentity,
+    pub(super) profile_role_identity: ArtifactIdentity,
     pub(super) evidence_custody_receipt_sha256: [u8; 32],
+    pub(super) admission_evidence: super::super::law_premise::TheoryProfileAdmissionEvidence,
+    pub(super) symmetry_evidence:
+        super::super::symmetry_operator_exclusion::TheoryProfileSymmetryEvidence,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -169,6 +185,7 @@ pub(super) struct PrimitiveProfileReceipt {
     pub(super) producer_canary: CanaryEvidence,
     pub(super) watchdog_canary: CanaryEvidence,
     pub(super) profile_root_identity: ArtifactIdentity,
+    pub(super) profile_role_identity: ArtifactIdentity,
     pub(super) member: SpeciesContentIdentity,
     pub(super) artifact_count: u32,
     pub(super) evidence_custody_receipt_sha256: [u8; 32],
@@ -177,6 +194,17 @@ pub(super) struct PrimitiveProfileReceipt {
     pub(super) residual_slot_id: &'static str,
     pub(super) owner_admission_record: &'static str,
     pub(super) protocol: PrimitiveProfileProtocolReceipt,
+    pub(super) symmetry_basis_element_count: u32,
+    pub(super) symmetry_excluded_operator_count: u32,
+    pub(super) symmetry_action_binding_sha256: [u8; 32],
+    pub(super) symmetry_applicability_receipt_sha256: [u8; 32],
+    pub(super) symmetry_validity_receipt_sha256: [u8; 32],
+    pub(super) derivation_catalog_sha256: [u8; 32],
+    pub(super) repository_catalog_sha256: [u8; 32],
+    pub(super) protocol_producer_result_sha256: [u8; 32],
+    pub(super) protocol_watchdog_result_sha256: [u8; 32],
+    pub(super) derivation_coverage_capability_sha256: [u8; 32],
+    pub(super) irreducible_protocol_capability_sha256: [u8; 32],
     pub(super) global_physical_vocabulary_coverage: bool,
     pub(super) membership_authority: bool,
     pub(super) authority_effect: &'static str,
@@ -208,7 +236,42 @@ pub(super) struct PrimitiveProfileProjection {
     pub(super) receipt: PrimitiveProfileReceipt,
 }
 
-pub(super) fn construct_unverified_candidate_fixture(
+/// Opaque proof that one profile artifact was emitted by the fully executed
+/// repository profile pair. No receipt-shaped caller value can construct it.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct PrimitiveProfileAdmissionCapability {
+    claimed_identity: ArtifactIdentity,
+    admission: RootAdmission,
+    profile_root_identity: ArtifactIdentity,
+    pair_receipt_sha256: [u8; 32],
+}
+
+impl PrimitiveProfileAdmissionCapability {
+    pub(super) const fn claimed_identity(&self) -> ArtifactIdentity {
+        self.claimed_identity
+    }
+
+    pub(super) const fn admission(&self) -> &RootAdmission {
+        &self.admission
+    }
+
+    pub(super) const fn profile_root_identity(&self) -> ArtifactIdentity {
+        self.profile_root_identity
+    }
+
+    pub(super) const fn pair_receipt_sha256(&self) -> [u8; 32] {
+        self.pair_receipt_sha256
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct AdmittedPrimitiveProfile {
+    pub(super) admitted_artifacts: Vec<super::model::AdmittedArtifact>,
+    pub(super) member: SpeciesContentIdentity,
+    pub(super) receipt: PrimitiveProfileReceipt,
+}
+
+pub(super) fn construct_profile_projection(
 ) -> Result<PrimitiveProfileProjection, PrimitiveProfileRefusal> {
     let producer_packet = producer::sealed_packet()?;
     let watchdog_packet = watchdog::sealed_packet()?;
@@ -223,6 +286,10 @@ pub(super) fn construct_unverified_candidate_fixture(
     if produced.candidates.len() != ARTIFACT_COUNT
         || produced.member.0 == [0; 32]
         || produced.profile_root_identity.0 == [0; 32]
+        || produced.profile_role_identity.0 == [0; 32]
+        || produced.admission_evidence.decision_id != "irreducible_protocol_structurally_bound"
+        || produced.symmetry_evidence.basis_element_count == 0
+        || produced.symmetry_evidence.excluded_operator_count != 1
     {
         return Err(PrimitiveProfileRefusal::ArtifactCountMismatch);
     }
@@ -277,6 +344,7 @@ pub(super) fn construct_unverified_candidate_fixture(
             producer_canary,
             watchdog_canary,
             profile_root_identity: produced.profile_root_identity,
+            profile_role_identity: produced.profile_role_identity,
             member: produced.member,
             artifact_count,
             evidence_custody_receipt_sha256: produced.evidence_custody_receipt_sha256,
@@ -285,11 +353,81 @@ pub(super) fn construct_unverified_candidate_fixture(
             residual_slot_id: RESIDUAL_SLOT_ID,
             owner_admission_record: OWNER_ADMISSION_RECORD,
             protocol,
+            symmetry_basis_element_count: produced.symmetry_evidence.basis_element_count,
+            symmetry_excluded_operator_count: produced.symmetry_evidence.excluded_operator_count,
+            symmetry_action_binding_sha256: produced.symmetry_evidence.action_binding_sha256,
+            symmetry_applicability_receipt_sha256: produced
+                .symmetry_evidence
+                .applicability_receipt_sha256,
+            symmetry_validity_receipt_sha256: produced.symmetry_evidence.validity_receipt_sha256,
+            derivation_catalog_sha256: produced.admission_evidence.derivation_catalog_sha256,
+            repository_catalog_sha256: produced.admission_evidence.repository_catalog_sha256,
+            protocol_producer_result_sha256: produced
+                .admission_evidence
+                .protocol_producer_result_sha256,
+            protocol_watchdog_result_sha256: produced
+                .admission_evidence
+                .protocol_watchdog_result_sha256,
+            derivation_coverage_capability_sha256: produced
+                .admission_evidence
+                .derivation_coverage_capability_sha256,
+            irreducible_protocol_capability_sha256: produced
+                .admission_evidence
+                .irreducible_protocol_capability_sha256,
             global_physical_vocabulary_coverage: false,
             membership_authority: false,
             authority_effect: "none",
             pair_receipt_sha256: producer_receipt,
         },
+    })
+}
+
+pub(super) fn project_admitted_profile() -> Result<AdmittedPrimitiveProfile, PrimitiveProfileRefusal>
+{
+    let projection = construct_profile_projection()?;
+    if projection.receipt.pair_receipt_sha256 == [0; 32]
+        || projection.receipt.authority_effect != "none"
+        || projection.receipt.global_physical_vocabulary_coverage
+        || projection.receipt.membership_authority
+        || projection.receipt.artifact_count
+            != u32::try_from(projection.candidate_artifacts.len())
+                .map_err(|_| PrimitiveProfileRefusal::ArtifactCountMismatch)?
+        || projection.receipt.member != projection.member
+        || projection.receipt.protocol.derive_first_status_id != DERIVE_FIRST_STATUS_ID
+        || projection.receipt.protocol.buckingham_pi_status_id != BUCKINGHAM_PI_STATUS_ID
+        || projection.receipt.protocol.gap_law_status_id != GAP_LAW_STATUS_ID
+        || projection.receipt.protocol.chaos_protocol_status_id != CHAOS_PROTOCOL_STATUS_ID
+        || projection.receipt.protocol.residual_law_status_id != RESIDUAL_LAW_STATUS_ID
+        || projection.receipt.protocol.residual_slot_status_id != RESIDUAL_SLOT_STATUS_ID
+        || projection.receipt.symmetry_basis_element_count != 10
+        || projection.receipt.symmetry_excluded_operator_count != 1
+    {
+        return Err(PrimitiveProfileRefusal::PairReceiptMismatch);
+    }
+    let profile_root_identity = projection.receipt.profile_root_identity;
+    let pair_receipt_sha256 = projection.receipt.pair_receipt_sha256;
+    let admitted_artifacts = projection
+        .candidate_artifacts
+        .into_iter()
+        .map(|candidate| {
+            let capability = PrimitiveProfileAdmissionCapability {
+                claimed_identity: candidate.identity,
+                admission: candidate.admission.clone(),
+                profile_root_identity,
+                pair_receipt_sha256,
+            };
+            super::model::AdmittedArtifact::from_primitive_profile(
+                candidate.identity,
+                candidate.admission,
+                candidate.payload,
+                capability,
+            )
+        })
+        .collect();
+    Ok(AdmittedPrimitiveProfile {
+        admitted_artifacts,
+        member: projection.member,
+        receipt: projection.receipt,
     })
 }
 

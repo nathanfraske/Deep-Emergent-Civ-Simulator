@@ -107,6 +107,14 @@ impl ScopeProofReport {
         true
     }
 
+    pub(super) const fn producer_result_sha256(&self) -> [u8; 32] {
+        self.producer_result_sha256
+    }
+
+    pub(super) const fn watchdog_result_sha256(&self) -> [u8; 32] {
+        self.watchdog_result_sha256
+    }
+
     pub(super) const fn premise_admission_authority(&self) -> bool {
         false
     }

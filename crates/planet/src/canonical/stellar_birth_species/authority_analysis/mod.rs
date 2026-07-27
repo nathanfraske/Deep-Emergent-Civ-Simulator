@@ -6,7 +6,8 @@ mod watchdog;
 mod wire;
 
 pub use view::{
-    PhysicalRootAdmissionView, SpeciesDerivationAnalysisView, SpeciesDerivationAttemptView,
+    PhysicalRootAdmissionView, PrimitiveProfileSemanticsView, SpeciesDerivationAnalysisView,
+    SpeciesDerivationAttemptView,
 };
 pub(in crate::canonical) use wire::write_species_derivation_analysis;
 
@@ -32,36 +33,36 @@ use watchdog::validate_analysis;
 use super::COMPLETE_SPECIES_STATE_MEAN_PARTICLE_MASS_LAW_ID;
 
 pub(in crate::canonical) const SPECIES_DERIVATION_ANALYSIS_SCHEMA_ID: &str =
-    "civsim.planet.stellar-birth-species-derivation-analysis.v7";
+    "civsim.planet.stellar-birth-species-derivation-analysis.v8";
 pub(in crate::canonical) const SPECIES_DERIVATION_ANALYSIS_CHECKER_ID: &str =
-    "civsim.planet.stellar-birth-species-derivation-watchdog.v8";
+    "civsim.planet.stellar-birth-species-derivation-watchdog.v9";
 
 const FLOOR_ANCHOR_ID: &str = "fundamental.m_e";
 const FLOOR_ANCHOR_SYMBOL: &str = "m_e";
 const FLOOR_ANCHOR_ROLE: &str = "mass_coordinate_anchor_only";
-const FRONTIER_SOURCE_ID: &str = "repository_physical_registry_live_refusal";
-const FRONTIER_SCOPE_ID: &str = "first_executable_refusal_only";
+const FRONTIER_SOURCE_ID: &str = "repository_physical_registry_partial_closure";
+const FRONTIER_SCOPE_ID: &str = "one_local_member_then_open_global_obligations";
 pub(super) const LIVE_PHYSICAL_REGISTRY_ATTEMPT_ID: &str =
-    "stellar_birth.species_derivation.live_physical_registry_refusal";
+    "stellar_birth.species_derivation.partial_physical_registry_closure";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum AnalysisProgress {
-    OpenDependencies,
-    DimensionOnlyRelationNotPhysicalClosure,
-    NotReached,
-    NotClaimed,
+    ExecutedOpenFrontier,
+    SemanticInapplicabilityPaired,
+    ExecutedAndBound,
+    NondynamicalInapplicabilityPaired,
+    CollisionCheckedUnique,
     BlockedOpenProofs,
 }
 
 impl AnalysisProgress {
     const fn id(self) -> &'static str {
         match self {
-            Self::OpenDependencies => "open_dependencies",
-            Self::DimensionOnlyRelationNotPhysicalClosure => {
-                "dimension_only_relation_not_physical_closure"
-            }
-            Self::NotReached => "not_reached",
-            Self::NotClaimed => "not_claimed",
+            Self::ExecutedOpenFrontier => "executed_open_frontier",
+            Self::SemanticInapplicabilityPaired => "semantic_inapplicability_paired",
+            Self::ExecutedAndBound => "executed_and_bound",
+            Self::NondynamicalInapplicabilityPaired => "nondynamical_inapplicability_paired",
+            Self::CollisionCheckedUnique => "collision_checked_unique",
             Self::BlockedOpenProofs => "blocked_open_proofs",
         }
     }
@@ -331,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn production_analysis_is_bound_and_permanently_non_admitting() {
+    fn production_analysis_exposes_one_local_member_without_support_authority() {
         let artifact = analysis();
         let view = SpeciesDerivationAnalysisView::new(&artifact);
 
@@ -418,14 +419,14 @@ mod tests {
                 view.law_premise_content_identity_sha256().unwrap(),
             ))
         );
-        assert_eq!(view.premise_admission_route_counts(), Some((1, 0, 4, 0)));
+        assert_eq!(view.premise_admission_route_counts(), Some((1, 26, 33, 1)));
         assert_eq!(
             view.premise_admission_route_decisions(),
-            Some(("derived", "no_admitted_semantic_target_role"))
+            Some(("derived", "next_target_not_bound"))
         );
         assert_eq!(
             view.premise_admission_route_scope(),
-            Some((false, false, false, false, "none"))
+            Some((false, true, false, false, "none"))
         );
         assert_eq!(
             view.physical_registry_root_claim_id(),
@@ -445,45 +446,77 @@ mod tests {
             Some(1)
         );
         assert_eq!(view.physical_registry_admitted_root_count(), Some(4));
+        assert_eq!(view.physical_registry_admitted_artifact_count(), Some(33));
         assert_eq!(view.physical_registry_membership_authority(), Some(false));
-        assert_eq!(view.physical_vocabulary_counts(), Some((4, 0, 4, 0)));
+        assert_eq!(view.physical_vocabulary_counts(), Some((33, 26, 33, 1)));
         assert_eq!(view.physical_vocabulary_scope(), Some((true, false, false)));
         assert_eq!(
             view.physical_vocabulary_relation_target_identities()
                 .map(|identities| identities.len()),
-            Some(4)
+            Some(33)
         );
         assert_ne!(view.physical_vocabulary_receipt_sha256(), Some([0; 32]));
         assert_eq!(
-            view.physical_registry_refusal_code(),
-            Some("no_admitted_species_derivation_rules")
+            view.primitive_profile_identity().map(|identity| identity.2),
+            Some("primitive-profile.unbroken-abelian-null-excitation.v1")
         );
-        assert_eq!(view.physical_registry_open_obligations().len(), 6);
+        assert_eq!(view.primitive_profile_counts(), Some((29, 10, 1)));
+        assert_ne!(view.primitive_profile_member_sha256(), Some([0; 32]));
+        assert_ne!(view.primitive_profile_receipt_sha256(), Some([0; 32]));
+        assert_eq!(
+            view.primitive_profile_protocol_statuses(),
+            Some((
+                "executed_open_frontier",
+                "semantic_inapplicability_paired",
+                "executed_and_bound",
+                "nondynamical_inapplicability_paired",
+                "executed_and_bound",
+                "collision_checked_unique",
+            ))
+        );
+        assert_eq!(view.physical_registry_refusal_code(), Some("none"));
+        assert_eq!(view.physical_registry_member_count(), Some(1));
+        assert_eq!(view.physical_registry_open_obligations().len(), 5);
         assert_ne!(view.physical_registry_root_receipt_sha256(), Some([0; 32]));
         assert_eq!(
             view.frontier_source_id(),
-            Some("repository_physical_registry_live_refusal")
+            Some("repository_physical_registry_partial_closure")
         );
         assert_eq!(
             view.frontier_scope_id(),
-            Some("first_executable_refusal_only")
+            Some("one_local_member_then_open_global_obligations")
         );
         assert_eq!(view.frontier_completeness_claim(), Some(false));
-        assert_eq!(view.candidate_member_count(), Some(0));
+        assert_eq!(view.candidate_member_count(), Some(1));
         assert_eq!(view.verified_support_member_count(), Some(0));
         assert_eq!(view.species_support_value_payload_present(), Some(false));
-        assert_eq!(view.residual_slot_claim(), Some(false));
-        assert_eq!(view.gap_law_status_id(), Some("not_reached"));
-        assert_eq!(view.chaos_protocol_status_id(), Some("not_reached"));
+        assert_eq!(view.residual_slot_claim(), Some(true));
+        assert_eq!(
+            view.derive_first_status_id(),
+            Some("executed_open_frontier")
+        );
+        assert_eq!(
+            view.buckingham_pi_status_id(),
+            Some("semantic_inapplicability_paired")
+        );
+        assert_eq!(view.gap_law_status_id(), Some("executed_and_bound"));
+        assert_eq!(
+            view.chaos_protocol_status_id(),
+            Some("nondynamical_inapplicability_paired")
+        );
+        assert_eq!(view.residual_law_status_id(), Some("executed_and_bound"));
+        assert_eq!(
+            view.unique_residual_slot_status_id(),
+            Some("collision_checked_unique")
+        );
         assert_eq!(view.attempts().len(), 1);
         assert_eq!(
             view.open_proof_ids(),
             [
-                "admitted_constraint_laws",
-                "admitted_physical_descriptor_roles",
-                "admitted_species_derivation_rules",
+                "charged_matter_profile",
                 "complete_global_physical_vocabulary_coverage",
                 "complete_registry_closure_domain",
+                "conditioned_species_support",
                 "species_mass_uncertainty_transport",
             ]
             .into_iter()
@@ -497,6 +530,7 @@ mod tests {
                 .input_ids(),
             [
                 "planet.stellar-species-floor-coordinate-projection",
+                "planet.primitive-excitation.unbroken-abelian-null-mode",
                 "civsim.planet.stellar-birth-physical-vocabulary.partition.v1",
             ]
         );
@@ -511,7 +545,7 @@ mod tests {
             view.attempts()
                 .map(|attempt| attempt.id())
                 .collect::<Vec<_>>(),
-            ["stellar_birth.species_derivation.live_physical_registry_refusal"]
+            ["stellar_birth.species_derivation.partial_physical_registry_closure"]
         );
     }
 

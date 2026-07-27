@@ -163,11 +163,6 @@ pub(super) fn validate_and_encode_with_caps(
     if rules.is_empty() {
         return Err(PhysicalRegistryRefusalCode::NoAdmittedSpeciesDerivationRules);
     }
-    if production_vocabulary_binding
-        && !input.vocabulary_binding.global_physical_vocabulary_coverage
-    {
-        return Err(PhysicalRegistryRefusalCode::PhysicalVocabularyCoverageIncomplete);
-    }
     let dependency_count = rules.iter().try_fold(0_usize, |total, rule| {
         total
             .checked_add(rule.constituents.len())
@@ -354,9 +349,23 @@ fn validate_admission_capability(
                 return Err(PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch);
             }
         }
+        AdmissionCapabilityKind::PrimitiveProfile => {
+            if artifact
+                .primitive_profile_pair_receipt_sha256()
+                .is_none_or(|digest| digest == [0; 32])
+                || artifact
+                    .primitive_profile_root_identity()
+                    .is_none_or(|identity| identity.0 == [0; 32])
+                || artifact.repository_root_pair_receipt_sha256().is_some()
+            {
+                return Err(PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch);
+            }
+        }
         #[cfg(test)]
         AdmissionCapabilityKind::ExactTest => {
-            if artifact.repository_root_pair_receipt_sha256().is_some() {
+            if artifact.repository_root_pair_receipt_sha256().is_some()
+                || artifact.primitive_profile_pair_receipt_sha256().is_some()
+            {
                 return Err(PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch);
             }
         }

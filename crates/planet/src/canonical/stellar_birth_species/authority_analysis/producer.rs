@@ -1,4 +1,4 @@
-//! Producer for the non-admitting species derivation frontier.
+//! Producer for the partial species derivation frontier.
 
 use super::{AnalysisProgress, SpeciesDerivationAttempt, LIVE_PHYSICAL_REGISTRY_ATTEMPT_ID};
 use crate::canonical::stellar_birth_species::physical_registry::RepositoryPhysicalRegistryFrontier;
@@ -20,15 +20,15 @@ pub(super) struct ProducedFrontier {
 }
 
 pub(super) fn produce_frontier(physical: &RepositoryPhysicalRegistryFrontier) -> ProducedFrontier {
-    // Report only the first executable refusal reached by the repository.
-    // Downstream support and reduction paths are not attempted while the
-    // physical registry refuses, so listing their authored proof guesses here
-    // would imply coverage that the live run has not established.
+    // Report the local closure and its first open global obligations.
+    // Downstream support and reduction paths remain closed, so listing later
+    // authored proof guesses here would imply coverage the live run lacks.
     let attempts = vec![SpeciesDerivationAttempt {
         id: LIVE_PHYSICAL_REGISTRY_ATTEMPT_ID,
         status: AnalysisProgress::BlockedOpenProofs,
         input_ids: vec![
             physical.root_claim_id.to_owned(),
+            physical.primitive_profile.claim_id.to_owned(),
             physical.vocabulary_claim_id.clone(),
         ],
         open_proof_ids: physical
@@ -46,15 +46,16 @@ pub(super) fn produce_frontier(physical: &RepositoryPhysicalRegistryFrontier) ->
     ProducedFrontier {
         attempts,
         open_proof_ids,
-        candidate_member_count: 0,
+        candidate_member_count: usize::try_from(physical.registry_member_count)
+            .unwrap_or(usize::MAX),
         verified_support_member_count: 0,
         species_support_value_payload_present: false,
-        residual_slot_claim: false,
-        derive_first_status: AnalysisProgress::OpenDependencies,
-        buckingham_pi_status: AnalysisProgress::DimensionOnlyRelationNotPhysicalClosure,
-        gap_law_status: AnalysisProgress::NotReached,
-        chaos_protocol_status: AnalysisProgress::NotReached,
-        residual_law_status: AnalysisProgress::NotReached,
-        unique_residual_slot_status: AnalysisProgress::NotClaimed,
+        residual_slot_claim: true,
+        derive_first_status: AnalysisProgress::ExecutedOpenFrontier,
+        buckingham_pi_status: AnalysisProgress::SemanticInapplicabilityPaired,
+        gap_law_status: AnalysisProgress::ExecutedAndBound,
+        chaos_protocol_status: AnalysisProgress::NondynamicalInapplicabilityPaired,
+        residual_law_status: AnalysisProgress::ExecutedAndBound,
+        unique_residual_slot_status: AnalysisProgress::CollisionCheckedUnique,
     }
 }

@@ -10,7 +10,8 @@ use super::stellar_birth_dimensions::{
 };
 use super::stellar_birth_species::SpeciesDerivationAnalysisArtifact;
 pub use super::stellar_birth_species::{
-    PhysicalRootAdmissionView, SpeciesDerivationAnalysisView, SpeciesDerivationAttemptView,
+    PhysicalRootAdmissionView, PrimitiveProfileSemanticsView, SpeciesDerivationAnalysisView,
+    SpeciesDerivationAttemptView,
 };
 use super::stellar_birth_structure::{
     CarrierSchema, CarrierSchemaView, ComponentRegistrySchemaView, IndexDomain, IndexDomainView,

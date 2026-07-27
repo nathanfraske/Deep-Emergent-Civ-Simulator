@@ -1,5 +1,6 @@
 use super::*;
 use crate::canonical::stellar_birth_species::law_premise::{CandidateProof, PremiseCapabilitySeal};
+use std::collections::BTreeSet;
 
 fn id(tag: u8) -> [u8; 32] {
     let mut identity = [tag; 32];
@@ -155,7 +156,7 @@ fn derivable_fixture() -> PremiseAdmissionRouteInput {
 }
 
 #[test]
-fn repository_frontier_replays_one_derived_route_and_stops_before_authored_semantics() {
+fn repository_frontier_reports_the_derived_seed_and_completed_local_profile_protocol() {
     let frontier = repository_premise_admission_frontier().unwrap();
     assert_eq!(
         frontier.schema_id,
@@ -168,15 +169,12 @@ fn repository_frontier_replays_one_derived_route_and_stops_before_authored_seman
         frontier.producer_result_sha256,
         frontier.watchdog_result_sha256
     );
-    assert_eq!(frontier.current_descriptor_role_count, 0);
-    assert_eq!(frontier.current_relation_target_count, 4);
-    assert_eq!(frontier.current_constraint_law_count, 0);
-    assert_eq!(
-        frontier.next_target_decision_id,
-        "no_admitted_semantic_target_role"
-    );
+    assert_eq!(frontier.current_descriptor_role_count, 26);
+    assert_eq!(frontier.current_relation_target_count, 33);
+    assert_eq!(frontier.current_constraint_law_count, 1);
+    assert_eq!(frontier.next_target_decision_id, "next_target_not_bound");
     assert!(!frontier.derivation_frontier_complete);
-    assert!(!frontier.irreducible_protocol_started);
+    assert!(frontier.irreducible_protocol_started);
     assert!(!frontier.premise_admission_authority);
     assert!(!frontier.species_membership_authority);
     assert_eq!(frontier.authority_effect, "none");
@@ -197,6 +195,80 @@ fn next_target_blocker_tracks_each_missing_capability_class() {
         "no_admitted_premise_derivation_rule"
     );
     assert_eq!(next_target_decision(1, 1, 1), "next_target_not_bound");
+}
+
+#[test]
+fn repository_theory_profile_executes_the_full_irreducible_route() {
+    let request = TheoryProfileAdmissionRequest {
+        claim_identity: id(151),
+        role_identity: id(152),
+        content_identity: id(153),
+        profile_input_sha256: id(154),
+        source_custody_sha256: id(155),
+        applicability_receipt_sha256: id(156),
+        validity_receipt_sha256: id(157),
+        residual_slot_id: "planet.test.unfamiliar-theory-profile.v1".to_owned(),
+        owner_admission_record: "owner-reviewed-test-profile-v1".to_owned(),
+    };
+    let evidence = inspect_theory_profile_admission(&request).unwrap();
+    assert_eq!(
+        evidence.decision_id,
+        "irreducible_protocol_structurally_bound"
+    );
+    assert_eq!(evidence.target_claim_identity, request.claim_identity);
+    assert_eq!(evidence.target_role_identity, request.role_identity);
+    assert_eq!(evidence.target_content_identity, request.content_identity);
+    assert_eq!(evidence.seed_count, 0);
+    assert_eq!(evidence.rule_count, 0);
+    assert_ne!(evidence.derivation_catalog_sha256, [0; 32]);
+    assert_ne!(evidence.repository_catalog_sha256, [0; 32]);
+    assert_ne!(evidence.protocol_producer_result_sha256, [0; 32]);
+    assert_eq!(
+        evidence.protocol_producer_result_sha256,
+        evidence.protocol_watchdog_result_sha256
+    );
+    assert_ne!(evidence.open_producer_result_sha256, [0; 32]);
+    assert_eq!(
+        evidence.open_producer_result_sha256,
+        evidence.open_watchdog_result_sha256
+    );
+    assert_ne!(evidence.final_producer_result_sha256, [0; 32]);
+    assert_eq!(
+        evidence.final_producer_result_sha256,
+        evidence.final_watchdog_result_sha256
+    );
+    assert_ne!(evidence.derivation_coverage_capability_sha256, [0; 32]);
+    assert_ne!(evidence.irreducible_protocol_capability_sha256, [0; 32]);
+    let receipts = [
+        evidence.derivation_exhaustion_receipt_sha256,
+        evidence.buckingham_pi_receipt_sha256,
+        evidence.gap_law_receipt_sha256,
+        evidence.chaos_protocol_receipt_sha256,
+        evidence.residual_law_receipt_sha256,
+        evidence.residual_slot_receipt_sha256,
+        evidence.owner_admission_receipt_sha256,
+        evidence.independent_watchdog_receipt_sha256,
+    ];
+    assert!(receipts.iter().all(|receipt| *receipt != [0; 32]));
+    assert_eq!(
+        receipts.iter().copied().collect::<BTreeSet<_>>().len(),
+        receipts.len()
+    );
+
+    let mut alien = request;
+    alien.claim_identity = id(161);
+    alien.role_identity = id(162);
+    alien.content_identity = id(163);
+    alien.residual_slot_id = "planet.test.alien-theory-profile.v1".to_owned();
+    let alien_evidence = inspect_theory_profile_admission(&alien).unwrap();
+    assert_eq!(
+        alien_evidence.decision_id,
+        "irreducible_protocol_structurally_bound"
+    );
+    assert_ne!(
+        alien_evidence.irreducible_protocol_capability_sha256,
+        evidence.irreducible_protocol_capability_sha256
+    );
 }
 
 #[test]

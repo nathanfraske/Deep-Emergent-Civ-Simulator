@@ -67,7 +67,7 @@ flowchart TB
         RUN["run_planet<br/>Only accepted input: sealed floor"]
         AUDITED["AuditedFloorView<br/>Exact typed magnitudes plus<br/>independent floor-authority digest"]
         EPS0["CURRENT derived eps_0 premise<br/>Exact floor ancestry plus local scale<br/>Independent results and canaries<br/>Claim-scoped capability only"]
-        PREMISE_ROUTE["CURRENT paired derive-first route<br/>Minimal grounded proof levels<br/>Cycles cannot create a premise<br/>Separate completeness before irreducibility<br/>Next blocker: no semantic target role"]
+        PREMISE_ROUTE["CURRENT paired generic derive-first route<br/>Minimal grounded proof levels<br/>Cycles cannot create a premise<br/>Separate completeness before irreducibility"]
 
         FLOOR --> LEDGER
         FLOOR --> RUN
@@ -78,7 +78,7 @@ flowchart TB
 
         STRUCTURE["Value-free stellar structure v2<br/>Open components, species, coordinates,<br/>dimensions, sectors, regimes,<br/>histories, and classifications"]
         CENSUS["Exact dimensional census v4<br/>Non-admitting diagnostic<br/>closure_effect = none<br/>coverage_claim = false"]
-        SPECIES_ANALYSIS["Species derivation analysis v7<br/>Independent watchdog v8<br/>Live premise, route, root, and vocabulary frontiers<br/>Zero members and zero species support,<br/>no residual slot"]
+        SPECIES_ANALYSIS["Species derivation analysis v8<br/>Independent watchdog v9<br/>Live premise, profile, root, and vocabulary frontiers<br/>One local member, zero verified support,<br/>one claim-local residual slot"]
         SPECIES_PACKET["CURRENT bounded structural packet pair<br/>Canonical descriptors plus conditioned support<br/>Independent algorithms agree on bytes only<br/>No physical member or authority"]
         CURRENT_PROOFS["CURRENT production resolver<br/>Joint physical measure = None<br/>Coordinate law = None"]
         CURRENT_REFUSAL["CURRENT Stage 1 refusal<br/>stellar_birth.realization_measure<br/>Both open leaves remain visible"]
@@ -97,11 +97,13 @@ flowchart TB
         SPECIES_ANALYSIS -. "Attached as non-admitting analysis" .-> CURRENT_REFUSAL
 
         ROOT_PROJECTION["CURRENT independent floor-root pair<br/>Three exact scalar coordinates plus<br/>one membership-neutral pure-mass expression<br/>No species membership authority"]
-        VOCABULARY["CURRENT independent physical-vocabulary pair<br/>Exact current-input partition: 0 / 4 / 0<br/>Descriptor roles / relation targets / constraint laws<br/>Global coverage and membership authority: false<br/>Identity-keyed tier, provenance, and route census"]
-        PHYSICAL_REGISTRY["CURRENT conditional physical registry pair<br/>Bottom-up producer plus top-down watchdog<br/>Exact mass, dimensions, state, sectors,<br/>validity, ancestry, and complete closure<br/>Repository result: no admitted species rules"]
-        REJECTED_PROFILE["AUDITED rejected primitive candidate<br/>Shared authored ontology<br/>Assertion hashes instead of executable evidence<br/>Raw test fixture, no registry capability"]
+        VOCABULARY["CURRENT independent physical-vocabulary pair<br/>33 admitted artifacts: 26 / 33 / 1<br/>Descriptor roles / relation targets / constraint laws<br/>Global coverage and membership authority: false<br/>Identity-keyed tier, provenance, and route census"]
+        PHYSICAL_REGISTRY["CURRENT conditional physical registry pair<br/>Bottom-up producer plus top-down watchdog<br/>Exact mass, dimensions, state, sectors,<br/>validity, ancestry, and local closure<br/>Repository result: one local member,<br/>global coverage false"]
+        PROFILE_PROTOCOL["CURRENT profile protocol pair<br/>Registered-catalog derive-first exhaustion<br/>Pi, Gap plus nondynamical Chaos, Residual,<br/>unique slot and owner-admission binding"]
+        PRIMITIVE_PROFILE["CURRENT primitive profile authority<br/>Independent outer producer and watchdog<br/>1 Residue [A] plus 28 Residue [D]<br/>Complete basis, symmetry, and scope evidence"]
         PREMISE_AUTHORITY["CURRENT blocked premise authority<br/>Target and rule capabilities<br/>Complete rule-universe coverage<br/>Paired Pi, Gap plus Chaos, Residual,<br/>unique slot, live canaries, and mint"]
-        SPECIES_LAWS["NEXT executable species-forming authority<br/>Independent symmetry and operator evaluation<br/>Real derive-first, Pi, Gap plus Chaos,<br/>Residual-minimality and unique-slot evidence"]
+        LOCAL_MEMBER["CURRENT local null excitation<br/>Exact zero mass, helicity pair,<br/>Bose statistics, zero self-charge,<br/>conserved current and scoped stability"]
+        SPECIES_LAWS["NEXT charged-matter authority<br/>Opposite-charge mobile excitation<br/>Mass, spin, statistics, currents,<br/>stability, transitions, and validity"]
         REGISTRY["FUTURE realized species registry<br/>Complete lawful membership<br/>Familiarity-independent"]
         MECHANISMS["FUTURE admitted mechanism set<br/>Thermal, opacity, EOS, collapse,<br/>transport, spectra, topology,<br/>conservation, and validity laws"]
         JOINT["FUTURE correlation-preserving<br/>joint physical measure proof"]
@@ -126,10 +128,13 @@ flowchart TB
         ROOT_PROJECTION --> VOCABULARY
         VOCABULARY --> PHYSICAL_REGISTRY
         STRUCTURE --> PHYSICAL_REGISTRY
-        EPS0 -. "Does not select ontology" .-> REJECTED_PROFILE
-        PREMISE_ROUTE -. "Names the missing capability classes" .-> PREMISE_AUTHORITY
-        REJECTED_PROFILE -. "No production authority edge" .-> CURRENT_REFUSAL
-        REJECTED_PROFILE -. "Defines the missing proof" .-> SPECIES_LAWS
+        EPS0 -. "Registered seed, not ontology selector" .-> PROFILE_PROTOCOL
+        PREMISE_ROUTE --> PROFILE_PROTOCOL
+        PROFILE_PROTOCOL --> PRIMITIVE_PROFILE
+        PRIMITIVE_PROFILE --> PHYSICAL_REGISTRY
+        PRIMITIVE_PROFILE --> LOCAL_MEMBER
+        LOCAL_MEMBER --> PHYSICAL_REGISTRY
+        PREMISE_ROUTE -. "Remains generic for later targets" .-> PREMISE_AUTHORITY
         PREMISE_AUTHORITY --> SPECIES_LAWS
         SPECIES_LAWS --> PHYSICAL_REGISTRY
         PHYSICAL_REGISTRY -. "Requires roots and separate authority receipt" .-> REGISTRY
@@ -352,31 +357,31 @@ flowchart TB
 
 - Solid arrows are permitted data or authority flow. Dotted arrows are
   diagnostic, representational, or rejected uses.
-- The only live PR #215 route ends at the typed Stage 1 refusal. Everything
-  after the two missing proof capabilities is future work.
+- The live PR #215 route now closes one claim-local primitive member and still
+  ends at the typed Stage 1 refusal because both Stage 1 proof capabilities
+  remain absent.
 - The drawn seven-stage chain is one Solar-system route, not a universal
   completion predicate. Snapshot activation also requires a sealed route
   receipt that proves generic obligation applicability, every typed
   not-applicable decision, and every alternate-origin substitution.
 - The live floor-root pair supplies coordinate capabilities only. Its pure-mass
-  expression is membership-neutral, and the registry refusal remains
-  `no_admitted_species_derivation_rules`.
-- The rejected primitive candidate is retained only as raw hostile-audit data.
-  It cannot construct a registry capability or `AdmittedArtifact`.
-  Its hashes prove byte identity, not derivation exhaustion, residual
-  minimality, or symmetry exclusion. It cannot mint an artifact or member in
-  the production registry.
-- The live physical-vocabulary pair classifies the exact current input as zero
-  descriptor roles, four relation targets, and zero constraint laws. That is
-  not a closed vocabulary: global coverage and membership authority remain
-  false. The frontier preserves each root's exact identity, tier, provenance
+  expression remains membership-neutral. The separate primitive-profile pair
+  supplies the only local member authority.
+- The first primitive candidate remains rejected historical audit data. The
+  replacement does not reuse its assertion hashes. It executes the registered
+  catalog, protocol, basis, symmetry, scope, canary, and independent outer
+  reconstruction paths before minting a capability.
+- The live physical-vocabulary pair classifies 33 admitted artifacts into 26
+  descriptor roles, 33 relation targets, and one constraint law. That is not
+  a closed vocabulary: global coverage and membership authority remain false.
+  The frontier preserves every artifact's exact identity, tier, provenance
   tag, and derived or irreducible route without assuming one familiar class.
 - The paired derive-first route replays the exact admitted `eps_0` capability
   as a grounded seed. It does not use that seed to invent the next target. A
   failed rule search remains open unless a separate capability proves the
-  target-bound rule universe complete. The current exact blocker is the
-  absence of an admitted semantic target role, before any irreducible protocol
-  may start.
+  target-bound rule universe complete. The current local profile supplies one
+  exact target and registered-catalog protocol. Every later target starts from
+  the generic open state and cannot inherit that local completeness.
 - The viewer projects exact dimension-only relation terms from the sealed
   refusal without recomputing physics. The current collapse witness is
   `G^-1 * sound_speed^3`; its dimensionless similarity eigenstructure, initial

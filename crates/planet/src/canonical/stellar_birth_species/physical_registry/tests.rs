@@ -1,8 +1,8 @@
 use super::super::SpeciesContentIdentity;
 use super::{
-    inspect_physical_registry, is_repository_scientific_refusal, model::*, producer,
-    repository_input, repository_physical_registry_frontier,
-    resolve_repository_physical_species_registry, root_admission_census, watchdog,
+    inspect_physical_registry, model::*, producer, repository_input,
+    repository_physical_registry_frontier, resolve_repository_physical_species_registry,
+    root_admission_census, watchdog,
 };
 use civsim_units::{bignum::BigUint, digest::sha256};
 
@@ -650,28 +650,70 @@ fn reverse_expression_storage(expression: &ExactExpression) -> ExactExpression {
 }
 
 #[test]
-fn repository_result_is_the_exact_non_admitting_refusal() {
-    let refusal = resolve_repository_physical_species_registry().unwrap_err();
-    assert_eq!(
-        refusal.code,
-        PhysicalRegistryRefusalCode::NoAdmittedSpeciesDerivationRules
-    );
-    assert_eq!(refusal.code.id(), "no_admitted_species_derivation_rules");
-    assert_eq!(refusal.member_count, 0);
-    assert!(!refusal.coverage_claim);
-    assert_eq!(refusal.authority_effect.id(), "none");
-    assert_eq!(
-        refusal.open_obligations,
-        [
-            "admitted_physical_descriptor_roles",
-            "admitted_constraint_laws",
-            "admitted_species_derivation_rules",
-            "complete_global_physical_vocabulary_coverage",
-            "complete_registry_closure_domain",
-            "species_mass_uncertainty_transport",
-        ]
-    );
+fn repository_result_closes_one_partial_profile_without_global_authority() {
+    let registry = resolve_repository_physical_species_registry().expect("local profile closes");
+    assert_eq!(registry.members.len(), 1);
+    assert_eq!(registry.authority_effect.id(), "none");
     let frontier = repository_physical_registry_frontier().expect("repository frontier");
+    assert_eq!(frontier.registry_refusal_code, "none");
+    assert_eq!(frontier.registry_member_count, 1);
+    assert!(!frontier.registry_coverage_claim);
+    assert_eq!(frontier.registry_authority_effect, "none");
+    assert_eq!(frontier.admitted_root_count, 4);
+    assert_eq!(frontier.admitted_artifact_count, 33);
+    assert_eq!(frontier.primitive_profile.artifact_count, 29);
+    assert_eq!(frontier.primitive_profile.admission_census.len(), 29);
+    assert_eq!(
+        frontier
+            .primitive_profile
+            .admission_census
+            .iter()
+            .filter(|row| row.provenance_tag == "[A]" && row.route_id == "irreducible")
+            .count(),
+        1
+    );
+    assert_eq!(
+        frontier
+            .primitive_profile
+            .admission_census
+            .iter()
+            .filter(|row| row.provenance_tag == "[D]" && row.route_id == "derived")
+            .count(),
+        28
+    );
+    assert_eq!(
+        frontier.primitive_profile.member_sha256,
+        registry.members[0].identity.0
+    );
+    assert_eq!(frontier.primitive_profile.symmetry_basis_element_count, 10);
+    assert_eq!(
+        frontier.primitive_profile.symmetry_excluded_operator_count,
+        1
+    );
+    assert_eq!(
+        frontier.primitive_profile.derive_first_status_id,
+        "executed_open_frontier"
+    );
+    assert_eq!(
+        frontier.primitive_profile.buckingham_pi_status_id,
+        "semantic_inapplicability_paired"
+    );
+    assert_eq!(
+        frontier.primitive_profile.gap_law_status_id,
+        "executed_and_bound"
+    );
+    assert_eq!(
+        frontier.primitive_profile.chaos_protocol_status_id,
+        "nondynamical_inapplicability_paired"
+    );
+    assert_eq!(
+        frontier.primitive_profile.residual_law_status_id,
+        "executed_and_bound"
+    );
+    assert_eq!(
+        frontier.primitive_profile.residual_slot_status_id,
+        "collision_checked_unique"
+    );
     assert_eq!(frontier.root_admission_census.len(), 4);
     assert!(frontier.root_admission_census.iter().all(|admission| {
         admission.tier_id == "universal"
@@ -705,22 +747,37 @@ fn repository_result_is_the_exact_non_admitting_refusal() {
             .count(),
         1
     );
-    assert!(input.admitted_artifacts.iter().all(|artifact| {
-        artifact.admission.provenance == ProvenanceMark::Derived
-            && matches!(&artifact.admission.route, AdmissionRoute::Derived(_))
-            && matches!(
-                &artifact.payload,
-                ArtifactPayload::ScalarCoordinate(_) | ArtifactPayload::MassProjection(_)
-            )
-    }));
-    assert!(input.declared_members.is_empty());
-    assert_eq!(input.vocabulary_binding.root_count, 4);
-    assert!(input
+    assert_eq!(
+        input
+            .admitted_artifacts
+            .iter()
+            .filter(|artifact| {
+                artifact.admission_capability_kind() == AdmissionCapabilityKind::RepositoryRoot
+            })
+            .count(),
+        4
+    );
+    assert_eq!(
+        input
+            .admitted_artifacts
+            .iter()
+            .filter(|artifact| {
+                artifact.admission_capability_kind() == AdmissionCapabilityKind::PrimitiveProfile
+            })
+            .count(),
+        29
+    );
+    assert_eq!(input.declared_members.len(), 1);
+    assert_eq!(input.vocabulary_binding.root_count, 33);
+    assert!(!input
         .vocabulary_binding
         .descriptor_role_identities
         .is_empty());
-    assert_eq!(input.vocabulary_binding.relation_target_identities.len(), 4);
-    assert!(input
+    assert_eq!(
+        input.vocabulary_binding.relation_target_identities.len(),
+        33
+    );
+    assert!(!input
         .vocabulary_binding
         .constraint_law_identities
         .is_empty());
@@ -737,41 +794,19 @@ fn repository_result_is_the_exact_non_admitting_refusal() {
 }
 
 #[test]
-fn repository_frontier_accepts_each_live_scientific_refusal_only() {
-    assert!(is_repository_scientific_refusal(
-        PhysicalRegistryRefusalCode::NoAdmittedSpeciesDerivationRules
-    ));
-    assert!(is_repository_scientific_refusal(
-        PhysicalRegistryRefusalCode::PhysicalVocabularyCoverageIncomplete
-    ));
-    assert!(!is_repository_scientific_refusal(
-        PhysicalRegistryRefusalCode::CheckerDisagreement
-    ));
-}
-
-#[test]
-fn repository_roots_with_species_rules_execute_the_global_vocabulary_refusal() {
-    let mut fixture = elementary_fixture(29);
-    let repository = repository_input().expect("repository roots are available");
-    fixture
-        .input
-        .admitted_artifacts
-        .extend(repository.admitted_artifacts);
-    refresh_vocabulary_binding(&mut fixture.input);
-
-    assert!(fixture.input.admitted_artifacts.iter().any(|artifact| {
+fn local_closure_does_not_require_a_false_global_vocabulary_claim() {
+    let repository = repository_input().expect("repository profile is available");
+    assert!(repository.admitted_artifacts.iter().any(|artifact| {
         artifact.admission_capability_kind() == AdmissionCapabilityKind::RepositoryRoot
     }));
     assert!(
-        !fixture
-            .input
+        !repository
             .vocabulary_binding
             .global_physical_vocabulary_coverage
     );
-    assert_both_refuse(
-        &fixture.input,
-        PhysicalRegistryRefusalCode::PhysicalVocabularyCoverageIncomplete,
-    );
+    let registry = inspect_physical_registry(&repository).expect("bounded local closure");
+    assert_eq!(registry.members.len(), 1);
+    assert_eq!(registry.authority_effect, AuthorityEffect::None);
 }
 
 #[test]

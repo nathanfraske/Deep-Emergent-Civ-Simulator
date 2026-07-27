@@ -405,20 +405,37 @@ separate near-linear execution.
 Only then can the route request the typed irreducible protocol. Buckingham Pi,
 Gap Law with Chaos Protocol, Residual Law, unique residual-slot review, and
 owner admission are separate capability bindings. A complete structural test
-fixture still mints no authority. Production can only replay the already
-admitted exact `eps_0` premise as one grounded seed. It then reads the live
-physical-vocabulary partition and stops at
-`no_admitted_semantic_target_role`: zero descriptor roles, four relation
-targets, and zero constraint laws. The route has no production target-role,
-rule, coverage, protocol, or premise-capability constructor.
+fixture still mints no authority. The generic production route can replay the
+already admitted exact `eps_0` premise as one grounded seed, but it has no
+authority to close an arbitrary target or rule universe.
 
-A distinct future non-root mint and registry-to-support boundary remain
-blocked. Before a species-forming rule may authorize a derived or irreducible
-artifact, a claim-specific independent pair must verify its complete ancestry
-and mint the matching capability. Both physical registry validators must then
-revalidate attribution, closure, and membership scope. The species derivation
-frontier is recorded as a non-authoritative diagnostic because its two
-traversals share repository-authored frontier material.
+`planet.primitive-profile-admission` is the first active claim-local instance
+of that order. Its protocol producer scans a centralized registered premise
+catalog and every occupied residual slot through ordered traversals. Its
+watchdog independently indexes target-scoped entries and scans slots in
+reverse through ordered maps. Both find zero profile-target seeds and rules,
+classify the categorical request as Buckingham-Pi inapplicable and
+nondynamical, execute Gap and Residual disposition, and agree on one
+collision-free slot. Distinct outer producer and watchdog implementations then
+reconstruct the complete profile without a shared semantic decision helper.
+
+The active receipt binds one Residue `[A]` claim, 28 Residue `[D]`
+consequences, the lower independent basis, action, and scope receipts, all
+mutation transcripts, one exact local member, and explicit false global
+coverage and support claims. Any changed catalog entry, slot, profile artifact,
+symmetry result, scope fact, evidence-custody field, member property, or
+authority escalation refuses. The owner boundary covers only the exact
+source-free unbroken compact rank-one abelian validity domain. Global premise
+coverage, charged matter, complete species membership, and conditioned support
+remain separate blocked authorities.
+
+A distinct registry-to-support boundary remains blocked. Every later
+species-forming rule still needs its own claim-specific independent pair,
+complete ancestry, matching capability, canaries, and local owner boundary.
+Both physical registry validators must revalidate attribution, closure, and
+membership scope. The species derivation frontier remains a non-authoritative
+diagnostic because its two traversals share repository-authored frontier
+material.
 
 The scientific recursion bottoms at explicit authority boundaries. A human
 owner decides whether a declared physical variable set is complete, whether

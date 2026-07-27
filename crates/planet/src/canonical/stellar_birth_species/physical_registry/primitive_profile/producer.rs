@@ -1,7 +1,10 @@
 //! Forward constructor and semantic inspector for the primitive profile.
 
 use super::*;
-use crate::canonical::stellar_birth_species::law_premise::repository_derived_relation_premise_frontier;
+use crate::canonical::stellar_birth_species::{
+    law_premise::{self, repository_derived_relation_premise_frontier},
+    symmetry_operator_exclusion,
+};
 use civsim_ledger::{Provenance, Tier};
 use civsim_units::{digest::sha256, physics_floor::sealed_physical_floor_authority_binding};
 
@@ -9,6 +12,136 @@ const INPUT_DOMAIN: &[u8] = b"civsim.planet.primitive-excitation-profile.produce
 const OUTPUT_DOMAIN: &[u8] = b"civsim.planet.primitive-excitation-profile.canonical-output.v1";
 const PAIR_DOMAIN: &[u8] = b"civsim.planet.primitive-excitation-profile.pair-receipt.v1";
 const MAX_CANONICAL_BYTES: usize = 1_048_576;
+const PROFILE_CLAIM_DOMAIN: &[u8] = b"civsim.planet.primitive-profile-claim.v1";
+const PROFILE_COMPONENT_DOMAIN: &[u8] = b"civsim.planet.primitive-profile-field-component.v1";
+const PROFILE_SHIFT_DOMAIN: &[u8] = b"civsim.planet.primitive-profile-shift-generator.v1";
+const PROFILE_EXCLUDED_OPERATOR_DOMAIN: &[u8] =
+    b"civsim.planet.primitive-profile-excluded-operator.v1";
+const PROFILE_APPLICABILITY_FACT_DOMAIN: &[u8] =
+    b"civsim.planet.primitive-profile-applicability-fact.v1";
+const PROFILE_VALIDITY_FACT_DOMAIN: &[u8] = b"civsim.planet.primitive-profile-validity-fact.v1";
+
+struct CandidateBuild {
+    candidates: Vec<ProfileArtifactCandidate>,
+    member: SpeciesContentIdentity,
+    profile_root_identity: ArtifactIdentity,
+    profile_role_identity: ArtifactIdentity,
+    admission_evidence: law_premise::TheoryProfileAdmissionEvidence,
+    symmetry_evidence: symmetry_operator_exclusion::TheoryProfileSymmetryEvidence,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_profile_evidence(
+    packet: &PrimitiveProfilePacket,
+    input_sha256: [u8; 32],
+    evidence_custody_receipt_sha256: [u8; 32],
+    profile_root_identity: ArtifactIdentity,
+    profile_role_identity: ArtifactIdentity,
+    field_identity: ArtifactIdentity,
+    operator_identity: ArtifactIdentity,
+    sector_identity: ArtifactIdentity,
+    validity_identity: ArtifactIdentity,
+) -> Result<
+    (
+        law_premise::TheoryProfileAdmissionEvidence,
+        symmetry_operator_exclusion::TheoryProfileSymmetryEvidence,
+    ),
+    PrimitiveProfileRefusal,
+> {
+    let claim_identity = digest(
+        PROFILE_CLAIM_DOMAIN,
+        &[
+            &profile_root_identity.0,
+            &profile_role_identity.0,
+            &input_sha256,
+        ],
+    );
+    let mut components = Vec::with_capacity(4);
+    let mut shifts = Vec::with_capacity(4);
+    let mut excluded_operator_terms = Vec::with_capacity(4);
+    for index in 0_u32..4 {
+        let index_bytes = index.to_be_bytes();
+        let component = digest(PROFILE_COMPONENT_DOMAIN, &[&field_identity.0, &index_bytes]);
+        components.push(component);
+        shifts.push(symmetry_operator_exclusion::TheoryProfileShift {
+            field_component: component,
+            shift_generator: digest(PROFILE_SHIFT_DOMAIN, &[&sector_identity.0, &index_bytes]),
+            coefficient: 1,
+        });
+        excluded_operator_terms.push(symmetry_operator_exclusion::TheoryProfileQuadraticTerm {
+            left_field: component,
+            right_field: component,
+            coefficient: if index == 0 { 1 } else { -1 },
+        });
+    }
+    let excluded_operator_identity = digest(
+        PROFILE_EXCLUDED_OPERATOR_DOMAIN,
+        &[
+            &operator_identity.0,
+            packet.excluded_term_id.as_bytes(),
+            &profile_root_identity.0,
+        ],
+    );
+    let required_applicability_fact = digest(
+        PROFILE_APPLICABILITY_FACT_DOMAIN,
+        &[
+            &profile_root_identity.0,
+            &sector_identity.0,
+            &validity_identity.0,
+        ],
+    );
+    let required_validity_fact = digest(
+        PROFILE_VALIDITY_FACT_DOMAIN,
+        &[
+            &required_applicability_fact,
+            &validity_identity.0,
+            &input_sha256,
+        ],
+    );
+    let symmetry = symmetry_operator_exclusion::inspect_theory_profile_symmetry(
+        &symmetry_operator_exclusion::TheoryProfileSymmetryRequest {
+            claim_identity,
+            subject_identity: field_identity.0,
+            applicability_domain_identity: validity_identity.0,
+            symmetry_identity: sector_identity.0,
+            field_components: components,
+            shifts,
+            excluded_operator_identity,
+            excluded_operator_terms,
+            admitted_scope_fact: profile_root_identity.0,
+            required_applicability_fact,
+            required_validity_fact,
+        },
+    )
+    .map_err(|_| PrimitiveProfileRefusal::ArtifactConstructionFailure)?;
+    let admission = law_premise::inspect_theory_profile_admission(
+        &law_premise::TheoryProfileAdmissionRequest {
+            claim_identity,
+            role_identity: profile_role_identity.0,
+            content_identity: profile_root_identity.0,
+            profile_input_sha256: input_sha256,
+            source_custody_sha256: evidence_custody_receipt_sha256,
+            applicability_receipt_sha256: symmetry.applicability_receipt_sha256,
+            validity_receipt_sha256: symmetry.validity_receipt_sha256,
+            residual_slot_id: packet.residual_slot_id.clone(),
+            owner_admission_record: packet.owner_admission_record.clone(),
+        },
+    )
+    .map_err(|_| PrimitiveProfileRefusal::ArtifactConstructionFailure)?;
+    if admission.decision_id != "irreducible_protocol_structurally_bound"
+        || admission.target_claim_identity != claim_identity
+        || admission.target_role_identity != profile_role_identity.0
+        || admission.target_content_identity != profile_root_identity.0
+        || symmetry.basis_element_count != 10
+        || symmetry.basis_excluded_count != 10
+        || symmetry.basis_invariant_count != 0
+        || symmetry.excluded_operator_count != 1
+        || symmetry.invariant_operator_count != 0
+    {
+        return Err(PrimitiveProfileRefusal::ArtifactConstructionFailure);
+    }
+    Ok((admission, symmetry))
+}
 
 pub(super) fn sealed_packet() -> Result<PrimitiveProfilePacket, PrimitiveProfileRefusal> {
     let floor = sealed_physical_floor_authority_binding()
@@ -25,6 +158,12 @@ pub(super) fn sealed_packet() -> Result<PrimitiveProfilePacket, PrimitiveProfile
         state_id: STATE_ID.to_owned(),
         sector_id: SECTOR_ID.to_owned(),
         validity_id: VALIDITY_ID.to_owned(),
+        helicity_id: HELICITY_ID.to_owned(),
+        statistics_id: STATISTICS_ID.to_owned(),
+        charge_id: CHARGE_ID.to_owned(),
+        current_id: CURRENT_ID.to_owned(),
+        stability_id: STABILITY_ID.to_owned(),
+        transition_id: TRANSITION_ID.to_owned(),
         excluded_term_id: EXCLUDED_TERM_ID.to_owned(),
         member_id: MEMBER_ID.to_owned(),
         residual_slot_id: RESIDUAL_SLOT_ID.to_owned(),
@@ -62,28 +201,24 @@ pub(super) fn inspect(
             packet.evidence_anchor.as_bytes(),
         ],
     );
-    let (candidates, member, profile_root_identity) =
-        build_candidates(packet, input_sha256, evidence_custody_receipt_sha256)?;
-    if candidates.len() != ARTIFACT_COUNT {
+    let build = build_candidates(packet, input_sha256, evidence_custody_receipt_sha256)?;
+    if build.candidates.len() != ARTIFACT_COUNT {
         return Err(PrimitiveProfileRefusal::ArtifactCountMismatch);
     }
-    let canonical_bytes = encode_output(
-        input_sha256,
-        &candidates,
-        member,
-        profile_root_identity,
-        evidence_custody_receipt_sha256,
-    );
+    let canonical_bytes = encode_output(input_sha256, &build, evidence_custody_receipt_sha256);
     if canonical_bytes.len() > MAX_CANONICAL_BYTES {
         return Err(PrimitiveProfileRefusal::ArtifactConstructionFailure);
     }
     Ok(PrimitiveProfileCheckerOutput {
         input_sha256,
         canonical_bytes,
-        candidates,
-        member,
-        profile_root_identity,
+        candidates: build.candidates,
+        member: build.member,
+        profile_root_identity: build.profile_root_identity,
+        profile_role_identity: build.profile_role_identity,
         evidence_custody_receipt_sha256,
+        admission_evidence: build.admission_evidence,
+        symmetry_evidence: build.symmetry_evidence,
     })
 }
 
@@ -97,27 +232,27 @@ fn validate_packet(packet: &PrimitiveProfilePacket) -> Result<(), PrimitiveProfi
     {
         return Err(PrimitiveProfileRefusal::ProfileIdentityMismatch);
     }
-    if (
-        packet.theory_class_id.as_str(),
-        packet.symmetry_id.as_str(),
-        packet.field_id.as_str(),
-        packet.operator_id.as_str(),
-        packet.state_id.as_str(),
-        packet.sector_id.as_str(),
-        packet.validity_id.as_str(),
-        packet.excluded_term_id.as_str(),
-        packet.member_id.as_str(),
-    ) != (
-        THEORY_CLASS_ID,
-        SYMMETRY_ID,
-        FIELD_ID,
-        OPERATOR_ID,
-        STATE_ID,
-        SECTOR_ID,
-        VALIDITY_ID,
-        EXCLUDED_TERM_ID,
-        MEMBER_ID,
-    ) {
+    let theory_fields = [
+        (packet.theory_class_id.as_str(), THEORY_CLASS_ID),
+        (packet.symmetry_id.as_str(), SYMMETRY_ID),
+        (packet.field_id.as_str(), FIELD_ID),
+        (packet.operator_id.as_str(), OPERATOR_ID),
+        (packet.state_id.as_str(), STATE_ID),
+        (packet.sector_id.as_str(), SECTOR_ID),
+        (packet.validity_id.as_str(), VALIDITY_ID),
+        (packet.helicity_id.as_str(), HELICITY_ID),
+        (packet.statistics_id.as_str(), STATISTICS_ID),
+        (packet.charge_id.as_str(), CHARGE_ID),
+        (packet.current_id.as_str(), CURRENT_ID),
+        (packet.stability_id.as_str(), STABILITY_ID),
+        (packet.transition_id.as_str(), TRANSITION_ID),
+        (packet.excluded_term_id.as_str(), EXCLUDED_TERM_ID),
+        (packet.member_id.as_str(), MEMBER_ID),
+    ];
+    if theory_fields
+        .into_iter()
+        .any(|(found, expected)| found != expected)
+    {
         return Err(PrimitiveProfileRefusal::TheoryProfileMismatch);
     }
     if (
@@ -162,14 +297,7 @@ fn build_candidates(
     packet: &PrimitiveProfilePacket,
     input_sha256: [u8; 32],
     evidence_custody_receipt_sha256: [u8; 32],
-) -> Result<
-    (
-        Vec<ProfileArtifactCandidate>,
-        SpeciesContentIdentity,
-        ArtifactIdentity,
-    ),
-    PrimitiveProfileRefusal,
-> {
+) -> Result<CandidateBuild, PrimitiveProfileRefusal> {
     let mut candidates = Vec::with_capacity(ARTIFACT_COUNT);
     let profile_payload = descriptor(
         PROFILE_SCHEMA_ID,
@@ -181,11 +309,13 @@ fn build_candidates(
         ),
     );
     let profile_root_identity = identity(&profile_payload)?;
-    candidates.push(ProfileArtifactCandidate {
-        identity: profile_root_identity,
-        admission: irreducible_admission(packet, input_sha256, profile_root_identity),
-        payload: profile_payload,
-    });
+    let profile_role_identity = push_descriptor(
+        &mut candidates,
+        profile_root_identity,
+        input_sha256,
+        "civsim.physical-profile.role.profile-root.v1",
+        "admitted-theory-profile-role",
+    )?;
 
     let derivation_kind = push_descriptor(
         &mut candidates,
@@ -264,6 +394,109 @@ fn build_candidates(
         "civsim.physical-profile.validity.v1",
         packet.validity_id.as_str(),
     )?;
+    let (admission_evidence, symmetry_evidence) = execute_profile_evidence(
+        packet,
+        input_sha256,
+        evidence_custody_receipt_sha256,
+        profile_root_identity,
+        profile_role_identity,
+        field,
+        operator,
+        sector,
+        validity,
+    )?;
+    candidates.insert(
+        0,
+        ProfileArtifactCandidate {
+            identity: profile_root_identity,
+            admission: irreducible_admission(packet, &admission_evidence),
+            payload: profile_payload,
+        },
+    );
+    let helicity_role = push_descriptor(
+        &mut candidates,
+        profile_root_identity,
+        input_sha256,
+        "civsim.physical-profile.role.helicity-requirement.v1",
+        "helicity-requirement-role",
+    )?;
+    let helicity = push_descriptor(
+        &mut candidates,
+        profile_root_identity,
+        input_sha256,
+        "civsim.physical-profile.helicity.v1",
+        packet.helicity_id.as_str(),
+    )?;
+    let statistics_role = push_descriptor(
+        &mut candidates,
+        profile_root_identity,
+        input_sha256,
+        "civsim.physical-profile.role.statistics-requirement.v1",
+        "statistics-requirement-role",
+    )?;
+    let statistics = push_descriptor(
+        &mut candidates,
+        profile_root_identity,
+        input_sha256,
+        "civsim.physical-profile.statistics.v1",
+        packet.statistics_id.as_str(),
+    )?;
+    let charge_role = push_descriptor(
+        &mut candidates,
+        profile_root_identity,
+        input_sha256,
+        "civsim.physical-profile.role.charge-requirement.v1",
+        "charge-requirement-role",
+    )?;
+    let charge = push_descriptor(
+        &mut candidates,
+        profile_root_identity,
+        input_sha256,
+        "civsim.physical-profile.charge.v1",
+        packet.charge_id.as_str(),
+    )?;
+    let current_role = push_descriptor(
+        &mut candidates,
+        profile_root_identity,
+        input_sha256,
+        "civsim.physical-profile.role.current-requirement.v1",
+        "current-requirement-role",
+    )?;
+    let current = push_descriptor(
+        &mut candidates,
+        profile_root_identity,
+        input_sha256,
+        "civsim.physical-profile.current.v1",
+        packet.current_id.as_str(),
+    )?;
+    let stability_role = push_descriptor(
+        &mut candidates,
+        profile_root_identity,
+        input_sha256,
+        "civsim.physical-profile.role.stability-requirement.v1",
+        "stability-requirement-role",
+    )?;
+    let stability = push_descriptor(
+        &mut candidates,
+        profile_root_identity,
+        input_sha256,
+        "civsim.physical-profile.stability.v1",
+        packet.stability_id.as_str(),
+    )?;
+    let transition_role = push_descriptor(
+        &mut candidates,
+        profile_root_identity,
+        input_sha256,
+        "civsim.physical-profile.role.transition-requirement.v1",
+        "transition-requirement-role",
+    )?;
+    let transition = push_descriptor(
+        &mut candidates,
+        profile_root_identity,
+        input_sha256,
+        "civsim.physical-profile.transition.v1",
+        packet.transition_id.as_str(),
+    )?;
     let constraint_role = push_descriptor(
         &mut candidates,
         profile_root_identity,
@@ -278,6 +511,12 @@ fn build_candidates(
             relation(state_role, state),
             relation(sector_role, sector),
             relation(validity_role, validity),
+            relation(helicity_role, helicity),
+            relation(statistics_role, statistics),
+            relation(charge_role, charge),
+            relation(current_role, current),
+            relation(stability_role, stability),
+            relation(transition_role, transition),
         ],
         species_dependencies: Vec::new(),
     };
@@ -304,39 +543,15 @@ fn build_candidates(
                 symmetry: sector,
                 applicability_receipt: receipt_binding(
                     "civsim.primitive-profile.exact-zero-applicability.v1",
-                    digest(
-                        b"civsim.primitive-profile.exact-zero-applicability.v1",
-                        &[
-                            &input_sha256,
-                            &field.0,
-                            &sector.0,
-                            packet.validity_id.as_bytes(),
-                        ],
-                    ),
+                    symmetry_evidence.applicability_receipt_sha256,
                 ),
                 exclusion_producer_receipt: receipt_binding(
                     "civsim.primitive-profile.exact-zero-forward-proof.v1",
-                    digest(
-                        b"civsim.primitive-profile.exact-zero-forward-proof.v1",
-                        &[
-                            &input_sha256,
-                            &field.0,
-                            &sector.0,
-                            packet.excluded_term_id.as_bytes(),
-                        ],
-                    ),
+                    symmetry_evidence.exclusion_producer_result_sha256,
                 ),
                 exclusion_watchdog_receipt: receipt_binding(
                     "civsim.primitive-profile.exact-zero-reverse-proof.v1",
-                    digest(
-                        b"civsim.primitive-profile.exact-zero-reverse-proof.v1",
-                        &[
-                            &input_sha256,
-                            &sector.0,
-                            &field.0,
-                            packet.excluded_term_id.as_bytes(),
-                        ],
-                    ),
+                    symmetry_evidence.exclusion_watchdog_result_sha256,
                 ),
             },
         });
@@ -373,7 +588,14 @@ fn build_candidates(
         input_sha256,
         species_payload,
     )?;
-    Ok((candidates, member, profile_root_identity))
+    Ok(CandidateBuild {
+        candidates,
+        member,
+        profile_root_identity,
+        profile_role_identity,
+        admission_evidence,
+        symmetry_evidence,
+    })
 }
 
 fn descriptor(schema_id: &str, content: &str) -> ArtifactPayload {
@@ -427,78 +649,8 @@ fn push_derived(
 
 fn irreducible_admission(
     packet: &PrimitiveProfilePacket,
-    input_sha256: [u8; 32],
-    profile_root_identity: ArtifactIdentity,
+    evidence: &law_premise::TheoryProfileAdmissionEvidence,
 ) -> RootAdmission {
-    let exhaustion = digest(
-        b"civsim.primitive-profile.derive-first-exhaustion.v1",
-        &[
-            &packet.floor_authority_sha256,
-            &packet.eps0_pair_receipt_sha256,
-            b"constants-and-execution-relations-do-not-select-field-ontology",
-        ],
-    );
-    let pi = digest(
-        b"civsim.primitive-profile.buckingham-pi.v1",
-        &[
-            &input_sha256,
-            b"dimensionless-groups-cannot-select-discrete-gauge-ontology",
-        ],
-    );
-    let gap = digest(
-        b"civsim.primitive-profile.gap-law.v1",
-        &[
-            &input_sha256,
-            b"structural-theory-seam-not-a-fitted-magnitude",
-        ],
-    );
-    let chaos = digest(
-        b"civsim.primitive-profile.chaos-protocol.v1",
-        &[
-            &input_sha256,
-            b"not-applicable-static-theory-profile-no-evolving-trajectory",
-        ],
-    );
-    let residual = digest(
-        b"civsim.primitive-profile.residual-law.v1",
-        &[
-            &exhaustion,
-            &pi,
-            &gap,
-            &chaos,
-            b"one-minimal-unbroken-abelian-profile",
-        ],
-    );
-    let slot = digest(
-        b"civsim.primitive-profile.residual-slot.v1",
-        &[
-            packet.residual_slot_id.as_bytes(),
-            &profile_root_identity.0,
-            &residual,
-        ],
-    );
-    let owner = digest(
-        b"civsim.primitive-profile.owner-admission.v1",
-        &[
-            packet.owner_admission_record.as_bytes(),
-            &profile_root_identity.0,
-            &exhaustion,
-            &pi,
-            &gap,
-            &chaos,
-            &residual,
-            &slot,
-        ],
-    );
-    let independent = digest(
-        b"civsim.primitive-profile.independent-watchdog-route.v1",
-        &[
-            &input_sha256,
-            &profile_root_identity.0,
-            &owner,
-            WATCHDOG_ID.as_bytes(),
-        ],
-    );
     RootAdmission {
         tier: Tier::Residue,
         provenance: Provenance::Authored,
@@ -506,33 +658,36 @@ fn irreducible_admission(
             super::super::model::IrreducibleAdmission {
                 derivation_exhaustion_receipt: receipt_binding(
                     "civsim.primitive-profile.derive-first-exhaustion.v1",
-                    exhaustion,
+                    evidence.derivation_exhaustion_receipt_sha256,
                 ),
                 buckingham_pi_receipt: receipt_binding(
                     "civsim.primitive-profile.buckingham-pi.v1",
-                    pi,
+                    evidence.buckingham_pi_receipt_sha256,
                 ),
-                gap_law_receipt: receipt_binding("civsim.primitive-profile.gap-law.v1", gap),
+                gap_law_receipt: receipt_binding(
+                    "civsim.primitive-profile.gap-law.v1",
+                    evidence.gap_law_receipt_sha256,
+                ),
                 chaos_protocol_receipt: receipt_binding(
                     "civsim.primitive-profile.chaos-protocol.v1",
-                    chaos,
+                    evidence.chaos_protocol_receipt_sha256,
                 ),
                 residual_law_receipt: receipt_binding(
                     "civsim.primitive-profile.residual-law.v1",
-                    residual,
+                    evidence.residual_law_receipt_sha256,
                 ),
                 residual_slot_id: packet.residual_slot_id.clone(),
                 residual_slot_receipt: receipt_binding(
                     "civsim.primitive-profile.residual-slot.v1",
-                    slot,
+                    evidence.residual_slot_receipt_sha256,
                 ),
                 owner_admission_receipt: receipt_binding(
                     "civsim.primitive-profile.owner-admission.v1",
-                    owner,
+                    evidence.owner_admission_receipt_sha256,
                 ),
                 independent_watchdog_receipt: receipt_binding(
                     "civsim.primitive-profile.independent-watchdog-route.v1",
-                    independent,
+                    evidence.independent_watchdog_receipt_sha256,
                 ),
             },
         )),
@@ -626,6 +781,24 @@ fn mutations(packet: &PrimitiveProfilePacket) -> Vec<(&'static str, PrimitivePro
     changed.validity_id.push_str(".changed");
     cases.push(("validity", changed));
     let mut changed = packet.clone();
+    changed.helicity_id.push_str(".changed");
+    cases.push(("helicity", changed));
+    let mut changed = packet.clone();
+    changed.statistics_id.push_str(".changed");
+    cases.push(("statistics", changed));
+    let mut changed = packet.clone();
+    changed.charge_id.push_str(".changed");
+    cases.push(("charge", changed));
+    let mut changed = packet.clone();
+    changed.current_id.push_str(".changed");
+    cases.push(("current", changed));
+    let mut changed = packet.clone();
+    changed.stability_id.push_str(".changed");
+    cases.push(("stability", changed));
+    let mut changed = packet.clone();
+    changed.transition_id.push_str(".changed");
+    cases.push(("transition", changed));
+    let mut changed = packet.clone();
     changed.excluded_term_id.push_str(".changed");
     cases.push(("excluded_mass_term", changed));
     let mut changed = packet.clone();
@@ -694,11 +867,28 @@ pub(super) fn pair_receipt_digest(
             &watchdog_canary.case_count.to_be_bytes(),
             &watchdog_canary.transcript_sha256,
             &output.profile_root_identity.0,
+            &output.profile_role_identity.0,
             &output.member.0,
             &u32::try_from(output.candidates.len())
                 .unwrap_or(u32::MAX)
                 .to_be_bytes(),
             &output.evidence_custody_receipt_sha256,
+            &output.admission_evidence.derivation_catalog_sha256,
+            &output.admission_evidence.repository_catalog_sha256,
+            &output.admission_evidence.protocol_producer_result_sha256,
+            &output.admission_evidence.protocol_watchdog_result_sha256,
+            &output
+                .admission_evidence
+                .derivation_coverage_capability_sha256,
+            &output
+                .admission_evidence
+                .irreducible_protocol_capability_sha256,
+            &output.symmetry_evidence.basis_element_count.to_be_bytes(),
+            &output.symmetry_evidence.exclusion_producer_result_sha256,
+            &output.symmetry_evidence.exclusion_watchdog_result_sha256,
+            &output.symmetry_evidence.action_binding_sha256,
+            &output.symmetry_evidence.applicability_receipt_sha256,
+            &output.symmetry_evidence.validity_receipt_sha256,
             &[0],
             &[0],
             b"none",
@@ -708,7 +898,7 @@ pub(super) fn pair_receipt_digest(
 
 fn encode_packet(packet: &PrimitiveProfilePacket) -> Vec<u8> {
     let mut bytes = INPUT_DOMAIN.to_vec();
-    let fields: [&[u8]; 23] = [
+    let fields: [&[u8]; 29] = [
         packet.schema_id.as_bytes(),
         packet.profile_id.as_bytes(),
         packet.theory_class_id.as_bytes(),
@@ -718,6 +908,12 @@ fn encode_packet(packet: &PrimitiveProfilePacket) -> Vec<u8> {
         packet.state_id.as_bytes(),
         packet.sector_id.as_bytes(),
         packet.validity_id.as_bytes(),
+        packet.helicity_id.as_bytes(),
+        packet.statistics_id.as_bytes(),
+        packet.charge_id.as_bytes(),
+        packet.current_id.as_bytes(),
+        packet.stability_id.as_bytes(),
+        packet.transition_id.as_bytes(),
         packet.excluded_term_id.as_bytes(),
         packet.member_id.as_bytes(),
         packet.residual_slot_id.as_bytes(),
@@ -748,29 +944,110 @@ fn encode_packet(packet: &PrimitiveProfilePacket) -> Vec<u8> {
 
 fn encode_output(
     input_sha256: [u8; 32],
-    candidates: &[ProfileArtifactCandidate],
-    member: SpeciesContentIdentity,
-    profile_root_identity: ArtifactIdentity,
+    build: &CandidateBuild,
     evidence_custody_receipt_sha256: [u8; 32],
 ) -> Vec<u8> {
     let mut bytes = OUTPUT_DOMAIN.to_vec();
     append_field(&mut bytes, 1, &input_sha256);
-    append_field(&mut bytes, 2, &profile_root_identity.0);
-    append_field(&mut bytes, 3, &member.0);
+    append_field(&mut bytes, 2, &build.profile_root_identity.0);
+    append_field(&mut bytes, 3, &build.member.0);
     append_field(&mut bytes, 4, &evidence_custody_receipt_sha256);
     append_field(
         &mut bytes,
         5,
-        &u32::try_from(candidates.len())
+        &u32::try_from(build.candidates.len())
             .unwrap_or(u32::MAX)
             .to_be_bytes(),
     );
-    for candidate in candidates {
+    for candidate in &build.candidates {
         append_field(&mut bytes, 6, &candidate.identity.0);
         append_field(&mut bytes, 7, &encode_admission(&candidate.admission));
     }
     append_field(&mut bytes, 8, &[0]);
     append_field(&mut bytes, 9, &[0]);
+    append_field(&mut bytes, 10, &build.profile_role_identity.0);
+    append_field(
+        &mut bytes,
+        11,
+        &build.admission_evidence.derivation_catalog_sha256,
+    );
+    append_field(
+        &mut bytes,
+        12,
+        &build
+            .admission_evidence
+            .derivation_coverage_capability_sha256,
+    );
+    append_field(
+        &mut bytes,
+        13,
+        &build
+            .admission_evidence
+            .irreducible_protocol_capability_sha256,
+    );
+    append_field(
+        &mut bytes,
+        14,
+        build.admission_evidence.decision_id.as_bytes(),
+    );
+    append_field(
+        &mut bytes,
+        15,
+        &build.symmetry_evidence.basis_element_count.to_be_bytes(),
+    );
+    append_field(
+        &mut bytes,
+        16,
+        &build.symmetry_evidence.basis_excluded_count.to_be_bytes(),
+    );
+    append_field(
+        &mut bytes,
+        17,
+        &build
+            .symmetry_evidence
+            .excluded_operator_count
+            .to_be_bytes(),
+    );
+    append_field(
+        &mut bytes,
+        18,
+        &build.symmetry_evidence.exclusion_producer_result_sha256,
+    );
+    append_field(
+        &mut bytes,
+        19,
+        &build.symmetry_evidence.exclusion_watchdog_result_sha256,
+    );
+    append_field(
+        &mut bytes,
+        20,
+        &build.symmetry_evidence.action_binding_sha256,
+    );
+    append_field(
+        &mut bytes,
+        21,
+        &build.symmetry_evidence.applicability_receipt_sha256,
+    );
+    append_field(
+        &mut bytes,
+        22,
+        &build.symmetry_evidence.validity_receipt_sha256,
+    );
+    append_field(
+        &mut bytes,
+        23,
+        &build.admission_evidence.repository_catalog_sha256,
+    );
+    append_field(
+        &mut bytes,
+        24,
+        &build.admission_evidence.protocol_producer_result_sha256,
+    );
+    append_field(
+        &mut bytes,
+        25,
+        &build.admission_evidence.protocol_watchdog_result_sha256,
+    );
     bytes
 }
 

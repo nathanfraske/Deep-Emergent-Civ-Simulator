@@ -189,11 +189,6 @@ pub(super) fn validate_and_encode_with_caps(
     if rules.is_empty() {
         return Err(PhysicalRegistryRefusalCode::NoAdmittedSpeciesDerivationRules);
     }
-    if production_vocabulary_binding
-        && !input.vocabulary_binding.global_physical_vocabulary_coverage
-    {
-        return Err(PhysicalRegistryRefusalCode::PhysicalVocabularyCoverageIncomplete);
-    }
     let declared = normalize_declared_members(&input.declared_members, caps)?;
     let dependency_count = rules.values().try_fold(0_usize, |total, rule| {
         total
@@ -374,9 +369,25 @@ fn verify_admission_capability(
                 return Err(PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch);
             }
         }
+        AdmissionCapabilityKind::PrimitiveProfile => {
+            let Some(receipt_sha256) = artifact.primitive_profile_pair_receipt_sha256() else {
+                return Err(PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch);
+            };
+            let Some(profile_root_identity) = artifact.primitive_profile_root_identity() else {
+                return Err(PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch);
+            };
+            if receipt_sha256.iter().all(|byte| *byte == 0)
+                || profile_root_identity.0.iter().all(|byte| *byte == 0)
+                || artifact.repository_root_pair_receipt_sha256().is_some()
+            {
+                return Err(PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch);
+            }
+        }
         #[cfg(test)]
         AdmissionCapabilityKind::ExactTest => {
-            if artifact.repository_root_pair_receipt_sha256().is_some() {
+            if artifact.repository_root_pair_receipt_sha256().is_some()
+                || artifact.primitive_profile_pair_receipt_sha256().is_some()
+            {
                 return Err(PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch);
             }
         }

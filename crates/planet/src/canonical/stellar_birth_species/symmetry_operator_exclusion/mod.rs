@@ -329,6 +329,73 @@ impl ConditionalQuadraticSymmetryReport {
     }
 }
 
+/// Data-defined request used by an enrolled theory-profile authority.
+///
+/// Every identity is opaque at this boundary. The caller supplies the complete
+/// field-component basis, affine action, and one exact quadratic term to test.
+/// No familiar particle, gauge group, component count, or coefficient pattern
+/// is selected inside the evaluator.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::canonical::stellar_birth_species) struct TheoryProfileSymmetryRequest {
+    pub(in crate::canonical::stellar_birth_species) claim_identity: [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) subject_identity: [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) applicability_domain_identity: [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) symmetry_identity: [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) field_components: Vec<[u8; 32]>,
+    pub(in crate::canonical::stellar_birth_species) shifts: Vec<TheoryProfileShift>,
+    pub(in crate::canonical::stellar_birth_species) excluded_operator_identity: [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) excluded_operator_terms:
+        Vec<TheoryProfileQuadraticTerm>,
+    pub(in crate::canonical::stellar_birth_species) admitted_scope_fact: [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) required_applicability_fact: [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) required_validity_fact: [u8; 32],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::canonical::stellar_birth_species) struct TheoryProfileShift {
+    pub(in crate::canonical::stellar_birth_species) field_component: [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) shift_generator: [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) coefficient: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::canonical::stellar_birth_species) struct TheoryProfileQuadraticTerm {
+    pub(in crate::canonical::stellar_birth_species) left_field: [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) right_field: [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) coefficient: i64,
+}
+
+/// Executed evidence for one claim-local exact-zero admission attempt.
+///
+/// The report proves the supplied algebra, the complete finite homogeneous
+/// commutative quadratic basis, exclusion of the exact requested operator, and
+/// action-dependent scope closure. It does not by itself admit the supplied
+/// ontology or create species membership.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::canonical::stellar_birth_species) struct TheoryProfileSymmetryEvidence {
+    pub(in crate::canonical::stellar_birth_species) basis_element_count: u32,
+    pub(in crate::canonical::stellar_birth_species) basis_excluded_count: u32,
+    pub(in crate::canonical::stellar_birth_species) basis_invariant_count: u32,
+    pub(in crate::canonical::stellar_birth_species) excluded_operator_count: u32,
+    pub(in crate::canonical::stellar_birth_species) invariant_operator_count: u32,
+    pub(in crate::canonical::stellar_birth_species) scope_reachable_fact_count: u32,
+    pub(in crate::canonical::stellar_birth_species) basis_producer_result_sha256: [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) basis_watchdog_result_sha256: [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) exclusion_producer_result_sha256: [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) exclusion_watchdog_result_sha256: [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) scope_producer_result_sha256: [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) scope_watchdog_result_sha256: [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) action_binding_sha256: [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) applicability_receipt_sha256: [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) validity_receipt_sha256: [u8; 32],
+}
+
+const THEORY_PROFILE_ACTION_BINDING_DOMAIN: &[u8] =
+    b"civsim.planet.theory-profile-symmetry-action-binding.v1";
+const THEORY_PROFILE_APPLICABILITY_DOMAIN: &[u8] =
+    b"civsim.planet.theory-profile-symmetry-applicability.v1";
+const THEORY_PROFILE_VALIDITY_DOMAIN: &[u8] = b"civsim.planet.theory-profile-symmetry-validity.v1";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SymmetryOperatorExclusionRefusal {
     NoAdmittedSymmetryActionInput,
@@ -470,6 +537,164 @@ fn inspect_conditional_quadratic_symmetry(
     })
     .map_err(ConditionalQuadraticSymmetryRefusal::Scope)?;
     Ok(ConditionalQuadraticSymmetryReport { scope, symmetry })
+}
+
+pub(in crate::canonical::stellar_birth_species) fn inspect_theory_profile_symmetry(
+    request: &TheoryProfileSymmetryRequest,
+) -> Result<TheoryProfileSymmetryEvidence, &'static str> {
+    let claim_identity = AlgebraIdentity(request.claim_identity);
+    let subject_identity = AlgebraIdentity(request.subject_identity);
+    let applicability_domain_identity = AlgebraIdentity(request.applicability_domain_identity);
+    let field_components = request
+        .field_components
+        .iter()
+        .copied()
+        .map(AlgebraIdentity)
+        .collect::<Vec<_>>();
+    let action = AffineSymmetryAction {
+        symmetry_identity: AlgebraIdentity(request.symmetry_identity),
+        terms: request
+            .shifts
+            .iter()
+            .map(|term| AffineActionTerm {
+                field_component: AlgebraIdentity(term.field_component),
+                shift_generator: AlgebraIdentity(term.shift_generator),
+                coefficient: term.coefficient,
+            })
+            .collect(),
+    };
+    let scoped = ScopedSymmetryActionInput {
+        claim_identity,
+        subject_identity,
+        applicability_domain_identity,
+        field_components: field_components.clone(),
+        action: action.clone(),
+    };
+    let complete = inspect_complete_quadratic_symmetry(&scoped)
+        .map_err(|_| "complete_quadratic_symmetry_refused")?;
+    let excluded = inspect_symmetry_operator_exclusion(&SymmetryOperatorExclusionInput {
+        claim_identity,
+        subject_identity,
+        applicability_domain_identity,
+        field_components,
+        action,
+        operators: vec![QuadraticOperatorCandidate {
+            operator_identity: AlgebraIdentity(request.excluded_operator_identity),
+            terms: request
+                .excluded_operator_terms
+                .iter()
+                .map(|term| QuadraticOperatorTerm {
+                    left_field: AlgebraIdentity(term.left_field),
+                    right_field: AlgebraIdentity(term.right_field),
+                    coefficient: term.coefficient,
+                })
+                .collect(),
+        }],
+    })
+    .map_err(|_| "excluded_operator_evaluation_refused")?;
+
+    let basis_element_count = u32::try_from(complete.basis_element_count())
+        .map_err(|_| "basis_element_count_overflow")?;
+    let basis_excluded_count = u32::try_from(complete.excluded_operator_count())
+        .map_err(|_| "basis_excluded_count_overflow")?;
+    let basis_invariant_count = u32::try_from(complete.invariant_operator_count())
+        .map_err(|_| "basis_invariant_count_overflow")?;
+    let excluded_operator_count = u32::try_from(excluded.excluded_operator_count())
+        .map_err(|_| "excluded_operator_count_overflow")?;
+    let invariant_operator_count = u32::try_from(excluded.invariant_operator_count())
+        .map_err(|_| "invariant_operator_count_overflow")?;
+    if basis_element_count == 0
+        || basis_excluded_count != basis_element_count
+        || basis_invariant_count != 0
+        || excluded_operator_count != 1
+        || invariant_operator_count != 0
+    {
+        return Err("requested_mass_operator_not_excluded");
+    }
+
+    let mut action_binding_bytes = THEORY_PROFILE_ACTION_BINDING_DOMAIN.to_vec();
+    for (tag, payload) in [
+        (1, complete.basis.producer_result_sha256().as_slice()),
+        (2, complete.basis.watchdog_result_sha256().as_slice()),
+        (3, complete.exclusion.producer_result_sha256.as_slice()),
+        (4, complete.exclusion.watchdog_result_sha256.as_slice()),
+        (5, excluded.producer_result_sha256.as_slice()),
+        (6, excluded.watchdog_result_sha256.as_slice()),
+        (7, request.excluded_operator_identity.as_slice()),
+    ] {
+        append_scope_binding_field(&mut action_binding_bytes, tag, payload);
+    }
+    let action_binding = AlgebraIdentity(sha256(&action_binding_bytes));
+    let admitted_scope_fact = AlgebraIdentity(request.admitted_scope_fact);
+    let required_applicability_fact = AlgebraIdentity(request.required_applicability_fact);
+    let required_validity_fact = AlgebraIdentity(request.required_validity_fact);
+    let scope = applicability_proof::inspect_scope_proof(&applicability_proof::ScopeProofInput {
+        claim_identity,
+        subject_identity,
+        applicability_domain_identity,
+        action_binding_fact: action_binding,
+        premise_facts: vec![admitted_scope_fact],
+        inference_rules: vec![
+            applicability_proof::ScopeInferenceRule {
+                premises: vec![
+                    applicability_proof::ScopeRulePremise::EvaluatedAction,
+                    applicability_proof::ScopeRulePremise::Fact(admitted_scope_fact),
+                ],
+                conclusion: required_applicability_fact,
+            },
+            applicability_proof::ScopeInferenceRule {
+                premises: vec![applicability_proof::ScopeRulePremise::Fact(
+                    required_applicability_fact,
+                )],
+                conclusion: required_validity_fact,
+            },
+        ],
+        required_applicability_fact,
+        required_validity_fact,
+    })
+    .map_err(|_| "action_bound_scope_refused")?;
+    if !scope.conditional_applicability_proved()
+        || !scope.conditional_validity_proved()
+        || !scope.action_dependency_proved()
+    {
+        return Err("action_bound_scope_unproved");
+    }
+    let scope_reachable_fact_count = u32::try_from(scope.reachable_fact_count())
+        .map_err(|_| "scope_reachable_fact_count_overflow")?;
+    let mut applicability_bytes = THEORY_PROFILE_APPLICABILITY_DOMAIN.to_vec();
+    append_scope_binding_field(&mut applicability_bytes, 1, &action_binding.0);
+    append_scope_binding_field(&mut applicability_bytes, 2, &scope.producer_result_sha256());
+    append_scope_binding_field(&mut applicability_bytes, 3, &scope.watchdog_result_sha256());
+    append_scope_binding_field(
+        &mut applicability_bytes,
+        4,
+        &request.required_applicability_fact,
+    );
+    let applicability_receipt_sha256 = sha256(&applicability_bytes);
+    let mut validity_bytes = THEORY_PROFILE_VALIDITY_DOMAIN.to_vec();
+    append_scope_binding_field(&mut validity_bytes, 1, &applicability_receipt_sha256);
+    append_scope_binding_field(&mut validity_bytes, 2, &scope.producer_result_sha256());
+    append_scope_binding_field(&mut validity_bytes, 3, &scope.watchdog_result_sha256());
+    append_scope_binding_field(&mut validity_bytes, 4, &request.required_validity_fact);
+    let validity_receipt_sha256 = sha256(&validity_bytes);
+
+    Ok(TheoryProfileSymmetryEvidence {
+        basis_element_count,
+        basis_excluded_count,
+        basis_invariant_count,
+        excluded_operator_count,
+        invariant_operator_count,
+        scope_reachable_fact_count,
+        basis_producer_result_sha256: complete.basis.producer_result_sha256(),
+        basis_watchdog_result_sha256: complete.basis.watchdog_result_sha256(),
+        exclusion_producer_result_sha256: excluded.producer_result_sha256,
+        exclusion_watchdog_result_sha256: excluded.watchdog_result_sha256,
+        scope_producer_result_sha256: scope.producer_result_sha256(),
+        scope_watchdog_result_sha256: scope.watchdog_result_sha256(),
+        action_binding_sha256: action_binding.0,
+        applicability_receipt_sha256,
+        validity_receipt_sha256,
+    })
 }
 
 fn repository_symmetry_operator_exclusion(

@@ -2,8 +2,10 @@
 
 Status: planning-only no-move map, baseline inspected 2026-07-22 at PR #215
 head `2ae61a3d920aafca74ba6154e14fc83ebb302187`. The same integration slice adds
-observer-only scene children after this baseline; the map still moves no
-candidate physics source.
+observer-only scene children after this baseline. A 2026-07-27 implementation
+overlay now adds one claim-local primitive-profile child and one registered
+protocol child without moving candidate physics source. The decomposition
+rules remain unchanged.
 
 This record maps active canonical and candidate files to coherent future child
 modules. It moves no source, test, formula, constant, schema, receipt, or public
@@ -16,6 +18,12 @@ The current canonical run still enters Stage 1 and refuses on
 `stellar_birth.realization_measure`. Biology, civilization, dawn, and the
 causal legacy viewer remain parked. They appear here only where a shared-source
 compatibility constraint can break a pure move.
+
+The refusal now carries one locally closed primitive null-excitation member,
+not an empty physical registry. That member comes from an independent
+claim-local profile pair with one Residue `[A]` premise and 28 Residue `[D]`
+consequences. Global vocabulary coverage, charged matter, conditioned support,
+and both Stage 1 proof leaves remain absent.
 
 ## Rules for every future split
 
@@ -351,10 +359,10 @@ crosses one of their present boundaries.
 | `stellar_birth_artifacts.rs` | Sealed proof-capability carriers and repository resolver. | Compile-time seal plus measure tests. | Keep private; production resolver remains empty until verified artifacts exist. |
 | `stellar_birth_structure/` | Value-free open registry and stellar-state schemas with private validation and read-only views. | 12 focused tests across facade and wire, including mutation and unfamiliar-state checks. | Preserve child boundaries and schema id `civsim.planet.stellar-birth-structure.v2`. A schema rule is not a realized member or physical value. |
 | `stellar_birth_species.rs` | Exact complete-support verification and mean-particle-mass reduction over sealed candidates. | 6 unit tests, including permutation and unfamiliar-state behavior. | Keep the reducer cohesive. Production returns no support and no packet path may construct its seals. |
-| `stellar_birth_species/law_premise/` | Exact claim-scoped premise selection, one active derived `eps_0` relation, and a paired bounded derive-first route over opaque admitted premise and rule capabilities. | Thirty-two focused tests cover the live derived relation, exact role and content selection, target-scoped minimal grounded ancestry, cyclic non-minting, independent search completeness, exact work preflight, both typed irreducible branches, unrelated reachable and unreachable alien extension, malformed and bounded refusal, and cross-algorithm agreement. | Keep selection, derived-relation authority, and generic admission routing in their child boundaries. The generic route has no production target, rule, coverage, protocol, or premise-capability minter. A failed search stays open and a structurally complete test protocol grants no authority. |
-| `stellar_birth_species/authority_analysis/` | Permanently non-admitting analysis bound to the floor, live premise pair, paired derive-first blocker, physical-root pair, identity-keyed admission census, exact physical-vocabulary partition, and first executable refusal. | Focused unit tests plus typed read-only views, canonical CLI coverage, and viewer projection tests cover the grounded route, live missing-role blocker, both physical scientific-refusal codes, and heterogeneous root metadata. | Keep separate from the future admitting authority. Analysis success, route agreement, root-pair agreement, or current-input vocabulary coverage cannot mint a premise, support, or global frontier-completeness claim. |
-| `stellar_birth_species/physical_registry/` | Conditional admitted-artifact proof graph, independent sealed-floor root projection, bounded three-way physical-vocabulary classification, exact mass and dimension validation, and complete species closure. | Root-pair and focused physical-registry tests cover independent floor extraction, exact rational vectors, source order and identity binding, resource and canary reconnection, unfamiliar and massless graphs, proof-bearing exact-zero shape, derived and irreducible routes, exact identity-keyed tier and provenance census, closure defects, exact arithmetic, depth, resource caps, and non-authority reachability. The rejected primitive profile is test-only, retains raw candidates without a registry capability, and is labeled `assertion_only_not_admitted`. | Keep root projection, vocabulary classification, registry closure, conditioned support, and the reducer in their existing child boundaries. The repository currently returns `no_admitted_species_derivation_rules`; a future incomplete global vocabulary returns its own typed scientific refusal, while integrity failures remain hard errors. Neither result has authority effect. A symmetry label and receipt hashes cannot substitute for an executable operator-exclusion authority. |
-| `stellar_birth_species/symmetry_operator_exclusion/` | Conditional exact affine-action evaluation, complete finite homogeneous commutative quadratic basis construction, and action-bound positive applicability closure. | Thirty focused tests cover two independent algorithms for each seam, exact action substitution, action-removal counterfactuals, permutation neutrality, unfamiliar extension, malformed agreement, checked arithmetic, whole-request resource preflight, and production refusal. | Keep algebra, basis construction, and applicability closure in separate child modules. Supplied field, action, fact, and rule inputs remain non-admitted. Positive reachability is not physical premise meaning, the quadratic family is not globally exhaustive, and production must keep both typed refusals until separate authority closes. |
+| `stellar_birth_species/law_premise/` | Exact claim-scoped premise selection, one active derived `eps_0` relation, a paired bounded generic derive-first route, and a claim-local registered-catalog protocol pair for the primitive profile. | Focused tests cover the live derived relation, exact role and content selection, target-scoped minimal grounded ancestry, cyclic non-minting, independent search completeness, exact work preflight, both typed irreducible branches, unrelated alien extension, occupied-slot collision, target-scoped catalog injection, malformed and bounded refusal, and cross-algorithm agreement. | Keep selection, derived-relation authority, generic routing, and claim-local protocol scanning in separate child boundaries. The generic route cannot close an arbitrary target or rule universe. Every unfamiliar profile needs a new catalog, coverage, protocol, slot, owner boundary, and authority pair. |
+| `stellar_birth_species/authority_analysis/` | Permanently non-admitting analysis v8 under watchdog v9, bound to the floor, live premise pair, primitive-profile authority receipt, physical-root pair, exact admission censuses, the 33-artifact vocabulary partition, one local member, and five open obligations. | Focused unit tests plus typed read-only views, canonical CLI coverage, and viewer projection tests cover profile identities, protocol statuses, symmetry counts, 1 `[A]` plus 28 `[D]` admissions, one local member, zero verified support, and false global coverage. | Keep separate from admitting authorities. Analysis success, profile agreement, route agreement, root-pair agreement, or current-input vocabulary coverage cannot mint support or a global frontier-completeness claim. |
+| `stellar_birth_species/physical_registry/` | Conditional admitted-artifact proof graph, independent sealed-floor root projection, claim-local primitive-profile pair, bounded three-way physical-vocabulary classification, exact mass and dimension validation, and local species closure. | Root-pair, primitive-profile, and physical-registry tests cover independent floor extraction, exact rational vectors, source order and identity binding, protocol and symmetry receipts, all 29 profile artifact mutations, unfamiliar and massless graphs, exact-zero shape, derived and irreducible routes, tier and provenance censuses, closure defects, exact arithmetic, depth, resource caps, and authority escalation refusal. | Keep root projection, primitive-profile admission, vocabulary classification, registry closure, conditioned support, and the reducer in their child boundaries. The repository closes exactly one local member with `authority_effect=none`; global vocabulary, charged matter, complete membership, and support remain open. Integrity failures remain hard errors. |
+| `stellar_birth_species/symmetry_operator_exclusion/` | Conditional exact affine-action evaluation, complete finite homogeneous commutative quadratic basis construction, and action-bound positive applicability closure. One exact local profile consumes their paired receipts. | Focused tests cover two independent algorithms for each seam, exact action substitution, action-removal counterfactuals, permutation neutrality, unfamiliar extension, malformed agreement, checked arithmetic, whole-request resource preflight, and production refusal outside the enrolled profile. | Keep algebra, basis construction, applicability closure, and profile admission in separate child modules. The local profile does not prove the quadratic family globally exhaustive. Unfamiliar noncommutative, derivative, tensor, higher-order, uncertain, or time-dependent theories require typed extension or refusal. |
 | `stellar_birth_species/support_packet/` | Bounded canonical species descriptors and conditioned-support packet validation by independent structural algorithms. | Focused synthetic unfamiliar, massless, mutation, coverage, canonical-order, and resource-refusal tests. | Keep separate from the reducer and physical authority. Packet agreement binds bytes only and cannot prove membership, mass ancestry, support, or closure. |
 | `requirement_analysis.rs` | Read-only projections over non-admitting census and species analysis. | Exercised by measure, receipt, and CLI tests. | Keep construction private. New viewer needs should add narrow getters rather than expose payload constructors. |
 
@@ -386,8 +394,8 @@ unit suite.
 ### Open authority blockers
 
 - The joint physical measure and realization-coordinate law remain absent.
-- The realized species registry contains zero members and verified support is
-  absent; the dormant reducer cannot supply a value.
+- The realized species registry contains one claim-local member and zero
+  verified support members; the dormant reducer cannot supply a value.
 - The four live physical roots are coordinate capabilities only. Each future
   species-forming rule remains blocked until downstream validators independently
   revalidate species attribution, complete closure, and membership scope. The
@@ -395,15 +403,14 @@ unit suite.
   the sealed floor, then exact-matches the root receipt, private candidate
   manifest, artifact identity, paired result, and canonical bytes. A stale
   receipt cannot authorize a scope substitution.
-- The paired premise route has no admitted semantic target role or constraint
-  law. Production replays one existing derived capability, then stops before
-  selecting a target. A failed search cannot become irreducible until a
-  separate capability proves complete target-bound rule-universe coverage.
-- The next primitive-member attempt requires an executable symmetry action,
-  candidate mass operator, applicability-domain check, and two independent
-  exclusion evaluations. Its irreducible seam must also carry executable
-  derive-first, Buckingham-Pi, Gap plus Chaos, residual-minimality, and
-  unique-slot evidence.
+- The paired generic premise route cannot close an arbitrary semantic target
+  role or constraint-law universe. One exact local profile supplies its own
+  target, registered catalog, protocol pair, constraint law, residual slot,
+  and owner boundary. Every unfamiliar target starts open.
+- The next primitive-member attempt is a charged-matter profile. It requires
+  its own executable derivation or irreducible admission, mass relation,
+  charge, spin, statistics, currents, stability, transitions, validity,
+  canaries, and independent outer pair.
 - Dimensional reachability and structure schemas are discovery and validation
   artifacts with `closure_effect=none`. They do not prove a physical law.
 - Named classes such as Population III, magnetar, Terran, or thaumic remain

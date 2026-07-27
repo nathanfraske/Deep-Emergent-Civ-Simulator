@@ -3,11 +3,13 @@
 Status: executable leaf-closure evaluator, replayable floor, partial exact
 dimensional census, modular value-free structure schema, open stellar-state
 and classification contracts, a private exact species-state reducer, a sealed
-non-admitting species derivation analysis, and a bounded structural species
-descriptor and conditioned-support packet pair, plus a conditional physical
-species proof-graph pair
-implemented; both physical obligations remain unresolved and the canonical
-runner reports their exact frontier before refusing.
+non-admitting species derivation analysis, a bounded structural species
+descriptor and conditioned-support packet pair, a conditional physical
+species proof-graph pair, and one claim-local primitive null-excitation
+profile implemented. The local profile closes one registry member while
+global species coverage, conditioned support, and both Stage 1 proof leaves
+remain unresolved. The canonical runner reports that partial closure and its
+exact frontier before refusing.
 
 ## Authority
 
@@ -81,6 +83,38 @@ scoped to that relation. It admits no electromagnetic field, operator, sector,
 species, support value, global vocabulary, uncertainty closure, or snapshot.
 This proves one upward derivation and capability-mint route, not a
 species-forming law.
+
+One additional claim-local authority now admits the exact source-free,
+linearized, unbroken compact rank-one abelian profile. This premise does not
+follow from the three measured floor values or from the SI coordinate system.
+Two registered-catalog implementations instead confirm that no admitted
+profile-target seed or derivation rule exists, classify Buckingham Pi as
+semantically inapplicable to the categorical request, execute Gap Law,
+classify the Chaos Protocol as nondynamical, execute Residual Law, confirm one
+collision-free residual slot, and bind the owner-reviewed admission record.
+This is the only route used after derive-first closure fails.
+
+Independent outer producer and watchdog implementations then reconstruct one
+Residue `[A]` irreducible profile claim and 28 Residue `[D]` consequences. They
+bind a complete ten-element homogeneous commutative quadratic basis over four
+opaque field components, exact affine-action evaluation, exclusion of one
+rest-mass operator, and action-dependent applicability and validity receipts.
+The physical registry therefore closes exactly one local member with:
+
+- exact zero rest mass within the admitted validity domain;
+- a minus-one and plus-one helicity pair;
+- integer-spin Bose statistics;
+- zero charge under its own unbroken abelian symmetry;
+- conserved-current coupling;
+- stability and no lower-profile transition within the same scoped domain.
+
+The identity is structural and generic. It is photon-like, but no familiar
+particle name participates in admission or dispatch. The result does not
+admit charged matter, a complete field or operator ontology, global species
+coverage, state-conditioned support, a periodic table, a star, a planet, or a
+snapshot. The current physical-vocabulary receipt covers 33 admitted
+artifacts, with 26 descriptor roles, 33 relation targets, and one constraint
+law, while global coverage and global membership authority remain false.
 
 ## Joint physical measure
 
@@ -211,72 +245,53 @@ fractions to sum exactly to one. It never normalizes an incomplete support and
 has no branch for a familiar species, stellar population, chemistry table, or
 molecular convention.
 
-This does not derive a species or a species mass. The opaque state proof and
-registry authority in this slice are structural seals with no production
-constructors, bound payloads, or semantic checkers. The repository resolver
-returns `None`, so no production path can call the reducer. The joint-measure
-refusal includes
-`civsim.planet.stellar-birth-species-derivation-analysis.v7`, checked by
-`civsim.planet.stellar-birth-species-derivation-watchdog.v8`. Its private
-authority is constructible only from the audited floor, the independently
-sealed floor digest, the validated structure schemas, and the live physical
-root pair. The analysis also binds the adjacent claim-scoped premise's
-producer and watchdog identities, result digests, separate canary transcript
-identities, canary counts and digests,
-claim, role, content, upstream, applicability, validity, ancestry, pair, and
-capability evidence. It retains the exact `m_e` compatibility anchor with
-`membership_authority=false`, then records the paired root claim and receipt,
-three scalar coordinates, one membership-neutral pure-mass expression, zero
-candidate members, zero verified support members, no species-support value
-payload, and no residual-slot claim. Its only attempt is the first executable
-refusal reached by the live physical registry.
+This does not derive a complete species state or mean species mass. The
+repository resolver still returns `None`, so no production path can call the
+conditioned-support reducer. The joint-measure refusal now includes
+`civsim.planet.stellar-birth-species-derivation-analysis.v8`, checked by
+`civsim.planet.stellar-birth-species-derivation-watchdog.v9`. The analysis
+binds the audited floor, sealed floor digest, structure schemas, live physical
+root pair, derived `eps_0` premise, primitive-profile authority receipt,
+registered-catalog protocol results, symmetry and scope evidence, profile
+admission census, physical-vocabulary receipt, local registry result, and open
+obligations.
 
-The same analysis now carries a paired bounded premise-admission route. Its
-synchronous producer and dependency-indexed watchdog independently compute
-minimal grounded derivation levels and exact ancestry. A cyclic rule has no
-grounding and cannot create a premise or displace the canonical grounded
-witness. Each checker independently extracts the target reverse-dependency
-cone, so an unrelated alien seed or rule island cannot change the target
-report. Production replays the admitted `eps_0` capability as one seed, then
-stops at `no_admitted_semantic_target_role` against the current `0 / 4 / 0`
-partition. The route records
-`derivation_frontier_complete=false`,
-`irreducible_protocol_started=false`,
-`premise_admission_authority=false`, and `authority_effect=none`.
+It records three scalar coordinates, one membership-neutral pure-mass
+expression, one local candidate member, zero verified support members, no
+species-support value payload, and one claim-local residual slot. The exact
+profile census contains one Residue `[A]` irreducible claim and 28 Residue
+`[D]` descendants.
 
-A failed search remains an open frontier. It cannot become an irreducible
-claim until a separate capability binds complete target-scoped coverage of the
-admitted rule universe. The typed protocol then requires distinct Buckingham
-Pi, Gap Law with Chaos Protocol, Residual Law, unique residual-slot, and owner
-admission bindings. No production constructor for the semantic target, rules,
-coverage, protocol, or resulting premise exists in this slice.
+The generic paired premise route remains open to unfamiliar targets. Its
+synchronous producer and dependency-indexed watchdog compute minimal grounded
+levels, prevent cycles from minting a premise, and independently scope the
+catalog to the requested target. A failed generic search remains open until a
+separate capability proves the target-bound rule universe complete.
 
-Before that refusal, two bounded classifiers independently partition the exact
-admitted input into physical descriptor roles, relation targets, and constraint
-laws. The current partition is `0 / 4 / 0`: all four floor-derived roots are
-relation targets, while no descriptor role or constraint law is admitted.
-`current_input_partition_complete=true` describes only those four inputs;
-`global_physical_vocabulary_coverage=false` and
-`membership_authority=false` remain explicit. The frontier also serializes one
-identity-keyed row per root with its ledger tier, provenance tag, and admission
-route, so a future lawful irreducible or unfamiliar root cannot be collapsed
-into a hard-coded Universal `[D]` aggregate. The live frontier accepts either
-`no_admitted_species_derivation_rules` or
-`physical_vocabulary_coverage_incomplete` as a scientific refusal and rejects
-integrity failures.
+For the one enrolled primitive profile, a separate registered-catalog protocol
+pair runs the complete post-search route. Both implementations confirm no
+registered target seed or rule, Buckingham-Pi semantic inapplicability,
+nondynamical Chaos disposition, Gap and Residual execution, and one unique
+residual slot before owner admission. This local route cannot close any later
+target or global ontology.
 
-The open proofs are copied from the live refusal and checked against a fresh
-registry result. Unreached support and mean-mass paths are omitted rather than
-populated from authored proof guesses. The bitstream
-states `frontier.scope=first_executable_refusal_only` and
-`frontier.completeness_claim=false`. The checker proves faithful propagation
-of the live refusal. It does not prove that the registry's diagnostic
-vocabulary is complete. Dimension-only reachability is not physical closure,
-so Gap Law, Chaos Protocol, Residual Law, and the unique residual slot remain
-not reached or not claimed. This analysis has `closure_effect=none` and
-`coverage_claim=false`. The observer-only viewer
-projects the same source, scope, and completeness fields without a return edge
-to the run.
+Two bounded vocabulary classifiers independently partition the exact 33
+admitted artifacts into 26 physical descriptor roles, 33 relation targets, and
+one constraint law. `current_input_partition_complete=true` describes only
+those inputs; `global_physical_vocabulary_coverage=false` and
+`membership_authority=false` remain explicit. The frontier serializes each
+artifact with its exact identity, tier, provenance tag, and admission route.
+The local physical registry closes one member with `registry_refusal_code=none`
+while `registry_coverage_claim=false` and `authority_effect=none`.
+
+The open proofs are copied from the live five-obligation frontier and checked
+against a fresh registry result. Unreached support and mean-mass paths remain
+absent rather than populated from authored guesses. The bitstream states
+`frontier.scope=one_local_member_then_open_global_obligations` and
+`frontier.completeness_claim=false`. The analysis has `closure_effect=none`
+and `coverage_claim=false`. The observer-only viewer projects the same source,
+profile, member, protocol, census, scope, and completeness fields without a
+return edge to the run.
 
 The byte-neutral structural packet is private and landed. It separates a
 complete descriptor packet from conditioned support, uses content-derived
@@ -317,15 +332,18 @@ producer and watchdog exclusion receipts. Those fields prevent a marker-only
 zero from passing the graph validators. They do not prove the physical
 exclusion claim by themselves.
 
-A proposed unbroken-abelian primitive profile failed its hostile audit. Both
+The first proposed unbroken-abelian primitive profile failed its hostile audit. Both
 paths reconstructed one shared authored ontology; the derive-first,
 Buckingham-Pi, Gap, Chaos, and Residual records hashed conclusions rather than
 executing their evidence; and the exact-zero records did not evaluate a
-symmetry action against the candidate mass operator. The proposal is retained
-only under the test configuration as raw candidate artifacts with
-`assertion_only_not_admitted` status. It defines no registry capability or
-`AdmittedArtifact` conversion. Production still supplies four coordinate
-roots, no species-forming law, and zero members.
+symmetry action against the candidate mass operator. That implementation
+remains rejected historical audit data.
+
+The replacement production profile shares none of those assertion receipts.
+It executes the independent registered-catalog protocol, complete basis,
+affine-action, action-dependent scope, outer reconstruction, and mutation
+paths described above. Its private capability can construct exactly the 29
+profile artifacts bound by the pair receipt.
 
 The repository supplies four admitted coordinate roots. Two independent
 paths extract the exact sealed floor leaves, canonicalize source arrival order
@@ -337,9 +355,9 @@ watchdog, success receipt, and refusal receipt are v5; root ancestry
 is v2, and coordinate content is v3. The root-pair v5 success receipt binds the
 claim, canonicalized semantic input, separate producer and watchdog result
 digests, separate resource-contract digests, runtime canary digest, neutral
-decision, and receipt digest. The physical registry therefore reaches the more
-precise refusal `no_admitted_species_derivation_rules`, with zero members, no
-coverage claim, and no authority effect.
+decision, and receipt digest. The physical registry combines those four roots
+with the 29 profile artifacts and closes one local member. It retains no global
+coverage claim and no global authority effect.
 
 ### Verified repair note, 2026-07-25
 
@@ -382,28 +400,32 @@ suite is v6, and the producer and watchdog implementations are v6. The active
 authority profile hash is
 `c7239a2f62f67bb35a63823cbfa04e3b235d1f88837dd4716cbcd1e0a88a696c`.
 This repair proves faithful floor projection and downstream root verification,
-not floor scientific sufficiency. Every species-forming field, operator, state,
-sector, validity, constraint, excitation, bound-state, mass-uncertainty, and
-massless-law root remains open. The live result remains zero members, no
-coverage claim, and no authority effect.
+not floor scientific sufficiency. The later primitive-profile authority adds
+one local field, operator, state, sector, validity, constraint, excitation,
+and massless-law chain. Every unfamiliar or global extension, charged-matter
+profile, bound-state sector, mass-uncertainty path, and conditioned-support
+proof remains open. The live result is one local member, no global coverage
+claim, and no global authority effect.
 
-The next bounded physical sub-rung is the rest of
-`P-STELLAR-SPECIES-DERIVATION-ROOTS`: derive or fully admit the field,
-operator, state, sector, validity, constraint-law, excitation, bound-state,
-species mass-uncertainty, or massless-law artifacts consumed by the pair.
-The live `eps_0` premise is a template for that claim-scoped route, not one of
-those missing ontology or membership proofs.
+The next bounded physical sub-rung is a charged-matter profile. It must derive
+or fully admit an opposite-charge mobile excitation with its mass relation,
+spin, statistics, currents, stability, transitions, validity, and complete
+ancestry. The live `eps_0` premise and local null excitation are admitted
+inputs only where their exact capabilities apply. Neither can select the new
+ontology or outcome.
 Production artifacts now carry a private opaque
 `VerifiedAdmissionCapability` rather than accepting receipt-shaped fields as
-authority. The repository-root pair is the only production minter. The
-capability binds artifact identity, exact root admission, and pair-receipt
-digest, and both downstream validators independently reject any drift. A
-future non-root rule must supply its own independent authority pair, admitted
+authority. The repository-root pair and the narrow primitive-profile pair are
+the only production minters. Each capability binds artifact identity, exact
+admission, and pair-receipt digest, and both downstream validators
+independently reject any drift. A future non-root rule must supply its own
+independent authority pair, admitted
 physical law, exact proof ancestry, and matching capability mint. The current
-floor cannot populate an electron member: `m_e` is a mass coordinate, not
-proof of a degree of freedom, state, interaction sector, stable excitation, or
-complete registry. A cited mass table, familiar species enum, named stellar
-class, or empty registry cannot bypass that refusal.
+floor and local profile cannot populate an electron-like member: `m_e` is a
+mass coordinate, not proof of a degree of freedom, state, charge, interaction
+sector, stable excitation, or complete registry. A cited mass table, familiar
+species enum, named stellar class, or singleton registry cannot bypass that
+refusal.
 
 A future smart authority must bind content identity, exact mass and
 dimension ancestry, charge and physical state, active sectors and couplings,
@@ -449,18 +471,12 @@ three physical floor values, derives `eps_0`, enters Stage 1, and returns
 `stellar_birth.realization_measure`. It emits six transcript events: three
 floor records, one derived-value record, one Stage 1 entry, and one refusal.
 It emits no `[X]`, no `[W]` realization, and no snapshot. Two direct runs after
-the grounded derive-first route and analysis v7 integration are byte-identical
-at `398,946` stdout bytes and SHA-256
-`0706ce497538c2d5e71c1ecd810b5ccfc456228ce789b54e313dbc7dde096b4a`,
-with exit `2` and empty stderr. A direct `--readiness` run has the same exit,
-stdout, stderr, and digest. It is an observer alias for the canonical front
-door, not a separate readiness result or evidence source. The changed bytes
-bind authority evidence, not a changed physical outcome. The current receipt
+the primitive-profile and analysis v8 integration are byte-identical at
+`466,254` stdout bytes and SHA-256
+`13666b6e4349d6901fede48d06859ae4ca152335239830d50cc17142b6ca11e1`,
+with exit `2` and empty stderr. The changed bytes bind one local member and its
+authority evidence while preserving the Stage 1 refusal. The current receipt
 is `civsim.planet.run.v13`; its transcript schema major is `10`.
-
-The complete PR route passes in 1,518.1 seconds. It covers every declared gate,
-all canonical all-target tests, deterministic integer and CPU/GPU parity
-checks, warnings-denied Clippy, private-item documentation, and doctests.
 
 The three-node graph now executes as a fixed-order conjunction over two opaque
 repository-owned proof capabilities. The production resolver currently

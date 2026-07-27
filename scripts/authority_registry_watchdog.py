@@ -97,28 +97,35 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "authority",
         "scientific",
         "blocked",
-        "ba4b6ac315f89552c89b6f7ad183be3ea236117db5f1f99f589236d2bbe1537f",
+        "ad77326e8ac1004ad8c086f6d6b3eaaa7f39c618e5ef9a8375765498e817b505",
     ),
     (
         "planet.physical-vocabulary-partition",
         "diagnostic",
         None,
         "diagnostic",
-        "fcd35a3c4997fde2be067a86172894a7b1f1d983afd21abddf1b130feac33f0d",
+        "3355af11fec7870fdc7f2a6ee5760682f62f236ce8c7d4c7bbbd668fc48ade40",
+    ),
+    (
+        "planet.primitive-profile-admission",
+        "authority",
+        "scientific",
+        "active",
+        "aeefd698a2a29dd2ffcc82d17302b77c331d027cd81734803c7c4c01813e7981",
     ),
     (
         "planet.species-derivation-frontier",
         "diagnostic",
         None,
         "diagnostic",
-        "3958d367d97fe51eaf05faaff8d939c6515064d379684d6e92b255f390f59c36",
+        "d3877bc6991786b97cc3f2bfd38cd16443d69e3980e1005a400cdcdf3670650f",
     ),
     (
         "planet.species-state-support",
         "authority",
         "scientific",
         "blocked",
-        "3ff574bcd1a9e19f95bfaafb3fcd472422531d4a2ac2dcc7655943c93a9d34f0",
+        "7264ff58ee5ef96f3d4275fe8dfda949e40b1f6316b498e88c5c1d0e225f3519",
     ),
     (
         "planet.stage1-dimensional-census",
@@ -146,7 +153,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "authority",
         "scientific",
         "blocked",
-        "e5dc84106b148569a835b616ec8dc15595ecd5c6321e282234ce3895eb750116",
+        "31359d3cda1a4d74b0519dd7d589c843b60949719f311e2d95e0443519e10747",
     ),
     (
         "planet.symmetry-scope-applicability",
@@ -184,7 +191,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "3bfb94aa0c3f507ad8ba9762e91ca9009284becc9d9752d7b7b896cb9a26ca7d",
     ),
 )
-EXPECTED_COUNTS = (10, 11, 2, 23)
+EXPECTED_COUNTS = (11, 11, 2, 24)
 
 META_EXPECTATIONS = (
     ("producer_path", "scripts/authority_watchdog_gate.py"),

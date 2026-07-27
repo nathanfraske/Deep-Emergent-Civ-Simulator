@@ -214,6 +214,17 @@ fn inspect_admission(artifact: &AdmittedArtifact) -> Result<(), VocabularyRefusa
                 _ => return Err(VocabularyRefusalCode::AdmissionCapabilityMismatch),
             }
         }
+        AdmissionCapabilityKind::PrimitiveProfile => {
+            if artifact
+                .primitive_profile_pair_receipt_sha256()
+                .is_none_or(|digest| digest.iter().all(|byte| *byte == 0))
+                || artifact
+                    .primitive_profile_root_identity()
+                    .is_none_or(|identity| identity.0.iter().all(|byte| *byte == 0))
+            {
+                return Err(VocabularyRefusalCode::AdmissionCapabilityMismatch);
+            }
+        }
         #[cfg(test)]
         AdmissionCapabilityKind::ExactTest => {}
     }

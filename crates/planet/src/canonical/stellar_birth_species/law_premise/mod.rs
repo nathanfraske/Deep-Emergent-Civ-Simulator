@@ -25,7 +25,9 @@ mod watchdog;
 mod tests;
 
 pub(super) use admission_route::{
-    repository_premise_admission_frontier, RepositoryPremiseAdmissionFrontier,
+    inspect_theory_profile_admission, repository_premise_admission_frontier,
+    RepositoryPremiseAdmissionFrontier, TheoryProfileAdmissionEvidence,
+    TheoryProfileAdmissionRequest,
 };
 pub(super) use derived_relation::{
     repository_derived_relation_premise_frontier, RepositoryDerivedRelationPremiseFrontier,

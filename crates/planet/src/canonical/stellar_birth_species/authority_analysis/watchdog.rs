@@ -1,4 +1,4 @@
-//! Consistency checker for the live species derivation refusal.
+//! Consistency checker for the live partial species derivation closure.
 //!
 //! This path re-queries the physical registry and checks faithful propagation.
 //! It does not certify completeness of the registry's diagnostic vocabulary.
@@ -20,10 +20,10 @@ const CHECKED_FLOOR_ANCHOR_ID: &str = "fundamental.m_e";
 const CHECKED_FLOOR_ANCHOR_SYMBOL: &str = "m_e";
 const CHECKED_FLOOR_ANCHOR_ROLE: &str = "mass_coordinate_anchor_only";
 const CHECKED_REDUCER_LAW_ID: &str = "candidate.composition_weighted_particle_mass";
-const CHECKED_FRONTIER_SOURCE_ID: &str = "repository_physical_registry_live_refusal";
-const CHECKED_FRONTIER_SCOPE_ID: &str = "first_executable_refusal_only";
+const CHECKED_FRONTIER_SOURCE_ID: &str = "repository_physical_registry_partial_closure";
+const CHECKED_FRONTIER_SCOPE_ID: &str = "one_local_member_then_open_global_obligations";
 const CHECKED_LIVE_ATTEMPT_ID: &str =
-    "stellar_birth.species_derivation.live_physical_registry_refusal";
+    "stellar_birth.species_derivation.partial_physical_registry_closure";
 
 pub(super) fn validate_analysis(
     analysis: &SpeciesDerivationAnalysis,
@@ -123,12 +123,11 @@ pub(super) fn validate_analysis(
             .premise_admission_frontier
             .current_constraint_law_count
             != expected_physical_frontier.vocabulary_constraint_law_count
-        || analysis.premise_admission_frontier.next_target_decision_id
-            != "no_admitted_semantic_target_role"
+        || analysis.premise_admission_frontier.next_target_decision_id != "next_target_not_bound"
         || analysis
             .premise_admission_frontier
             .derivation_frontier_complete
-        || analysis
+        || !analysis
             .premise_admission_frontier
             .irreducible_protocol_started
         || analysis
@@ -151,17 +150,16 @@ pub(super) fn validate_analysis(
         != usize::try_from(expected_physical_frontier.registry_member_count).map_err(|_| {
             AnalysisBuildError::InternalInvariant("member count overflow".to_owned())
         })?
-        || analysis.candidate_member_count != 0
+        || analysis.candidate_member_count != 1
         || analysis.verified_support_member_count != 0
         || analysis.species_support_value_payload_present
-        || analysis.residual_slot_claim
-        || analysis.derive_first_status != AnalysisProgress::OpenDependencies
-        || analysis.buckingham_pi_status
-            != AnalysisProgress::DimensionOnlyRelationNotPhysicalClosure
-        || analysis.gap_law_status != AnalysisProgress::NotReached
-        || analysis.chaos_protocol_status != AnalysisProgress::NotReached
-        || analysis.residual_law_status != AnalysisProgress::NotReached
-        || analysis.unique_residual_slot_status != AnalysisProgress::NotClaimed
+        || !analysis.residual_slot_claim
+        || analysis.derive_first_status != AnalysisProgress::ExecutedOpenFrontier
+        || analysis.buckingham_pi_status != AnalysisProgress::SemanticInapplicabilityPaired
+        || analysis.gap_law_status != AnalysisProgress::ExecutedAndBound
+        || analysis.chaos_protocol_status != AnalysisProgress::NondynamicalInapplicabilityPaired
+        || analysis.residual_law_status != AnalysisProgress::ExecutedAndBound
+        || analysis.unique_residual_slot_status != AnalysisProgress::CollisionCheckedUnique
     {
         return invariant("non-admitting derivation state changed");
     }
@@ -184,6 +182,7 @@ pub(super) fn validate_analysis(
         || attempt.input_ids.as_slice()
             != [
                 expected_physical_frontier.root_claim_id,
+                expected_physical_frontier.primitive_profile.claim_id,
                 expected_physical_frontier.vocabulary_claim_id.as_str(),
             ]
         || !matches_strings(

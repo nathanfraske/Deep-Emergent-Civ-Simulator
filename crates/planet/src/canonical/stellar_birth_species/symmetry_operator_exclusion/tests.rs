@@ -430,3 +430,74 @@ fn conditional_runner_binds_scope_proofs_to_the_exact_evaluated_action() {
     assert!(!report.species_membership_authority());
     assert_eq!(report.authority_effect(), "none");
 }
+
+#[test]
+fn theory_profile_evidence_executes_the_complete_basis_and_exact_mass_term() {
+    let fields = [
+        identity(10).0,
+        identity(11).0,
+        identity(12).0,
+        identity(13).0,
+    ];
+    let request = TheoryProfileSymmetryRequest {
+        claim_identity: identity(1).0,
+        subject_identity: identity(2).0,
+        applicability_domain_identity: identity(3).0,
+        symmetry_identity: identity(4).0,
+        field_components: fields.to_vec(),
+        shifts: fields
+            .into_iter()
+            .enumerate()
+            .map(|(index, field_component)| TheoryProfileShift {
+                field_component,
+                shift_generator: identity(
+                    u8::try_from(20 + index).expect("small fixture identity"),
+                )
+                .0,
+                coefficient: 1,
+            })
+            .collect(),
+        excluded_operator_identity: identity(40).0,
+        excluded_operator_terms: fields
+            .into_iter()
+            .enumerate()
+            .map(|(index, field)| TheoryProfileQuadraticTerm {
+                left_field: field,
+                right_field: field,
+                coefficient: if index == 0 { 1 } else { -1 },
+            })
+            .collect(),
+        admitted_scope_fact: identity(50).0,
+        required_applicability_fact: identity(51).0,
+        required_validity_fact: identity(52).0,
+    };
+    let evidence = inspect_theory_profile_symmetry(&request).unwrap();
+    assert_eq!(evidence.basis_element_count, 10);
+    assert_eq!(evidence.basis_excluded_count, 10);
+    assert_eq!(evidence.basis_invariant_count, 0);
+    assert_eq!(evidence.excluded_operator_count, 1);
+    assert_eq!(evidence.invariant_operator_count, 0);
+    assert_eq!(evidence.scope_reachable_fact_count, 3);
+    assert_ne!(evidence.action_binding_sha256, [0; 32]);
+    assert_ne!(evidence.applicability_receipt_sha256, [0; 32]);
+    assert_ne!(evidence.validity_receipt_sha256, [0; 32]);
+
+    let mut alien = request;
+    alien.claim_identity = identity(90).0;
+    alien.subject_identity = identity(91).0;
+    alien.applicability_domain_identity = identity(92).0;
+    alien.symmetry_identity = identity(93).0;
+    let alien_evidence = inspect_theory_profile_symmetry(&alien).unwrap();
+    assert_eq!(
+        (
+            alien_evidence.basis_element_count,
+            alien_evidence.basis_excluded_count,
+            alien_evidence.basis_invariant_count,
+        ),
+        (10, 10, 0)
+    );
+    assert_ne!(
+        alien_evidence.action_binding_sha256,
+        evidence.action_binding_sha256
+    );
+}

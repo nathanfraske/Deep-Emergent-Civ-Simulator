@@ -80,8 +80,9 @@ impl<'a> SpeciesAttemptScene<'a> {
 
 /// Read-only projection of the repository physical-registry frontier.
 ///
-/// These fields report the planet-owned authority receipt and exact downstream
-/// refusal. They cannot admit a root, create membership, or alter the run.
+/// These fields report the planet-owned authority receipts, one local member,
+/// and the exact open global frontier. They cannot admit a root, create
+/// membership, or alter the run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PhysicalRootAdmissionScene<'a> {
     identity_sha256: [u8; 32],
@@ -112,6 +113,121 @@ impl<'a> PhysicalRootAdmissionScene<'a> {
     }
 }
 
+/// Read-only projection of the one locally closed primitive profile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepositoryPrimitiveProfileScene<'a> {
+    identity: (
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+    ),
+    dynamical_identity: (
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+    ),
+    member_properties: (&'a str, &'a str, &'a str, &'a str, &'a str, &'a str),
+    counts: (u32, u32, u32),
+    admissions: Vec<PhysicalRootAdmissionScene<'a>>,
+    member_sha256: [u8; 32],
+    receipt_sha256: [u8; 32],
+    evidence_sha256: ([u8; 32], [u8; 32], [u8; 32], [u8; 32]),
+    repository_catalog_sha256: [u8; 32],
+    protocol_checker_result_sha256: ([u8; 32], [u8; 32]),
+    protocol_statuses: (&'a str, &'a str, &'a str, &'a str, &'a str, &'a str),
+}
+
+impl<'a> RepositoryPrimitiveProfileScene<'a> {
+    /// Receipt, claim, profile, theory, residual slot, and checker identities.
+    pub const fn identity(
+        &self,
+    ) -> (
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+    ) {
+        self.identity
+    }
+
+    /// Member, symmetry, field, operator, state, sector, validity, and excluded term.
+    pub const fn dynamical_identity(
+        &self,
+    ) -> (
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+    ) {
+        self.dynamical_identity
+    }
+
+    /// Helicity, statistics, charge, current, stability, and transition labels.
+    pub const fn member_properties(
+        &self,
+    ) -> (&'a str, &'a str, &'a str, &'a str, &'a str, &'a str) {
+        self.member_properties
+    }
+
+    /// Artifact count, complete quadratic basis count, and excluded operator count.
+    pub const fn counts(&self) -> (u32, u32, u32) {
+        self.counts
+    }
+
+    /// Identity-keyed tier, provenance, and route rows for profile artifacts.
+    pub fn admissions(&self) -> &[PhysicalRootAdmissionScene<'a>] {
+        &self.admissions
+    }
+
+    /// Identity of the one locally closed physical member.
+    pub const fn member_sha256(&self) -> [u8; 32] {
+        self.member_sha256
+    }
+
+    /// Digest of the paired profile projection receipt.
+    pub const fn receipt_sha256(&self) -> [u8; 32] {
+        self.receipt_sha256
+    }
+
+    /// Symmetry action, derivation catalog, coverage, and protocol digests.
+    pub const fn evidence_sha256(&self) -> ([u8; 32], [u8; 32], [u8; 32], [u8; 32]) {
+        self.evidence_sha256
+    }
+
+    /// Registered premise-catalog digest scanned before irreducible admission.
+    pub const fn repository_catalog_sha256(&self) -> [u8; 32] {
+        self.repository_catalog_sha256
+    }
+
+    /// Independent protocol producer and watchdog result digests.
+    pub const fn protocol_checker_result_sha256(&self) -> ([u8; 32], [u8; 32]) {
+        self.protocol_checker_result_sha256
+    }
+
+    /// Derive-first, Pi, Gap, Chaos, Residual, and residual-slot statuses.
+    pub const fn protocol_statuses(
+        &self,
+    ) -> (&'a str, &'a str, &'a str, &'a str, &'a str, &'a str) {
+        self.protocol_statuses
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepositoryPhysicalRegistryFrontierScene<'a> {
     registry_schema_id: &'a str,
@@ -133,8 +249,10 @@ pub struct RepositoryPhysicalRegistryFrontierScene<'a> {
     scalar_coordinate_count: u32,
     membership_neutral_mass_projection_count: u32,
     admitted_root_count: u32,
+    admitted_artifact_count: u32,
     root_admissions: Vec<PhysicalRootAdmissionScene<'a>>,
     membership_authority: bool,
+    primitive_profile: RepositoryPrimitiveProfileScene<'a>,
     vocabulary_receipt_schema_id: &'a str,
     vocabulary_claim_id: &'a str,
     vocabulary_producer_id: &'a str,
@@ -275,6 +393,16 @@ impl<'a> RepositoryPhysicalRegistryFrontierScene<'a> {
         self.admitted_root_count
     }
 
+    /// Total admitted artifacts across floor roots and the local profile.
+    pub const fn admitted_artifact_count(&self) -> u32 {
+        self.admitted_artifact_count
+    }
+
+    /// The one locally closed primitive profile and its evidence.
+    pub const fn primitive_profile(&self) -> &RepositoryPrimitiveProfileScene<'a> {
+        &self.primitive_profile
+    }
+
     /// Exact identity-keyed tier, provenance, and route census for admitted roots.
     pub fn root_admissions(&self) -> &[PhysicalRootAdmissionScene<'a>] {
         &self.root_admissions
@@ -305,7 +433,7 @@ impl<'a> RepositoryPhysicalRegistryFrontierScene<'a> {
         self.registry_authority_effect
     }
 
-    /// Ordered obligations that remain open beneath the registry refusal.
+    /// Ordered obligations that remain open beyond the local registry closure.
     pub fn open_obligations(&self) -> &[&'static str] {
         &self.open_obligations
     }
@@ -461,7 +589,7 @@ impl<'a> RepositoryPremiseAdmissionFrontierScene<'a> {
     }
 }
 
-/// Exact non-admitting species derivation analysis attached to Stage 1.
+/// Exact partial species derivation analysis attached to Stage 1.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpeciesDerivationScene<'a> {
     computed: bool,
@@ -891,6 +1019,8 @@ impl<'a> RefusalScene<'a> {
                                             })
                                         })();
                                         let physical_registry_frontier = (|| {
+                                            let primitive_semantics =
+                                                view.primitive_profile_semantics()?;
                                             Some(RepositoryPhysicalRegistryFrontierScene {
                                                 registry_schema_id: view
                                                     .physical_registry_schema_id()?,
@@ -933,6 +1063,8 @@ impl<'a> RefusalScene<'a> {
                                                     )?,
                                                 admitted_root_count: view
                                                     .physical_registry_admitted_root_count()?,
+                                                admitted_artifact_count: view
+                                                    .physical_registry_admitted_artifact_count()?,
                                                 root_admissions: view
                                                     .physical_registry_root_admissions()
                                                     .map(|admission| {
@@ -948,6 +1080,43 @@ impl<'a> RefusalScene<'a> {
                                                     .collect(),
                                                 membership_authority: view
                                                     .physical_registry_membership_authority()?,
+                                                primitive_profile:
+                                                    RepositoryPrimitiveProfileScene {
+                                                        identity: view
+                                                            .primitive_profile_identity()?,
+                                                        dynamical_identity: primitive_semantics
+                                                            .dynamical_identity(),
+                                                        member_properties: primitive_semantics
+                                                            .member_properties(),
+                                                        counts: view.primitive_profile_counts()?,
+                                                        admissions: view
+                                                            .primitive_profile_admissions()
+                                                            .map(|admission| {
+                                                                PhysicalRootAdmissionScene {
+                                                                    identity_sha256: admission
+                                                                        .identity_sha256(),
+                                                                    tier_id: admission.tier_id(),
+                                                                    provenance_tag: admission
+                                                                        .provenance_tag(),
+                                                                    route_id: admission.route_id(),
+                                                                }
+                                                            })
+                                                            .collect(),
+                                                        member_sha256: view
+                                                            .primitive_profile_member_sha256()?,
+                                                        receipt_sha256: view
+                                                            .primitive_profile_receipt_sha256()?,
+                                                        evidence_sha256: view
+                                                            .primitive_profile_evidence_sha256()?,
+                                                        repository_catalog_sha256: view
+                                                            .primitive_profile_repository_catalog_sha256(
+                                                            )?,
+                                                        protocol_checker_result_sha256: view
+                                                            .primitive_profile_protocol_checker_result_sha256(
+                                                            )?,
+                                                        protocol_statuses: view
+                                                            .primitive_profile_protocol_statuses()?,
+                                                    },
                                                 vocabulary_receipt_schema_id: view
                                                     .physical_vocabulary_receipt_schema_id()?,
                                                 vocabulary_claim_id: view
@@ -1159,14 +1328,14 @@ mod tests {
     }
 
     #[test]
-    fn premise_admission_frontier_exposes_the_next_blocker_without_a_control_edge() {
+    fn premise_admission_frontier_exposes_partial_protocol_progress_without_a_control_edge() {
         let frontier = RepositoryPremiseAdmissionFrontierScene {
             identity: ("route.v1", "producer.v1", "watchdog.v1"),
             checker_result_sha256: ([1; 32], [1; 32]),
             derived_identity_sha256: ([2; 32], [3; 32], [4; 32]),
-            counts: (1, 0, 4, 0),
-            decisions: ("derived", "no_admitted_semantic_target_role"),
-            scope: (false, false, false, false, "none"),
+            counts: (1, 26, 33, 1),
+            decisions: ("derived", "next_target_not_bound"),
+            scope: (false, true, false, false, "none"),
         };
 
         assert_ne!(frontier.identity().1, frontier.identity().2);
@@ -1175,12 +1344,9 @@ mod tests {
             frontier.derived_identity_digests(),
             ([2; 32], [3; 32], [4; 32])
         );
-        assert_eq!(frontier.counts(), (1, 0, 4, 0));
-        assert_eq!(
-            frontier.decisions(),
-            ("derived", "no_admitted_semantic_target_role")
-        );
-        assert_eq!(frontier.scope(), (false, false, false, false, "none"));
+        assert_eq!(frontier.counts(), (1, 26, 33, 1));
+        assert_eq!(frontier.decisions(), ("derived", "next_target_not_bound"));
+        assert_eq!(frontier.scope(), (false, true, false, false, "none"));
     }
 
     #[test]
@@ -1207,6 +1373,7 @@ mod tests {
             scalar_coordinate_count: 3,
             membership_neutral_mass_projection_count: 1,
             admitted_root_count: 4,
+            admitted_artifact_count: 33,
             root_admissions: (20_u8..24)
                 .map(|identity| PhysicalRootAdmissionScene {
                     identity_sha256: [identity; 32],
@@ -1216,32 +1383,88 @@ mod tests {
                 })
                 .collect(),
             membership_authority: false,
+            primitive_profile: RepositoryPrimitiveProfileScene {
+                identity: (
+                    "civsim.planet.primitive-excitation-profile-pair-receipt.v1",
+                    "planet.primitive-excitation.unbroken-abelian-null-mode",
+                    "primitive-profile.unbroken-abelian-null-excitation.v1",
+                    "compact-rank-one-unbroken-abelian-gauge-theory",
+                    "planet.primitive-excitation.theory-profile.unbroken-abelian.v1",
+                    "profile-producer",
+                    "profile-watchdog",
+                ),
+                dynamical_identity: (
+                    "primitive-null-abelian-gauge-excitation",
+                    "unbroken-compact-rank-one-abelian-gauge-symmetry",
+                    "abelian-gauge-connection-field",
+                    "source-free-gauge-wave-operator",
+                    "transverse-null-one-excitation-state",
+                    "unbroken-abelian-interaction-sector",
+                    "local-source-free-linearized-unbroken-sector",
+                    "gauge-noninvariant-rest-mass-term",
+                ),
+                member_properties: (
+                    "massless-helicity-pair-minus-one-plus-one",
+                    "integer-spin-bose-statistics",
+                    "zero-unbroken-abelian-self-charge",
+                    "conserved-unbroken-abelian-current-coupling",
+                    "stable-within-unbroken-source-free-validity-domain",
+                    "no-lower-profile-state-transition-within-validity-domain",
+                ),
+                counts: (29, 10, 1),
+                admissions: (100_u8..129)
+                    .map(|identity| PhysicalRootAdmissionScene {
+                        identity_sha256: [identity; 32],
+                        tier_id: "residue",
+                        provenance_tag: if identity == 100 { "[A]" } else { "[D]" },
+                        route_id: if identity == 100 {
+                            "irreducible"
+                        } else {
+                            "derived"
+                        },
+                    })
+                    .collect(),
+                member_sha256: [13; 32],
+                receipt_sha256: [14; 32],
+                evidence_sha256: ([15; 32], [16; 32], [17; 32], [18; 32]),
+                repository_catalog_sha256: [19; 32],
+                protocol_checker_result_sha256: ([20; 32], [20; 32]),
+                protocol_statuses: (
+                    "executed_open_frontier",
+                    "semantic_inapplicability_paired",
+                    "executed_and_bound",
+                    "nondynamical_inapplicability_paired",
+                    "executed_and_bound",
+                    "collision_checked_unique",
+                ),
+            },
             vocabulary_receipt_schema_id:
                 "civsim.planet.stellar-birth-physical-vocabulary-agreement.v1",
             vocabulary_claim_id: "civsim.planet.stellar-birth-physical-vocabulary.partition.v1",
             vocabulary_producer_id: "civsim.planet.stellar-birth-physical-vocabulary-producer.v1",
             vocabulary_watchdog_id: "civsim.planet.stellar-birth-physical-vocabulary-watchdog.v1",
-            vocabulary_descriptor_role_identities: Vec::new(),
-            vocabulary_relation_target_identities: vec![[6; 32], [7; 32], [8; 32], [9; 32]],
-            vocabulary_constraint_law_identities: Vec::new(),
-            vocabulary_counts: (4, 0, 4, 0),
+            vocabulary_descriptor_role_identities: (30_u8..56)
+                .map(|identity| [identity; 32])
+                .collect(),
+            vocabulary_relation_target_identities: (60_u8..93)
+                .map(|identity| [identity; 32])
+                .collect(),
+            vocabulary_constraint_law_identities: vec![[94; 32]],
+            vocabulary_counts: (33, 26, 33, 1),
             vocabulary_scope: (true, false, false),
             vocabulary_checker_result_sha256: ([10; 32], [10; 32]),
             vocabulary_checker_resource_sha256: ([11; 32], [11; 32]),
             vocabulary_receipt_sha256: [12; 32],
-            refusal_code: "no_admitted_species_derivation_rules",
-            registry_member_count: 0,
+            refusal_code: "none",
+            registry_member_count: 1,
             registry_coverage_claim: false,
             registry_authority_effect: "none",
             open_obligations: vec![
-                "admitted_field_content_law",
-                "admitted_operator_dynamics",
-                "admitted_interaction_sector_membership",
-                "admitted_state_coordinate_membership",
-                "admitted_validity_regime",
-                "stable_excitation_or_bound_state_derivation",
+                "complete_global_physical_vocabulary_coverage",
                 "complete_registry_closure_domain",
+                "conditioned_species_support",
                 "species_mass_uncertainty_transport",
+                "charged_matter_profile",
             ],
         };
 
@@ -1274,6 +1497,49 @@ mod tests {
         assert_eq!(frontier.scalar_coordinate_count(), 3);
         assert_eq!(frontier.membership_neutral_mass_projection_count(), 1);
         assert_eq!(frontier.admitted_root_count(), 4);
+        assert_eq!(frontier.admitted_artifact_count(), 33);
+        assert_eq!(frontier.primitive_profile().counts(), (29, 10, 1));
+        assert_eq!(frontier.primitive_profile().admissions().len(), 29);
+        assert_eq!(
+            frontier
+                .primitive_profile()
+                .admissions()
+                .iter()
+                .filter(|admission| admission.provenance_tag() == "[A]")
+                .count(),
+            1
+        );
+        assert_eq!(frontier.primitive_profile().member_sha256(), [13; 32]);
+        assert_eq!(frontier.primitive_profile().receipt_sha256(), [14; 32]);
+        assert_eq!(
+            frontier.primitive_profile().repository_catalog_sha256(),
+            [19; 32]
+        );
+        assert_eq!(
+            frontier
+                .primitive_profile()
+                .protocol_checker_result_sha256(),
+            ([20; 32], [20; 32])
+        );
+        assert_eq!(
+            frontier.primitive_profile().dynamical_identity().0,
+            "primitive-null-abelian-gauge-excitation"
+        );
+        assert_eq!(
+            frontier.primitive_profile().member_properties().0,
+            "massless-helicity-pair-minus-one-plus-one"
+        );
+        assert_eq!(
+            frontier.primitive_profile().protocol_statuses(),
+            (
+                "executed_open_frontier",
+                "semantic_inapplicability_paired",
+                "executed_and_bound",
+                "nondynamical_inapplicability_paired",
+                "executed_and_bound",
+                "collision_checked_unique",
+            )
+        );
         assert_eq!(frontier.root_admissions().len(), 4);
         assert!(frontier.root_admissions().iter().all(|admission| {
             admission.tier_id() == "universal"
@@ -1290,34 +1556,28 @@ mod tests {
                 "civsim.planet.stellar-birth-physical-vocabulary-watchdog.v1",
             )
         );
-        assert!(frontier.vocabulary_partitions().0.is_empty());
-        assert_eq!(frontier.vocabulary_partitions().1.len(), 4);
-        assert!(frontier.vocabulary_partitions().2.is_empty());
-        assert_eq!(frontier.vocabulary_counts(), (4, 0, 4, 0));
+        assert_eq!(frontier.vocabulary_partitions().0.len(), 26);
+        assert_eq!(frontier.vocabulary_partitions().1.len(), 33);
+        assert_eq!(frontier.vocabulary_partitions().2.len(), 1);
+        assert_eq!(frontier.vocabulary_counts(), (33, 26, 33, 1));
         assert_eq!(frontier.vocabulary_scope(), (true, false, false));
         assert_eq!(
             frontier.vocabulary_checker_digests(),
             (([10; 32], [10; 32]), ([11; 32], [11; 32]))
         );
         assert_eq!(frontier.vocabulary_receipt_sha256(), [12; 32]);
-        assert_eq!(
-            frontier.refusal_code(),
-            "no_admitted_species_derivation_rules"
-        );
-        assert_eq!(frontier.registry_member_count(), 0);
+        assert_eq!(frontier.refusal_code(), "none");
+        assert_eq!(frontier.registry_member_count(), 1);
         assert!(!frontier.registry_coverage_claim());
         assert_eq!(frontier.registry_authority_effect(), "none");
         assert_eq!(
             frontier.open_obligations(),
             [
-                "admitted_field_content_law",
-                "admitted_operator_dynamics",
-                "admitted_interaction_sector_membership",
-                "admitted_state_coordinate_membership",
-                "admitted_validity_regime",
-                "stable_excitation_or_bound_state_derivation",
+                "complete_global_physical_vocabulary_coverage",
                 "complete_registry_closure_domain",
+                "conditioned_species_support",
                 "species_mass_uncertainty_transport",
+                "charged_matter_profile",
             ]
         );
     }

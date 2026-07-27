@@ -1,9 +1,13 @@
-//! Public read-only views over the bounded live species derivation refusal.
+//! Public read-only views over the bounded live species derivation frontier.
 
 use super::{
     SpeciesDerivationAnalysis, SpeciesDerivationAnalysisArtifact, SpeciesDerivationAttempt,
 };
 use crate::canonical::stellar_birth_species::physical_registry::RepositoryRootAdmissionCensusRow;
+
+/// The action, derivation-catalog, coverage, and irreducible-protocol digests
+/// bound by the locally admitted primitive profile.
+pub type PrimitiveProfileEvidenceDigests = ([u8; 32], [u8; 32], [u8; 32], [u8; 32]);
 
 /// Read-only view of the authority analysis attached to the open joint measure.
 #[derive(Debug, Clone, Copy)]
@@ -21,6 +25,62 @@ pub struct SpeciesDerivationAttemptView<'a> {
 #[derive(Debug, Clone, Copy)]
 pub struct PhysicalRootAdmissionView<'a> {
     admission: &'a RepositoryRootAdmissionCensusRow,
+}
+
+/// Read-only semantic labels for the one locally admitted primitive profile.
+#[derive(Debug, Clone, Copy)]
+pub struct PrimitiveProfileSemanticsView<'a> {
+    member_id: &'a str,
+    symmetry_id: &'a str,
+    field_id: &'a str,
+    operator_id: &'a str,
+    state_id: &'a str,
+    sector_id: &'a str,
+    validity_id: &'a str,
+    excluded_term_id: &'a str,
+    helicity_id: &'a str,
+    statistics_id: &'a str,
+    charge_id: &'a str,
+    current_id: &'a str,
+    stability_id: &'a str,
+    transition_id: &'a str,
+}
+
+impl<'a> PrimitiveProfileSemanticsView<'a> {
+    pub const fn dynamical_identity(
+        self,
+    ) -> (
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+    ) {
+        (
+            self.member_id,
+            self.symmetry_id,
+            self.field_id,
+            self.operator_id,
+            self.state_id,
+            self.sector_id,
+            self.validity_id,
+            self.excluded_term_id,
+        )
+    }
+
+    pub const fn member_properties(self) -> (&'a str, &'a str, &'a str, &'a str, &'a str, &'a str) {
+        (
+            self.helicity_id,
+            self.statistics_id,
+            self.charge_id,
+            self.current_id,
+            self.stability_id,
+            self.transition_id,
+        )
+    }
 }
 
 impl<'a> SpeciesDerivationAnalysisView<'a> {
@@ -558,6 +618,138 @@ impl<'a> SpeciesDerivationAnalysisView<'a> {
             .map(|analysis| analysis.physical_registry_frontier.admitted_root_count)
     }
 
+    pub fn physical_registry_admitted_artifact_count(self) -> Option<u32> {
+        self.computed()
+            .map(|analysis| analysis.physical_registry_frontier.admitted_artifact_count)
+    }
+
+    pub fn primitive_profile_identity(
+        self,
+    ) -> Option<(
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+    )> {
+        self.computed().map(|analysis| {
+            let frontier = &analysis.physical_registry_frontier;
+            (
+                frontier.primitive_profile.receipt_schema_id,
+                frontier.primitive_profile.claim_id,
+                frontier.primitive_profile.profile_id,
+                frontier.primitive_profile.theory_class_id,
+                frontier.primitive_profile.residual_slot_id,
+                frontier.primitive_profile.producer_id,
+                frontier.primitive_profile.watchdog_id,
+            )
+        })
+    }
+
+    pub fn primitive_profile_counts(self) -> Option<(u32, u32, u32)> {
+        self.computed().map(|analysis| {
+            let frontier = &analysis.physical_registry_frontier;
+            (
+                frontier.primitive_profile.artifact_count,
+                frontier.primitive_profile.symmetry_basis_element_count,
+                frontier.primitive_profile.symmetry_excluded_operator_count,
+            )
+        })
+    }
+
+    pub fn primitive_profile_member_sha256(self) -> Option<[u8; 32]> {
+        self.computed().map(|analysis| {
+            analysis
+                .physical_registry_frontier
+                .primitive_profile
+                .member_sha256
+        })
+    }
+
+    pub fn primitive_profile_receipt_sha256(self) -> Option<[u8; 32]> {
+        self.computed().map(|analysis| {
+            analysis
+                .physical_registry_frontier
+                .primitive_profile
+                .pair_receipt_sha256
+        })
+    }
+
+    pub fn primitive_profile_evidence_sha256(self) -> Option<PrimitiveProfileEvidenceDigests> {
+        self.computed().map(|analysis| {
+            let frontier = &analysis.physical_registry_frontier;
+            (
+                frontier.primitive_profile.symmetry_action_binding_sha256,
+                frontier.primitive_profile.derivation_catalog_sha256,
+                frontier
+                    .primitive_profile
+                    .derivation_coverage_capability_sha256,
+                frontier
+                    .primitive_profile
+                    .irreducible_protocol_capability_sha256,
+            )
+        })
+    }
+
+    pub fn primitive_profile_repository_catalog_sha256(self) -> Option<[u8; 32]> {
+        self.computed().map(|analysis| {
+            analysis
+                .physical_registry_frontier
+                .primitive_profile
+                .repository_catalog_sha256
+        })
+    }
+
+    pub fn primitive_profile_protocol_checker_result_sha256(self) -> Option<([u8; 32], [u8; 32])> {
+        self.computed().map(|analysis| {
+            let profile = &analysis.physical_registry_frontier.primitive_profile;
+            (
+                profile.protocol_producer_result_sha256,
+                profile.protocol_watchdog_result_sha256,
+            )
+        })
+    }
+
+    pub fn primitive_profile_protocol_statuses(
+        self,
+    ) -> Option<(&'a str, &'a str, &'a str, &'a str, &'a str, &'a str)> {
+        self.computed().map(|analysis| {
+            let frontier = &analysis.physical_registry_frontier;
+            (
+                frontier.primitive_profile.derive_first_status_id,
+                frontier.primitive_profile.buckingham_pi_status_id,
+                frontier.primitive_profile.gap_law_status_id,
+                frontier.primitive_profile.chaos_protocol_status_id,
+                frontier.primitive_profile.residual_law_status_id,
+                frontier.primitive_profile.residual_slot_status_id,
+            )
+        })
+    }
+
+    pub fn primitive_profile_semantics(self) -> Option<PrimitiveProfileSemanticsView<'a>> {
+        self.computed().map(|analysis| {
+            let profile = &analysis.physical_registry_frontier.primitive_profile;
+            PrimitiveProfileSemanticsView {
+                member_id: profile.member_id,
+                symmetry_id: profile.symmetry_id,
+                field_id: profile.field_id,
+                operator_id: profile.operator_id,
+                state_id: profile.state_id,
+                sector_id: profile.sector_id,
+                validity_id: profile.validity_id,
+                excluded_term_id: profile.excluded_term_id,
+                helicity_id: profile.helicity_id,
+                statistics_id: profile.statistics_id,
+                charge_id: profile.charge_id,
+                current_id: profile.current_id,
+                stability_id: profile.stability_id,
+                transition_id: profile.transition_id,
+            }
+        })
+    }
+
     pub fn physical_registry_membership_authority(self) -> Option<bool> {
         self.computed()
             .map(|analysis| analysis.physical_registry_frontier.membership_authority)
@@ -570,6 +762,19 @@ impl<'a> SpeciesDerivationAnalysisView<'a> {
             analysis
                 .physical_registry_frontier
                 .root_admission_census
+                .iter()
+                .map(|admission| PhysicalRootAdmissionView { admission })
+        })
+    }
+
+    pub fn primitive_profile_admissions(
+        self,
+    ) -> impl Iterator<Item = PhysicalRootAdmissionView<'a>> + 'a {
+        self.computed().into_iter().flat_map(|analysis| {
+            analysis
+                .physical_registry_frontier
+                .primitive_profile
+                .admission_census
                 .iter()
                 .map(|admission| PhysicalRootAdmissionView { admission })
         })

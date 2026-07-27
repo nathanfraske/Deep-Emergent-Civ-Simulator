@@ -1604,3 +1604,67 @@ at SHA-256
 `0706ce497538c2d5e71c1ecd810b5ccfc456228ce789b54e313dbc7dde096b4a`.
 Publication, remote checks, and the exact Stop gate remain for the end of this
 slice.
+
+## 2026-07-27 primitive null-excitation production closure
+
+The source-confirmed finding and recommendation were stated before
+implementation. The prior primitive candidate could not enter production
+because both outer paths shared authored semantic construction, its protocol
+fields attested to themselves, and its exact-zero artifact did not execute the
+claimed symmetry exclusion. The recommendation was to retain the generic graph
+shape, replace every assertion receipt with an independent calculation, keep
+the irreducible profile premise explicit rather than pretending it derived
+from floor magnitudes, and scope every resulting capability to one exact
+validity domain.
+
+The replacement route adds an independent registered-catalog protocol pair.
+The producer scans registered seeds, registered rules, and occupied residual
+slots through ordered passes. The watchdog builds target indexes, traverses
+catalog entries through a different order, and scans residual slots in reverse
+through ordered maps. Both confirm zero registered seeds and rules for the
+categorical profile target, Buckingham-Pi semantic inapplicability,
+nondynamical Chaos disposition, executed Gap and Residual steps, and one
+collision-free owner-reviewed residual slot. Target-scoped seed or rule
+injection and occupied-slot collision refuse under both paths.
+
+The outer primitive-profile producer and watchdog now reconstruct all semantic
+evidence through separate algorithms with no shared semantic decision helper.
+They consume independently paired lower receipts for the complete
+four-component, ten-element homogeneous commutative quadratic basis, exact
+affine action, one excluded rest-mass operator, and action-dependent
+applicability and validity. Their complete packet and result encodings bind the
+registered catalog, both protocol results, source custody, all artifacts, all
+canary outcomes, member semantics, and false global authority claims.
+
+Production now admits one Residue `[A]` profile claim and 28 Residue `[D]`
+consequences. The physical registry closes one generic source-free unbroken
+rank-one abelian null excitation with exact zero rest mass, a minus-one and
+plus-one helicity pair, integer-spin Bose statistics, zero self-charge, a
+conserved-current coupling, scoped stability, and no lower-profile transition
+inside the admitted validity domain. The current physical vocabulary covers
+33 artifacts, 26 descriptor roles, 33 relation targets, and one constraint
+law. It remains explicitly incomplete globally.
+
+This is a local scientific payoff, not Stage 1 closure. The runner still has
+zero verified support members and no conditioned species-support value. The
+five next obligations are a charged-matter profile, complete global physical
+vocabulary coverage, a complete registry-closure domain, conditioned species
+support, and species-mass uncertainty transport. No periodic table, star,
+planet, or snapshot follows yet.
+
+The closed authority inventory now contains 11 active scientific or governance
+authorities, 11 blocked authorities, and 2 diagnostics. The new active
+`planet.primitive-profile-admission` row binds distinct implementation
+identities, an empty shared-semantic-helper set, exact canaries, semantic
+closure, and the narrow owner boundary. The global law-premise, symmetry,
+species-support, and snapshot authorities remain blocked. Both inventory
+implementations and both mutation self-tests pass. `check-fast` passes in
+120.5 seconds. The complete Linux `check-pr` route passes with exit 0 in
+1,519.1 seconds, including every declared gate, all canonical all-target
+tests, deterministic integer and available CPU/GPU parity checks,
+warnings-denied Clippy, private-item documentation, and doctests. Two fresh
+direct runner executions each exit 2, write no stderr, and emit the same
+466,254-byte receipt at SHA-256
+`13666b6e4349d6901fede48d06859ae4ca152335239830d50cc17142b6ca11e1`.
+The changed bitstream contains the local member while preserving the Stage 1
+refusal. Publication, remote checks, and the exact Stop gate remain.

@@ -37,8 +37,8 @@ pub use preflight::preflight;
 pub use receipt::{OpenRequirement, Refusal, RefusalCode, RunReceipt, StageReceipt, StageStatus};
 pub use requirement_analysis::{
     DimensionalAttemptView, DimensionalPhenomenonView, DimensionalVariableView,
-    ExactDimensionalCensusView, PhysicalRootAdmissionView, RequirementAnalysis,
-    SpeciesDerivationAnalysisView, SpeciesDerivationAttemptView,
+    ExactDimensionalCensusView, PhysicalRootAdmissionView, PrimitiveProfileSemanticsView,
+    RequirementAnalysis, SpeciesDerivationAnalysisView, SpeciesDerivationAttemptView,
 };
 pub use snapshot::PlanetSnapshot;
 pub use stage::Stage;

@@ -7,6 +7,7 @@
 //! refuse it.
 
 use super::super::SpeciesContentIdentity;
+use super::primitive_profile::PrimitiveProfileAdmissionCapability;
 use super::repository_roots::RepositoryRootAdmissionCapability;
 pub(super) use civsim_ledger::{Provenance as ProvenanceMark, Tier as LedgerTier};
 
@@ -370,6 +371,7 @@ pub(super) struct AdmittedArtifact {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum VerifiedAdmissionCapability {
     RepositoryRoot(RepositoryRootAdmissionCapability),
+    PrimitiveProfile(PrimitiveProfileAdmissionCapability),
     #[cfg(test)]
     ExactTest {
         claimed_identity: ArtifactIdentity,
@@ -380,6 +382,7 @@ enum VerifiedAdmissionCapability {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum AdmissionCapabilityKind {
     RepositoryRoot,
+    PrimitiveProfile,
     #[cfg(test)]
     ExactTest,
 }
@@ -399,6 +402,24 @@ impl AdmittedArtifact {
             admission,
             payload,
             admission_capability: VerifiedAdmissionCapability::RepositoryRoot(capability),
+        }
+    }
+
+    pub(super) fn from_primitive_profile(
+        claimed_identity: ArtifactIdentity,
+        admission: RootAdmission,
+        payload: ArtifactPayload,
+        capability: PrimitiveProfileAdmissionCapability,
+    ) -> Self {
+        debug_assert_eq!(capability.claimed_identity(), claimed_identity);
+        debug_assert_eq!(capability.admission(), &admission);
+        debug_assert_ne!(capability.profile_root_identity().0, [0; 32]);
+        debug_assert_ne!(capability.pair_receipt_sha256(), [0; 32]);
+        Self {
+            claimed_identity,
+            admission,
+            payload,
+            admission_capability: VerifiedAdmissionCapability::PrimitiveProfile(capability),
         }
     }
 
@@ -432,12 +453,18 @@ impl AdmittedArtifact {
             VerifiedAdmissionCapability::RepositoryRoot(_) => {
                 panic!("repository-root capabilities cannot be refreshed by a test fixture")
             }
+            VerifiedAdmissionCapability::PrimitiveProfile(_) => {
+                panic!("primitive-profile capabilities cannot be refreshed by a test fixture")
+            }
         }
     }
 
     pub(super) const fn capability_claimed_identity(&self) -> ArtifactIdentity {
         match &self.admission_capability {
             VerifiedAdmissionCapability::RepositoryRoot(capability) => {
+                capability.claimed_identity()
+            }
+            VerifiedAdmissionCapability::PrimitiveProfile(capability) => {
                 capability.claimed_identity()
             }
             #[cfg(test)]
@@ -452,6 +479,9 @@ impl AdmittedArtifact {
             VerifiedAdmissionCapability::RepositoryRoot(_) => {
                 AdmissionCapabilityKind::RepositoryRoot
             }
+            VerifiedAdmissionCapability::PrimitiveProfile(_) => {
+                AdmissionCapabilityKind::PrimitiveProfile
+            }
             #[cfg(test)]
             VerifiedAdmissionCapability::ExactTest { .. } => AdmissionCapabilityKind::ExactTest,
         }
@@ -460,6 +490,7 @@ impl AdmittedArtifact {
     pub(super) const fn capability_admission(&self) -> &RootAdmission {
         match &self.admission_capability {
             VerifiedAdmissionCapability::RepositoryRoot(capability) => capability.admission(),
+            VerifiedAdmissionCapability::PrimitiveProfile(capability) => capability.admission(),
             #[cfg(test)]
             VerifiedAdmissionCapability::ExactTest { admission, .. } => admission,
         }
@@ -470,6 +501,29 @@ impl AdmittedArtifact {
             VerifiedAdmissionCapability::RepositoryRoot(capability) => {
                 Some(capability.pair_receipt_sha256())
             }
+            VerifiedAdmissionCapability::PrimitiveProfile(_) => None,
+            #[cfg(test)]
+            VerifiedAdmissionCapability::ExactTest { .. } => None,
+        }
+    }
+
+    pub(super) const fn primitive_profile_pair_receipt_sha256(&self) -> Option<[u8; 32]> {
+        match &self.admission_capability {
+            VerifiedAdmissionCapability::PrimitiveProfile(capability) => {
+                Some(capability.pair_receipt_sha256())
+            }
+            VerifiedAdmissionCapability::RepositoryRoot(_) => None,
+            #[cfg(test)]
+            VerifiedAdmissionCapability::ExactTest { .. } => None,
+        }
+    }
+
+    pub(super) const fn primitive_profile_root_identity(&self) -> Option<ArtifactIdentity> {
+        match &self.admission_capability {
+            VerifiedAdmissionCapability::PrimitiveProfile(capability) => {
+                Some(capability.profile_root_identity())
+            }
+            VerifiedAdmissionCapability::RepositoryRoot(_) => None,
             #[cfg(test)]
             VerifiedAdmissionCapability::ExactTest { .. } => None,
         }
@@ -657,8 +711,8 @@ pub(super) enum PhysicalRegistryRefusalCode {
     FloorBindingMismatch,
     FloorCoordinateProjectionInvalid,
     FloorCoordinateProjectionCheckerDisagreement,
+    PrimitiveProfileProjectionInvalid,
     PhysicalVocabularyBindingMismatch,
-    PhysicalVocabularyCoverageIncomplete,
     StructureBindingMismatch,
     ArtifactCapacityExceeded,
     RegistryCapacityExceeded,
@@ -728,8 +782,8 @@ impl PhysicalRegistryRefusalCode {
             Self::FloorCoordinateProjectionCheckerDisagreement => {
                 "floor_coordinate_projection_checker_disagreement"
             }
+            Self::PrimitiveProfileProjectionInvalid => "primitive_profile_projection_invalid",
             Self::PhysicalVocabularyBindingMismatch => "physical_vocabulary_binding_mismatch",
-            Self::PhysicalVocabularyCoverageIncomplete => "physical_vocabulary_coverage_incomplete",
             Self::StructureBindingMismatch => "structure_binding_mismatch",
             Self::ArtifactCapacityExceeded => "artifact_capacity_exceeded",
             Self::RegistryCapacityExceeded => "registry_capacity_exceeded",
@@ -823,10 +877,6 @@ impl PhysicalRegistryRefusal {
                 "complete_global_physical_vocabulary_coverage",
                 "complete_registry_closure_domain",
                 "species_mass_uncertainty_transport",
-            ],
-            PhysicalRegistryRefusalCode::PhysicalVocabularyCoverageIncomplete => vec![
-                "complete_global_physical_vocabulary_coverage",
-                "complete_registry_closure_domain",
             ],
             _ => Vec::new(),
         };

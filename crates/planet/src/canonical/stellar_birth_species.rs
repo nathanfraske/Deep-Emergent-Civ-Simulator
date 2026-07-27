@@ -5,11 +5,12 @@
 //! those inputs belong on the canonical path. This module keeps only the
 //! invariant weighted reduction over a complete, physically derived support.
 //!
-//! No repository species support exists yet. The verifier is sealed behind an
+//! One claim-local massless profile member exists, but no repository species
+//! support measure exists yet. The support verifier is sealed behind an
 //! authority token with no production constructor, so this code cannot invent
-//! a familiar species, attach a cited mass, or close either Stage 1 proof. A
-//! future authority must derive every content identity, rest mass, physical
-//! state, support weight, and applicability proof from admitted dependencies.
+//! familiar matter, attach a cited mass, or close either Stage 1 proof. A future
+//! authority must derive every support identity, weight, and applicability
+//! proof from admitted dependencies.
 
 #![cfg_attr(
     not(test),
@@ -31,7 +32,8 @@ pub(super) use authority_analysis::{
     SpeciesDerivationAnalysisArtifact,
 };
 pub use authority_analysis::{
-    PhysicalRootAdmissionView, SpeciesDerivationAnalysisView, SpeciesDerivationAttemptView,
+    PhysicalRootAdmissionView, PrimitiveProfileSemanticsView, SpeciesDerivationAnalysisView,
+    SpeciesDerivationAttemptView,
 };
 
 use civsim_units::bignum::BigRat;

@@ -2,37 +2,14 @@ use super::*;
 use civsim_ledger::Provenance;
 
 #[test]
-fn rejected_profile_fixture_preserves_the_proposed_dependency_cone_shape() {
-    let projection =
-        construct_unverified_candidate_fixture().expect("candidate fixture constructs");
+fn profile_projection_binds_executed_admission_and_symmetry_evidence() {
+    let projection = construct_profile_projection().expect("profile projection constructs");
     assert_eq!(projection.candidate_artifacts.len(), ARTIFACT_COUNT);
     assert_ne!(projection.member.0, [0; 32]);
     assert_eq!(projection.receipt.member, projection.member);
     assert_eq!(
         usize::try_from(projection.receipt.artifact_count).unwrap(),
         ARTIFACT_COUNT
-    );
-    assert!([
-        projection.receipt.protocol.derive_first_status_id,
-        projection.receipt.protocol.buckingham_pi_status_id,
-        projection.receipt.protocol.gap_law_status_id,
-        projection.receipt.protocol.chaos_protocol_status_id,
-        projection.receipt.protocol.residual_law_status_id,
-        projection.receipt.protocol.residual_slot_status_id,
-    ]
-    .into_iter()
-    .all(|status| status == "assertion_only_not_admitted"));
-    assert!(!projection.receipt.global_physical_vocabulary_coverage);
-    assert!(!projection.receipt.membership_authority);
-    assert_eq!(projection.receipt.authority_effect, "none");
-    assert_ne!(projection.receipt.pair_receipt_sha256, [0; 32]);
-    assert_ne!(projection.receipt.evidence_custody_receipt_sha256, [0; 32]);
-    assert_eq!(projection.receipt.profile_id, PROFILE_ID);
-    assert_eq!(projection.receipt.theory_class_id, THEORY_CLASS_ID);
-    assert_eq!(projection.receipt.residual_slot_id, RESIDUAL_SLOT_ID);
-    assert_eq!(
-        projection.receipt.owner_admission_record,
-        OWNER_ADMISSION_RECORD
     );
     assert_eq!(
         [
@@ -51,6 +28,42 @@ fn rejected_profile_fixture_preserves_the_proposed_dependency_cone_shape() {
             RESIDUAL_LAW_STATUS_ID,
             RESIDUAL_SLOT_STATUS_ID,
         ]
+    );
+    assert!(!projection.receipt.global_physical_vocabulary_coverage);
+    assert!(!projection.receipt.membership_authority);
+    assert_eq!(projection.receipt.authority_effect, "none");
+    assert_ne!(projection.receipt.pair_receipt_sha256, [0; 32]);
+    assert_ne!(projection.receipt.evidence_custody_receipt_sha256, [0; 32]);
+    assert_eq!(projection.receipt.profile_id, PROFILE_ID);
+    assert_eq!(projection.receipt.theory_class_id, THEORY_CLASS_ID);
+    assert_eq!(projection.receipt.residual_slot_id, RESIDUAL_SLOT_ID);
+    assert_eq!(
+        projection.receipt.owner_admission_record,
+        OWNER_ADMISSION_RECORD
+    );
+    assert_ne!(projection.receipt.profile_role_identity.0, [0; 32]);
+    assert_eq!(projection.receipt.symmetry_basis_element_count, 10);
+    assert_eq!(projection.receipt.symmetry_excluded_operator_count, 1);
+    assert_ne!(projection.receipt.symmetry_action_binding_sha256, [0; 32]);
+    assert_ne!(
+        projection.receipt.symmetry_applicability_receipt_sha256,
+        [0; 32]
+    );
+    assert_ne!(projection.receipt.symmetry_validity_receipt_sha256, [0; 32]);
+    assert_ne!(projection.receipt.derivation_catalog_sha256, [0; 32]);
+    assert_ne!(projection.receipt.repository_catalog_sha256, [0; 32]);
+    assert_ne!(projection.receipt.protocol_producer_result_sha256, [0; 32]);
+    assert_eq!(
+        projection.receipt.protocol_producer_result_sha256,
+        projection.receipt.protocol_watchdog_result_sha256
+    );
+    assert_ne!(
+        projection.receipt.derivation_coverage_capability_sha256,
+        [0; 32]
+    );
+    assert_ne!(
+        projection.receipt.irreducible_protocol_capability_sha256,
+        [0; 32]
     );
     assert!([
         projection.receipt.protocol.derivation_exhaustion_sha256,
@@ -84,8 +97,7 @@ fn rejected_profile_fixture_preserves_the_proposed_dependency_cone_shape() {
 
 #[test]
 fn fixture_canary_transcripts_are_distinct_and_nonempty() {
-    let projection =
-        construct_unverified_candidate_fixture().expect("candidate fixture constructs");
+    let projection = construct_profile_projection().expect("profile projection constructs");
     assert_ne!(
         projection.receipt.producer_canary.transcript_id,
         projection.receipt.watchdog_canary.transcript_id
@@ -94,6 +106,6 @@ fn fixture_canary_transcripts_are_distinct_and_nonempty() {
         projection.receipt.producer_canary.transcript_sha256,
         projection.receipt.watchdog_canary.transcript_sha256
     );
-    assert!(projection.receipt.producer_canary.case_count >= 23);
-    assert!(projection.receipt.watchdog_canary.case_count >= 23);
+    assert!(projection.receipt.producer_canary.case_count >= 29);
+    assert!(projection.receipt.watchdog_canary.case_count >= 29);
 }
