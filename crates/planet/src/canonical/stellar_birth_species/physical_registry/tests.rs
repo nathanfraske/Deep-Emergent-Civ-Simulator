@@ -246,6 +246,18 @@ fn build_fixture(
                 output_node: 5,
             },
             scope: MassProjectionScope::SpeciesRestMass,
+            uncertainty_transport: Some(MassUncertaintyTransportProof {
+                source_coordinate: scalar,
+                source_pair_receipt: receipt("test-mass-source-pair", base_tag.wrapping_add(30)),
+                producer_receipt: receipt(
+                    "test-mass-uncertainty-producer",
+                    base_tag.wrapping_add(31),
+                ),
+                watchdog_receipt: receipt(
+                    "test-mass-uncertainty-watchdog",
+                    base_tag.wrapping_add(32),
+                ),
+            }),
         }),
         base_tag.wrapping_add(15),
     );
@@ -545,6 +557,29 @@ fn replace_elementary_projection_with_scope(
     expression: ExactExpression,
     scope: MassProjectionScope,
 ) -> SpeciesContentIdentity {
+    let source_coordinate = expression.nodes.iter().find_map(|node| match node {
+        ExactExpressionNode::Coordinate(identity) => Some(*identity),
+        _ => None,
+    });
+    let uncertainty_transport = match scope {
+        MassProjectionScope::MembershipNeutral => None,
+        MassProjectionScope::SpeciesRestMass => Some(MassUncertaintyTransportProof {
+            source_coordinate: source_coordinate
+                .expect("a species mass fixture needs a coordinate source"),
+            source_pair_receipt: receipt("replacement-mass-source-pair", 211),
+            producer_receipt: receipt("replacement-mass-uncertainty-producer", 212),
+            watchdog_receipt: receipt("replacement-mass-uncertainty-watchdog", 213),
+        }),
+    };
+    replace_elementary_projection_with_transport(input, expression, scope, uncertainty_transport)
+}
+
+fn replace_elementary_projection_with_transport(
+    input: &mut PhysicalRegistryInput,
+    expression: ExactExpression,
+    scope: MassProjectionScope,
+    uncertainty_transport: Option<MassUncertaintyTransportProof>,
+) -> SpeciesContentIdentity {
     let projection_index = input
         .admitted_artifacts
         .iter()
@@ -552,7 +587,11 @@ fn replace_elementary_projection_with_scope(
         .expect("projection fixture");
     let prior_projection = input.admitted_artifacts[projection_index].claimed_identity;
     input.admitted_artifacts[projection_index].payload =
-        ArtifactPayload::MassProjection(MassProjectionArtifact { expression, scope });
+        ArtifactPayload::MassProjection(MassProjectionArtifact {
+            expression,
+            scope,
+            uncertainty_transport,
+        });
     let projection_identity = producer::derive_artifact_identity_for_test(
         &input.admitted_artifacts[projection_index].payload,
     )
@@ -650,17 +689,17 @@ fn reverse_expression_storage(expression: &ExactExpression) -> ExactExpression {
 }
 
 #[test]
-fn repository_result_closes_one_partial_profile_without_global_authority() {
+fn repository_result_closes_three_local_members_without_global_authority() {
     let registry = resolve_repository_physical_species_registry().expect("local profile closes");
-    assert_eq!(registry.members.len(), 1);
+    assert_eq!(registry.members.len(), 3);
     assert_eq!(registry.authority_effect.id(), "none");
     let frontier = repository_physical_registry_frontier().expect("repository frontier");
     assert_eq!(frontier.registry_refusal_code, "none");
-    assert_eq!(frontier.registry_member_count, 1);
+    assert_eq!(frontier.registry_member_count, 3);
     assert!(!frontier.registry_coverage_claim);
     assert_eq!(frontier.registry_authority_effect, "none");
     assert_eq!(frontier.admitted_root_count, 4);
-    assert_eq!(frontier.admitted_artifact_count, 33);
+    assert_eq!(frontier.admitted_artifact_count, 72);
     assert_eq!(frontier.primitive_profile.artifact_count, 29);
     assert_eq!(frontier.primitive_profile.admission_census.len(), 29);
     assert_eq!(
@@ -681,10 +720,10 @@ fn repository_result_closes_one_partial_profile_without_global_authority() {
             .count(),
         28
     );
-    assert_eq!(
-        frontier.primitive_profile.member_sha256,
-        registry.members[0].identity.0
-    );
+    assert!(registry
+        .members
+        .iter()
+        .any(|member| member.identity.0 == frontier.primitive_profile.member_sha256));
     assert_eq!(frontier.primitive_profile.symmetry_basis_element_count, 10);
     assert_eq!(
         frontier.primitive_profile.symmetry_excluded_operator_count,
@@ -714,6 +753,43 @@ fn repository_result_closes_one_partial_profile_without_global_authority() {
         frontier.primitive_profile.residual_slot_status_id,
         "collision_checked_unique"
     );
+    assert_eq!(frontier.charged_profile.artifact_count, 39);
+    assert_eq!(frontier.charged_profile.admission_census.len(), 39);
+    assert_eq!(frontier.charged_profile.member_sha256.len(), 2);
+    assert_eq!(
+        frontier
+            .charged_profile
+            .admission_census
+            .iter()
+            .filter(|row| row.provenance_tag == "[A]" && row.route_id == "irreducible")
+            .count(),
+        1
+    );
+    assert_eq!(
+        frontier
+            .charged_profile
+            .admission_census
+            .iter()
+            .filter(|row| row.provenance_tag == "[D]" && row.route_id == "derived")
+            .count(),
+        38
+    );
+    assert!(frontier
+        .charged_profile
+        .member_sha256
+        .iter()
+        .all(|identity| registry
+            .members
+            .iter()
+            .any(|member| member.identity.0 == *identity)));
+    assert_ne!(
+        frontier.charged_profile.charge_conjugation_producer_sha256,
+        frontier.charged_profile.charge_conjugation_watchdog_sha256
+    );
+    assert_ne!(
+        frontier.charged_profile.mass_transport_producer_sha256,
+        frontier.charged_profile.mass_transport_watchdog_sha256
+    );
     assert_eq!(frontier.root_admission_census.len(), 4);
     assert!(frontier.root_admission_census.iter().all(|admission| {
         admission.tier_id == "universal"
@@ -729,7 +805,7 @@ fn repository_result_closes_one_partial_profile_without_global_authority() {
                 matches!(&artifact.payload, ArtifactPayload::ScalarCoordinate(_))
             })
             .count(),
-        3
+        5
     );
     assert_eq!(
         input
@@ -767,15 +843,25 @@ fn repository_result_closes_one_partial_profile_without_global_authority() {
             .count(),
         29
     );
-    assert_eq!(input.declared_members.len(), 1);
-    assert_eq!(input.vocabulary_binding.root_count, 33);
+    assert_eq!(
+        input
+            .admitted_artifacts
+            .iter()
+            .filter(|artifact| {
+                artifact.admission_capability_kind() == AdmissionCapabilityKind::ChargedProfile
+            })
+            .count(),
+        39
+    );
+    assert_eq!(input.declared_members.len(), 3);
+    assert_eq!(input.vocabulary_binding.root_count, 72);
     assert!(!input
         .vocabulary_binding
         .descriptor_role_identities
         .is_empty());
     assert_eq!(
         input.vocabulary_binding.relation_target_identities.len(),
-        33
+        72
     );
     assert!(!input
         .vocabulary_binding
@@ -805,7 +891,7 @@ fn local_closure_does_not_require_a_false_global_vocabulary_claim() {
             .global_physical_vocabulary_coverage
     );
     let registry = inspect_physical_registry(&repository).expect("bounded local closure");
-    assert_eq!(registry.members.len(), 1);
+    assert_eq!(registry.members.len(), 3);
     assert_eq!(registry.authority_effect, AuthorityEffect::None);
 }
 
@@ -1649,6 +1735,12 @@ fn exact_zero_needs_a_massless_law_and_expression_cycles_refuse() {
             output_node: 0,
         },
         scope: MassProjectionScope::SpeciesRestMass,
+        uncertainty_transport: Some(MassUncertaintyTransportProof {
+            source_coordinate: ArtifactIdentity([1; 32]),
+            source_pair_receipt: receipt("cycle-mass-source-pair", 221),
+            producer_receipt: receipt("cycle-mass-uncertainty-producer", 222),
+            watchdog_receipt: receipt("cycle-mass-uncertainty-watchdog", 223),
+        }),
     });
     assert_both_refuse(&cyclic, PhysicalRegistryRefusalCode::ExpressionCycle);
 
@@ -1661,6 +1753,12 @@ fn exact_zero_needs_a_massless_law_and_expression_cycles_refuse() {
     projection.payload = ArtifactPayload::MassProjection(MassProjectionArtifact {
         expression: exponent_one_chain(ArtifactIdentity([1; 32]), 1_026),
         scope: MassProjectionScope::SpeciesRestMass,
+        uncertainty_transport: Some(MassUncertaintyTransportProof {
+            source_coordinate: ArtifactIdentity([1; 32]),
+            source_pair_receipt: receipt("deep-mass-source-pair", 224),
+            producer_receipt: receipt("deep-mass-uncertainty-producer", 225),
+            watchdog_receipt: receipt("deep-mass-uncertainty-watchdog", 226),
+        }),
     });
     assert_both_refuse(
         &too_deep,
@@ -1741,6 +1839,37 @@ fn a_membership_neutral_mass_projection_cannot_prove_a_species_mass() {
     assert_both_refuse(
         &input,
         PhysicalRegistryRefusalCode::MassProjectionNotAuthorizedForMember,
+    );
+}
+
+#[test]
+fn species_mass_uncertainty_transport_needs_independent_receipts() {
+    let fixture = elementary_fixture(48);
+    let source_coordinate = fixture.scalar;
+    let mut input = fixture.input;
+    let expression = input
+        .admitted_artifacts
+        .iter()
+        .find_map(|artifact| match &artifact.payload {
+            ArtifactPayload::MassProjection(projection) => Some(projection.expression.clone()),
+            _ => None,
+        })
+        .expect("projection fixture");
+    let duplicate = receipt("duplicate-mass-uncertainty-checker", 241);
+    replace_elementary_projection_with_transport(
+        &mut input,
+        expression,
+        MassProjectionScope::SpeciesRestMass,
+        Some(MassUncertaintyTransportProof {
+            source_coordinate,
+            source_pair_receipt: receipt("independent-mass-source-pair", 240),
+            producer_receipt: duplicate.clone(),
+            watchdog_receipt: duplicate,
+        }),
+    );
+    assert_both_refuse(
+        &input,
+        PhysicalRegistryRefusalCode::MassUncertaintyTransportInvalid,
     );
 }
 

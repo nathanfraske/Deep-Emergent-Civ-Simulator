@@ -268,6 +268,7 @@ impl PrimitiveProfileAdmissionCapability {
 pub(super) struct AdmittedPrimitiveProfile {
     pub(super) admitted_artifacts: Vec<super::model::AdmittedArtifact>,
     pub(super) member: SpeciesContentIdentity,
+    pub(super) sector_identity: ArtifactIdentity,
     pub(super) receipt: PrimitiveProfileReceipt,
 }
 
@@ -406,6 +407,19 @@ pub(super) fn project_admitted_profile() -> Result<AdmittedPrimitiveProfile, Pri
     }
     let profile_root_identity = projection.receipt.profile_root_identity;
     let pair_receipt_sha256 = projection.receipt.pair_receipt_sha256;
+    let sector_identity = projection
+        .candidate_artifacts
+        .iter()
+        .find_map(|candidate| match &candidate.payload {
+            ArtifactPayload::PhysicalDescriptor(content)
+                if content.schema_id == "civsim.physical-profile.sector.v1"
+                    && content.canonical_bytes == SECTOR_ID.as_bytes() =>
+            {
+                Some(candidate.identity)
+            }
+            _ => None,
+        })
+        .ok_or(PrimitiveProfileRefusal::ArtifactConstructionFailure)?;
     let admitted_artifacts = projection
         .candidate_artifacts
         .into_iter()
@@ -427,6 +441,7 @@ pub(super) fn project_admitted_profile() -> Result<AdmittedPrimitiveProfile, Pri
     Ok(AdmittedPrimitiveProfile {
         admitted_artifacts,
         member: projection.member,
+        sector_identity,
         receipt: projection.receipt,
     })
 }

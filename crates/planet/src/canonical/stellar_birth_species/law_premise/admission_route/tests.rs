@@ -169,9 +169,9 @@ fn repository_frontier_reports_the_derived_seed_and_completed_local_profile_prot
         frontier.producer_result_sha256,
         frontier.watchdog_result_sha256
     );
-    assert_eq!(frontier.current_descriptor_role_count, 26);
-    assert_eq!(frontier.current_relation_target_count, 33);
-    assert_eq!(frontier.current_constraint_law_count, 1);
+    assert_eq!(frontier.current_descriptor_role_count, 58);
+    assert_eq!(frontier.current_relation_target_count, 72);
+    assert_eq!(frontier.current_constraint_law_count, 3);
     assert_eq!(frontier.next_target_decision_id, "next_target_not_bound");
     assert!(!frontier.derivation_frontier_complete);
     assert!(frontier.irreducible_protocol_started);
@@ -208,6 +208,7 @@ fn repository_theory_profile_executes_the_full_irreducible_route() {
         applicability_receipt_sha256: id(156),
         validity_receipt_sha256: id(157),
         residual_slot_id: "planet.test.unfamiliar-theory-profile.v1".to_owned(),
+        occupied_profile_slots: Vec::new(),
         owner_admission_record: "owner-reviewed-test-profile-v1".to_owned(),
     };
     let evidence = inspect_theory_profile_admission(&request).unwrap();
@@ -253,6 +254,15 @@ fn repository_theory_profile_executes_the_full_irreducible_route() {
     assert_eq!(
         receipts.iter().copied().collect::<BTreeSet<_>>().len(),
         receipts.len()
+    );
+
+    let mut collision = request.clone();
+    collision
+        .occupied_profile_slots
+        .push(collision.residual_slot_id.clone());
+    assert_eq!(
+        inspect_theory_profile_admission(&collision),
+        Err("profile_protocol_residual_slot_collision")
     );
 
     let mut alien = request;

@@ -7,8 +7,8 @@ cannot admit a law, value, species, or world state.
 
 ## Current truth
 
-One physical species member has now emerged, but only inside one narrow local
-profile. The canonical floor still contains three Universal `[M]` invariants,
+Three physical species members have now emerged, but only inside two narrow
+local profiles. The canonical floor still contains three Universal `[M]` invariants,
 `alpha`, `G`, and `m_e`. Exact SI definitions remain engine coordinates with
 no provenance mark or physical freedom. None of those values selects a field
 ontology, a gauge group, a particle name, or a desired Solar outcome.
@@ -30,8 +30,8 @@ remains rejected. The replacement production route executes the missing work:
    complete artifact set and must agree before any production capability is
    minted.
 
-The resulting census is one Residue `[A]` irreducible profile claim and 28
-Residue `[D]` consequences. The physical registry closes one generic,
+The first resulting census is one Residue `[A]` irreducible profile claim and
+28 Residue `[D]` consequences. The physical registry closes one generic,
 source-free, unbroken rank-one abelian null excitation. Within its exact
 validity domain it has zero rest mass, a minus-one and plus-one helicity pair,
 integer-spin Bose statistics, zero self-charge under the unbroken symmetry, a
@@ -39,12 +39,21 @@ conserved-current coupling, stability, and no lower-profile transition.
 These are structural identities. A familiar particle label does not enter the
 causal path.
 
-The live vocabulary now partitions 33 admitted artifacts into 26 descriptor
-roles, 33 relation targets, and one constraint law. This is complete only for
-the current input. Global physical-vocabulary coverage, global membership
-authority, and conditioned support remain false. There is still no charged
-matter profile, composite sector, nucleus, atom, element, periodic table,
-star, planet, or snapshot.
+A second independent profile pair now admits one local complex-spinor matter
+profile under the already admitted rank-one abelian sector. Its census is one
+Residue `[A]` profile claim plus 38 Residue `[D]` consequences. The pair binds
+the sealed `m_e` coordinate through an explicit uncertainty-transport proof,
+uses `alpha` only as a dimensionless coupling coordinate, and closes exactly
+two equal-mass mobile Fermi members with relative charge weights minus one and
+plus one. Charge orientation may swap the members but cannot change the set.
+No familiar particle name enters the packet, either checker, or registry.
+
+The live vocabulary now partitions 72 admitted artifacts into 58 descriptor
+roles, 72 relation targets, and three constraint laws. This is complete only
+for the current input. Global physical-vocabulary coverage, global membership
+authority, conditioned support, and global stability remain false. There is
+still no neutral bound state, composite core, nucleus, atom, element, periodic
+table, star, planet, or snapshot.
 
 The generic law router remains available for every later premise. Its
 synchronous producer and dependency-indexed watchdog accept only grounded
@@ -70,8 +79,8 @@ flowchart TB
     ROUTE["CURRENT paired generic derive-first route<br/>grounded ancestry only<br/>separate search completeness<br/>before irreducibility"]
     LAW["CURRENT local profile admission<br/>paired catalog and protocol scan<br/>complete scoped quadratic basis<br/>exact symmetry exclusion and scope"]
     PRIMITIVE["CURRENT one local primitive excitation<br/>exact zero mass and helicity pair<br/>Bose statistics, zero self-charge,<br/>conserved current and scoped stability"]
-    CHARGED["NEXT charged-matter profile<br/>opposite-charge mobile excitation<br/>mass, statistics, currents,<br/>stability and transition coverage"]
-    COMPOSITE["FUTURE confining and composite sector<br/>solver-produced level bands<br/>complete separation thresholds<br/>conservation and decay coverage"]
+    CHARGED["CURRENT charged-matter profile<br/>two-member conjugation orbit<br/>transported mass uncertainty<br/>Fermi statistics and scoped laws"]
+    COMPOSITE["NEXT neutral bound-state profile<br/>solver-produced level bands<br/>complete separation thresholds<br/>conservation and decay coverage"]
     THRESHOLD["CURRENT dormant exact threshold pair<br/>strictly below all covered thresholds<br/>overlap stays unresolved<br/>open channel remains visible<br/>authority_effect = none"]
     NUCLEAR["FUTURE stable and metastable cores<br/>binding spectra, decay channels<br/>charge and neutral conserved content"]
     ELEMENT["FUTURE element identity projection<br/>same derived core-charge vector<br/>isotopes differ by neutral content or state"]
@@ -336,12 +345,13 @@ Floating point remains confirmation-only.
 5. **First primitive excitation.** DONE FOR ONE LOCAL MEMBER: the registry
    closes one massless unbroken abelian excitation without claiming global
    registry coverage or conditioned support.
-6. **Charged-matter profile.** NEXT: derive or fully admit one opposite-charge
-   mobile excitation with mass or exact masslessness, spin, statistics,
-   currents, stability, transitions, validity, and complete ancestry. Reuse
-   the same registered-catalog and irreducible protocol without assuming a
-   familiar particle or gauge class.
-7. **Bound-state evidence integration.** Bind solver-produced level bands,
+6. **Charged-matter profile.** DONE FOR ONE LOCAL TWO-MEMBER ORBIT: the
+   registered-catalog and irreducible protocol admits one categorical complex
+   spinor profile. Independent profile checkers prove equal mass, opposite
+   relative charge, conjugation closure, explicit `m_e` uncertainty transport,
+   Fermi statistics, current, mobility, scoped stability, and transitions.
+   Global vocabulary, stability, support, and familiar identity remain open.
+7. **Bound-state evidence integration.** NEXT: bind solver-produced level bands,
    complete threshold coverage, conservation, and decay channels into the
    physical registry. Promote the dormant threshold pair only after live
    canaries and the authority-watchdog receipt exist.
@@ -360,10 +370,11 @@ Floating point remains confirmation-only.
    The reference table remains validation-only until no canonical consumer
    needs it.
 
-The next code target is slice 6, one charged-matter profile. It should begin
-with a new opaque target and registered rule-catalog scan, reuse the paired
-derive-first and irreducible protocol, and mint no member until its independent
-outer producer and watchdog agree on every artifact and canary. The existing
-null excitation may participate only through its admitted capabilities.
-Independent serialization, owner review, citations, and nonzero digests do
-not substitute for executable physical evidence.
+The next code target is slice 7, interaction evidence and one neutral
+bound-state profile. It must consume the exact charged-orbit and null-sector
+capabilities without naming a familiar atom. A solver-produced negative level
+relative to a proved separation threshold, normalization, convergence,
+conservation, validity, uncertainty transport, and independent threshold
+coverage must precede membership. Independent serialization, owner review,
+citations, and nonzero digests do not substitute for executable physical
+evidence.

@@ -137,6 +137,45 @@ owner_boundary = "The pair proves the reviewed Cargo topology, manifest-derived 
 semantic_closure = ["scripts/stone0_build_wiring_gate.py", "scripts/stone0_build_wiring_watchdog.py", "scripts/gates.toml", "scripts/gate_runner.py", "Cargo.toml", "justfile", "crates/stone0-build/Cargo.toml", "crates/stone0-build/build.rs", "crates/stone0-build/src/lib.rs", "crates/stone0/src/lib.rs", "crates/planet/Cargo.toml", "crates/planet/build.rs", "crates/planet-substrate/Cargo.toml", "crates/planet-substrate/build.rs"]
 
 [[mechanism]]
+id = "planet.charged-profile-admission"
+kind = "authority"
+domain = "scientific"
+status = "active"
+claim = "For the exact repository-enrolled local complex-spinor profile under the already admitted rank-one abelian sector, independent outer producer and watchdog implementations reconstruct one owner-admitted irreducible theory claim and 38 derived consequences, bind the sealed m_e mass coordinate through an explicit uncertainty-transport proof, bind alpha only as a dimensionless coupling coordinate, prove a two-member equal-mass opposite-charge conjugation orbit, and mint exactly two local charged-matter registry members."
+producer_path = "crates/planet/src/canonical/stellar_birth_species/physical_registry/charged_profile/producer.rs"
+producer_implementation = "civsim.planet.charged-matter-profile.forward-producer.v1"
+checker_path = "crates/planet/src/canonical/stellar_birth_species/physical_registry/charged_profile/watchdog.rs"
+checker_implementation = "civsim.planet.charged-matter-profile.reverse-watchdog.v1"
+receipt_schema = "civsim.planet.charged-matter-profile-pair-receipt.v1"
+shared_semantic_helpers = []
+shared_primitives = ["sealed physical-floor authority and exact repository coordinate bindings", "already admitted primitive-profile pair receipt and abelian-sector identity", "typed charged-profile packet and open physical-artifact model", "paired registered-catalog derive-first and irreducible-protocol evidence", "canonical ledger tier and seven-type provenance taxonomy", "exact rational and integer algebra", "canonical big-endian tagged framing", "SHA-256", "deterministic ordered containers"]
+canaries = ["profile packet schema, profile identity, claim identity, source custody, or sealed-floor binding substitution", "mass source entry, scalar identity, ancestry, root-pair receipt, or uncertainty-transport checker receipt substitution", "coupling source entry, scalar identity, or ancestry substitution", "primitive profile pair receipt, root identity, sector identity, member identity, or residual-slot substitution", "charge weight omission, duplication, zeroing, order substitution, or non-conjugate pair substitution", "charge-conjugation producer or watchdog receipt substitution", "derive-first, Buckingham Pi, Gap Law, Chaos Protocol, Residual Law, residual-slot, owner-admission, or route-watchdog receipt substitution", "occupied residual-slot collision and unfamiliar prior-slot injection", "field, operator, state-pair, validity, spin, statistics, mobility, stability, transition, conjugation, or member-class substitution", "irreducible claim tier, provenance, admission route, semantic identity, content identity, ancestry, or capability substitution", "derived artifact role, semantic identity, content identity, dependency, provenance, admission route, or capability substitution", "artifact omission, addition, duplication, order substitution, or count escalation", "member omission, addition, identity substitution, or order substitution", "producer or watchdog canary transcript substitution", "outer producer and watchdog result disagreement", "global vocabulary, global membership, conditioned support, neutral bound-state, or downstream authority escalation"]
+owner_boundary = "The owner admits only the categorical local profile premise, its source custody, its unique residual slot, and the two-member conjugation orbit after the paired registered-catalog protocol reports no derivation path. The pair proves the 38 listed consequences and two local members only inside the stated linearized charge-conserving validity domain. It does not name a familiar particle, establish global stability, admit a neutral bound state, complete a periodic table, close species membership, prove conditioned support, or select a familiar universe."
+semantic_closure = [
+    "crates/ledger/src/admission.rs",
+    "crates/ledger/src/lib.rs",
+    "crates/planet/src/canonical/stellar_birth_species/law_premise/admission_route/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/law_premise/admission_route/profile_protocol/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/law_premise/admission_route/profile_protocol/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/law_premise/admission_route/profile_protocol/watchdog.rs",
+    "crates/planet/src/canonical/stellar_birth_species/law_premise/admission_route/tests.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/model.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/tests.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/watchdog.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/model.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/primitive_profile/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/charged_profile/mod.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/charged_profile/producer.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/charged_profile/tests.rs",
+    "crates/planet/src/canonical/stellar_birth_species/physical_registry/charged_profile/watchdog.rs",
+    "sources/registry.toml",
+    "sources/mirrored.toml",
+]
+
+[[mechanism]]
 id = "planet.completed-snapshot"
 kind = "authority"
 domain = "scientific"
@@ -248,7 +287,7 @@ diagnostic_checker_implementation = "civsim.planet.stellar-birth-physical-vocabu
 diagnostic_schema = "civsim.planet.stellar-birth-physical-vocabulary-agreement.v1"
 shared_material = ["capability-bearing admitted physical-root artifacts", "content-derived artifact identities and open ArtifactPayload variants", "bounded resource contract", "SHA-256", "canonical big-endian tagged framing"]
 canaries = ["unfamiliar descriptor and constraint payloads", "heterogeneous tier, provenance, and irreducible admission-route census", "root arrival-order permutation", "duplicate root identity", "evidence-custody substitution", "admission-capability substitution", "root-count limit", "partition-identity limit", "work limit", "canonical-byte limit", "partition identity mutation", "global-coverage escalation", "membership-authority escalation", "checker-result substitution", "resource-contract substitution", "receipt substitution"]
-non_authority_guard = "The receipt proves an exact partition of only its admitted input artifacts. It carries current_input_partition_complete=true, global_physical_vocabulary_coverage=false, and membership_authority=false. It cannot admit an artifact, add a registry member, add a support member, or make a completion claim. The one local member is admitted by the separate primitive-profile authority pair."
+non_authority_guard = "The receipt proves an exact partition of only its admitted input artifacts. It carries current_input_partition_complete=true, global_physical_vocabulary_coverage=false, and membership_authority=false. It cannot admit an artifact, add a registry member, add a support member, or make a completion claim. The three local members are admitted by the separate primitive-profile and charged-profile authority pairs."
 owner_boundary = "The owner reviews any future claim that a physical vocabulary is globally complete. Payload kinds and unfamiliar identities remain data-defined; this diagnostic may not turn the current partition into a closed class list."
 semantic_closure = [
     "crates/ledger/src/admission.rs",
@@ -325,17 +364,17 @@ semantic_closure = [
 id = "planet.species-derivation-frontier"
 kind = "diagnostic"
 status = "diagnostic"
-observation = "The producer reports the first executable partial physical-registry closure. Four floor-derived artifacts and 29 primitive-profile artifacts enter the live registry, whose independent local closure yields one source-free unbroken abelian null-excitation member. The surrounding analysis binds the exact eps0 premise, the primitive profile admission pair, its registered-catalog derive-first and irreducible-protocol evidence, its 1 Residue [A] plus 28 Residue [D] admission census, its complete ten-element quadratic basis, its one excluded rest-mass operator, the 33-artifact physical-vocabulary partition, the local registry result, and five remaining obligations. The checker independently re-queries the premise, route, profile, vocabulary, and physical-registry frontiers. The diagnostic makes no global vocabulary, conditioned-support, or frontier-completeness claim."
+observation = "The producer reports the first executable partial physical-registry closure. Four floor-derived artifacts, 29 primitive-profile artifacts, and 39 charged-profile artifacts enter the live registry, whose independent local closure yields one source-free unbroken abelian null-excitation member plus a two-member equal-mass opposite-charge conjugation orbit. The surrounding analysis binds the exact eps0 premise, both profile admission pairs, their registered-catalog derive-first and irreducible-protocol evidence, the 72-artifact physical-vocabulary partition, the local registry result, and five remaining obligations led by bound-state interaction evidence and a neutral bound-state profile. The checker independently re-queries the premise, route, profile, vocabulary, and physical-registry frontiers. The diagnostic makes no global vocabulary, conditioned-support, or frontier-completeness claim."
 authority_effect = "none"
 diagnostic_producer_path = "crates/planet/src/canonical/stellar_birth_species/authority_analysis/producer.rs"
 diagnostic_producer_implementation = "civsim.planet.stellar-birth-species-frontier-producer.v6"
 diagnostic_checker_path = "crates/planet/src/canonical/stellar_birth_species/authority_analysis/watchdog.rs"
-diagnostic_checker_implementation = "civsim.planet.stellar-birth-species-derivation-watchdog.v9"
-diagnostic_schema = "civsim.planet.stellar-birth-species-derivation-analysis.v8"
-shared_material = ["sealed physical-floor authority and audited execution view", "canonical structure schema", "live exact eps0 derived-coordinate premise and pair receipt", "primitive-profile authority receipt, protocol pair results, symmetry evidence, admission census, and member semantics", "live physical-root pair receipt and identity-keyed admission census", "bounded 33-artifact physical-vocabulary agreement receipt and exact partitions", "one-member local physical-registry result and five open obligations", "ordered proof identifiers"]
-canaries = ["omitted live obligation", "injected authored downstream path", "frontier completeness escalation", "unfamiliar live obligation", "changed floor authority or anchor", "changed law-premise output or pair receipt", "law-premise species-authority or global-coverage escalation", "changed primitive-profile identity, receipt, member, census, protocol evidence, or symmetry evidence", "primitive-profile global-coverage, support, or downstream-authority escalation", "changed root-pair schema, implementation identity, receipt, or paired result", "changed root identity, tier, provenance, admission route, or membership-neutral scope", "changed vocabulary schema, implementation identity, receipt, 33-artifact partition, scope, or checker digest", "changed local registry member count or member semantics", "changed five-obligation frontier", "changed non-admitting diagnostic status"]
-non_authority_guard = "The analysis carries closure_effect=none, coverage_claim=false, frontier.completeness_claim=false, vocabulary.global_coverage=false, vocabulary.membership_authority=false, exactly one local candidate member, zero verified support members, no species-support value payload, and one claim-local residual slot. The primitive profile authority cannot broaden itself beyond its exact source-free unbroken validity domain. Diagnostic agreement cannot admit charged matter, global species completeness, conditioned support, or close Stage 1."
-owner_boundary = "The diagnostic reports one local member followed by the open frontier. Global physical species membership, charged matter, state-conditioned support, and completeness require future authority pairs over independently admitted inputs."
+diagnostic_checker_implementation = "civsim.planet.stellar-birth-species-derivation-watchdog.v10"
+diagnostic_schema = "civsim.planet.stellar-birth-species-derivation-analysis.v9"
+shared_material = ["sealed physical-floor authority and audited execution view", "canonical structure schema", "live exact eps0 derived-coordinate premise and pair receipt", "primitive-profile authority receipt, protocol pair results, symmetry evidence, admission census, and member semantics", "charged-profile authority receipt, charge-conjugation checker evidence, uncertainty-transport evidence, admission census, and member identities", "live physical-root pair receipt and identity-keyed admission census", "bounded 72-artifact physical-vocabulary agreement receipt and exact partitions", "three-member local physical-registry result and five open obligations", "ordered proof identifiers"]
+canaries = ["omitted live obligation", "injected authored downstream path", "frontier completeness escalation", "unfamiliar live obligation", "changed floor authority or anchor", "changed law-premise output or pair receipt", "law-premise species-authority or global-coverage escalation", "changed primitive-profile identity, receipt, member, census, protocol evidence, or symmetry evidence", "changed charged-profile identity, receipt, members, census, protocol evidence, conjugation evidence, or mass-transport evidence", "either local profile global-coverage, support, or downstream-authority escalation", "changed root-pair schema, implementation identity, receipt, or paired result", "changed root identity, tier, provenance, admission route, or membership-neutral scope", "changed vocabulary schema, implementation identity, receipt, 72-artifact partition, scope, or checker digest", "changed local registry member count or member semantics", "changed five-obligation frontier", "changed non-admitting diagnostic status"]
+non_authority_guard = "The analysis carries closure_effect=none, coverage_claim=false, frontier.completeness_claim=false, vocabulary.global_coverage=false, vocabulary.membership_authority=false, exactly three local candidate members, zero verified support members, no species-support value payload, and two claim-local residual slots. Neither local profile authority can broaden itself beyond its stated validity domain. Diagnostic agreement cannot admit a neutral bound state, global species completeness, conditioned support, or close Stage 1."
+owner_boundary = "The diagnostic reports three local members followed by the open frontier. Neutral bound-state admission, global physical species membership, state-conditioned support, and completeness require future authority pairs over independently admitted inputs."
 semantic_closure = [
     "crates/ledger/src/admission.rs",
     "crates/ledger/src/lib.rs",

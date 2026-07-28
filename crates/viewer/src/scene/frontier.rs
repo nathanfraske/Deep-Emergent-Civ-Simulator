@@ -16,6 +16,9 @@ pub type PhysicalVocabularyPartitions<'a> = (&'a [[u8; 32]], &'a [[u8; 32]], &'a
 /// Producer/watchdog result digests followed by their resource digests.
 pub type PhysicalVocabularyCheckerDigests = (([u8; 32], [u8; 32]), ([u8; 32], [u8; 32]));
 
+/// Charge-conjugation and mass-transport producer and watchdog digests.
+pub type ChargedProfileCheckerEvidenceDigests = ([u8; 32], [u8; 32], [u8; 32], [u8; 32]);
+
 /// One canonical stage status in fixed pipeline order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StageScene {
@@ -228,6 +231,75 @@ impl<'a> RepositoryPrimitiveProfileScene<'a> {
     }
 }
 
+/// Read-only projection of the locally closed charged conjugation orbit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepositoryChargedProfileScene<'a> {
+    identity: (
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+    ),
+    counts: (u32, usize),
+    admissions: Vec<PhysicalRootAdmissionScene<'a>>,
+    member_sha256: Vec<[u8; 32]>,
+    receipt_sha256: [u8; 32],
+    checker_evidence_sha256: ChargedProfileCheckerEvidenceDigests,
+    protocol_statuses: (&'a str, &'a str, &'a str, &'a str, &'a str, &'a str),
+}
+
+impl<'a> RepositoryChargedProfileScene<'a> {
+    /// Receipt, claim, profile, theory, residual slot, and checker identities.
+    pub const fn identity(
+        &self,
+    ) -> (
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+    ) {
+        self.identity
+    }
+
+    /// Artifact and member counts for the closed conjugation orbit.
+    pub const fn counts(&self) -> (u32, usize) {
+        self.counts
+    }
+
+    /// Identity-keyed tier, provenance, and route rows for profile artifacts.
+    pub fn admissions(&self) -> &[PhysicalRootAdmissionScene<'a>] {
+        &self.admissions
+    }
+
+    /// Sorted identities of both locally closed charged members.
+    pub fn member_sha256(&self) -> &[[u8; 32]] {
+        &self.member_sha256
+    }
+
+    /// Digest of the paired charged-profile projection receipt.
+    pub const fn receipt_sha256(&self) -> [u8; 32] {
+        self.receipt_sha256
+    }
+
+    /// Charge-conjugation and mass-transport producer and watchdog digests.
+    pub const fn checker_evidence_sha256(&self) -> ChargedProfileCheckerEvidenceDigests {
+        self.checker_evidence_sha256
+    }
+
+    /// Derive-first, Pi, Gap, Chaos, Residual, and residual-slot statuses.
+    pub const fn protocol_statuses(
+        &self,
+    ) -> (&'a str, &'a str, &'a str, &'a str, &'a str, &'a str) {
+        self.protocol_statuses
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepositoryPhysicalRegistryFrontierScene<'a> {
     registry_schema_id: &'a str,
@@ -253,6 +325,7 @@ pub struct RepositoryPhysicalRegistryFrontierScene<'a> {
     root_admissions: Vec<PhysicalRootAdmissionScene<'a>>,
     membership_authority: bool,
     primitive_profile: RepositoryPrimitiveProfileScene<'a>,
+    charged_profile: RepositoryChargedProfileScene<'a>,
     vocabulary_receipt_schema_id: &'a str,
     vocabulary_claim_id: &'a str,
     vocabulary_producer_id: &'a str,
@@ -401,6 +474,11 @@ impl<'a> RepositoryPhysicalRegistryFrontierScene<'a> {
     /// The one locally closed primitive profile and its evidence.
     pub const fn primitive_profile(&self) -> &RepositoryPrimitiveProfileScene<'a> {
         &self.primitive_profile
+    }
+
+    /// The locally closed two-member charge-conjugation orbit and its evidence.
+    pub const fn charged_profile(&self) -> &RepositoryChargedProfileScene<'a> {
+        &self.charged_profile
     }
 
     /// Exact identity-keyed tier, provenance, and route census for admitted roots.
@@ -1117,6 +1195,35 @@ impl<'a> RefusalScene<'a> {
                                                         protocol_statuses: view
                                                             .primitive_profile_protocol_statuses()?,
                                                     },
+                                                charged_profile:
+                                                    RepositoryChargedProfileScene {
+                                                        identity: view
+                                                            .charged_profile_identity()?,
+                                                        counts: view.charged_profile_counts()?,
+                                                        admissions: view
+                                                            .charged_profile_admissions()
+                                                            .map(|admission| {
+                                                                PhysicalRootAdmissionScene {
+                                                                    identity_sha256: admission
+                                                                        .identity_sha256(),
+                                                                    tier_id: admission.tier_id(),
+                                                                    provenance_tag: admission
+                                                                        .provenance_tag(),
+                                                                    route_id: admission.route_id(),
+                                                                }
+                                                            })
+                                                            .collect(),
+                                                        member_sha256: view
+                                                            .charged_profile_member_sha256()?
+                                                            .to_vec(),
+                                                        receipt_sha256: view
+                                                            .charged_profile_receipt_sha256()?,
+                                                        checker_evidence_sha256: view
+                                                            .charged_profile_checker_evidence_sha256(
+                                                            )?,
+                                                        protocol_statuses: view
+                                                            .charged_profile_protocol_statuses()?,
+                                                    },
                                                 vocabulary_receipt_schema_id: view
                                                     .physical_vocabulary_receipt_schema_id()?,
                                                 vocabulary_claim_id: view
@@ -1333,7 +1440,7 @@ mod tests {
             identity: ("route.v1", "producer.v1", "watchdog.v1"),
             checker_result_sha256: ([1; 32], [1; 32]),
             derived_identity_sha256: ([2; 32], [3; 32], [4; 32]),
-            counts: (1, 26, 33, 1),
+            counts: (1, 58, 72, 3),
             decisions: ("derived", "next_target_not_bound"),
             scope: (false, true, false, false, "none"),
         };
@@ -1344,7 +1451,7 @@ mod tests {
             frontier.derived_identity_digests(),
             ([2; 32], [3; 32], [4; 32])
         );
-        assert_eq!(frontier.counts(), (1, 26, 33, 1));
+        assert_eq!(frontier.counts(), (1, 58, 72, 3));
         assert_eq!(frontier.decisions(), ("derived", "next_target_not_bound"));
         assert_eq!(frontier.scope(), (false, true, false, false, "none"));
     }
@@ -1373,7 +1480,7 @@ mod tests {
             scalar_coordinate_count: 3,
             membership_neutral_mass_projection_count: 1,
             admitted_root_count: 4,
-            admitted_artifact_count: 33,
+            admitted_artifact_count: 72,
             root_admissions: (20_u8..24)
                 .map(|identity| PhysicalRootAdmissionScene {
                     identity_sha256: [identity; 32],
@@ -1438,33 +1545,68 @@ mod tests {
                     "collision_checked_unique",
                 ),
             },
+            charged_profile: RepositoryChargedProfileScene {
+                identity: (
+                    "civsim.planet.charged-matter-profile-pair-receipt.v1",
+                    "planet.charged-matter.charge-conjugate-massive-spinor-pair",
+                    "matter-profile.charge-conjugate-massive-spinor-pair.v1",
+                    "local-lorentz-covariant-complex-spinor-under-admitted-rank-one-abelian-sector",
+                    "planet.charged-matter.theory-profile.complex-spinor.v1",
+                    "charged-profile-producer",
+                    "charged-profile-watchdog",
+                ),
+                counts: (39, 2),
+                admissions: (130_u8..169)
+                    .map(|identity| PhysicalRootAdmissionScene {
+                        identity_sha256: [identity; 32],
+                        tier_id: "residue",
+                        provenance_tag: if identity == 130 { "[A]" } else { "[D]" },
+                        route_id: if identity == 130 {
+                            "irreducible"
+                        } else {
+                            "derived"
+                        },
+                    })
+                    .collect(),
+                member_sha256: vec![[21; 32], [22; 32]],
+                receipt_sha256: [23; 32],
+                checker_evidence_sha256: ([24; 32], [25; 32], [26; 32], [27; 32]),
+                protocol_statuses: (
+                    "executed_open_frontier",
+                    "semantic_inapplicability_paired",
+                    "executed_and_bound",
+                    "nondynamical_inapplicability_paired",
+                    "executed_and_bound",
+                    "collision_checked_unique",
+                ),
+            },
             vocabulary_receipt_schema_id:
                 "civsim.planet.stellar-birth-physical-vocabulary-agreement.v1",
             vocabulary_claim_id: "civsim.planet.stellar-birth-physical-vocabulary.partition.v1",
             vocabulary_producer_id: "civsim.planet.stellar-birth-physical-vocabulary-producer.v1",
             vocabulary_watchdog_id: "civsim.planet.stellar-birth-physical-vocabulary-watchdog.v1",
-            vocabulary_descriptor_role_identities: (30_u8..56)
+            vocabulary_descriptor_role_identities: (30_u8..88)
                 .map(|identity| [identity; 32])
                 .collect(),
-            vocabulary_relation_target_identities: (60_u8..93)
+            vocabulary_relation_target_identities: (100_u8..172)
                 .map(|identity| [identity; 32])
                 .collect(),
-            vocabulary_constraint_law_identities: vec![[94; 32]],
-            vocabulary_counts: (33, 26, 33, 1),
+            vocabulary_constraint_law_identities: vec![[94; 32], [95; 32], [96; 32]],
+            vocabulary_counts: (72, 58, 72, 3),
             vocabulary_scope: (true, false, false),
             vocabulary_checker_result_sha256: ([10; 32], [10; 32]),
             vocabulary_checker_resource_sha256: ([11; 32], [11; 32]),
             vocabulary_receipt_sha256: [12; 32],
             refusal_code: "none",
-            registry_member_count: 1,
+            registry_member_count: 3,
             registry_coverage_claim: false,
             registry_authority_effect: "none",
             open_obligations: vec![
                 "complete_global_physical_vocabulary_coverage",
                 "complete_registry_closure_domain",
                 "conditioned_species_support",
-                "species_mass_uncertainty_transport",
-                "charged_matter_profile",
+                "bound_state_interaction_evidence",
+                "neutral_bound_state_profile",
             ],
         };
 
@@ -1497,7 +1639,7 @@ mod tests {
         assert_eq!(frontier.scalar_coordinate_count(), 3);
         assert_eq!(frontier.membership_neutral_mass_projection_count(), 1);
         assert_eq!(frontier.admitted_root_count(), 4);
-        assert_eq!(frontier.admitted_artifact_count(), 33);
+        assert_eq!(frontier.admitted_artifact_count(), 72);
         assert_eq!(frontier.primitive_profile().counts(), (29, 10, 1));
         assert_eq!(frontier.primitive_profile().admissions().len(), 29);
         assert_eq!(
@@ -1540,6 +1682,26 @@ mod tests {
                 "collision_checked_unique",
             )
         );
+        assert_eq!(frontier.charged_profile().counts(), (39, 2));
+        assert_eq!(frontier.charged_profile().admissions().len(), 39);
+        assert_eq!(
+            frontier
+                .charged_profile()
+                .admissions()
+                .iter()
+                .filter(|admission| admission.provenance_tag() == "[A]")
+                .count(),
+            1
+        );
+        assert_eq!(
+            frontier.charged_profile().member_sha256(),
+            &[[21; 32], [22; 32]]
+        );
+        assert_eq!(frontier.charged_profile().receipt_sha256(), [23; 32]);
+        assert_eq!(
+            frontier.charged_profile().checker_evidence_sha256(),
+            ([24; 32], [25; 32], [26; 32], [27; 32])
+        );
         assert_eq!(frontier.root_admissions().len(), 4);
         assert!(frontier.root_admissions().iter().all(|admission| {
             admission.tier_id() == "universal"
@@ -1556,10 +1718,10 @@ mod tests {
                 "civsim.planet.stellar-birth-physical-vocabulary-watchdog.v1",
             )
         );
-        assert_eq!(frontier.vocabulary_partitions().0.len(), 26);
-        assert_eq!(frontier.vocabulary_partitions().1.len(), 33);
-        assert_eq!(frontier.vocabulary_partitions().2.len(), 1);
-        assert_eq!(frontier.vocabulary_counts(), (33, 26, 33, 1));
+        assert_eq!(frontier.vocabulary_partitions().0.len(), 58);
+        assert_eq!(frontier.vocabulary_partitions().1.len(), 72);
+        assert_eq!(frontier.vocabulary_partitions().2.len(), 3);
+        assert_eq!(frontier.vocabulary_counts(), (72, 58, 72, 3));
         assert_eq!(frontier.vocabulary_scope(), (true, false, false));
         assert_eq!(
             frontier.vocabulary_checker_digests(),
@@ -1567,7 +1729,7 @@ mod tests {
         );
         assert_eq!(frontier.vocabulary_receipt_sha256(), [12; 32]);
         assert_eq!(frontier.refusal_code(), "none");
-        assert_eq!(frontier.registry_member_count(), 1);
+        assert_eq!(frontier.registry_member_count(), 3);
         assert!(!frontier.registry_coverage_claim());
         assert_eq!(frontier.registry_authority_effect(), "none");
         assert_eq!(
@@ -1576,8 +1738,8 @@ mod tests {
                 "complete_global_physical_vocabulary_coverage",
                 "complete_registry_closure_domain",
                 "conditioned_species_support",
-                "species_mass_uncertainty_transport",
-                "charged_matter_profile",
+                "bound_state_interaction_evidence",
+                "neutral_bound_state_profile",
             ]
         );
     }

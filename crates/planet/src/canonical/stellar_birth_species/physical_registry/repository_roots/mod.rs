@@ -13,8 +13,8 @@ mod tests;
 #[cfg(test)]
 pub(super) use model::RepositoryRootSource;
 pub(super) use model::{
-    RepositoryRootDecision, RepositoryRootProjection, RepositoryRootProjectionReceipt,
-    RepositoryRootRefusal, RepositoryRootRefusalCode,
+    RepositoryCoordinateBinding, RepositoryRootDecision, RepositoryRootProjection,
+    RepositoryRootProjectionReceipt, RepositoryRootRefusal, RepositoryRootRefusalCode,
 };
 
 use super::model::{
@@ -73,6 +73,52 @@ pub(super) fn project_repository_roots(
             Err(refusal.code)
         }
     }
+}
+
+/// Project every sealed coordinate into an opaque, order-stable binding.
+///
+/// Later profiles may select a named local input from this complete list, but
+/// no cardinality fallback exists and no binding grants membership authority.
+pub(super) fn coordinate_bindings(
+    projection: &RepositoryRootProjection,
+) -> Result<Vec<RepositoryCoordinateBinding>, RepositoryRootRefusalCode> {
+    if !verify_projection(projection) || projection.receipt.receipt_sha256 == [0; 32] {
+        return Err(RepositoryRootRefusalCode::ReceiptInvalid);
+    }
+    let root_pair_receipt = ReceiptBinding {
+        schema_id: projection.receipt.schema_id.to_owned(),
+        digest_sha256: projection.receipt.receipt_sha256,
+    };
+    let mut bindings = Vec::new();
+    for scalar in projection
+        .checker_candidates
+        .iter()
+        .filter(|candidate| candidate.kind == model::ProjectedRootKind::ScalarCoordinate)
+    {
+        let mass = projection.checker_candidates.iter().find(|candidate| {
+            candidate.source_entry_id == scalar.source_entry_id
+                && candidate.kind == model::ProjectedRootKind::MembershipNeutralMassProjection
+        });
+        bindings.push(RepositoryCoordinateBinding {
+            entry_id: scalar.source_entry_id.clone(),
+            scalar_identity: scalar.identity,
+            scalar_ancestry_sha256: scalar.ancestry_digest_sha256,
+            mass_projection_identity: mass.map(|candidate| candidate.identity),
+            mass_projection_ancestry_sha256: mass.map(|candidate| candidate.ancestry_digest_sha256),
+            root_pair_receipt: root_pair_receipt.clone(),
+        });
+    }
+    bindings.sort_by(|left, right| left.entry_id.cmp(&right.entry_id));
+    if bindings.len()
+        != usize::try_from(projection.receipt.scalar_coordinate_count)
+            .map_err(|_| RepositoryRootRefusalCode::UnexpectedArtifactKind)?
+        || bindings
+            .windows(2)
+            .any(|pair| pair[0].entry_id == pair[1].entry_id)
+    {
+        return Err(RepositoryRootRefusalCode::UnexpectedArtifactKind);
+    }
+    Ok(bindings)
 }
 
 /// Preserve the pair's claim-scoped refusal evidence instead of reducing every

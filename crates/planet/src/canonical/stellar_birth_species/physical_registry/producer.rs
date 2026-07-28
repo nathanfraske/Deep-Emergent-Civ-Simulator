@@ -329,7 +329,64 @@ fn validate_artifacts<'a>(
         }
         validate_admission_capability(artifact)?;
     }
+    for artifact in grouped.values() {
+        if let ArtifactPayload::MassProjection(projection) = &artifact.payload {
+            validate_mass_uncertainty_transport(projection, &grouped, caps)?;
+        }
+    }
     Ok(grouped)
+}
+
+fn validate_mass_uncertainty_transport(
+    projection: &MassProjectionArtifact,
+    artifacts: &BTreeMap<ArtifactIdentity, &AdmittedArtifact>,
+    caps: ValidationCaps,
+) -> Result<(), PhysicalRegistryRefusalCode> {
+    let proof = match (projection.scope, projection.uncertainty_transport.as_ref()) {
+        (MassProjectionScope::MembershipNeutral, None) => return Ok(()),
+        (MassProjectionScope::SpeciesRestMass, Some(proof)) => proof,
+        _ => return Err(PhysicalRegistryRefusalCode::MassUncertaintyTransportInvalid),
+    };
+    for receipt in [
+        &proof.source_pair_receipt,
+        &proof.producer_receipt,
+        &proof.watchdog_receipt,
+    ] {
+        validate_receipt(receipt, caps)
+            .map_err(|_| PhysicalRegistryRefusalCode::MassUncertaintyTransportInvalid)?;
+    }
+    validate_distinct_receipts([
+        &proof.source_pair_receipt,
+        &proof.producer_receipt,
+        &proof.watchdog_receipt,
+    ])
+    .map_err(|_| PhysicalRegistryRefusalCode::MassUncertaintyTransportInvalid)?;
+    if !projection.expression.nodes.iter().any(
+        |node| matches!(node, ExactExpressionNode::Coordinate(identity) if *identity == proof.source_coordinate),
+    ) {
+        return Err(PhysicalRegistryRefusalCode::MassUncertaintyTransportInvalid);
+    }
+    let source = artifacts
+        .get(&proof.source_coordinate)
+        .ok_or(PhysicalRegistryRefusalCode::MassUncertaintyTransportInvalid)?;
+    if !matches!(source.payload, ArtifactPayload::ScalarCoordinate(_)) {
+        return Err(PhysicalRegistryRefusalCode::MassUncertaintyTransportInvalid);
+    }
+    match source.admission_capability_kind() {
+        AdmissionCapabilityKind::RepositoryRoot => {
+            if source.repository_root_pair_receipt_sha256()
+                != Some(proof.source_pair_receipt.digest_sha256)
+            {
+                return Err(PhysicalRegistryRefusalCode::MassUncertaintyTransportInvalid);
+            }
+        }
+        #[cfg(test)]
+        AdmissionCapabilityKind::ExactTest => {}
+        AdmissionCapabilityKind::PrimitiveProfile | AdmissionCapabilityKind::ChargedProfile => {
+            return Err(PhysicalRegistryRefusalCode::MassUncertaintyTransportInvalid);
+        }
+    }
+    Ok(())
 }
 
 fn validate_admission_capability(
@@ -361,10 +418,24 @@ fn validate_admission_capability(
                 return Err(PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch);
             }
         }
+        AdmissionCapabilityKind::ChargedProfile => {
+            if artifact
+                .charged_profile_pair_receipt_sha256()
+                .is_none_or(|digest| digest == [0; 32])
+                || artifact
+                    .charged_profile_root_identity()
+                    .is_none_or(|identity| identity.0 == [0; 32])
+                || artifact.repository_root_pair_receipt_sha256().is_some()
+                || artifact.primitive_profile_pair_receipt_sha256().is_some()
+            {
+                return Err(PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch);
+            }
+        }
         #[cfg(test)]
         AdmissionCapabilityKind::ExactTest => {
             if artifact.repository_root_pair_receipt_sha256().is_some()
                 || artifact.primitive_profile_pair_receipt_sha256().is_some()
+                || artifact.charged_profile_pair_receipt_sha256().is_some()
             {
                 return Err(PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch);
             }
@@ -514,7 +585,9 @@ fn artifact_reference_count(payload: &ArtifactPayload) -> Result<u32, PhysicalRe
                         _ => 2,
                     })
                     .ok_or(PhysicalRegistryRefusalCode::ReferenceCapacityExceeded)
-            })?,
+            })?
+            .checked_add(usize::from(projection.uncertainty_transport.is_some()))
+            .ok_or(PhysicalRegistryRefusalCode::ReferenceCapacityExceeded)?,
         ArtifactPayload::ExactMasslessLaw(law) => {
             checked_reference_lengths(&[requirement_reference_count(&law.requirements)?, 2])?
         }
@@ -1751,6 +1824,12 @@ fn encode_artifact_payload(
             output.field(1, b"mass-projection")?;
             output.field(2, &encode_expression(&projection.expression, caps, meter)?)?;
             output.field(3, projection.scope.id().as_bytes())?;
+            if let Some(proof) = &projection.uncertainty_transport {
+                output.field(4, &proof.source_coordinate.0)?;
+                output.field(5, &encode_receipt(&proof.source_pair_receipt, caps)?)?;
+                output.field(6, &encode_receipt(&proof.producer_receipt, caps)?)?;
+                output.field(7, &encode_receipt(&proof.watchdog_receipt, caps)?)?;
+            }
         }
         ArtifactPayload::ExactMasslessLaw(law) => {
             output.field(1, b"exact-massless-law")?;

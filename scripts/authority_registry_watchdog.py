@@ -79,6 +79,13 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "ff8dc217d4473b4264bc1a15ed6ad541e78455e0e95dedae5b3fdd89aba197c8",
     ),
     (
+        "planet.charged-profile-admission",
+        "authority",
+        "scientific",
+        "active",
+        "98951a462e69e2076f4e837dd42da6d90130a5f84b6725c48139addccc7d336f",
+    ),
+    (
         "planet.completed-snapshot",
         "authority",
         "scientific",
@@ -104,7 +111,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "diagnostic",
         None,
         "diagnostic",
-        "3355af11fec7870fdc7f2a6ee5760682f62f236ce8c7d4c7bbbd668fc48ade40",
+        "3c72d3cbf6cde2668a12efaf0ee5c5bfad9e823bd3aec9ae1d127622a8cdb8fd",
     ),
     (
         "planet.primitive-profile-admission",
@@ -118,7 +125,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "diagnostic",
         None,
         "diagnostic",
-        "d3877bc6991786b97cc3f2bfd38cd16443d69e3980e1005a400cdcdf3670650f",
+        "f641b7fd27731581017c6895c1bfc0c426d962b16bf1690acb6d06a6fda33133",
     ),
     (
         "planet.species-state-support",
@@ -191,7 +198,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "3bfb94aa0c3f507ad8ba9762e91ca9009284becc9d9752d7b7b896cb9a26ca7d",
     ),
 )
-EXPECTED_COUNTS = (11, 11, 2, 24)
+EXPECTED_COUNTS = (12, 11, 2, 25)
 
 META_EXPECTATIONS = (
     ("producer_path", "scripts/authority_watchdog_gate.py"),

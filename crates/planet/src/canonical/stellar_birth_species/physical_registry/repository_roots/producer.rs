@@ -309,6 +309,7 @@ fn project_validated(
                     output_node: 0,
                 },
                 scope: MassProjectionScope::MembershipNeutral,
+                uncertainty_transport: None,
             });
             let mass_identity = derive_artifact_identity(&mass_payload)?;
             let mass_ancestry =

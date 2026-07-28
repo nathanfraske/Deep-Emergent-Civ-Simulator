@@ -124,6 +124,7 @@ fn execute_profile_evidence(
             applicability_receipt_sha256: symmetry.applicability_receipt_sha256,
             validity_receipt_sha256: symmetry.validity_receipt_sha256,
             residual_slot_id: packet.residual_slot_id.clone(),
+            occupied_profile_slots: Vec::new(),
             owner_admission_record: packet.owner_admission_record.clone(),
         },
     )

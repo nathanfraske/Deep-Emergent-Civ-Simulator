@@ -40,6 +40,7 @@ REQUIRED_PROFILES: dict[str, tuple[str, str | None, str]] = {
         "active",
     ),
     "governance.stone0-build-wiring": ("authority", "governance", "active"),
+    "planet.charged-profile-admission": ("authority", "scientific", "active"),
     "planet.completed-snapshot": ("authority", "scientific", "blocked"),
     "planet.derived-law-premise-eps0": ("authority", "scientific", "active"),
     "planet.law-premise-admission-route": (
@@ -101,12 +102,13 @@ REQUIRED_PROFILE_DIGESTS: dict[str, str] = {
     "governance.authority-inventory": "c2a6095c66f8dc4d9b2384a3b46c5da06142b27fad99b10ce6fc34239f5c5100",
     "governance.external-adverse-claim-release": "a8a74e0c6032ee15d125b7c2e00e4accf77de2c9ac7f9e675f5848f80f38295d",
     "governance.stone0-build-wiring": "ff8dc217d4473b4264bc1a15ed6ad541e78455e0e95dedae5b3fdd89aba197c8",
+    "planet.charged-profile-admission": "98951a462e69e2076f4e837dd42da6d90130a5f84b6725c48139addccc7d336f",
     "planet.completed-snapshot": "5c09a8d95b7de145110a9f97f773bb0e0a63d6d6dc0f964eeb8beb62efff5575",
     "planet.derived-law-premise-eps0": "9ce5e04b3cf043616148062cb4f7eada303fe03a421aef004fa02970d41e26c2",
     "planet.law-premise-admission-route": "ad77326e8ac1004ad8c086f6d6b3eaaa7f39c618e5ef9a8375765498e817b505",
-    "planet.physical-vocabulary-partition": "3355af11fec7870fdc7f2a6ee5760682f62f236ce8c7d4c7bbbd668fc48ade40",
+    "planet.physical-vocabulary-partition": "3c72d3cbf6cde2668a12efaf0ee5c5bfad9e823bd3aec9ae1d127622a8cdb8fd",
     "planet.primitive-profile-admission": "aeefd698a2a29dd2ffcc82d17302b77c331d027cd81734803c7c4c01813e7981",
-    "planet.species-derivation-frontier": "d3877bc6991786b97cc3f2bfd38cd16443d69e3980e1005a400cdcdf3670650f",
+    "planet.species-derivation-frontier": "f641b7fd27731581017c6895c1bfc0c426d962b16bf1690acb6d06a6fda33133",
     "planet.species-state-support": "7264ff58ee5ef96f3d4275fe8dfda949e40b1f6316b498e88c5c1d0e225f3519",
     "planet.stage1-dimensional-census": "21140b26c937f9cca7a8066b98e9fa75e9366f483ca44ffd1cc5206315f2b5dc",
     "planet.stellar-birth-proof-tokens": "68f58f019ab4f620194133e673c64240d4ad066f97404698ba0bfbf8b96935d1",
@@ -119,10 +121,10 @@ REQUIRED_PROFILE_DIGESTS: dict[str, str] = {
     "units.wide-integer-arithmetic": "3bfb94aa0c3f507ad8ba9762e91ca9009284becc9d9752d7b7b896cb9a26ca7d",
 }
 REQUIRED_COUNTS = {
-    "active": 11,
+    "active": 12,
     "blocked": 11,
     "diagnostic": 2,
-    "total": 24,
+    "total": 25,
 }
 META_PAIR = {
     "producer_path": "scripts/authority_watchdog_gate.py",

@@ -185,6 +185,21 @@ pub(in super::super) struct RepositoryRootProjection {
     pub(super) post_projection_canary_sha256: [u8; 32],
 }
 
+/// One coordinate selected from the already paired repository projection.
+///
+/// The binding exposes identities and ancestry only. It cannot mint an
+/// admission capability or turn a membership-neutral mass projection into a
+/// species proof.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in super::super) struct RepositoryCoordinateBinding {
+    pub(in super::super) entry_id: String,
+    pub(in super::super) scalar_identity: ArtifactIdentity,
+    pub(in super::super) scalar_ancestry_sha256: [u8; 32],
+    pub(in super::super) mass_projection_identity: Option<ArtifactIdentity>,
+    pub(in super::super) mass_projection_ancestry_sha256: Option<[u8; 32]>,
+    pub(in super::super) root_pair_receipt: ReceiptBinding,
+}
+
 /// One checker's exact outcome for a refused pair decision.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum RepositoryRootCheckerOutcome {

@@ -21,7 +21,7 @@ const CHECKED_FLOOR_ANCHOR_SYMBOL: &str = "m_e";
 const CHECKED_FLOOR_ANCHOR_ROLE: &str = "mass_coordinate_anchor_only";
 const CHECKED_REDUCER_LAW_ID: &str = "candidate.composition_weighted_particle_mass";
 const CHECKED_FRONTIER_SOURCE_ID: &str = "repository_physical_registry_partial_closure";
-const CHECKED_FRONTIER_SCOPE_ID: &str = "one_local_member_then_open_global_obligations";
+const CHECKED_FRONTIER_SCOPE_ID: &str = "three_local_members_then_open_global_obligations";
 const CHECKED_LIVE_ATTEMPT_ID: &str =
     "stellar_birth.species_derivation.partial_physical_registry_closure";
 
@@ -150,7 +150,7 @@ pub(super) fn validate_analysis(
         != usize::try_from(expected_physical_frontier.registry_member_count).map_err(|_| {
             AnalysisBuildError::InternalInvariant("member count overflow".to_owned())
         })?
-        || analysis.candidate_member_count != 1
+        || analysis.candidate_member_count != 3
         || analysis.verified_support_member_count != 0
         || analysis.species_support_value_payload_present
         || !analysis.residual_slot_claim
@@ -183,6 +183,7 @@ pub(super) fn validate_analysis(
             != [
                 expected_physical_frontier.root_claim_id,
                 expected_physical_frontier.primitive_profile.claim_id,
+                expected_physical_frontier.charged_profile.claim_id,
                 expected_physical_frontier.vocabulary_claim_id.as_str(),
             ]
         || !matches_strings(

@@ -9,6 +9,10 @@ use crate::canonical::stellar_birth_species::physical_registry::RepositoryRootAd
 /// bound by the locally admitted primitive profile.
 pub type PrimitiveProfileEvidenceDigests = ([u8; 32], [u8; 32], [u8; 32], [u8; 32]);
 
+/// Charge-conjugation producer, charge-conjugation watchdog, mass-transport
+/// producer, and mass-transport watchdog digests.
+pub type ChargedProfileCheckerEvidenceDigests = ([u8; 32], [u8; 32], [u8; 32], [u8; 32]);
+
 /// Read-only view of the authority analysis attached to the open joint measure.
 #[derive(Debug, Clone, Copy)]
 pub struct SpeciesDerivationAnalysisView<'a> {
@@ -750,6 +754,87 @@ impl<'a> SpeciesDerivationAnalysisView<'a> {
         })
     }
 
+    pub fn charged_profile_identity(
+        self,
+    ) -> Option<(
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+    )> {
+        self.computed().map(|analysis| {
+            let profile = &analysis.physical_registry_frontier.charged_profile;
+            (
+                profile.receipt_schema_id,
+                profile.claim_id,
+                profile.profile_id,
+                profile.theory_class_id,
+                profile.residual_slot_id,
+                profile.producer_id,
+                profile.watchdog_id,
+            )
+        })
+    }
+
+    pub fn charged_profile_counts(self) -> Option<(u32, usize)> {
+        self.computed().map(|analysis| {
+            let profile = &analysis.physical_registry_frontier.charged_profile;
+            (profile.artifact_count, profile.member_sha256.len())
+        })
+    }
+
+    pub fn charged_profile_member_sha256(self) -> Option<&'a [[u8; 32]]> {
+        self.computed().map(|analysis| {
+            analysis
+                .physical_registry_frontier
+                .charged_profile
+                .member_sha256
+                .as_slice()
+        })
+    }
+
+    pub fn charged_profile_receipt_sha256(self) -> Option<[u8; 32]> {
+        self.computed().map(|analysis| {
+            analysis
+                .physical_registry_frontier
+                .charged_profile
+                .pair_receipt_sha256
+        })
+    }
+
+    pub fn charged_profile_checker_evidence_sha256(
+        self,
+    ) -> Option<ChargedProfileCheckerEvidenceDigests> {
+        self.computed().map(|analysis| {
+            let profile = &analysis.physical_registry_frontier.charged_profile;
+            (
+                profile.charge_conjugation_producer_sha256,
+                profile.charge_conjugation_watchdog_sha256,
+                profile.mass_transport_producer_sha256,
+                profile.mass_transport_watchdog_sha256,
+            )
+        })
+    }
+
+    pub fn charged_profile_protocol_statuses(
+        self,
+    ) -> Option<(&'a str, &'a str, &'a str, &'a str, &'a str, &'a str)> {
+        self.computed().map(|analysis| {
+            let profile = &analysis.physical_registry_frontier.charged_profile;
+            (
+                profile.derive_first_status_id,
+                profile.buckingham_pi_status_id,
+                profile.gap_law_status_id,
+                profile.chaos_protocol_status_id,
+                profile.residual_law_status_id,
+                profile.residual_slot_status_id,
+            )
+        })
+    }
+
     pub fn physical_registry_membership_authority(self) -> Option<bool> {
         self.computed()
             .map(|analysis| analysis.physical_registry_frontier.membership_authority)
@@ -774,6 +859,19 @@ impl<'a> SpeciesDerivationAnalysisView<'a> {
             analysis
                 .physical_registry_frontier
                 .primitive_profile
+                .admission_census
+                .iter()
+                .map(|admission| PhysicalRootAdmissionView { admission })
+        })
+    }
+
+    pub fn charged_profile_admissions(
+        self,
+    ) -> impl Iterator<Item = PhysicalRootAdmissionView<'a>> + 'a {
+        self.computed().into_iter().flat_map(|analysis| {
+            analysis
+                .physical_registry_frontier
+                .charged_profile
                 .admission_census
                 .iter()
                 .map(|admission| PhysicalRootAdmissionView { admission })

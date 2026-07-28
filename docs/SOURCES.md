@@ -12,7 +12,7 @@ Custody is one of three. `in_repo`: bytes held in-tree, checksum verifiable with
 witness. `external`: bytes in local custody outside the repo, checksum plus archive snapshot.
 The licence decides which is permitted; see `docs/working/FETCH_PIPELINE_PLAN.md` section 3.
 
-**48 sources** (17 registry, 31 mirrored).
+**49 sources** (18 registry, 31 mirrored).
 
 ## Registry (hand-maintained)
 
@@ -157,6 +157,19 @@ Powell, R.W., Ho, C.Y. & Liley, P.E., 1966, Thermal Conductivity of Selected Mat
 - licence evidence: the document's own front matter (issue date, GPO imprint, no copyright notice); Public Law 90-396, 11 July 1968, for the date comparison
 - free route (gov-work): https://nvlpubs.nist.gov/nistpubs/Legacy/NSRDS/nbsnsrds8.pdf
 - holding: `crates/physics/data/phase_conductivity/nsrds_nbs8_SLIM.pdf`
+
+### `pdg_2024_electroweak_model_review`
+
+Erler, J. and Freitas, A., 2024, Electroweak Model and Constraints on New Physics, in Navas, S. et al. (Particle Data Group), Review of Particle Physics, Physical Review D 110, 030001, DOI 10.1103/PhysRevD.110.030001. Review revised April 2024 and dated 31 May 2024.
+
+- sha256: `0caa17a5eb4c3329219a45537b52f6ca42c2ec18e9e317e55995179e6b9aee64`
+- archived: https://web.archive.org/web/20260310191918id_/https://pdg.lbl.gov/2024/reviews/rpp2024-rev-standard-model.pdf
+- scope: Section 10.1, limited to printed pages 1 through 3. Equation 10.2 prints a fermion kinetic and mass term together with the Abelian current coupling. The following prose identifies the electromagnetic interaction, defines charge in units of e, and states that the first term supplies fermion masses. This source does not establish a charge-conjugation pair, select m_e as a species mass, prove stability, or admit a repository profile.
+- custody: in_repo
+- licence (redistributable): Creative Commons Attribution 4.0 International (CC BY 4.0). The official PDG 2024 download page states that, except where otherwise noted, content of the 2024 Review of Particle Physics carries this licence. No exception is marked on the held pages. Redistribution and slimming are permitted with attribution.
+- licence evidence: https://pdg.lbl.gov/2024/download/download.html and https://journals.aps.org/prd/abstract/10.1103/PhysRevD.110.030001
+- free route (publisher-open): https://pdg.lbl.gov/2024/reviews/rpp2024-rev-standard-model.pdf
+- holding: `sources/pdg_2024_electroweak_model_review/erler_freitas_2024_pdg_electroweak_SLIM_p1_p3.pdf`
 
 ### `pdg_2024_higgs_boson_review`
 

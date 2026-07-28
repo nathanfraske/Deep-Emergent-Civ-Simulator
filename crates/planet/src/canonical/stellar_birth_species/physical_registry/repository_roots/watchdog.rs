@@ -316,6 +316,7 @@ fn project_validated(
                     output_node: 0,
                 },
                 scope: MassProjectionScope::MembershipNeutral,
+                uncertainty_transport: None,
             });
             let projection_identity = identify_payload(&projection_payload)?;
             let projection_ancestry =

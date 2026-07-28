@@ -58,10 +58,7 @@ fn catalog_target_or_slot_collision_refuses_pair_evidence() {
         content_identity: target_seed.content_identity,
         capability_sha256: id(24),
     });
-    assert_eq!(
-        inspect(&target_seed),
-        Err("profile_protocol_checker_disagreement")
-    );
+    assert_eq!(inspect(&target_seed), Err("profile_protocol_scope_invalid"));
 
     let mut collision = input();
     collision
@@ -69,7 +66,7 @@ fn catalog_target_or_slot_collision_refuses_pair_evidence() {
         .push(collision.residual_slot_id.clone());
     assert_eq!(
         inspect(&collision),
-        Err("profile_protocol_checker_disagreement")
+        Err("profile_protocol_residual_slot_collision")
     );
 }
 

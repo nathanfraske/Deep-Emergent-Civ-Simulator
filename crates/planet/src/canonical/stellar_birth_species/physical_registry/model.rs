@@ -7,6 +7,7 @@
 //! refuse it.
 
 use super::super::SpeciesContentIdentity;
+use super::charged_profile::ChargedProfileAdmissionCapability;
 use super::primitive_profile::PrimitiveProfileAdmissionCapability;
 use super::repository_roots::RepositoryRootAdmissionCapability;
 pub(super) use civsim_ledger::{Provenance as ProvenanceMark, Tier as LedgerTier};
@@ -297,6 +298,22 @@ pub(super) struct ConstraintLawArtifact {
 pub(super) struct MassProjectionArtifact {
     pub(super) expression: ExactExpression,
     pub(super) scope: MassProjectionScope,
+    pub(super) uncertainty_transport: Option<MassUncertaintyTransportProof>,
+}
+
+/// Claim-local proof that a measured coordinate's uncertainty identity travels
+/// with a species rest-mass projection.
+///
+/// The source coordinate's canonical identity already binds its central value,
+/// uncertainty kind, uncertainty value, dimension, floor ancestry, and root
+/// pair capability. These receipts bind the profile pair that inspected the
+/// projection without turning a coordinate into species authority on its own.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct MassUncertaintyTransportProof {
+    pub(super) source_coordinate: ArtifactIdentity,
+    pub(super) source_pair_receipt: ReceiptBinding,
+    pub(super) producer_receipt: ReceiptBinding,
+    pub(super) watchdog_receipt: ReceiptBinding,
 }
 
 /// Whether an exact mass-dimension expression may satisfy a species rest-mass
@@ -372,6 +389,7 @@ pub(super) struct AdmittedArtifact {
 enum VerifiedAdmissionCapability {
     RepositoryRoot(RepositoryRootAdmissionCapability),
     PrimitiveProfile(PrimitiveProfileAdmissionCapability),
+    ChargedProfile(ChargedProfileAdmissionCapability),
     #[cfg(test)]
     ExactTest {
         claimed_identity: ArtifactIdentity,
@@ -383,6 +401,7 @@ enum VerifiedAdmissionCapability {
 pub(super) enum AdmissionCapabilityKind {
     RepositoryRoot,
     PrimitiveProfile,
+    ChargedProfile,
     #[cfg(test)]
     ExactTest,
 }
@@ -423,6 +442,24 @@ impl AdmittedArtifact {
         }
     }
 
+    pub(super) fn from_charged_profile(
+        claimed_identity: ArtifactIdentity,
+        admission: RootAdmission,
+        payload: ArtifactPayload,
+        capability: ChargedProfileAdmissionCapability,
+    ) -> Self {
+        debug_assert_eq!(capability.claimed_identity(), claimed_identity);
+        debug_assert_eq!(capability.admission(), &admission);
+        debug_assert_ne!(capability.profile_root_identity().0, [0; 32]);
+        debug_assert_ne!(capability.pair_receipt_sha256(), [0; 32]);
+        Self {
+            claimed_identity,
+            admission,
+            payload,
+            admission_capability: VerifiedAdmissionCapability::ChargedProfile(capability),
+        }
+    }
+
     #[cfg(test)]
     pub(super) fn from_exact_test_recomputation(
         claimed_identity: ArtifactIdentity,
@@ -456,6 +493,9 @@ impl AdmittedArtifact {
             VerifiedAdmissionCapability::PrimitiveProfile(_) => {
                 panic!("primitive-profile capabilities cannot be refreshed by a test fixture")
             }
+            VerifiedAdmissionCapability::ChargedProfile(_) => {
+                panic!("charged-profile capabilities cannot be refreshed by a test fixture")
+            }
         }
     }
 
@@ -465,6 +505,9 @@ impl AdmittedArtifact {
                 capability.claimed_identity()
             }
             VerifiedAdmissionCapability::PrimitiveProfile(capability) => {
+                capability.claimed_identity()
+            }
+            VerifiedAdmissionCapability::ChargedProfile(capability) => {
                 capability.claimed_identity()
             }
             #[cfg(test)]
@@ -482,6 +525,9 @@ impl AdmittedArtifact {
             VerifiedAdmissionCapability::PrimitiveProfile(_) => {
                 AdmissionCapabilityKind::PrimitiveProfile
             }
+            VerifiedAdmissionCapability::ChargedProfile(_) => {
+                AdmissionCapabilityKind::ChargedProfile
+            }
             #[cfg(test)]
             VerifiedAdmissionCapability::ExactTest { .. } => AdmissionCapabilityKind::ExactTest,
         }
@@ -491,6 +537,7 @@ impl AdmittedArtifact {
         match &self.admission_capability {
             VerifiedAdmissionCapability::RepositoryRoot(capability) => capability.admission(),
             VerifiedAdmissionCapability::PrimitiveProfile(capability) => capability.admission(),
+            VerifiedAdmissionCapability::ChargedProfile(capability) => capability.admission(),
             #[cfg(test)]
             VerifiedAdmissionCapability::ExactTest { admission, .. } => admission,
         }
@@ -502,6 +549,7 @@ impl AdmittedArtifact {
                 Some(capability.pair_receipt_sha256())
             }
             VerifiedAdmissionCapability::PrimitiveProfile(_) => None,
+            VerifiedAdmissionCapability::ChargedProfile(_) => None,
             #[cfg(test)]
             VerifiedAdmissionCapability::ExactTest { .. } => None,
         }
@@ -513,6 +561,7 @@ impl AdmittedArtifact {
                 Some(capability.pair_receipt_sha256())
             }
             VerifiedAdmissionCapability::RepositoryRoot(_) => None,
+            VerifiedAdmissionCapability::ChargedProfile(_) => None,
             #[cfg(test)]
             VerifiedAdmissionCapability::ExactTest { .. } => None,
         }
@@ -524,6 +573,31 @@ impl AdmittedArtifact {
                 Some(capability.profile_root_identity())
             }
             VerifiedAdmissionCapability::RepositoryRoot(_) => None,
+            VerifiedAdmissionCapability::ChargedProfile(_) => None,
+            #[cfg(test)]
+            VerifiedAdmissionCapability::ExactTest { .. } => None,
+        }
+    }
+
+    pub(super) const fn charged_profile_pair_receipt_sha256(&self) -> Option<[u8; 32]> {
+        match &self.admission_capability {
+            VerifiedAdmissionCapability::ChargedProfile(capability) => {
+                Some(capability.pair_receipt_sha256())
+            }
+            VerifiedAdmissionCapability::RepositoryRoot(_)
+            | VerifiedAdmissionCapability::PrimitiveProfile(_) => None,
+            #[cfg(test)]
+            VerifiedAdmissionCapability::ExactTest { .. } => None,
+        }
+    }
+
+    pub(super) const fn charged_profile_root_identity(&self) -> Option<ArtifactIdentity> {
+        match &self.admission_capability {
+            VerifiedAdmissionCapability::ChargedProfile(capability) => {
+                Some(capability.profile_root_identity())
+            }
+            VerifiedAdmissionCapability::RepositoryRoot(_)
+            | VerifiedAdmissionCapability::PrimitiveProfile(_) => None,
             #[cfg(test)]
             VerifiedAdmissionCapability::ExactTest { .. } => None,
         }
@@ -712,6 +786,7 @@ pub(super) enum PhysicalRegistryRefusalCode {
     FloorCoordinateProjectionInvalid,
     FloorCoordinateProjectionCheckerDisagreement,
     PrimitiveProfileProjectionInvalid,
+    ChargedProfileProjectionInvalid,
     PhysicalVocabularyBindingMismatch,
     StructureBindingMismatch,
     ArtifactCapacityExceeded,
@@ -759,6 +834,7 @@ pub(super) enum PhysicalRegistryRefusalCode {
     DimensionMismatch,
     MassDimensionMismatch,
     MassProjectionNotAuthorizedForMember,
+    MassUncertaintyTransportInvalid,
     NonPositiveMass,
     UnprovedExactZero,
     NoAdmittedSpeciesDerivationRoots,
@@ -783,6 +859,7 @@ impl PhysicalRegistryRefusalCode {
                 "floor_coordinate_projection_checker_disagreement"
             }
             Self::PrimitiveProfileProjectionInvalid => "primitive_profile_projection_invalid",
+            Self::ChargedProfileProjectionInvalid => "charged_profile_projection_invalid",
             Self::PhysicalVocabularyBindingMismatch => "physical_vocabulary_binding_mismatch",
             Self::StructureBindingMismatch => "structure_binding_mismatch",
             Self::ArtifactCapacityExceeded => "artifact_capacity_exceeded",
@@ -834,6 +911,7 @@ impl PhysicalRegistryRefusalCode {
             Self::MassProjectionNotAuthorizedForMember => {
                 "mass_projection_not_authorized_for_member"
             }
+            Self::MassUncertaintyTransportInvalid => "mass_uncertainty_transport_invalid",
             Self::NonPositiveMass => "non_positive_mass",
             Self::UnprovedExactZero => "unproved_exact_zero",
             Self::NoAdmittedSpeciesDerivationRoots => "no_admitted_species_derivation_roots",

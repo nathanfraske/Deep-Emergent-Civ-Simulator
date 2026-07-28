@@ -33,15 +33,15 @@ use watchdog::validate_analysis;
 use super::COMPLETE_SPECIES_STATE_MEAN_PARTICLE_MASS_LAW_ID;
 
 pub(in crate::canonical) const SPECIES_DERIVATION_ANALYSIS_SCHEMA_ID: &str =
-    "civsim.planet.stellar-birth-species-derivation-analysis.v8";
+    "civsim.planet.stellar-birth-species-derivation-analysis.v9";
 pub(in crate::canonical) const SPECIES_DERIVATION_ANALYSIS_CHECKER_ID: &str =
-    "civsim.planet.stellar-birth-species-derivation-watchdog.v9";
+    "civsim.planet.stellar-birth-species-derivation-watchdog.v10";
 
 const FLOOR_ANCHOR_ID: &str = "fundamental.m_e";
 const FLOOR_ANCHOR_SYMBOL: &str = "m_e";
 const FLOOR_ANCHOR_ROLE: &str = "mass_coordinate_anchor_only";
 const FRONTIER_SOURCE_ID: &str = "repository_physical_registry_partial_closure";
-const FRONTIER_SCOPE_ID: &str = "one_local_member_then_open_global_obligations";
+const FRONTIER_SCOPE_ID: &str = "three_local_members_then_open_global_obligations";
 pub(super) const LIVE_PHYSICAL_REGISTRY_ATTEMPT_ID: &str =
     "stellar_birth.species_derivation.partial_physical_registry_closure";
 
@@ -332,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn production_analysis_exposes_one_local_member_without_support_authority() {
+    fn production_analysis_exposes_three_local_members_without_support_authority() {
         let artifact = analysis();
         let view = SpeciesDerivationAnalysisView::new(&artifact);
 
@@ -419,7 +419,7 @@ mod tests {
                 view.law_premise_content_identity_sha256().unwrap(),
             ))
         );
-        assert_eq!(view.premise_admission_route_counts(), Some((1, 26, 33, 1)));
+        assert_eq!(view.premise_admission_route_counts(), Some((1, 58, 72, 3)));
         assert_eq!(
             view.premise_admission_route_decisions(),
             Some(("derived", "next_target_not_bound"))
@@ -446,14 +446,14 @@ mod tests {
             Some(1)
         );
         assert_eq!(view.physical_registry_admitted_root_count(), Some(4));
-        assert_eq!(view.physical_registry_admitted_artifact_count(), Some(33));
+        assert_eq!(view.physical_registry_admitted_artifact_count(), Some(72));
         assert_eq!(view.physical_registry_membership_authority(), Some(false));
-        assert_eq!(view.physical_vocabulary_counts(), Some((33, 26, 33, 1)));
+        assert_eq!(view.physical_vocabulary_counts(), Some((72, 58, 72, 3)));
         assert_eq!(view.physical_vocabulary_scope(), Some((true, false, false)));
         assert_eq!(
             view.physical_vocabulary_relation_target_identities()
                 .map(|identities| identities.len()),
-            Some(33)
+            Some(72)
         );
         assert_ne!(view.physical_vocabulary_receipt_sha256(), Some([0; 32]));
         assert_eq!(
@@ -474,8 +474,36 @@ mod tests {
                 "collision_checked_unique",
             ))
         );
+        assert_eq!(
+            view.charged_profile_identity().map(|identity| identity.2),
+            Some("matter-profile.charge-conjugate-massive-spinor-pair.v1")
+        );
+        assert_eq!(view.charged_profile_counts(), Some((39, 2)));
+        assert!(view
+            .charged_profile_member_sha256()
+            .is_some_and(|members| members.len() == 2
+                && members.windows(2).all(|pair| pair[0] < pair[1])
+                && members.iter().all(|member| *member != [0; 32])));
+        assert_ne!(view.charged_profile_receipt_sha256(), Some([0; 32]));
+        let (charge_producer, charge_watchdog, mass_producer, mass_watchdog) = view
+            .charged_profile_checker_evidence_sha256()
+            .expect("charged checker evidence is visible");
+        assert_ne!(charge_producer, charge_watchdog);
+        assert_ne!(mass_producer, mass_watchdog);
+        assert_eq!(
+            view.charged_profile_protocol_statuses(),
+            Some((
+                "executed_open_frontier",
+                "semantic_inapplicability_paired",
+                "executed_and_bound",
+                "nondynamical_inapplicability_paired",
+                "executed_and_bound",
+                "collision_checked_unique",
+            ))
+        );
+        assert_eq!(view.charged_profile_admissions().count(), 39);
         assert_eq!(view.physical_registry_refusal_code(), Some("none"));
-        assert_eq!(view.physical_registry_member_count(), Some(1));
+        assert_eq!(view.physical_registry_member_count(), Some(3));
         assert_eq!(view.physical_registry_open_obligations().len(), 5);
         assert_ne!(view.physical_registry_root_receipt_sha256(), Some([0; 32]));
         assert_eq!(
@@ -484,10 +512,10 @@ mod tests {
         );
         assert_eq!(
             view.frontier_scope_id(),
-            Some("one_local_member_then_open_global_obligations")
+            Some("three_local_members_then_open_global_obligations")
         );
         assert_eq!(view.frontier_completeness_claim(), Some(false));
-        assert_eq!(view.candidate_member_count(), Some(1));
+        assert_eq!(view.candidate_member_count(), Some(3));
         assert_eq!(view.verified_support_member_count(), Some(0));
         assert_eq!(view.species_support_value_payload_present(), Some(false));
         assert_eq!(view.residual_slot_claim(), Some(true));
@@ -513,11 +541,11 @@ mod tests {
         assert_eq!(
             view.open_proof_ids(),
             [
-                "charged_matter_profile",
+                "bound_state_interaction_evidence",
                 "complete_global_physical_vocabulary_coverage",
                 "complete_registry_closure_domain",
                 "conditioned_species_support",
-                "species_mass_uncertainty_transport",
+                "neutral_bound_state_profile",
             ]
             .into_iter()
             .map(str::to_owned)
@@ -531,6 +559,7 @@ mod tests {
             [
                 "planet.stellar-species-floor-coordinate-projection",
                 "planet.primitive-excitation.unbroken-abelian-null-mode",
+                "planet.charged-matter.charge-conjugate-massive-spinor-pair",
                 "civsim.planet.stellar-birth-physical-vocabulary.partition.v1",
             ]
         );

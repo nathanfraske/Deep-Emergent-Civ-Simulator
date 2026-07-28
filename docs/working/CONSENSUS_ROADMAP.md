@@ -16,8 +16,8 @@ observer independence bind the full runpath.
 ## Active arcs
 
 - 2026-07-21  PR #215 is the draft integration base -> branch `claude/thermoelastic-rung3`, `HANDOFFS.md`
-- 2026-07-26  Four neutral floor roots classify as 0 descriptor roles, 4 relation targets, and 0 constraint laws; global vocabulary coverage, species-forming law, and registry membership remain open -> `TODOS.md` P-STELLAR-SPECIES-DERIVATION-ROOTS
-- 2026-07-27  Floor-to-periodicity now has the derived `eps_0` premise, grounded derive-first routing, conditional symmetry and scope pairs, and threshold diagnostics; semantic target, rule-universe completeness, and species authority remain open -> `docs/PERIODICITY_EMERGENCE_PIPELINE.md`
+- 2026-07-27  Two local profile authorities now close three members across a 72-artifact current-input partition; global vocabulary, conditioned support, and registry completeness remain open -> `TODOS.md` P-STELLAR-SPECIES-DERIVATION-ROOTS
+- 2026-07-27  Floor-to-periodicity now has the derived `eps_0` premise, grounded derive-first routing, one null excitation, and a two-member charged conjugation orbit; neutral bound-state interaction evidence is next -> `docs/PERIODICITY_EMERGENCE_PIPELINE.md`
 - 2026-07-21  Stage 1 SI-native adapters are blocked until both stellar-birth measure leaves close -> `TODOS.md` P-STAGE1-ADAPTERS
 - 2026-07-21  Canonical GPU use remains blocked on typed adapters and exact CPU/GPU Q32.32 parity for every enabled backend -> `TODOS.md` P-GPU-BIT-PARITY
 - 2026-07-20  Stage 1 star, collapse, disk, and embryo-system realization -> `TODOS.md` P-STAR-DISK-SYSTEM
@@ -37,14 +37,15 @@ observer independence bind the full runpath.
 ## Refusals and owner gates
 
 - 2026-07-20  Current canonical run enters Stage 1 and refuses on `stellar_birth.realization_measure`; no snapshot is emitted -> `crates/planet/src/canonical/`
-- 2026-07-20  Both birth-measure leaves remain unresolved; scalar roots are membership-neutral, no species-forming law exists, and the registry has zero members -> `crates/planet/src/canonical/stellar_birth_measure.rs`
+- 2026-07-27  Both birth-measure leaves remain unresolved; three local registry members have no conditioned support or global closure and cannot close the joint measure -> `crates/planet/src/canonical/stellar_birth_measure.rs`
 - 2026-07-21  The executable evaluator reports both exact open leaves; neither repository-owned proof capability exists yet -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
 
 ## Recent landings
 
+- 2026-07-27  A paired charged-matter authority closes an orientation-invariant two-member Fermi orbit with explicit mass-uncertainty transport and an independent `[A]/[D]` census -> `crates/planet/src/canonical/stellar_birth_species/physical_registry/charged_profile/`
+- 2026-07-27  Species analysis v9 and the observer-only viewer expose three member identities, both local profiles, conjugation evidence, mass transport, and the neutral bound-state frontier without a causal return edge -> `crates/planet/src/canonical/stellar_birth_species/authority_analysis/`
 - 2026-07-25  V5 root agreement canonicalizes arrival order, refuses stale identity binding, and keeps alien inspection test-only -> `crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/`
 - 2026-07-26  Registry v5 requires scoped exact-zero evidence from distinct encoders; live membership remains empty -> `crates/planet/src/canonical/stellar_birth_species/physical_registry/`
-- 2026-07-26  Rejected abelian profile is test-only; PDG bytes prove custody, not membership -> `crates/planet/src/canonical/stellar_birth_species/physical_registry/primitive_profile/`
 - 2026-07-26  The `eps_0` pair independently binds floor ancestry, claim-local scale, results, and canaries into one non-species capability -> `crates/planet/src/canonical/stellar_birth_species/law_premise/`
 - 2026-07-23  Independent bounded structural validators agree on canonical species descriptors and explicit positive or proved-zero conditioned support without minting physical authority or changing run bytes -> `crates/planet/src/canonical/stellar_birth_species/support_packet/`
 - 2026-07-23  Portable per-gate execution locks prevent cross-process cache stampedes, while one marker-backed build anchor runs Stone 0 per canonical Cargo graph and an independent pair checks its exact wiring -> `scripts/gate_runner.py`, `crates/stone0-build`, `scripts/stone0_build_wiring_gate.py`
@@ -56,7 +57,6 @@ observer independence bind the full runpath.
 - 2026-07-25  The viewer projects the physical-root agreement frontier from sealed planet views, including checker and resource digests, canary binding, neutral counts, refusal, and obligations, without a causal return edge -> `crates/viewer/src/scene/frontier.rs`
 - 2026-07-26  Viewer dimensional scenes expose `G^-1 * sound_speed^3` and its open eigenstructure and measure -> `crates/viewer/src/scene/frontier/dimensional.rs`
 - 2026-07-22  A private exact species-state kernel verifies complete normalized support and reduces mean particle mass without familiar tables or switches; production authority and support remain absent -> `crates/planet/src/canonical/stellar_birth_species.rs`
-- 2026-07-27  Species derivation analysis v7 under watchdog v8 serializes the claim-scoped premise, paired derive-first route, exact missing-role blocker, root census, 0/4/0 vocabulary partition, honest refusal, zero members, zero species-support values, and no residual slot -> `crates/planet/src/canonical/stellar_birth_species/authority_analysis/`
 - 2026-07-21  Physical floor normalized to three measured invariants; exact SI definitions moved to an untagged representation receipt and all execution constants derive from sealed relations -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
 - 2026-07-26  V9 remains distinct while current transcripts select V10; run receipt v13 carries the Stage 1 frontier, census v4, structure v2, species analysis v4, physical vocabulary v1, v5 root agreement or refusal, and the v5/v4 physical-registry schema boundary -> `crates/planet/src/canonical/transcript.rs`
 - 2026-07-26  A failed SI representation projection emits one value-free V10 refusal with V1 `representation_unavailable` status, preserves prior structural refusals, exposes no snapshot, and never retries the failed projection -> `crates/planet/src/canonical/transcript.rs`

@@ -91,13 +91,18 @@ pub(super) fn inspect(
     let watched = watchdog::inspect(input)?;
     if produced.assessment != watched.assessment
         || produced.canonical_bytes != watched.canonical_bytes
-        || produced.assessment.target_scoped_seed_count != 0
+    {
+        return Err("profile_protocol_checker_disagreement");
+    }
+    if produced.assessment.target_scoped_seed_count != 0
         || produced.assessment.target_scoped_rule_count != 0
         || produced.assessment.numeric_basis_count != 0
         || produced.assessment.trajectory_coordinate_count != 0
-        || produced.assessment.residual_slot_collision
     {
-        return Err("profile_protocol_checker_disagreement");
+        return Err("profile_protocol_scope_invalid");
+    }
+    if produced.assessment.residual_slot_collision {
+        return Err("profile_protocol_residual_slot_collision");
     }
     let producer_receipts = produced.receipts;
     let watchdog_receipts = watched.receipts;

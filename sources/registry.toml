@@ -112,6 +112,44 @@ archive_verification = "A HEAD request to the archived URL on 2026-07-26 returne
 note = "DOCUMENTARY CUSTODY ONLY. This entry proves that the held review states the scoped Standard Model claim. It admits no field, operator, state, sector, excitation, species, profile, exact-masslessness law, value, or canonical premise. Any project admission requires a separate owner-reviewed authority route."
 
 # ---------------------------------------------------------------------------------------------------
+# Documentary custody for the fermion mass and electromagnetic-current terms used to scope the
+# charged-profile review. These bytes grant no project authority.
+# ---------------------------------------------------------------------------------------------------
+
+[[source]]
+id = "pdg_2024_electroweak_model_review"
+citation = "Erler, J. and Freitas, A., 2024, Electroweak Model and Constraints on New Physics, in Navas, S. et al. (Particle Data Group), Review of Particle Physics, Physical Review D 110, 030001, DOI 10.1103/PhysRevD.110.030001. Review revised April 2024 and dated 31 May 2024."
+url = "https://pdg.lbl.gov/2024/reviews/rpp2024-rev-standard-model.pdf"
+archived_url = "https://web.archive.org/web/20260310191918id_/https://pdg.lbl.gov/2024/reviews/rpp2024-rev-standard-model.pdf"
+
+sha256 = "0caa17a5eb4c3329219a45537b52f6ca42c2ec18e9e317e55995179e6b9aee64"
+bytes = 379246
+pages = 3
+sha256_fetched = "4689caae925ee279228684249333a8395a40dda74a94863549b48f758d3fdd3f"
+bytes_fetched = 857127
+pages_fetched = 53
+
+recipe = "Fetch the official PDG PDF at the recorded URL, then keep zero-based PDF pages 0, 1, and 2 with pypdf.PdfWriter. The held slim reports pypdf as its Producer. The full-fetch and held-slim receipts are recorded separately above."
+grade = "theory review (documentary source, not project authority)"
+scope = "Section 10.1, limited to printed pages 1 through 3. Equation 10.2 prints a fermion kinetic and mass term together with the Abelian current coupling. The following prose identifies the electromagnetic interaction, defines charge in units of e, and states that the first term supplies fermion masses. This source does not establish a charge-conjugation pair, select m_e as a species mass, prove stability, or admit a repository profile."
+anchor = "Printed page 2, equation 10.2 and its immediately following definition of e; printed page 3, first two paragraphs."
+
+custody = "in_repo"
+holding = "sources/pdg_2024_electroweak_model_review/erler_freitas_2024_pdg_electroweak_SLIM_p1_p3.pdf"
+
+licence = "Creative Commons Attribution 4.0 International (CC BY 4.0). The official PDG 2024 download page states that, except where otherwise noted, content of the 2024 Review of Particle Physics carries this licence. No exception is marked on the held pages. Redistribution and slimming are permitted with attribution."
+redistributable = true
+licence_evidence = "https://pdg.lbl.gov/2024/download/download.html and https://journals.aps.org/prd/abstract/10.1103/PhysRevD.110.030001"
+free_route = "https://pdg.lbl.gov/2024/reviews/rpp2024-rev-standard-model.pdf"
+free_route_kind = "publisher-open"
+reviewed = "2026-07-27"
+
+slim = "KEPT: printed page 1, which carries the review identity, authors, contents, PDG citation, date, and fermion-field setup; printed page 2, which carries equation 10.2 and the fermion mass, electromagnetic-current, charge-normalization, and field statements; printed page 3, which identifies the QED term, charge units, and fermion-mass role. DROPPED: printed pages 4 through 53, which are outside this narrow documentary claim. The full document is recoverable from the official and archived URLs and checkable against the full-fetch receipt."
+read_channels = "Text extraction with pdftotext plus visual renders of all three held pages at 180 dpi. The renders were visually checked for complete margins, legible equations, and intact page identity. Page render SHA-256 values are 66ee33738f7f00c51a2d3d2b6c261b7ce94e6aadfd6a285f0564661c757a53d2, 5e4c78dfee829c0971977a167de16e2aad14376b3f11c4c950b994764d53b37e, and e2b7b508f4e82e5087f2e7360b2d3bb8d5f8d75054863df93046d1c224552c41. Text and visual channels agree on the scoped equations and prose."
+archive_verification = "The archived PDF was downloaded on 2026-07-27. Its 857127 bytes and SHA-256 4689caae925ee279228684249333a8395a40dda74a94863549b48f758d3fdd3f were byte-identical to the official fetch."
+note = "DOCUMENTARY CUSTODY ONLY. The entry proves only that the held review states the scoped Standard Model equations and prose. It admits no ontology, profile, charge orientation, particle name, species member, exact mass attribution, stability law, or canonical premise. Any project admission requires the full derive-first and irreducible route plus independent producer and watchdog agreement."
+
+# ---------------------------------------------------------------------------------------------------
 # Migrated from docs/working/VENDORING_CHECKLIST.md, which held this as its single prose entry and is the
 # fullest-discipline record the repo had. Every field of that entry is carried here verbatim, including
 # both checksums and the kept-versus-dropped slim record. The checklist's recorded slim sha256 and byte

@@ -29,6 +29,7 @@ pub(super) fn produce_frontier(physical: &RepositoryPhysicalRegistryFrontier) ->
         input_ids: vec![
             physical.root_claim_id.to_owned(),
             physical.primitive_profile.claim_id.to_owned(),
+            physical.charged_profile.claim_id.to_owned(),
             physical.vocabulary_claim_id.clone(),
         ],
         open_proof_ids: physical

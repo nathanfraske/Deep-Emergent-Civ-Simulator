@@ -389,6 +389,55 @@ fn write_physical_registry_frontier(
             "primitive_profile_residual_slot_status",
             frontier.primitive_profile.residual_slot_status_id,
         ),
+        (
+            "charged_profile_receipt_schema",
+            frontier.charged_profile.receipt_schema_id,
+        ),
+        (
+            "charged_profile_claim_id",
+            frontier.charged_profile.claim_id,
+        ),
+        ("charged_profile_id", frontier.charged_profile.profile_id),
+        (
+            "charged_profile_theory_class_id",
+            frontier.charged_profile.theory_class_id,
+        ),
+        (
+            "charged_profile_residual_slot_id",
+            frontier.charged_profile.residual_slot_id,
+        ),
+        (
+            "charged_profile_producer_id",
+            frontier.charged_profile.producer_id,
+        ),
+        (
+            "charged_profile_watchdog_id",
+            frontier.charged_profile.watchdog_id,
+        ),
+        (
+            "charged_profile_derive_first_status",
+            frontier.charged_profile.derive_first_status_id,
+        ),
+        (
+            "charged_profile_buckingham_pi_status",
+            frontier.charged_profile.buckingham_pi_status_id,
+        ),
+        (
+            "charged_profile_gap_law_status",
+            frontier.charged_profile.gap_law_status_id,
+        ),
+        (
+            "charged_profile_chaos_protocol_status",
+            frontier.charged_profile.chaos_protocol_status_id,
+        ),
+        (
+            "charged_profile_residual_law_status",
+            frontier.charged_profile.residual_law_status_id,
+        ),
+        (
+            "charged_profile_residual_slot_status",
+            frontier.charged_profile.residual_slot_status_id,
+        ),
         ("registry_refusal_code", frontier.registry_refusal_code),
         (
             "registry_authority_effect",
@@ -478,6 +527,52 @@ fn write_physical_registry_frontier(
                 .primitive_profile
                 .irreducible_protocol_capability_sha256,
         ),
+        (
+            "charged_profile_pair_receipt.sha256",
+            frontier.charged_profile.pair_receipt_sha256,
+        ),
+        (
+            "charged_profile_charge_conjugation_producer.sha256",
+            frontier.charged_profile.charge_conjugation_producer_sha256,
+        ),
+        (
+            "charged_profile_charge_conjugation_watchdog.sha256",
+            frontier.charged_profile.charge_conjugation_watchdog_sha256,
+        ),
+        (
+            "charged_profile_mass_transport_producer.sha256",
+            frontier.charged_profile.mass_transport_producer_sha256,
+        ),
+        (
+            "charged_profile_mass_transport_watchdog.sha256",
+            frontier.charged_profile.mass_transport_watchdog_sha256,
+        ),
+        (
+            "charged_profile_root_pair_receipt.sha256",
+            frontier.charged_profile.root_pair_receipt_sha256,
+        ),
+        (
+            "charged_profile_mass_scalar_identity.sha256",
+            frontier.charged_profile.mass_scalar_identity_sha256,
+        ),
+        (
+            "charged_profile_coupling_scalar_identity.sha256",
+            frontier.charged_profile.coupling_scalar_identity_sha256,
+        ),
+        (
+            "charged_profile_primitive_profile_receipt.sha256",
+            frontier.charged_profile.primitive_profile_receipt_sha256,
+        ),
+        (
+            "charged_profile_primitive_profile_root_identity.sha256",
+            frontier
+                .charged_profile
+                .primitive_profile_root_identity_sha256,
+        ),
+        (
+            "charged_profile_primitive_sector_identity.sha256",
+            frontier.charged_profile.primitive_sector_identity_sha256,
+        ),
     ] {
         write_digest(f, &frontier_prefix, field, digest)?;
     }
@@ -528,6 +623,53 @@ fn write_physical_registry_frontier(
         .enumerate()
     {
         let admission_prefix = format!("{frontier_prefix}.primitive_profile_admission.{index:04}");
+        write_digest(
+            f,
+            &admission_prefix,
+            "identity.sha256",
+            admission.identity_sha256,
+        )?;
+        writeln!(
+            f,
+            "{admission_prefix}.tier={}",
+            canonical_text(admission.tier_id)
+        )?;
+        writeln!(
+            f,
+            "{admission_prefix}.provenance={}",
+            canonical_text(admission.provenance_tag)
+        )?;
+        writeln!(
+            f,
+            "{admission_prefix}.route={}",
+            canonical_text(admission.route_id)
+        )?;
+    }
+    writeln!(
+        f,
+        "{frontier_prefix}.charged_profile_artifact_count={}",
+        frontier.charged_profile.artifact_count
+    )?;
+    writeln!(
+        f,
+        "{frontier_prefix}.charged_profile_member_count={}",
+        frontier.charged_profile.member_sha256.len()
+    )?;
+    for (index, digest) in frontier.charged_profile.member_sha256.iter().enumerate() {
+        write_digest(
+            f,
+            &frontier_prefix,
+            &format!("charged_profile_member.{index:04}.sha256"),
+            *digest,
+        )?;
+    }
+    writeln!(
+        f,
+        "{frontier_prefix}.charged_profile_admission_count={}",
+        frontier.charged_profile.admission_census.len()
+    )?;
+    for (index, admission) in frontier.charged_profile.admission_census.iter().enumerate() {
+        let admission_prefix = format!("{frontier_prefix}.charged_profile_admission.{index:04}");
         write_digest(
             f,
             &admission_prefix,

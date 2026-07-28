@@ -253,6 +253,12 @@ pub(in crate::canonical::stellar_birth_species) struct TheoryProfileAdmissionReq
     pub(in crate::canonical::stellar_birth_species) applicability_receipt_sha256: [u8; 32],
     pub(in crate::canonical::stellar_birth_species) validity_receipt_sha256: [u8; 32],
     pub(in crate::canonical::stellar_birth_species) residual_slot_id: String,
+    /// Residual slots already occupied by separately admitted theory profiles.
+    ///
+    /// The sealed floor contributes its own slots inside the inspector. This
+    /// list keeps a later profile from colliding with an earlier admitted
+    /// profile merely because that profile is not itself a floor leaf.
+    pub(in crate::canonical::stellar_birth_species) occupied_profile_slots: Vec<String>,
     pub(in crate::canonical::stellar_birth_species) owner_admission_record: String,
 }
 
@@ -423,6 +429,15 @@ pub(in crate::canonical::stellar_birth_species) fn inspect_theory_profile_admiss
         || request.residual_slot_id.trim().is_empty()
         || request.residual_slot_id.len() > 192
         || !request.residual_slot_id.is_ascii()
+        || request
+            .occupied_profile_slots
+            .iter()
+            .any(|slot| slot.trim().is_empty() || slot.len() > 192 || !slot.is_ascii())
+        || request
+            .occupied_profile_slots
+            .iter()
+            .enumerate()
+            .any(|(index, slot)| request.occupied_profile_slots[index + 1..].contains(slot))
         || request.owner_admission_record.trim().is_empty()
         || request.owner_admission_record.len() > 192
         || !request.owner_admission_record.is_ascii()
@@ -456,11 +471,17 @@ pub(in crate::canonical::stellar_birth_species) fn inspect_theory_profile_admiss
     let derivation_catalog_sha256 = open.derivation_catalog_sha256;
     let floor = crate::canonical::sealed_absolute_physics_floor()
         .map_err(|_| "sealed_floor_unavailable_for_slot_check")?;
-    let occupied_slots = floor
+    let mut occupied_slots = floor
         .entries()
         .filter_map(|entry| floor.receipt(&entry.id))
         .map(|receipt| receipt.residual_slot.trim().to_owned())
         .collect::<Vec<_>>();
+    occupied_slots.extend(
+        request
+            .occupied_profile_slots
+            .iter()
+            .map(|slot| slot.trim().to_owned()),
+    );
     let protocol_pair = profile_protocol::inspect(&profile_protocol::ProfileProtocolInput {
         claim_identity: request.claim_identity,
         role_identity: request.role_identity,
