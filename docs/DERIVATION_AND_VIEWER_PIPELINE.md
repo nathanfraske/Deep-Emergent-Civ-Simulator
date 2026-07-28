@@ -78,7 +78,7 @@ flowchart TB
 
         STRUCTURE["Value-free stellar structure v2<br/>Open components, species, coordinates,<br/>dimensions, sectors, regimes,<br/>histories, and classifications"]
         CENSUS["Exact dimensional census v4<br/>Non-admitting diagnostic<br/>closure_effect = none<br/>coverage_claim = false"]
-        SPECIES_ANALYSIS["Species derivation analysis v8<br/>Independent watchdog v9<br/>Live premise, profile, root, and vocabulary frontiers<br/>One local member, zero verified support,<br/>one claim-local residual slot"]
+        SPECIES_ANALYSIS["Species derivation analysis v11<br/>Independent watchdog v12<br/>Live premise, four-profile, root, and vocabulary frontiers<br/>Four local members, zero verified support,<br/>four claim-local residual slots"]
         SPECIES_PACKET["CURRENT bounded structural packet pair<br/>Canonical descriptors plus conditioned support<br/>Independent algorithms agree on bytes only<br/>No physical member or authority"]
         CURRENT_PROOFS["CURRENT production resolver<br/>Joint physical measure = None<br/>Coordinate law = None"]
         CURRENT_REFUSAL["CURRENT Stage 1 refusal<br/>stellar_birth.realization_measure<br/>Both open leaves remain visible"]
@@ -97,13 +97,16 @@ flowchart TB
         SPECIES_ANALYSIS -. "Attached as non-admitting analysis" .-> CURRENT_REFUSAL
 
         ROOT_PROJECTION["CURRENT independent floor-root pair<br/>Three exact scalar coordinates plus<br/>one membership-neutral pure-mass expression<br/>No species membership authority"]
-        VOCABULARY["CURRENT independent physical-vocabulary pair<br/>33 admitted artifacts: 26 / 33 / 1<br/>Descriptor roles / relation targets / constraint laws<br/>Global coverage and membership authority: false<br/>Identity-keyed tier, provenance, and route census"]
-        PHYSICAL_REGISTRY["CURRENT conditional physical registry pair<br/>Bottom-up producer plus top-down watchdog<br/>Exact mass, dimensions, state, sectors,<br/>validity, ancestry, and local closure<br/>Repository result: one local member,<br/>global coverage false"]
+        VOCABULARY["CURRENT independent physical-vocabulary pair<br/>125 admitted artifacts: 107 / 125 / 5<br/>Descriptor roles / relation targets / constraint laws<br/>Global coverage and membership authority: false<br/>Identity-keyed tier, provenance, and route census"]
+        PHYSICAL_REGISTRY["CURRENT conditional physical registry pair<br/>Bottom-up producer plus top-down watchdog<br/>Exact mass, dimensions, state, sectors,<br/>validity, ancestry, and local closure<br/>Repository result: four local members<br/>plus one zero-member confining profile;<br/>global coverage false"]
         PROFILE_PROTOCOL["CURRENT profile protocol pair<br/>Registered-catalog derive-first exhaustion<br/>Pi, Gap plus nondynamical Chaos, Residual,<br/>unique slot and owner-admission binding"]
         PRIMITIVE_PROFILE["CURRENT primitive profile authority<br/>Independent outer producer and watchdog<br/>1 Residue [A] plus 28 Residue [D]<br/>Complete basis, symmetry, and scope evidence"]
+        CHARGED_PROFILE["CURRENT charged profile authority<br/>1 Residue [A] plus 38 Residue [D]<br/>Two-member conjugation orbit<br/>Mass uncertainty transport"]
+        NEUTRAL_PROFILE["CURRENT neutral bound profile authority<br/>1 Residue [A] plus 32 Residue [D]<br/>One member below the free-pair threshold<br/>Open decay family remains visible"]
+        CONFINING_PROFILE["CURRENT confining profile authority<br/>1 Residue [A] plus 19 Residue [D]<br/>Nonlinear carrier grammar<br/>Invariant-only asymptotic boundary<br/>Zero members"]
         PREMISE_AUTHORITY["CURRENT blocked premise authority<br/>Target and rule capabilities<br/>Complete rule-universe coverage<br/>Paired Pi, Gap plus Chaos, Residual,<br/>unique slot, live canaries, and mint"]
-        LOCAL_MEMBER["CURRENT local null excitation<br/>Exact zero mass, helicity pair,<br/>Bose statistics, zero self-charge,<br/>conserved current and scoped stability"]
-        SPECIES_LAWS["NEXT charged-matter authority<br/>Opposite-charge mobile excitation<br/>Mass, spin, statistics, currents,<br/>stability, transitions, and validity"]
+        LOCAL_MEMBERS["CURRENT four local members<br/>One null excitation, two charged carriers,<br/>and one neutral two-body composite<br/>No familiar identity or global support"]
+        SPECIES_LAWS["NEXT confining-sector constituent content<br/>Exact representation, running or scale,<br/>mass, charge, spin, statistics,<br/>applicability, validity, and transitions"]
         REGISTRY["FUTURE realized species registry<br/>Complete lawful membership<br/>Familiarity-independent"]
         MECHANISMS["FUTURE admitted mechanism set<br/>Thermal, opacity, EOS, collapse,<br/>transport, spectra, topology,<br/>conservation, and validity laws"]
         JOINT["FUTURE correlation-preserving<br/>joint physical measure proof"]
@@ -131,9 +134,17 @@ flowchart TB
         EPS0 -. "Registered seed, not ontology selector" .-> PROFILE_PROTOCOL
         PREMISE_ROUTE --> PROFILE_PROTOCOL
         PROFILE_PROTOCOL --> PRIMITIVE_PROFILE
+        PROFILE_PROTOCOL --> CHARGED_PROFILE
+        PROFILE_PROTOCOL --> NEUTRAL_PROFILE
+        PROFILE_PROTOCOL --> CONFINING_PROFILE
         PRIMITIVE_PROFILE --> PHYSICAL_REGISTRY
-        PRIMITIVE_PROFILE --> LOCAL_MEMBER
-        LOCAL_MEMBER --> PHYSICAL_REGISTRY
+        CHARGED_PROFILE --> PHYSICAL_REGISTRY
+        NEUTRAL_PROFILE --> PHYSICAL_REGISTRY
+        CONFINING_PROFILE --> PHYSICAL_REGISTRY
+        PRIMITIVE_PROFILE --> LOCAL_MEMBERS
+        CHARGED_PROFILE --> LOCAL_MEMBERS
+        NEUTRAL_PROFILE --> LOCAL_MEMBERS
+        LOCAL_MEMBERS --> PHYSICAL_REGISTRY
         PREMISE_ROUTE -. "Remains generic for later targets" .-> PREMISE_AUTHORITY
         PREMISE_AUTHORITY --> SPECIES_LAWS
         SPECIES_LAWS --> PHYSICAL_REGISTRY
@@ -357,31 +368,31 @@ flowchart TB
 
 - Solid arrows are permitted data or authority flow. Dotted arrows are
   diagnostic, representational, or rejected uses.
-- The live PR #215 route now closes one claim-local primitive member and still
-  ends at the typed Stage 1 refusal because both Stage 1 proof capabilities
-  remain absent.
+- The live PR #215 route closes four claim-local members plus one zero-member
+  confining profile and still ends at the typed Stage 1 refusal because both
+  Stage 1 proof capabilities remain absent.
 - The drawn seven-stage chain is one Solar-system route, not a universal
   completion predicate. Snapshot activation also requires a sealed route
   receipt that proves generic obligation applicability, every typed
   not-applicable decision, and every alternate-origin substitution.
 - The live floor-root pair supplies coordinate capabilities only. Its pure-mass
-  expression remains membership-neutral. The separate primitive-profile pair
-  supplies the only local member authority.
+  expression remains membership-neutral. Four separate profile pairs supply
+  the current local authorities; the confining pair supplies no member.
 - The first primitive candidate remains rejected historical audit data. The
   replacement does not reuse its assertion hashes. It executes the registered
   catalog, protocol, basis, symmetry, scope, canary, and independent outer
   reconstruction paths before minting a capability.
-- The live physical-vocabulary pair classifies 33 admitted artifacts into 26
-  descriptor roles, 33 relation targets, and one constraint law. That is not
+- The live physical-vocabulary pair classifies 125 admitted artifacts into 107
+  descriptor roles, 125 relation targets, and five constraint laws. That is not
   a closed vocabulary: global coverage and membership authority remain false.
   The frontier preserves every artifact's exact identity, tier, provenance
   tag, and derived or irreducible route without assuming one familiar class.
 - The paired derive-first route replays the exact admitted `eps_0` capability
   as a grounded seed. It does not use that seed to invent the next target. A
   failed rule search remains open unless a separate capability proves the
-  target-bound rule universe complete. The current local profile supplies one
+  target-bound rule universe complete. Each current local profile supplies one
   exact target and registered-catalog protocol. Every later target starts from
-  the generic open state and cannot inherit that local completeness.
+  the generic open state and cannot inherit any local completeness.
 - The viewer projects exact dimension-only relation terms from the sealed
   refusal without recomputing physics. The current collapse witness is
   `G^-1 * sound_speed^3`; its dimensionless similarity eigenstructure, initial

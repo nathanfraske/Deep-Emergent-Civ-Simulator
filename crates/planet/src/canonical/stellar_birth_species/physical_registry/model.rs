@@ -11,13 +11,14 @@ use super::charged_profile::ChargedProfileAdmissionCapability;
 use super::neutral_bound_profile::NeutralBoundProfileAdmissionCapability;
 use super::primitive_profile::PrimitiveProfileAdmissionCapability;
 use super::repository_roots::RepositoryRootAdmissionCapability;
+use super::strong_profile::StrongProfileAdmissionCapability;
 pub(super) use civsim_ledger::{Provenance as ProvenanceMark, Tier as LedgerTier};
 
 pub(super) const REGISTRY_SCHEMA_ID: &str =
-    "civsim.planet.stellar-birth-physical-species-registry.v6";
-pub(super) const PROOF_GRAPH_SCHEMA_ID: &str = "civsim.planet.stellar-birth-species-proof-graph.v5";
-pub(super) const PRODUCER_ID: &str = "civsim.planet.stellar-birth-physical-species-producer.v8";
-pub(super) const WATCHDOG_ID: &str = "civsim.planet.stellar-birth-physical-species-watchdog.v7";
+    "civsim.planet.stellar-birth-physical-species-registry.v7";
+pub(super) const PROOF_GRAPH_SCHEMA_ID: &str = "civsim.planet.stellar-birth-species-proof-graph.v6";
+pub(super) const PRODUCER_ID: &str = "civsim.planet.stellar-birth-physical-species-producer.v9";
+pub(super) const WATCHDOG_ID: &str = "civsim.planet.stellar-birth-physical-species-watchdog.v8";
 
 pub(super) const MAX_ARTIFACT_COUNT: u32 = 4_096;
 pub(super) const MAX_REGISTRY_MEMBER_COUNT: u32 = 4_096;
@@ -398,6 +399,7 @@ enum VerifiedAdmissionCapability {
     PrimitiveProfile(PrimitiveProfileAdmissionCapability),
     ChargedProfile(ChargedProfileAdmissionCapability),
     NeutralBoundProfile(NeutralBoundProfileAdmissionCapability),
+    StrongProfile(StrongProfileAdmissionCapability),
     #[cfg(test)]
     ExactTest {
         claimed_identity: ArtifactIdentity,
@@ -411,6 +413,7 @@ pub(super) enum AdmissionCapabilityKind {
     PrimitiveProfile,
     ChargedProfile,
     NeutralBoundProfile,
+    StrongProfile,
     #[cfg(test)]
     ExactTest,
 }
@@ -487,6 +490,24 @@ impl AdmittedArtifact {
         }
     }
 
+    pub(super) fn from_strong_profile(
+        claimed_identity: ArtifactIdentity,
+        admission: RootAdmission,
+        payload: ArtifactPayload,
+        capability: StrongProfileAdmissionCapability,
+    ) -> Self {
+        debug_assert_eq!(capability.claimed_identity(), claimed_identity);
+        debug_assert_eq!(capability.admission(), &admission);
+        debug_assert_ne!(capability.profile_root_identity().0, [0; 32]);
+        debug_assert_ne!(capability.pair_receipt_sha256(), [0; 32]);
+        Self {
+            claimed_identity,
+            admission,
+            payload,
+            admission_capability: VerifiedAdmissionCapability::StrongProfile(capability),
+        }
+    }
+
     #[cfg(test)]
     pub(super) fn from_exact_test_recomputation(
         claimed_identity: ArtifactIdentity,
@@ -526,6 +547,9 @@ impl AdmittedArtifact {
             VerifiedAdmissionCapability::NeutralBoundProfile(_) => {
                 panic!("neutral-bound-profile capabilities cannot be refreshed by a test fixture")
             }
+            VerifiedAdmissionCapability::StrongProfile(_) => {
+                panic!("strong-profile capabilities cannot be refreshed by a test fixture")
+            }
         }
     }
 
@@ -543,6 +567,7 @@ impl AdmittedArtifact {
             VerifiedAdmissionCapability::NeutralBoundProfile(capability) => {
                 capability.claimed_identity()
             }
+            VerifiedAdmissionCapability::StrongProfile(capability) => capability.claimed_identity(),
             #[cfg(test)]
             VerifiedAdmissionCapability::ExactTest {
                 claimed_identity, ..
@@ -564,6 +589,7 @@ impl AdmittedArtifact {
             VerifiedAdmissionCapability::NeutralBoundProfile(_) => {
                 AdmissionCapabilityKind::NeutralBoundProfile
             }
+            VerifiedAdmissionCapability::StrongProfile(_) => AdmissionCapabilityKind::StrongProfile,
             #[cfg(test)]
             VerifiedAdmissionCapability::ExactTest { .. } => AdmissionCapabilityKind::ExactTest,
         }
@@ -575,6 +601,7 @@ impl AdmittedArtifact {
             VerifiedAdmissionCapability::PrimitiveProfile(capability) => capability.admission(),
             VerifiedAdmissionCapability::ChargedProfile(capability) => capability.admission(),
             VerifiedAdmissionCapability::NeutralBoundProfile(capability) => capability.admission(),
+            VerifiedAdmissionCapability::StrongProfile(capability) => capability.admission(),
             #[cfg(test)]
             VerifiedAdmissionCapability::ExactTest { admission, .. } => admission,
         }
@@ -588,6 +615,7 @@ impl AdmittedArtifact {
             VerifiedAdmissionCapability::PrimitiveProfile(_) => None,
             VerifiedAdmissionCapability::ChargedProfile(_) => None,
             VerifiedAdmissionCapability::NeutralBoundProfile(_) => None,
+            VerifiedAdmissionCapability::StrongProfile(_) => None,
             #[cfg(test)]
             VerifiedAdmissionCapability::ExactTest { .. } => None,
         }
@@ -601,6 +629,7 @@ impl AdmittedArtifact {
             VerifiedAdmissionCapability::RepositoryRoot(_) => None,
             VerifiedAdmissionCapability::ChargedProfile(_) => None,
             VerifiedAdmissionCapability::NeutralBoundProfile(_) => None,
+            VerifiedAdmissionCapability::StrongProfile(_) => None,
             #[cfg(test)]
             VerifiedAdmissionCapability::ExactTest { .. } => None,
         }
@@ -614,6 +643,7 @@ impl AdmittedArtifact {
             VerifiedAdmissionCapability::RepositoryRoot(_) => None,
             VerifiedAdmissionCapability::ChargedProfile(_) => None,
             VerifiedAdmissionCapability::NeutralBoundProfile(_) => None,
+            VerifiedAdmissionCapability::StrongProfile(_) => None,
             #[cfg(test)]
             VerifiedAdmissionCapability::ExactTest { .. } => None,
         }
@@ -626,7 +656,8 @@ impl AdmittedArtifact {
             }
             VerifiedAdmissionCapability::RepositoryRoot(_)
             | VerifiedAdmissionCapability::PrimitiveProfile(_)
-            | VerifiedAdmissionCapability::NeutralBoundProfile(_) => None,
+            | VerifiedAdmissionCapability::NeutralBoundProfile(_)
+            | VerifiedAdmissionCapability::StrongProfile(_) => None,
             #[cfg(test)]
             VerifiedAdmissionCapability::ExactTest { .. } => None,
         }
@@ -639,7 +670,8 @@ impl AdmittedArtifact {
             }
             VerifiedAdmissionCapability::RepositoryRoot(_)
             | VerifiedAdmissionCapability::PrimitiveProfile(_)
-            | VerifiedAdmissionCapability::NeutralBoundProfile(_) => None,
+            | VerifiedAdmissionCapability::NeutralBoundProfile(_)
+            | VerifiedAdmissionCapability::StrongProfile(_) => None,
             #[cfg(test)]
             VerifiedAdmissionCapability::ExactTest { .. } => None,
         }
@@ -652,7 +684,8 @@ impl AdmittedArtifact {
             }
             VerifiedAdmissionCapability::RepositoryRoot(_)
             | VerifiedAdmissionCapability::PrimitiveProfile(_)
-            | VerifiedAdmissionCapability::ChargedProfile(_) => None,
+            | VerifiedAdmissionCapability::ChargedProfile(_)
+            | VerifiedAdmissionCapability::StrongProfile(_) => None,
             #[cfg(test)]
             VerifiedAdmissionCapability::ExactTest { .. } => None,
         }
@@ -665,7 +698,36 @@ impl AdmittedArtifact {
             }
             VerifiedAdmissionCapability::RepositoryRoot(_)
             | VerifiedAdmissionCapability::PrimitiveProfile(_)
-            | VerifiedAdmissionCapability::ChargedProfile(_) => None,
+            | VerifiedAdmissionCapability::ChargedProfile(_)
+            | VerifiedAdmissionCapability::StrongProfile(_) => None,
+            #[cfg(test)]
+            VerifiedAdmissionCapability::ExactTest { .. } => None,
+        }
+    }
+
+    pub(super) const fn strong_profile_pair_receipt_sha256(&self) -> Option<[u8; 32]> {
+        match &self.admission_capability {
+            VerifiedAdmissionCapability::StrongProfile(capability) => {
+                Some(capability.pair_receipt_sha256())
+            }
+            VerifiedAdmissionCapability::RepositoryRoot(_)
+            | VerifiedAdmissionCapability::PrimitiveProfile(_)
+            | VerifiedAdmissionCapability::ChargedProfile(_)
+            | VerifiedAdmissionCapability::NeutralBoundProfile(_) => None,
+            #[cfg(test)]
+            VerifiedAdmissionCapability::ExactTest { .. } => None,
+        }
+    }
+
+    pub(super) const fn strong_profile_root_identity(&self) -> Option<ArtifactIdentity> {
+        match &self.admission_capability {
+            VerifiedAdmissionCapability::StrongProfile(capability) => {
+                Some(capability.profile_root_identity())
+            }
+            VerifiedAdmissionCapability::RepositoryRoot(_)
+            | VerifiedAdmissionCapability::PrimitiveProfile(_)
+            | VerifiedAdmissionCapability::ChargedProfile(_)
+            | VerifiedAdmissionCapability::NeutralBoundProfile(_) => None,
             #[cfg(test)]
             VerifiedAdmissionCapability::ExactTest { .. } => None,
         }
@@ -856,6 +918,7 @@ pub(super) enum PhysicalRegistryRefusalCode {
     PrimitiveProfileProjectionInvalid,
     ChargedProfileProjectionInvalid,
     NeutralBoundProfileProjectionInvalid,
+    StrongProfileProjectionInvalid,
     PhysicalVocabularyBindingMismatch,
     StructureBindingMismatch,
     ArtifactCapacityExceeded,
@@ -932,6 +995,7 @@ impl PhysicalRegistryRefusalCode {
             Self::NeutralBoundProfileProjectionInvalid => {
                 "neutral_bound_profile_projection_invalid"
             }
+            Self::StrongProfileProjectionInvalid => "strong_profile_projection_invalid",
             Self::PhysicalVocabularyBindingMismatch => "physical_vocabulary_binding_mismatch",
             Self::StructureBindingMismatch => "structure_binding_mismatch",
             Self::ArtifactCapacityExceeded => "artifact_capacity_exceeded",

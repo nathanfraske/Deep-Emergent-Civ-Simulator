@@ -19,7 +19,7 @@ The lists below are GENERATED from `crates/physics/data/*.toml`, `crates/physics
 
 ## Deriving substrates (check here BEFORE authoring: what the world derives, and where)
 
-The 113 deriving subsystems below live outside the absolute floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
+The 114 deriving subsystems below live outside the absolute floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
 
 ### `crates/core/src/fixed.rs`
 
@@ -184,6 +184,9 @@ The 113 deriving subsystems below live outside the absolute floor. Each produces
 ### `crates/planet/src/canonical/stellar_birth_species/physical_registry/neutral_bound_profile/mod.rs`
 
 - one neutral two-body mass interval and strict free-constituent separation <- the sealed m_e and alpha coordinates, the admitted charged orbit, the admitted abelian carrier sector, and the claim-local leading central interaction (`crates/planet/src/canonical/stellar_birth_species/physical_registry/neutral_bound_profile/mod.rs:393`)
+### `crates/planet/src/canonical/stellar_birth_species/physical_registry/strong_profile/mod.rs`
+
+- one generic confining interaction grammar and isolated-carrier refusal <- the claim-local admitted compact noncommutative sector profile and its independent categorical entailment pair (`crates/planet/src/canonical/stellar_birth_species/physical_registry/strong_profile/mod.rs:284`)
 
 ## Stored material and quantity axes (derive-first audit population)
 

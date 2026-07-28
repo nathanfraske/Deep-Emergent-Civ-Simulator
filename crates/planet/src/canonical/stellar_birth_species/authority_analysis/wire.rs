@@ -498,6 +498,56 @@ fn write_physical_registry_frontier(
             "neutral_bound_profile_residual_slot_status",
             frontier.neutral_bound_profile.residual_slot_status_id,
         ),
+        (
+            "strong_profile_receipt_schema",
+            frontier.strong_profile.receipt_schema_id,
+        ),
+        ("strong_profile_claim_id", frontier.strong_profile.claim_id),
+        ("strong_profile_id", frontier.strong_profile.profile_id),
+        (
+            "strong_profile_theory_class_id",
+            frontier.strong_profile.theory_class_id,
+        ),
+        (
+            "strong_profile_residual_slot_id",
+            frontier.strong_profile.residual_slot_id,
+        ),
+        (
+            "strong_profile_producer_id",
+            frontier.strong_profile.producer_id,
+        ),
+        (
+            "strong_profile_watchdog_id",
+            frontier.strong_profile.watchdog_id,
+        ),
+        (
+            "strong_profile_derive_first_status",
+            frontier.strong_profile.derive_first_status_id,
+        ),
+        (
+            "strong_profile_buckingham_pi_status",
+            frontier.strong_profile.buckingham_pi_status_id,
+        ),
+        (
+            "strong_profile_gap_law_status",
+            frontier.strong_profile.gap_law_status_id,
+        ),
+        (
+            "strong_profile_chaos_protocol_status",
+            frontier.strong_profile.chaos_protocol_status_id,
+        ),
+        (
+            "strong_profile_residual_law_status",
+            frontier.strong_profile.residual_law_status_id,
+        ),
+        (
+            "strong_profile_residual_slot_status",
+            frontier.strong_profile.residual_slot_status_id,
+        ),
+        (
+            "strong_profile_authority_effect",
+            frontier.strong_profile.authority_effect,
+        ),
         ("registry_refusal_code", frontier.registry_refusal_code),
         (
             "registry_authority_effect",
@@ -707,6 +757,78 @@ fn write_physical_registry_frontier(
             "neutral_bound_profile_threshold_interval.sha256",
             frontier.neutral_bound_profile.threshold_interval_sha256,
         ),
+        (
+            "strong_profile_root_identity.sha256",
+            frontier.strong_profile.profile_root_identity_sha256,
+        ),
+        (
+            "strong_profile_sector_identity.sha256",
+            frontier.strong_profile.sector_identity_sha256,
+        ),
+        (
+            "strong_profile_carrier_identity.sha256",
+            frontier.strong_profile.carrier_identity_sha256,
+        ),
+        (
+            "strong_profile_constraint_law_identity.sha256",
+            frontier.strong_profile.constraint_law_identity_sha256,
+        ),
+        (
+            "strong_profile_pair_receipt.sha256",
+            frontier.strong_profile.pair_receipt_sha256,
+        ),
+        (
+            "strong_profile_evidence_custody_receipt.sha256",
+            frontier.strong_profile.evidence_custody_receipt_sha256,
+        ),
+        (
+            "strong_profile_curvature_producer.sha256",
+            frontier.strong_profile.curvature_producer_sha256,
+        ),
+        (
+            "strong_profile_curvature_watchdog.sha256",
+            frontier.strong_profile.curvature_watchdog_sha256,
+        ),
+        (
+            "strong_profile_conservation_producer.sha256",
+            frontier.strong_profile.conservation_producer_sha256,
+        ),
+        (
+            "strong_profile_conservation_watchdog.sha256",
+            frontier.strong_profile.conservation_watchdog_sha256,
+        ),
+        (
+            "strong_profile_confinement_producer.sha256",
+            frontier.strong_profile.confinement_producer_sha256,
+        ),
+        (
+            "strong_profile_confinement_watchdog.sha256",
+            frontier.strong_profile.confinement_watchdog_sha256,
+        ),
+        (
+            "strong_profile_applicability_producer.sha256",
+            frontier.strong_profile.applicability_producer_sha256,
+        ),
+        (
+            "strong_profile_applicability_watchdog.sha256",
+            frontier.strong_profile.applicability_watchdog_sha256,
+        ),
+        (
+            "strong_profile_validity_producer.sha256",
+            frontier.strong_profile.validity_producer_sha256,
+        ),
+        (
+            "strong_profile_validity_watchdog.sha256",
+            frontier.strong_profile.validity_watchdog_sha256,
+        ),
+        (
+            "strong_profile_asymptotic_producer.sha256",
+            frontier.strong_profile.asymptotic_producer_sha256,
+        ),
+        (
+            "strong_profile_asymptotic_watchdog.sha256",
+            frontier.strong_profile.asymptotic_watchdog_sha256,
+        ),
     ] {
         write_digest(f, &frontier_prefix, field, digest)?;
     }
@@ -877,6 +999,75 @@ fn write_physical_registry_frontier(
         "{frontier_prefix}.neutral_bound_profile_global_stability_claim={}",
         frontier.neutral_bound_profile.global_stability_claim
     )?;
+    writeln!(
+        f,
+        "{frontier_prefix}.strong_profile_artifact_count={}",
+        frontier.strong_profile.artifact_count
+    )?;
+    writeln!(
+        f,
+        "{frontier_prefix}.strong_profile_member_count={}",
+        frontier.strong_profile.member_count
+    )?;
+    writeln!(
+        f,
+        "{frontier_prefix}.strong_profile_admission_count={}",
+        frontier.strong_profile.admission_census.len()
+    )?;
+    for (index, admission) in frontier.strong_profile.admission_census.iter().enumerate() {
+        let admission_prefix = format!("{frontier_prefix}.strong_profile_admission.{index:04}");
+        write_digest(
+            f,
+            &admission_prefix,
+            "identity.sha256",
+            admission.identity_sha256,
+        )?;
+        writeln!(
+            f,
+            "{admission_prefix}.tier={}",
+            canonical_text(admission.tier_id)
+        )?;
+        writeln!(
+            f,
+            "{admission_prefix}.provenance={}",
+            canonical_text(admission.provenance_tag)
+        )?;
+        writeln!(
+            f,
+            "{admission_prefix}.route={}",
+            canonical_text(admission.route_id)
+        )?;
+    }
+    for (field, value) in [
+        (
+            "strong_profile_global_physical_vocabulary_coverage",
+            frontier.strong_profile.global_physical_vocabulary_coverage,
+        ),
+        (
+            "strong_profile_membership_authority",
+            frontier.strong_profile.membership_authority,
+        ),
+        (
+            "strong_profile_carrier_species_membership",
+            frontier.strong_profile.carrier_species_membership,
+        ),
+        (
+            "strong_profile_conditioned_support_authority",
+            frontier.strong_profile.conditioned_support_authority,
+        ),
+        (
+            "strong_profile_confinement_theorem_claim",
+            frontier.strong_profile.confinement_theorem_claim,
+        ),
+        (
+            "strong_profile_confining_asymptotic_boundary_admitted",
+            frontier
+                .strong_profile
+                .confining_asymptotic_boundary_admitted,
+        ),
+    ] {
+        writeln!(f, "{frontier_prefix}.{field}={value}")?;
+    }
     writeln!(
         f,
         "{frontier_prefix}.root_admission_count={}",

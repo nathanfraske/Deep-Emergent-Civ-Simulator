@@ -422,7 +422,8 @@ fn inspect_mass_uncertainty_transport(
             AdmissionCapabilityKind::ExactTest => {}
             AdmissionCapabilityKind::PrimitiveProfile
             | AdmissionCapabilityKind::ChargedProfile
-            | AdmissionCapabilityKind::NeutralBoundProfile => {
+            | AdmissionCapabilityKind::NeutralBoundProfile
+            | AdmissionCapabilityKind::StrongProfile => {
                 return Err(PhysicalRegistryRefusalCode::MassUncertaintyTransportInvalid);
             }
         }
@@ -500,6 +501,25 @@ fn verify_admission_capability(
                 return Err(PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch);
             }
         }
+        AdmissionCapabilityKind::StrongProfile => {
+            let Some(receipt_sha256) = artifact.strong_profile_pair_receipt_sha256() else {
+                return Err(PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch);
+            };
+            let Some(profile_root_identity) = artifact.strong_profile_root_identity() else {
+                return Err(PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch);
+            };
+            if receipt_sha256.iter().all(|byte| *byte == 0)
+                || profile_root_identity.0.iter().all(|byte| *byte == 0)
+                || artifact.repository_root_pair_receipt_sha256().is_some()
+                || artifact.primitive_profile_pair_receipt_sha256().is_some()
+                || artifact.charged_profile_pair_receipt_sha256().is_some()
+                || artifact
+                    .neutral_bound_profile_pair_receipt_sha256()
+                    .is_some()
+            {
+                return Err(PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch);
+            }
+        }
         #[cfg(test)]
         AdmissionCapabilityKind::ExactTest => {
             if artifact.repository_root_pair_receipt_sha256().is_some()
@@ -508,6 +528,7 @@ fn verify_admission_capability(
                 || artifact
                     .neutral_bound_profile_pair_receipt_sha256()
                     .is_some()
+                || artifact.strong_profile_pair_receipt_sha256().is_some()
             {
                 return Err(PhysicalRegistryRefusalCode::AdmissionCapabilityMismatch);
             }

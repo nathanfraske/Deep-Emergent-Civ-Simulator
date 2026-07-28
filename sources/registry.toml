@@ -123,6 +123,45 @@ read_channels = "Semantic HTML text and the equation identifiers embedded by the
 note = "DOCUMENTARY COMPANION, NOT AN INDEPENDENT MEASUREMENT. This second DLMF section cross-checks the reduced-mass formulation, while the repository's producer and watchdog independently prove the exact dimensionless result."
 
 # ---------------------------------------------------------------------------------------------------
+# Documentary custody for the noncommutative carrier and confining-asymptotic statements used to
+# scope one strong-like profile. The familiar QCD specialization is a validation witness only.
+# It does not choose the repository profile, its algebra, a coupling, or a constituent spectrum.
+# ---------------------------------------------------------------------------------------------------
+
+[[source]]
+id = "pdg_2024_qcd_review"
+citation = "Huston, J., Rabbertz, K. and Zanderighi, G., 2024, Quantum Chromodynamics, in Navas, S. et al. (Particle Data Group), Review of Particle Physics, Physical Review D 110, 030001, DOI 10.1103/PhysRevD.110.030001. Review revised August 2023 and dated 31 May 2024."
+url = "https://pdg.lbl.gov/2024/reviews/rpp2024-rev-qcd.pdf"
+archived_url = "https://web.archive.org/web/20240811233948id_/https://pdg.lbl.gov/2024/reviews/rpp2024-rev-qcd.pdf"
+
+sha256 = "35f0bb289cf8cdaaef4963bab99bc9e45a7cebcf60b766fb9d16b61ea1ac8051"
+bytes = 328166
+pages = 2
+sha256_fetched = "d06948c331663c2341c3f922e48cd29b4aac83f3bbff71fe3ac8d70cb4f40c51"
+bytes_fetched = 1569596
+pages_fetched = 64
+
+recipe = "Fetch the official PDG PDF at the recorded URL, then keep zero-based PDF pages 0 and 1 with pypdf.PdfWriter. The held slim reports pypdf as its Producer. The full-fetch and held-slim receipts are recorded separately above."
+grade = "theory review (documentary source, not project authority)"
+scope = "Section 9.1, limited to printed pages 1 and 2. Equations 9.1 and 9.2 exhibit the gauge connection, adjoint carrier, noncommutative field-strength bracket, and resulting carrier self-interaction. The prose on printed page 2 states the familiar QCD confinement observation through the absence of free color-bearing constituents and the invariant composition of asymptotic hadrons. This source is specific to QCD. It does not derive or admit the repository's generic profile, choose a group or rank, prove four-dimensional confinement, supply a coupling or transition scale, enumerate constituents, or authorize a species member."
+anchor = "Printed page 1, equation 9.1 and its field and representation definitions; printed page 2, equation 9.2 and the immediately following paragraphs on free-particle absence, invariant combinations, and three- and four-carrier vertices."
+
+custody = "in_repo"
+holding = "sources/pdg_2024_qcd_review/huston_rabbertz_zanderighi_2024_pdg_qcd_SLIM_p1_p2.pdf"
+
+licence = "Creative Commons Attribution 4.0 International (CC BY 4.0). The official PDG 2024 download page states that, except where otherwise noted, content of the 2024 Review of Particle Physics carries this licence. No exception is marked on either held review page. Redistribution and slimming are permitted with attribution."
+redistributable = true
+licence_evidence = "https://pdg.lbl.gov/2024/download/download.html and https://journals.aps.org/prd/abstract/10.1103/PhysRevD.110.030001"
+free_route = "https://pdg.lbl.gov/2024/reviews/rpp2024-rev-qcd.pdf"
+free_route_kind = "publisher-open"
+reviewed = "2026-07-28"
+
+slim = "KEPT: printed page 1, which carries the review identity, authors, contents, PDG citation, the QCD Lagrangian in equation 9.1, and the definitions of the gauge connection, adjoint carrier, matter representation, and coupling; printed page 2, which carries the noncommutative field tensor in equation 9.2, the free-particle and invariant-combination statements, the carrier self-interaction vertices, and the opening running-coupling discussion. DROPPED: printed pages 3 through 64, which cover masses, perturbative predictions, experiments, and coupling determinations outside this categorical documentary claim. The full document is recoverable from the official and archived URLs and checkable against the full-fetch receipt."
+read_channels = "Semantic PDF text and visual renders of both held pages were inspected together. The equations, field definitions, confinement paragraph, and self-interaction paragraph agree across the two channels. No numerical value was transcribed."
+archive_verification = "The archived URL was downloaded independently on 2026-07-28. Its 1,569,596 bytes have SHA-256 d06948c331663c2341c3f922e48cd29b4aac83f3bbff71fe3ac8d70cb4f40c51, byte-identical to the official full fetch."
+note = "DOCUMENTARY CUSTODY ONLY. The familiar QCD specialization supports review of one generic categorical profile. It admits no algebra, rank, representation size, coupling, confinement scale, constituent, carrier species, composite, or canonical premise. Project admission still requires the complete derive-first and irreducible route plus an independent authority pair."
+
+# ---------------------------------------------------------------------------------------------------
 # Documentary custody for one narrow Standard Model statement. This source record and the held bytes
 # grant no project authority and admit no primitive physical profile.
 # ---------------------------------------------------------------------------------------------------

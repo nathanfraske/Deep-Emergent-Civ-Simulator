@@ -12,7 +12,7 @@ Custody is one of three. `in_repo`: bytes held in-tree, checksum verifiable with
 witness. `external`: bytes in local custody outside the repo, checksum plus archive snapshot.
 The licence decides which is permitted; see `docs/working/FETCH_PIPELINE_PLAN.md` section 3.
 
-**51 sources** (20 registry, 31 mirrored).
+**52 sources** (21 registry, 31 mirrored).
 
 ## Registry (hand-maintained)
 
@@ -207,6 +207,19 @@ Carena, M., Grojean, C., Kado, M. and Sharma, V., 2024, Status of Higgs Boson Ph
 - licence evidence: https://pdg.lbl.gov/2024/copyright-1.html and https://journals.aps.org/prd/abstract/10.1103/PhysRevD.110.030001
 - free route (publisher-open): https://pdg.lbl.gov/2024/reviews/rpp2024-rev-higgs-boson.pdf
 - holding: `sources/pdg_2024_higgs_boson_review/navas_et_al_2024_pdg_higgs_SLIM_p1_p4.pdf`
+
+### `pdg_2024_qcd_review`
+
+Huston, J., Rabbertz, K. and Zanderighi, G., 2024, Quantum Chromodynamics, in Navas, S. et al. (Particle Data Group), Review of Particle Physics, Physical Review D 110, 030001, DOI 10.1103/PhysRevD.110.030001. Review revised August 2023 and dated 31 May 2024.
+
+- sha256: `35f0bb289cf8cdaaef4963bab99bc9e45a7cebcf60b766fb9d16b61ea1ac8051`
+- archived: https://web.archive.org/web/20240811233948id_/https://pdg.lbl.gov/2024/reviews/rpp2024-rev-qcd.pdf
+- scope: Section 9.1, limited to printed pages 1 and 2. Equations 9.1 and 9.2 exhibit the gauge connection, adjoint carrier, noncommutative field-strength bracket, and resulting carrier self-interaction. The prose on printed page 2 states the familiar QCD confinement observation through the absence of free color-bearing constituents and the invariant composition of asymptotic hadrons. This source is specific to QCD. It does not derive or admit the repository's generic profile, choose a group or rank, prove four-dimensional confinement, supply a coupling or transition scale, enumerate constituents, or authorize a species member.
+- custody: in_repo
+- licence (redistributable): Creative Commons Attribution 4.0 International (CC BY 4.0). The official PDG 2024 download page states that, except where otherwise noted, content of the 2024 Review of Particle Physics carries this licence. No exception is marked on either held review page. Redistribution and slimming are permitted with attribution.
+- licence evidence: https://pdg.lbl.gov/2024/download/download.html and https://journals.aps.org/prd/abstract/10.1103/PhysRevD.110.030001
+- free route (publisher-open): https://pdg.lbl.gov/2024/reviews/rpp2024-rev-qcd.pdf
+- holding: `sources/pdg_2024_qcd_review/huston_rabbertz_zanderighi_2024_pdg_qcd_SLIM_p1_p2.pdf`
 
 ### `svo_tlusty_bstar2006`
 

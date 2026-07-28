@@ -33,15 +33,16 @@ use watchdog::validate_analysis;
 use super::COMPLETE_SPECIES_STATE_MEAN_PARTICLE_MASS_LAW_ID;
 
 pub(in crate::canonical) const SPECIES_DERIVATION_ANALYSIS_SCHEMA_ID: &str =
-    "civsim.planet.stellar-birth-species-derivation-analysis.v10";
+    "civsim.planet.stellar-birth-species-derivation-analysis.v11";
 pub(in crate::canonical) const SPECIES_DERIVATION_ANALYSIS_CHECKER_ID: &str =
-    "civsim.planet.stellar-birth-species-derivation-watchdog.v11";
+    "civsim.planet.stellar-birth-species-derivation-watchdog.v12";
 
 const FLOOR_ANCHOR_ID: &str = "fundamental.m_e";
 const FLOOR_ANCHOR_SYMBOL: &str = "m_e";
 const FLOOR_ANCHOR_ROLE: &str = "mass_coordinate_anchor_only";
 const FRONTIER_SOURCE_ID: &str = "repository_physical_registry_partial_closure";
-const FRONTIER_SCOPE_ID: &str = "four_local_members_then_open_global_obligations";
+const FRONTIER_SCOPE_ID: &str =
+    "four_local_members_plus_confining_profile_then_open_global_obligations";
 pub(super) const LIVE_PHYSICAL_REGISTRY_ATTEMPT_ID: &str =
     "stellar_birth.species_derivation.partial_physical_registry_closure";
 
@@ -425,7 +426,10 @@ mod tests {
                 view.law_premise_content_identity_sha256().unwrap(),
             ))
         );
-        assert_eq!(view.premise_admission_route_counts(), Some((1, 88, 105, 4)));
+        assert_eq!(
+            view.premise_admission_route_counts(),
+            Some((1, 107, 125, 5))
+        );
         assert_eq!(
             view.premise_admission_route_decisions(),
             Some(("derived", "next_target_not_bound"))
@@ -452,14 +456,14 @@ mod tests {
             Some(1)
         );
         assert_eq!(view.physical_registry_admitted_root_count(), Some(4));
-        assert_eq!(view.physical_registry_admitted_artifact_count(), Some(105));
+        assert_eq!(view.physical_registry_admitted_artifact_count(), Some(125));
         assert_eq!(view.physical_registry_membership_authority(), Some(false));
-        assert_eq!(view.physical_vocabulary_counts(), Some((105, 88, 105, 4)));
+        assert_eq!(view.physical_vocabulary_counts(), Some((125, 107, 125, 5)));
         assert_eq!(view.physical_vocabulary_scope(), Some((true, false, false)));
         assert_eq!(
             view.physical_vocabulary_relation_target_identities()
                 .map(|identities| identities.len()),
-            Some(105)
+            Some(125)
         );
         assert_ne!(view.physical_vocabulary_receipt_sha256(), Some([0; 32]));
         assert_eq!(
@@ -553,6 +557,39 @@ mod tests {
             ))
         );
         assert_eq!(view.neutral_bound_profile_admissions().count(), 33);
+        assert_eq!(
+            view.strong_profile_identity().map(|identity| identity.2),
+            Some("interaction-profile.compact-noncommutative-confining-sector.v1")
+        );
+        assert_eq!(view.strong_profile_counts(), Some((20, 0)));
+        assert!(view
+            .strong_profile_identity_digests()
+            .is_some_and(|digests| digests.into_iter().all(|digest| digest != [0; 32])));
+        assert!(view
+            .strong_profile_receipt_digests()
+            .is_some_and(|digests| digests.0 != [0; 32] && digests.1 != [0; 32]));
+        let strong_checker_evidence = view
+            .strong_profile_checker_evidence_sha256()
+            .expect("confining checker evidence is visible");
+        assert!(strong_checker_evidence
+            .iter()
+            .all(|digest| *digest != [0; 32]));
+        assert_eq!(
+            view.strong_profile_scope(),
+            Some((false, false, false, false, false, true, "none"))
+        );
+        assert_eq!(
+            view.strong_profile_protocol_statuses(),
+            Some((
+                "executed_open_frontier",
+                "semantic_inapplicability_paired",
+                "executed_and_bound",
+                "nondynamical_inapplicability_paired",
+                "executed_and_bound",
+                "collision_checked_unique",
+            ))
+        );
+        assert_eq!(view.strong_profile_admissions().count(), 20);
         assert_eq!(view.physical_registry_refusal_code(), Some("none"));
         assert_eq!(view.physical_registry_member_count(), Some(4));
         assert_eq!(view.physical_registry_open_obligations().len(), 6);
@@ -563,7 +600,7 @@ mod tests {
         );
         assert_eq!(
             view.frontier_scope_id(),
-            Some("four_local_members_then_open_global_obligations")
+            Some("four_local_members_plus_confining_profile_then_open_global_obligations")
         );
         assert_eq!(view.frontier_completeness_claim(), Some(false));
         assert_eq!(view.candidate_member_count(), Some(4));
@@ -595,9 +632,9 @@ mod tests {
                 "complete_global_physical_vocabulary_coverage",
                 "complete_registry_closure_domain",
                 "conditioned_species_support",
+                "confining-sector-constituent-content",
                 "multi-constituent-bound-state-spectrum",
                 "reaction-network-closure",
-                "strong-interaction-profile",
             ]
             .into_iter()
             .map(str::to_owned)
@@ -613,6 +650,7 @@ mod tests {
                 "planet.primitive-excitation.unbroken-abelian-null-mode",
                 "planet.charged-matter.charge-conjugate-massive-spinor-pair",
                 "planet.neutral-bound-state.equal-mass-opposite-charge-central-ground-level",
+                "planet.interaction-profile.compact-noncommutative-confining-asymptotic-boundary",
                 "civsim.planet.stellar-birth-physical-vocabulary.partition.v1",
             ]
         );

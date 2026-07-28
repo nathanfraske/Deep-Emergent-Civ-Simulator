@@ -16,7 +16,7 @@ fn the_no_argument_binary_enters_the_floor_only_runner_and_refuses() {
 
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stderr.is_empty());
-    assert!(stdout.starts_with("receipt=civsim.planet.run.v13\ncomplete=false\n"));
+    assert!(stdout.starts_with("receipt=civsim.planet.run.v14\ncomplete=false\n"));
     assert!(stdout.contains("absolute_floor_entries=3\n"));
     assert!(stdout.contains("representation.schema=\"civsim.units.si-representation.v1\"\n"));
     assert!(stdout.contains("event_count=6\n"));
@@ -105,13 +105,13 @@ fn the_no_argument_binary_enters_the_floor_only_runner_and_refuses() {
         "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.vocabulary_receipt_schema=\"civsim.planet.stellar-birth-physical-vocabulary-agreement.v1\"\n"
     ));
     assert!(stdout.contains(
-        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.vocabulary.descriptor_role_count=88\n"
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.vocabulary.descriptor_role_count=107\n"
     ));
     assert!(stdout.contains(
-        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.vocabulary.relation_target_count=105\n"
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.vocabulary.relation_target_count=125\n"
     ));
     assert!(stdout.contains(
-        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.vocabulary.constraint_law_count=4\n"
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.vocabulary.constraint_law_count=5\n"
     ));
     assert!(stdout.contains(
         "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.neutral_bound_profile_artifact_count=33\n"
@@ -121,6 +121,18 @@ fn the_no_argument_binary_enters_the_floor_only_runner_and_refuses() {
     ));
     assert!(stdout.contains(
         "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.neutral_bound_profile_decay_disposition=\"energetically_open_neutral_massless_carrier_family\"\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.strong_profile_artifact_count=20\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.strong_profile_member_count=0\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.strong_profile_confinement_theorem_claim=false\n"
+    ));
+    assert!(stdout.contains(
+        "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.strong_profile_confining_asymptotic_boundary_admitted=true\n"
     ));
     assert!(stdout.contains(
         "refusal.0000.open_requirement.0000.analysis.0001.physical_registry_frontier.vocabulary.current_input_partition_complete=true\n"
@@ -154,7 +166,7 @@ fn the_no_argument_binary_enters_the_floor_only_runner_and_refuses() {
     ));
     assert!(stdout.contains("refusal.0000.open_requirement.0001.analysis_count=0\n"));
     assert!(stdout.contains(".exhaustion.gap.chaos_protocol=not_applicable\n"));
-    assert!(stdout.contains("transcript=civsim.planet.transcript.v10\n"));
+    assert!(stdout.contains("transcript=civsim.planet.transcript.v11\n"));
     assert!(!stdout.contains(".kind=contingency\n"));
     assert!(!stdout.contains(".kind=written_state\n"));
 }
@@ -432,11 +444,11 @@ fn species_live_refusal_has_a_typed_read_only_api() {
     assert_eq!(species.physical_registry_admitted_root_count(), Some(4));
     assert_eq!(
         species.physical_registry_admitted_artifact_count(),
-        Some(105)
+        Some(125)
     );
     assert_eq!(
         species.physical_vocabulary_counts(),
-        Some((105, 88, 105, 4))
+        Some((125, 107, 125, 5))
     );
     assert_eq!(
         species.physical_vocabulary_scope(),
@@ -446,7 +458,7 @@ fn species_live_refusal_has_a_typed_read_only_api() {
         species
             .physical_vocabulary_relation_target_identities()
             .map(|identities| identities.len()),
-        Some(105)
+        Some(125)
     );
     assert_ne!(species.physical_vocabulary_receipt_sha256(), Some([0; 32]));
     assert_eq!(species.primitive_profile_counts(), Some((29, 10, 1)));
@@ -471,6 +483,11 @@ fn species_live_refusal_has_a_typed_read_only_api() {
         ))
     );
     assert_eq!(species.neutral_bound_profile_scope(), Some((false, false)));
+    assert_eq!(species.strong_profile_counts(), Some((20, 0)));
+    assert_eq!(
+        species.strong_profile_scope(),
+        Some((false, false, false, false, false, true, "none"))
+    );
     assert_eq!(species.physical_registry_refusal_code(), Some("none"));
     assert_eq!(
         species.physical_registry_membership_authority(),
@@ -495,14 +512,14 @@ fn species_live_refusal_has_a_typed_read_only_api() {
     );
     assert_eq!(
         species.frontier_scope_id(),
-        Some("four_local_members_then_open_global_obligations")
+        Some("four_local_members_plus_confining_profile_then_open_global_obligations")
     );
     assert_eq!(species.frontier_completeness_claim(), Some(false));
     assert_eq!(species.attempts().len(), 1);
     assert!(species
         .open_proof_ids()
         .iter()
-        .any(|id| id == "strong-interaction-profile"));
+        .any(|id| id == "confining-sector-constituent-content"));
     assert!(!species
         .open_proof_ids()
         .iter()

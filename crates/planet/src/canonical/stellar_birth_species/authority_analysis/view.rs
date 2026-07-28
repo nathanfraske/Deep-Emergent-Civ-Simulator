@@ -17,6 +17,10 @@ pub type ChargedProfileCheckerEvidenceDigests = ([u8; 32], [u8; 32], [u8; 32], [
 /// separation-threshold interval digests for the neutral bound profile.
 pub type NeutralBoundProfileChannelDigests = ([u8; 32], [u8; 32], [u8; 32], [u8; 32]);
 
+/// Forward and reverse categorical receipts for curvature, conservation,
+/// confinement, applicability, validity, and asymptotic disposition.
+pub type StrongProfileCheckerEvidenceDigests = [[u8; 32]; 12];
+
 /// Read-only view of the authority analysis attached to the open joint measure.
 #[derive(Debug, Clone, Copy)]
 pub struct SpeciesDerivationAnalysisView<'a> {
@@ -959,6 +963,113 @@ impl<'a> SpeciesDerivationAnalysisView<'a> {
         })
     }
 
+    pub fn strong_profile_identity(
+        self,
+    ) -> Option<(
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+    )> {
+        self.computed().map(|analysis| {
+            let profile = &analysis.physical_registry_frontier.strong_profile;
+            (
+                profile.receipt_schema_id,
+                profile.claim_id,
+                profile.profile_id,
+                profile.theory_class_id,
+                profile.residual_slot_id,
+                profile.producer_id,
+                profile.watchdog_id,
+            )
+        })
+    }
+
+    pub fn strong_profile_counts(self) -> Option<(u32, u32)> {
+        self.computed().map(|analysis| {
+            let profile = &analysis.physical_registry_frontier.strong_profile;
+            (profile.artifact_count, profile.member_count)
+        })
+    }
+
+    pub fn strong_profile_identity_digests(self) -> Option<[[u8; 32]; 4]> {
+        self.computed().map(|analysis| {
+            let profile = &analysis.physical_registry_frontier.strong_profile;
+            [
+                profile.profile_root_identity_sha256,
+                profile.sector_identity_sha256,
+                profile.carrier_identity_sha256,
+                profile.constraint_law_identity_sha256,
+            ]
+        })
+    }
+
+    pub fn strong_profile_receipt_digests(self) -> Option<([u8; 32], [u8; 32])> {
+        self.computed().map(|analysis| {
+            let profile = &analysis.physical_registry_frontier.strong_profile;
+            (
+                profile.pair_receipt_sha256,
+                profile.evidence_custody_receipt_sha256,
+            )
+        })
+    }
+
+    pub fn strong_profile_checker_evidence_sha256(
+        self,
+    ) -> Option<StrongProfileCheckerEvidenceDigests> {
+        self.computed().map(|analysis| {
+            let profile = &analysis.physical_registry_frontier.strong_profile;
+            [
+                profile.curvature_producer_sha256,
+                profile.curvature_watchdog_sha256,
+                profile.conservation_producer_sha256,
+                profile.conservation_watchdog_sha256,
+                profile.confinement_producer_sha256,
+                profile.confinement_watchdog_sha256,
+                profile.applicability_producer_sha256,
+                profile.applicability_watchdog_sha256,
+                profile.validity_producer_sha256,
+                profile.validity_watchdog_sha256,
+                profile.asymptotic_producer_sha256,
+                profile.asymptotic_watchdog_sha256,
+            ]
+        })
+    }
+
+    pub fn strong_profile_scope(self) -> Option<(bool, bool, bool, bool, bool, bool, &'a str)> {
+        self.computed().map(|analysis| {
+            let profile = &analysis.physical_registry_frontier.strong_profile;
+            (
+                profile.global_physical_vocabulary_coverage,
+                profile.membership_authority,
+                profile.carrier_species_membership,
+                profile.conditioned_support_authority,
+                profile.confinement_theorem_claim,
+                profile.confining_asymptotic_boundary_admitted,
+                profile.authority_effect,
+            )
+        })
+    }
+
+    pub fn strong_profile_protocol_statuses(
+        self,
+    ) -> Option<(&'a str, &'a str, &'a str, &'a str, &'a str, &'a str)> {
+        self.computed().map(|analysis| {
+            let profile = &analysis.physical_registry_frontier.strong_profile;
+            (
+                profile.derive_first_status_id,
+                profile.buckingham_pi_status_id,
+                profile.gap_law_status_id,
+                profile.chaos_protocol_status_id,
+                profile.residual_law_status_id,
+                profile.residual_slot_status_id,
+            )
+        })
+    }
+
     pub fn physical_registry_membership_authority(self) -> Option<bool> {
         self.computed()
             .map(|analysis| analysis.physical_registry_frontier.membership_authority)
@@ -1009,6 +1120,19 @@ impl<'a> SpeciesDerivationAnalysisView<'a> {
             analysis
                 .physical_registry_frontier
                 .neutral_bound_profile
+                .admission_census
+                .iter()
+                .map(|admission| PhysicalRootAdmissionView { admission })
+        })
+    }
+
+    pub fn strong_profile_admissions(
+        self,
+    ) -> impl Iterator<Item = PhysicalRootAdmissionView<'a>> + 'a {
+        self.computed().into_iter().flat_map(|analysis| {
+            analysis
+                .physical_registry_frontier
+                .strong_profile
                 .admission_census
                 .iter()
                 .map(|admission| PhysicalRootAdmissionView { admission })

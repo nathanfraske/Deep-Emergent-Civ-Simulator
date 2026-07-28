@@ -93,6 +93,13 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "5c09a8d95b7de145110a9f97f773bb0e0a63d6d6dc0f964eeb8beb62efff5575",
     ),
     (
+        "planet.confining-profile-admission",
+        "authority",
+        "scientific",
+        "active",
+        "9ae77146b6dfbee2d9e9b7645b07c7adc4e61a66e0d8554682238907407c0d37",
+    ),
+    (
         "planet.derived-law-premise-eps0",
         "authority",
         "scientific",
@@ -118,7 +125,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "diagnostic",
         None,
         "diagnostic",
-        "b22d861f4b714b9831669ba360c207bffa10323964c1e18d13c310f86c6ff36c",
+        "d858bcf769f9e3e0eaa9e9d19d047f5abfd6fac3a0092f64811b4d8d4cdb5c1f",
     ),
     (
         "planet.primitive-profile-admission",
@@ -132,14 +139,14 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "diagnostic",
         None,
         "diagnostic",
-        "0364515737501208b5c8899913b43b68a38f950d2b86a263133b98c728b937c2",
+        "a8dc6cbee19f3ace007a38ab2a32258ba716104d1192a11620393ac1c9af0685",
     ),
     (
         "planet.species-state-support",
         "authority",
         "scientific",
         "blocked",
-        "7264ff58ee5ef96f3d4275fe8dfda949e40b1f6316b498e88c5c1d0e225f3519",
+        "d537f116e5d0d665fd74a8308a8868aa4700c59b13ccd1e42ca2b3d5476bea6b",
     ),
     (
         "planet.stage1-dimensional-census",
@@ -205,7 +212,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "3bfb94aa0c3f507ad8ba9762e91ca9009284becc9d9752d7b7b896cb9a26ca7d",
     ),
 )
-EXPECTED_COUNTS = (13, 11, 2, 26)
+EXPECTED_COUNTS = (14, 11, 2, 27)
 
 META_EXPECTATIONS = (
     ("producer_path", "scripts/authority_watchdog_gate.py"),

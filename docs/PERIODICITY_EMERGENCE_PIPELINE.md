@@ -8,7 +8,9 @@ cannot admit a law, value, species, or world state.
 ## Current truth
 
 Four physical species members have now emerged, but only inside three narrow
-local profiles. The canonical floor still contains three Universal `[M]`
+member-producing profiles. A fourth claim-local profile contributes a
+confining interaction grammar and zero members. The canonical floor still
+contains three Universal `[M]`
 invariants, `alpha`, `G`, and `m_e`. Exact SI definitions remain engine
 coordinates with no provenance mark or physical freedom. None of those values
 selects a field ontology, a gauge group, a particle name, or a desired Solar
@@ -65,8 +67,16 @@ neutral massless-carrier decay family has zero threshold and remains
 energetically open. No decay rate, lifetime, conditioned support, familiar
 atom, or global stability follows.
 
-The live vocabulary now partitions 105 admitted artifacts into 88 descriptor
-roles, 105 relation targets, and four constraint laws. This is complete only
+The fourth pair admits one compact noncommutative local interaction sector
+with a connection-carrier family, nonlinear curvature, covariant
+conservation, and an asymptotic boundary that excludes isolated noninvariant
+carriers. Its census is one Residue `[A]` profile claim plus 19 Residue `[D]`
+consequences. Confinement is an explicit scoped premise, not a claimed
+four-dimensional theorem. The profile fixes no group, rank, representation
+size, coupling, transition scale, constituent mass, spectrum, or member.
+
+The live vocabulary now partitions 125 admitted artifacts into 107 descriptor
+roles, 125 relation targets, and five constraint laws. This is complete only
 for the current input. Global physical-vocabulary coverage, global membership
 authority, conditioned support, and global stability remain false. There is
 still no composite core, nucleus, atom, element, periodic table, star, planet,
@@ -76,7 +86,7 @@ The generic law router remains available for every later premise. Its
 synchronous producer and dependency-indexed watchdog accept only grounded
 capability ancestry, keep incomplete searches open, and require independent
 target-bound rule-universe coverage before an unfamiliar irreducible branch
-may begin. The three local profiles do not turn this generic router into a
+may begin. The four local profiles do not turn this generic router into a
 closed ontology.
 
 `crates/physics/data/periodic_table.toml` is a terrestrial reference cache used
@@ -99,7 +109,8 @@ flowchart TB
     CHARGED["CURRENT charged-matter profile<br/>two-member conjugation orbit<br/>transported mass uncertainty<br/>Fermi statistics and scoped laws"]
     COMPOSITE["CURRENT neutral two-body profile<br/>exact lowest-level coefficient<br/>complete free-pair threshold<br/>open decay remains visible"]
     THRESHOLD["CURRENT claim-scoped threshold pair<br/>strictly below the covered threshold<br/>overlap stays unresolved<br/>coverage receipts remain distinct"]
-    STRONG["NEXT strong-interaction profile<br/>derive-first law and carrier premises<br/>no familiar core template"]
+    STRONG["CURRENT confining interaction profile<br/>nonlinear carrier grammar<br/>invariant-only asymptotic boundary<br/>zero species members"]
+    CONSTITUENT["NEXT confining-sector content<br/>exact representation and scales<br/>constituent excitation profiles<br/>no familiar core template"]
     NUCLEAR["FUTURE multi-constituent cores<br/>binding spectra, decay channels<br/>charge and neutral conserved content"]
     ELEMENT["FUTURE element identity projection<br/>same derived core-charge vector<br/>isotopes differ by neutral content or state"]
     ATOM["FUTURE atomic many-body solve<br/>mobile opposite-charge carriers<br/>statistics, relativistic corrections<br/>ground and excited spectra"]
@@ -123,7 +134,8 @@ flowchart TB
     CHARGED --> COMPOSITE
     THRESHOLD -. "Reusable arithmetic after authority closes" .-> COMPOSITE
     COMPOSITE --> STRONG
-    STRONG --> NUCLEAR
+    STRONG --> CONSTITUENT
+    CONSTITUENT --> NUCLEAR
     NUCLEAR --> ELEMENT
     ELEMENT --> ATOM
     CHARGED --> ATOM
@@ -143,6 +155,7 @@ flowchart TB
     LAW -. "Unfamiliar incomplete premise" .-> REFUSE
     CHARGED -. "Incomplete registry" .-> REFUSE
     COMPOSITE -. "Incomplete channels or overlapping bands" .-> REFUSE
+    CONSTITUENT -. "Missing content, scale, or representation" .-> REFUSE
     NUCLEAR -. "Unresolved strong or weak sector" .-> REFUSE
     ATOM -. "Unconverged many-body solve" .-> REFUSE
 ```
@@ -379,31 +392,41 @@ Floating point remains confirmation-only.
    conservation, two-coordinate uncertainty interval, and strict separation
    below the free-constituent threshold. The open neutral-carrier decay family
    prevents a lifetime, support, or global-stability claim.
-8. **Strong-interaction profile.** NEXT: derive or fully admit the first
-   confining law and carrier premises without importing a familiar core
-   template. Bind every surviving irreducible premise to the complete
-   derive-first, Buckingham Pi, Gap plus Chaos, Residual, unique-slot, owner,
-   and independent-watchdog route.
-9. **Complete primitive registry and support.** Prove membership coverage,
-   conditioned support, explicit zeros, normalization, resource bounds, and
-   exact mean particle mass.
+8. **Confining-interaction profile.** DONE FOR ONE CLAIM-LOCAL ZERO-MEMBER
+   PROFILE: independent forward-entailment and reverse-obligation paths bind
+   nonlinear carrier self-interaction, conservation, applicability, validity,
+   and an invariant-only asymptotic boundary. One Residue `[A]` premise and 19
+   Residue `[D]` consequences enter the current-input vocabulary. Confinement
+   remains a scoped premise, not a theorem, and the profile grants no member,
+   group, rank, representation size, coupling, scale, or spectrum.
+9. **Confining-sector constituent content.** NEXT: derive or fully admit the
+   exact internal representation, running or scale relation, constituent
+   excitation profiles, masses, charges, statistics, applicability, and
+   validity needed to ask a multi-constituent solver a physical question.
+   Familiar constituent and core names may appear only in validation or view
+   projections.
 10. **Composite core profile.** Add the confining and transition sectors needed
    to enumerate stable and metastable cores for one admitted profile, while
    leaving unfamiliar sectors open.
-11. **Atomic solver cache.** Produce certified spectra and shell projections
+11. **Complete registry and conditioned support.** Prove membership coverage,
+   conditioned support, explicit zeros, normalization, resource bounds, and
+   exact mean particle mass after the relevant primitive and composite
+   channels close.
+12. **Atomic solver cache.** Produce certified spectra and shell projections
    without an exception list.
-12. **Nucleosynthesis and abundance history.** Generate local isotope support,
+13. **Nucleosynthesis and abundance history.** Generate local isotope support,
    atomic weights, opacity, and chemistry from the stellar and disk history.
-13. **Candidate-substrate migration.** Replace each consumer of the terrestrial
+14. **Candidate-substrate migration.** Replace each consumer of the terrestrial
    reference table with a typed derived cache adapter, one invariant at a time.
    The reference table remains validation-only until no canonical consumer
    needs it.
 
-The next code target is slice 8, one strong-interaction profile. It must derive
-or fully admit its law, carrier, applicability, validity, conservation, and
-confinement premises without naming a familiar constituent or core. A later
-multi-constituent spectrum must expose every separation and decay channel,
-converge under independent solvers, transport all floor uncertainties, and
-preserve unfamiliar interaction sectors. Independent serialization, owner
-review, citations, and nonzero digests do not substitute for executable
-physical evidence.
+The next code target is slice 9, the constituent content for the admitted
+confining sector. It must derive or fully admit every representation, scale,
+mass, state, statistics, conservation, applicability, and validity premise
+without naming a familiar constituent or core. The later multi-constituent
+spectrum must expose every separation and decay channel, converge under
+independent solvers, transport all floor uncertainties, and preserve
+unfamiliar interaction sectors. Independent serialization, owner review,
+citations, and nonzero digests do not substitute for executable physical
+evidence.

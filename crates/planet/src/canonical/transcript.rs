@@ -27,7 +27,7 @@ use civsim_units::physics_floor::PHYSICAL_FLOOR_LEN;
 use std::{fmt, num::TryFromIntError};
 
 /// Stable schema identity for the current concrete transcript format.
-pub const RUN_TRANSCRIPT_SCHEMA_ID: &str = "civsim.planet.transcript.v10";
+pub const RUN_TRANSCRIPT_SCHEMA_ID: &str = "civsim.planet.transcript.v11";
 
 /// Stable schema identity for representation availability states.
 pub const REPRESENTATION_STATUS_SCHEMA_ID: &str = "civsim.planet.representation-status.v1";
@@ -74,8 +74,14 @@ impl TranscriptSchema {
     };
 
     pub const V10: Self = Self {
-        id: RUN_TRANSCRIPT_SCHEMA_ID,
+        id: "civsim.planet.transcript.v10",
         major: 10,
+        minor: 0,
+    };
+
+    pub const V11: Self = Self {
+        id: RUN_TRANSCRIPT_SCHEMA_ID,
+        major: 11,
         minor: 0,
     };
 
@@ -468,7 +474,7 @@ impl RunTranscript {
         representation: Result<RepresentationReceipt, TranscriptError>,
     ) -> Result<Self, TranscriptError> {
         Ok(Self {
-            schema: TranscriptSchema::V10,
+            schema: TranscriptSchema::V11,
             representation: representation?,
             declared_floor_entries,
             events: Vec::new(),
@@ -498,7 +504,7 @@ impl RunTranscript {
         refusals.push(Refusal::representation_unavailable(detail.clone()));
         refusals.sort_by(|left, right| left.canonical_cmp(right));
         Self {
-            schema: TranscriptSchema::V10,
+            schema: TranscriptSchema::V11,
             representation: RepresentationReceipt::unavailable(detail),
             declared_floor_entries,
             events: vec![RunEvent {
@@ -894,7 +900,8 @@ impl fmt::Display for RunTranscript {
         writeln!(f, "transcript={}", self.schema.id())?;
         writeln!(f, "schema.major={}", self.schema.major())?;
         writeln!(f, "schema.minor={}", self.schema.minor())?;
-        // In V10, the complete representation fields imply `Available`; V1
+        // In V10 and later, the complete representation fields imply
+        // `Available`; V1
         // status fields appear only for the unavailable variant.
         match &self.representation.state {
             RepresentationState::Available(values) => {
@@ -1512,21 +1519,25 @@ mod tests {
     }
 
     #[test]
-    fn transcript_schema_selectors_preserve_distinct_v9_and_v10_contracts() {
+    fn transcript_schema_selectors_preserve_distinct_v9_v10_and_v11_contracts() {
         assert_eq!(TranscriptSchema::V9.id(), "civsim.planet.transcript.v9");
         assert_eq!(TranscriptSchema::V9.major(), 9);
         assert_eq!(TranscriptSchema::V9.minor(), 0);
-        assert_eq!(TranscriptSchema::V10.id(), RUN_TRANSCRIPT_SCHEMA_ID);
+        assert_eq!(TranscriptSchema::V10.id(), "civsim.planet.transcript.v10");
         assert_eq!(TranscriptSchema::V10.major(), 10);
         assert_eq!(TranscriptSchema::V10.minor(), 0);
+        assert_eq!(TranscriptSchema::V11.id(), RUN_TRANSCRIPT_SCHEMA_ID);
+        assert_eq!(TranscriptSchema::V11.major(), 11);
+        assert_eq!(TranscriptSchema::V11.minor(), 0);
         assert_ne!(TranscriptSchema::V9, TranscriptSchema::V10);
+        assert_ne!(TranscriptSchema::V10, TranscriptSchema::V11);
     }
 
     #[test]
-    fn current_transcripts_select_v10() {
+    fn current_transcripts_select_v11() {
         let transcript = RunTranscript::empty(PHYSICAL_FLOOR_LEN)
             .expect("the sealed SI representation projects");
-        assert_eq!(transcript.schema(), TranscriptSchema::V10);
+        assert_eq!(transcript.schema(), TranscriptSchema::V11);
         assert_eq!(transcript.schema().id(), RUN_TRANSCRIPT_SCHEMA_ID);
     }
 
@@ -1891,7 +1902,7 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(first.to_string(), second.to_string());
         assert!(first.to_string().starts_with(
-            "transcript=civsim.planet.transcript.v10\nschema.major=10\nschema.minor=0\n"
+            "transcript=civsim.planet.transcript.v11\nschema.major=11\nschema.minor=0\n"
         ));
         let last = first.events().last().expect("the refusal is recorded");
         assert!(matches!(

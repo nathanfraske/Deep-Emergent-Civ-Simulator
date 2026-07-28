@@ -20,24 +20,26 @@ default:
 # ---------------------------------------------------------------------------
 
 # Enter the canonical planet front door; incomplete physical closure emits a structured refusal.
+# Reuse the optimized test profile: its overflow checks and debug assertions stay
+# enabled, while the authority reconstruction avoids an unoptimized duplicate graph.
 run *args:
-    {{cargo_dev}} run -p civsim-planet --bin run_planet -- {{args}}
+    {{cargo_dev}} run --profile test -p civsim-planet --bin run_planet -- {{args}}
 
 # Compatibility name for the former derived view. This enters the same floor-only library runner and no viewer.
 run-derived:
-    {{cargo_dev}} run -p civsim-planet --bin run_planet
+    {{cargo_dev}} run --profile test -p civsim-planet --bin run_planet
 
 # Alias the ordinary canonical run. It emits the same receipt and cannot bypass a physical stage.
 readiness:
-    {{cargo_dev}} run -p civsim-planet --bin run_planet -- --readiness
+    {{cargo_dev}} run --profile test -p civsim-planet --bin run_planet -- --readiness
 
 # Regenerate the centralized four-tier by seven-tag inventory from the audited catalog.
 ledger-inventory:
-    {{cargo_dev}} run -p civsim-planet --bin ledger_inventory -- --write
+    {{cargo_dev}} run --profile test -p civsim-planet --bin ledger_inventory -- --write
 
 # Fail when the checked-in centralized ledger inventory does not match the audited catalog.
 ledger-inventory-check:
-    {{cargo_dev}} run -p civsim-planet --bin ledger_inventory -- --check
+    {{cargo_dev}} run --profile test -p civsim-planet --bin ledger_inventory -- --check
 
 # Run the quarantined legacy dawn development fixture to its final state hash.
 run-dawn-legacy:

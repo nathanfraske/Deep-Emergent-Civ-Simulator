@@ -727,7 +727,7 @@ fn repository_result_closes_four_local_members_without_global_authority() {
     assert!(!frontier.registry_coverage_claim);
     assert_eq!(frontier.registry_authority_effect, "none");
     assert_eq!(frontier.admitted_root_count, 4);
-    assert_eq!(frontier.admitted_artifact_count, 105);
+    assert_eq!(frontier.admitted_artifact_count, 125);
     assert_eq!(frontier.primitive_profile.artifact_count, 29);
     assert_eq!(frontier.primitive_profile.admission_census.len(), 29);
     assert_eq!(
@@ -884,6 +884,64 @@ fn repository_result_closes_four_local_members_without_global_authority() {
     ] {
         assert_ne!(producer, watchdog);
     }
+    assert_eq!(frontier.strong_profile.artifact_count, 20);
+    assert_eq!(frontier.strong_profile.member_count, 0);
+    assert_eq!(frontier.strong_profile.admission_census.len(), 20);
+    assert_eq!(
+        frontier
+            .strong_profile
+            .admission_census
+            .iter()
+            .filter(|row| row.provenance_tag == "[A]" && row.route_id == "irreducible")
+            .count(),
+        1
+    );
+    assert_eq!(
+        frontier
+            .strong_profile
+            .admission_census
+            .iter()
+            .filter(|row| row.provenance_tag == "[D]" && row.route_id == "derived")
+            .count(),
+        19
+    );
+    assert!(
+        frontier
+            .strong_profile
+            .confining_asymptotic_boundary_admitted
+    );
+    assert!(!frontier.strong_profile.confinement_theorem_claim);
+    assert!(!frontier.strong_profile.membership_authority);
+    assert!(!frontier.strong_profile.carrier_species_membership);
+    assert_eq!(frontier.strong_profile.authority_effect, "none");
+    for (producer, watchdog) in [
+        (
+            frontier.strong_profile.curvature_producer_sha256,
+            frontier.strong_profile.curvature_watchdog_sha256,
+        ),
+        (
+            frontier.strong_profile.conservation_producer_sha256,
+            frontier.strong_profile.conservation_watchdog_sha256,
+        ),
+        (
+            frontier.strong_profile.confinement_producer_sha256,
+            frontier.strong_profile.confinement_watchdog_sha256,
+        ),
+        (
+            frontier.strong_profile.applicability_producer_sha256,
+            frontier.strong_profile.applicability_watchdog_sha256,
+        ),
+        (
+            frontier.strong_profile.validity_producer_sha256,
+            frontier.strong_profile.validity_watchdog_sha256,
+        ),
+        (
+            frontier.strong_profile.asymptotic_producer_sha256,
+            frontier.strong_profile.asymptotic_watchdog_sha256,
+        ),
+    ] {
+        assert_ne!(producer, watchdog);
+    }
     assert_eq!(frontier.root_admission_census.len(), 4);
     assert!(frontier.root_admission_census.iter().all(|admission| {
         admission.tier_id == "universal"
@@ -957,15 +1015,25 @@ fn repository_result_closes_four_local_members_without_global_authority() {
             .count(),
         33
     );
+    assert_eq!(
+        input
+            .admitted_artifacts
+            .iter()
+            .filter(|artifact| {
+                artifact.admission_capability_kind() == AdmissionCapabilityKind::StrongProfile
+            })
+            .count(),
+        20
+    );
     assert_eq!(input.declared_members.len(), 4);
-    assert_eq!(input.vocabulary_binding.root_count, 105);
+    assert_eq!(input.vocabulary_binding.root_count, 125);
     assert!(!input
         .vocabulary_binding
         .descriptor_role_identities
         .is_empty());
     assert_eq!(
         input.vocabulary_binding.relation_target_identities.len(),
-        105
+        125
     );
     assert!(!input
         .vocabulary_binding
