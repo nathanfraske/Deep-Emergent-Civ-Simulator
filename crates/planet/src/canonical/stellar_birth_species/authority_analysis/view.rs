@@ -13,6 +13,10 @@ pub type PrimitiveProfileEvidenceDigests = ([u8; 32], [u8; 32], [u8; 32], [u8; 3
 /// producer, and mass-transport watchdog digests.
 pub type ChargedProfileCheckerEvidenceDigests = ([u8; 32], [u8; 32], [u8; 32], [u8; 32]);
 
+/// Constituent threshold, decay family, candidate mass interval, and
+/// separation-threshold interval digests for the neutral bound profile.
+pub type NeutralBoundProfileChannelDigests = ([u8; 32], [u8; 32], [u8; 32], [u8; 32]);
+
 /// Read-only view of the authority analysis attached to the open joint measure.
 #[derive(Debug, Clone, Copy)]
 pub struct SpeciesDerivationAnalysisView<'a> {
@@ -835,6 +839,126 @@ impl<'a> SpeciesDerivationAnalysisView<'a> {
         })
     }
 
+    pub fn neutral_bound_profile_identity(
+        self,
+    ) -> Option<(
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+    )> {
+        self.computed().map(|analysis| {
+            let profile = &analysis.physical_registry_frontier.neutral_bound_profile;
+            (
+                profile.receipt_schema_id,
+                profile.claim_id,
+                profile.profile_id,
+                profile.theory_class_id,
+                profile.residual_slot_id,
+                profile.producer_id,
+                profile.watchdog_id,
+            )
+        })
+    }
+
+    pub fn neutral_bound_profile_counts(self) -> Option<(u32, usize)> {
+        self.computed().map(|analysis| {
+            (
+                analysis
+                    .physical_registry_frontier
+                    .neutral_bound_profile
+                    .artifact_count,
+                1,
+            )
+        })
+    }
+
+    pub fn neutral_bound_profile_member_sha256(self) -> Option<[u8; 32]> {
+        self.computed().map(|analysis| {
+            analysis
+                .physical_registry_frontier
+                .neutral_bound_profile
+                .member_sha256
+        })
+    }
+
+    pub fn neutral_bound_profile_receipt_sha256(self) -> Option<[u8; 32]> {
+        self.computed().map(|analysis| {
+            analysis
+                .physical_registry_frontier
+                .neutral_bound_profile
+                .pair_receipt_sha256
+        })
+    }
+
+    pub fn neutral_bound_profile_checker_evidence_sha256(self) -> Option<[[u8; 32]; 10]> {
+        self.computed().map(|analysis| {
+            let profile = &analysis.physical_registry_frontier.neutral_bound_profile;
+            [
+                profile.solver_producer_sha256,
+                profile.solver_watchdog_sha256,
+                profile.normalization_producer_sha256,
+                profile.normalization_watchdog_sha256,
+                profile.threshold_coverage_producer_sha256,
+                profile.threshold_coverage_watchdog_sha256,
+                profile.uncertainty_transport_producer_sha256,
+                profile.uncertainty_transport_watchdog_sha256,
+                profile.conservation_producer_sha256,
+                profile.conservation_watchdog_sha256,
+            ]
+        })
+    }
+
+    pub fn neutral_bound_profile_channel_digests(
+        self,
+    ) -> Option<NeutralBoundProfileChannelDigests> {
+        self.computed().map(|analysis| {
+            let profile = &analysis.physical_registry_frontier.neutral_bound_profile;
+            (
+                profile.constituent_threshold_channel_sha256,
+                profile.decay_channel_family_sha256,
+                profile.mass_interval_sha256,
+                profile.threshold_interval_sha256,
+            )
+        })
+    }
+
+    pub fn neutral_bound_profile_dispositions(self) -> Option<(&'a str, &'a str)> {
+        self.computed().map(|analysis| {
+            let profile = &analysis.physical_registry_frontier.neutral_bound_profile;
+            (profile.binding_disposition_id, profile.decay_disposition_id)
+        })
+    }
+
+    pub fn neutral_bound_profile_scope(self) -> Option<(bool, bool)> {
+        self.computed().map(|analysis| {
+            let profile = &analysis.physical_registry_frontier.neutral_bound_profile;
+            (
+                profile.conditioned_support_authority,
+                profile.global_stability_claim,
+            )
+        })
+    }
+
+    pub fn neutral_bound_profile_protocol_statuses(
+        self,
+    ) -> Option<(&'a str, &'a str, &'a str, &'a str, &'a str, &'a str)> {
+        self.computed().map(|analysis| {
+            let profile = &analysis.physical_registry_frontier.neutral_bound_profile;
+            (
+                profile.derive_first_status_id,
+                profile.buckingham_pi_status_id,
+                profile.gap_law_status_id,
+                profile.chaos_protocol_status_id,
+                profile.residual_law_status_id,
+                profile.residual_slot_status_id,
+            )
+        })
+    }
+
     pub fn physical_registry_membership_authority(self) -> Option<bool> {
         self.computed()
             .map(|analysis| analysis.physical_registry_frontier.membership_authority)
@@ -872,6 +996,19 @@ impl<'a> SpeciesDerivationAnalysisView<'a> {
             analysis
                 .physical_registry_frontier
                 .charged_profile
+                .admission_census
+                .iter()
+                .map(|admission| PhysicalRootAdmissionView { admission })
+        })
+    }
+
+    pub fn neutral_bound_profile_admissions(
+        self,
+    ) -> impl Iterator<Item = PhysicalRootAdmissionView<'a>> + 'a {
+        self.computed().into_iter().flat_map(|analysis| {
+            analysis
+                .physical_registry_frontier
+                .neutral_bound_profile
                 .admission_census
                 .iter()
                 .map(|admission| PhysicalRootAdmissionView { admission })

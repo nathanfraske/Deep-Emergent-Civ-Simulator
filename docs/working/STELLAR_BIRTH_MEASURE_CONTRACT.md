@@ -6,11 +6,11 @@ and classification contracts, a private exact species-state reducer, a sealed
 non-admitting species derivation analysis, a bounded structural species
 descriptor and conditioned-support packet pair, a conditional physical
 species proof-graph pair, one claim-local primitive null-excitation profile,
-and one claim-local charge-conjugate matter profile implemented. The two local
-profiles close three registry members while
-global species coverage, conditioned support, and both Stage 1 proof leaves
-remain unresolved. The canonical runner reports that partial closure and its
-exact frontier before refusing.
+one claim-local charge-conjugate matter profile, and one claim-local neutral
+two-body profile implemented. The three local profiles close four registry
+members while global species coverage, conditioned support, global stability,
+and both Stage 1 proof leaves remain unresolved. The canonical runner reports
+that partial closure and its exact frontier before refusing.
 
 ## Authority
 
@@ -125,11 +125,27 @@ and share spin, Fermi statistics, current, mobility, scoped stability, and
 transition requirements. The sealed `alpha` scalar is only a dimensionless
 coupling coordinate. Neither coordinate selects the ontology.
 
-The current physical-vocabulary receipt covers 72 admitted artifacts, with 58
-descriptor roles, 72 relation targets, and three constraint laws. Global
+A third claim-local authority consumes the charge-conjugate orbit and the
+admitted rank-one abelian carrier. Its variational producer minimizes the exact
+dimensionless Rayleigh quotient `s^2/2 - s`; its independent watchdog completes
+the square. Both derive the lowest coefficient `-1/2`, equal-mass reduced-mass
+factor `1/2`, binding-mass factor `1/4`, exact radial normalization one, zero
+radial residual, and neutral charge sum. They transport the sealed `m_e` and
+`alpha` intervals through the exact candidate mass
+`m_e * (2 - alpha^2/4)` and prove its full interval lies strictly below the
+free-constituent interval.
+
+The profile admits one Residue `[A]` leading central interaction claim and
+derives 32 Residue `[D]` consequences. One neutral two-body registry member
+closes inside the declared leading nonrelativistic validity domain. A distinct
+neutral massless-carrier decay family has zero threshold and remains
+energetically open. The result grants no decay rate, lifetime, conditioned
+support, global stability, familiar atom, or periodic-table claim.
+
+The current physical-vocabulary receipt covers 105 admitted artifacts, with 88
+descriptor roles, 105 relation targets, and four constraint laws. Global
 coverage, global membership authority, global stability, conditioned support,
-neutral bound-state membership, and every downstream world result remain
-false.
+complete channel coverage, and every downstream world result remain false.
 
 ## Joint physical measure
 
@@ -263,18 +279,19 @@ molecular convention.
 This does not derive a complete species state or mean species mass. The
 repository resolver still returns `None`, so no production path can call the
 conditioned-support reducer. The joint-measure refusal now includes
-`civsim.planet.stellar-birth-species-derivation-analysis.v9`, checked by
-`civsim.planet.stellar-birth-species-derivation-watchdog.v10`. The analysis
+`civsim.planet.stellar-birth-species-derivation-analysis.v10`, checked by
+`civsim.planet.stellar-birth-species-derivation-watchdog.v11`. The analysis
 binds the audited floor, sealed floor digest, structure schemas, live physical
-root pair, derived `eps_0` premise, both profile authority receipts,
-registered-catalog protocol results, symmetry, conjugation, mass-transport and
-scope evidence, both profile admission censuses, physical-vocabulary receipt,
-local registry result, and open obligations.
+root pair, derived `eps_0` premise, all three profile authority receipts,
+registered-catalog protocol results, symmetry, conjugation, solver,
+normalization, threshold, conservation, mass-transport, and scope evidence,
+all three profile admission censuses, physical-vocabulary receipt, local
+registry result, and open obligations.
 
 It records three scalar coordinates, one membership-neutral pure-mass
-expression, three local candidate members, zero verified support members, no
-species-support value payload, and two claim-local residual slots. The two
-exact profile censuses contain two Residue `[A]` irreducible claims and 66
+expression, four local candidate members, zero verified support members, no
+species-support value payload, and three claim-local residual slots. The three
+exact profile censuses contain three Residue `[A]` irreducible claims and 98
 Residue `[D]` descendants.
 
 The generic paired premise route remains open to unfamiliar targets. Its
@@ -291,19 +308,19 @@ before owner admission. The charged profile supplies the primitive profile's
 occupied slot to the same generic collision check. Neither local route can
 close a later target or global ontology.
 
-Two bounded vocabulary classifiers independently partition the exact 72
-admitted artifacts into 58 physical descriptor roles, 72 relation targets, and
-three constraint laws. `current_input_partition_complete=true` describes only
+Two bounded vocabulary classifiers independently partition the exact 105
+admitted artifacts into 88 physical descriptor roles, 105 relation targets,
+and four constraint laws. `current_input_partition_complete=true` describes only
 those inputs; `global_physical_vocabulary_coverage=false` and
 `membership_authority=false` remain explicit. The frontier serializes each
 artifact with its exact identity, tier, provenance tag, and admission route.
-The local physical registry closes three members with `registry_refusal_code=none`
+The local physical registry closes four members with `registry_refusal_code=none`
 while `registry_coverage_claim=false` and `authority_effect=none`.
 
-The open proofs are copied from the live five-obligation frontier and checked
+The open proofs are copied from the live six-obligation frontier and checked
 against a fresh registry result. Unreached support and mean-mass paths remain
 absent rather than populated from authored guesses. The bitstream states
-`frontier.scope=three_local_members_then_open_global_obligations` and
+`frontier.scope=four_local_members_then_open_global_obligations` and
 `frontier.completeness_claim=false`. The analysis has `closure_effect=none`
 and `coverage_claim=false`. The observer-only viewer projects the same source,
 profile, member, protocol, census, scope, and completeness fields without a
@@ -342,11 +359,14 @@ massless graphs can exercise agreement, but the result carries
 `authority_effect=none` and has no path to conditioned support or the reducer.
 
 The current registry, proof graph, producer, and watchdog schema identities are
-v5, v4, v7, and v6. The bump adds a structural exact-zero contract containing
-the subject, excluded term, symmetry, applicability receipt, and distinct
-producer and watchdog exclusion receipts. Those fields prevent a marker-only
-zero from passing the graph validators. They do not prove the physical
-exclusion claim by themselves.
+v6, v5, v8, and v7. The bump generalizes rest-mass uncertainty transport from
+one source coordinate to a complete canonical source set. Both validators
+require exactly one proof row for every coordinate in the mass expression,
+strictly ordered unique sources, live scalar-coordinate ancestry, the exact
+root-pair receipt for each source, and distinct profile producer and watchdog
+receipts. Missing, duplicate, extra, or reordered source rows refuse. These
+fields prove complete transport for the expression coordinates; they do not
+prove global membership or support.
 
 The first proposed unbroken-abelian primitive profile failed its hostile audit. Both
 paths reconstructed one shared authored ontology; the derive-first,
@@ -372,9 +392,10 @@ is v2, and coordinate content is v3. The root-pair v5 success receipt binds the
 claim, canonicalized semantic input, separate producer and watchdog result
 digests, separate resource-contract digests, runtime canary digest, neutral
 decision, and receipt digest. The physical registry combines those four roots
-with 29 primitive-profile artifacts and 39 charged-profile artifacts and
-closes three local members. It retains no global coverage claim and no global
-authority effect.
+with 29 primitive-profile artifacts, 39 charged-profile artifacts, and 33
+neutral-bound-profile artifacts and closes four local members. It retains no
+global coverage claim, no conditioned support, no global stability claim, and
+no global authority effect.
 
 ### Verified repair note, 2026-07-25
 
@@ -418,26 +439,31 @@ authority profile hash is
 `c7239a2f62f67bb35a63823cbfa04e3b235d1f88837dd4716cbcd1e0a88a696c`.
 This repair proves faithful floor projection and downstream root verification,
 not floor scientific sufficiency. The later profile authorities add one local
-massless-law chain and a two-member charge-conjugation orbit with explicit
-mass-uncertainty transport. Every unfamiliar or global extension, neutral
-bound-state sector, complete interaction spectrum, and conditioned-support
-proof remains open. The live result is three local members, no global coverage
+massless-law chain, a two-member charge-conjugation orbit with explicit
+mass-uncertainty transport, and one neutral two-body member below its covered
+free-constituent threshold. The neutral member keeps its energetically open
+massless-carrier decay family explicit. Every unfamiliar or global extension,
+strong-interaction profile, multi-constituent spectrum, complete channel
+census, reaction network, and conditioned-support proof remains open. The live
+result is four local members, no global coverage claim, no global stability
 claim, and no global authority effect.
 
-The next bounded physical sub-rung is interaction evidence and one neutral
-bound-state profile. It must derive or fully admit a solver-produced level
-below a proved separation threshold with convergence, normalization,
-conservation, validity, uncertainty transport, and complete channel ancestry.
-The live `eps_0` premise, null excitation, and charged orbit are admitted
-inputs only where their exact capabilities apply. None can select a familiar
-bound state or desired outcome.
+The next bounded physical sub-rung is one strong-interaction profile. It must
+derive or fully admit its law, carrier, applicability, validity, conservation,
+and confinement premises through the generic route. The later
+multi-constituent solver must close convergence, normalization, uncertainty
+transport, and complete separation and decay ancestry before any core can
+enter the registry. The live `eps_0` premise, null excitation, charged orbit,
+and neutral two-body member are admitted inputs only where their exact
+capabilities apply. None can select a familiar constituent, nucleus, or desired
+outcome.
 Production artifacts now carry a private opaque
 `VerifiedAdmissionCapability` rather than accepting receipt-shaped fields as
 authority. The repository-root, primitive-profile, and charged-profile pairs
-are the only production minters. Each capability binds artifact identity,
-exact admission, and pair-receipt digest, and both downstream validators
-independently reject any drift. A future non-root rule must supply its own
-independent authority pair, admitted
+and the neutral-bound-profile pair are the only production minters. Each
+capability binds artifact identity, exact admission, and pair-receipt digest,
+and both downstream validators independently reject any drift. A future
+non-root rule must supply its own independent authority pair, admitted
 physical law, exact proof ancestry, and matching capability mint. The current
 floor alone cannot populate a charged member: `m_e` is a mass coordinate, not
 proof of a degree of freedom, state, charge, interaction sector, stable
@@ -489,12 +515,12 @@ The no-argument runner serializes the separate SI representation receipt and
 three physical floor values, derives `eps_0`, enters Stage 1, and returns
 `stellar_birth.realization_measure`. It emits six transcript events: three
 floor records, one derived-value record, one Stage 1 entry, and one refusal.
-It emits no `[X]`, no `[W]` realization, and no snapshot. A direct run after
-the charged-profile and analysis v9 integration emits `548,352` stdout bytes
-at SHA-256
-`785d04b94b7d160bf4245493b820768720c51605eb3c6c88e6944864a65fca15`,
-with exit `2` and empty stderr. The changed bytes bind three local members and
-both profile authority chains while preserving the Stage 1 refusal. The
+It emits no `[X]`, no `[W]` realization, and no snapshot. One fresh
+`just run-derived` execution after the neutral-profile and analysis v10
+integration emits `625,300` stdout bytes at SHA-256
+`f454d569d22809deb669c8b83b359f4e0e8c116d4ee5b6f656cd4b085b3db0da`
+and exits `2` as expected. The changed bytes bind four local members and all
+three profile authority chains while preserving the Stage 1 refusal. The
 current receipt is `civsim.planet.run.v13`; its transcript schema major is
 `10`.
 

@@ -7,11 +7,12 @@ cannot admit a law, value, species, or world state.
 
 ## Current truth
 
-Three physical species members have now emerged, but only inside two narrow
-local profiles. The canonical floor still contains three Universal `[M]` invariants,
-`alpha`, `G`, and `m_e`. Exact SI definitions remain engine coordinates with
-no provenance mark or physical freedom. None of those values selects a field
-ontology, a gauge group, a particle name, or a desired Solar outcome.
+Four physical species members have now emerged, but only inside three narrow
+local profiles. The canonical floor still contains three Universal `[M]`
+invariants, `alpha`, `G`, and `m_e`. Exact SI definitions remain engine
+coordinates with no provenance mark or physical freedom. None of those values
+selects a field ontology, a gauge group, a particle name, or a desired Solar
+outcome.
 
 The first primitive attempt failed its hostile audit because it hashed
 assertions about derive-first exhaustion and symmetry exclusion. That attempt
@@ -48,18 +49,34 @@ two equal-mass mobile Fermi members with relative charge weights minus one and
 plus one. Charge orientation may swap the members but cannot change the set.
 No familiar particle name enters the packet, either checker, or registry.
 
-The live vocabulary now partitions 72 admitted artifacts into 58 descriptor
-roles, 72 relation targets, and three constraint laws. This is complete only
+The third pair consumes that charged orbit and the admitted abelian carrier
+sector. Its variational producer derives the dimensionless Rayleigh quotient
+`epsilon(s) = s^2 / 2 - s`, whose unique stationary point is `s = 1` and whose
+lowest coefficient is `-1/2`. Its independent watchdog completes the square
+instead of replaying that solve. Both derive the equal-mass reduced-mass factor
+`1/2`, the binding-mass factor `alpha^2 / 4`, exact radial normalization one,
+zero radial residual, and the neutral charge sum. The candidate mass interval
+is the exact floor interval for `m_e * (2 - alpha^2 / 4)`. It lies strictly
+below the free-pair interval after propagating both `m_e` and `alpha`
+uncertainties.
+
+That result is one neutral two-body member, not a stability claim. A distinct
+neutral massless-carrier decay family has zero threshold and remains
+energetically open. No decay rate, lifetime, conditioned support, familiar
+atom, or global stability follows.
+
+The live vocabulary now partitions 105 admitted artifacts into 88 descriptor
+roles, 105 relation targets, and four constraint laws. This is complete only
 for the current input. Global physical-vocabulary coverage, global membership
 authority, conditioned support, and global stability remain false. There is
-still no neutral bound state, composite core, nucleus, atom, element, periodic
-table, star, planet, or snapshot.
+still no composite core, nucleus, atom, element, periodic table, star, planet,
+or snapshot.
 
 The generic law router remains available for every later premise. Its
 synchronous producer and dependency-indexed watchdog accept only grounded
 capability ancestry, keep incomplete searches open, and require independent
 target-bound rule-universe coverage before an unfamiliar irreducible branch
-may begin. The one local profile does not turn this generic router into a
+may begin. The three local profiles do not turn this generic router into a
 closed ontology.
 
 `crates/physics/data/periodic_table.toml` is a terrestrial reference cache used
@@ -80,9 +97,10 @@ flowchart TB
     LAW["CURRENT local profile admission<br/>paired catalog and protocol scan<br/>complete scoped quadratic basis<br/>exact symmetry exclusion and scope"]
     PRIMITIVE["CURRENT one local primitive excitation<br/>exact zero mass and helicity pair<br/>Bose statistics, zero self-charge,<br/>conserved current and scoped stability"]
     CHARGED["CURRENT charged-matter profile<br/>two-member conjugation orbit<br/>transported mass uncertainty<br/>Fermi statistics and scoped laws"]
-    COMPOSITE["NEXT neutral bound-state profile<br/>solver-produced level bands<br/>complete separation thresholds<br/>conservation and decay coverage"]
-    THRESHOLD["CURRENT dormant exact threshold pair<br/>strictly below all covered thresholds<br/>overlap stays unresolved<br/>open channel remains visible<br/>authority_effect = none"]
-    NUCLEAR["FUTURE stable and metastable cores<br/>binding spectra, decay channels<br/>charge and neutral conserved content"]
+    COMPOSITE["CURRENT neutral two-body profile<br/>exact lowest-level coefficient<br/>complete free-pair threshold<br/>open decay remains visible"]
+    THRESHOLD["CURRENT claim-scoped threshold pair<br/>strictly below the covered threshold<br/>overlap stays unresolved<br/>coverage receipts remain distinct"]
+    STRONG["NEXT strong-interaction profile<br/>derive-first law and carrier premises<br/>no familiar core template"]
+    NUCLEAR["FUTURE multi-constituent cores<br/>binding spectra, decay channels<br/>charge and neutral conserved content"]
     ELEMENT["FUTURE element identity projection<br/>same derived core-charge vector<br/>isotopes differ by neutral content or state"]
     ATOM["FUTURE atomic many-body solve<br/>mobile opposite-charge carriers<br/>statistics, relativistic corrections<br/>ground and excited spectra"]
     PERIODICITY["FUTURE periodicity cache<br/>shell closures and occupancy<br/>recurring valence response<br/>periods and groups as projections"]
@@ -104,7 +122,8 @@ flowchart TB
     PRIMITIVE --> CHARGED
     CHARGED --> COMPOSITE
     THRESHOLD -. "Reusable arithmetic after authority closes" .-> COMPOSITE
-    COMPOSITE --> NUCLEAR
+    COMPOSITE --> STRONG
+    STRONG --> NUCLEAR
     NUCLEAR --> ELEMENT
     ELEMENT --> ATOM
     CHARGED --> ATOM
@@ -196,12 +215,12 @@ masslessness, helicity, statistics, current structure, sector, state,
 validity, stability, transition disposition, and complete dependency
 ancestry. It does not prove a complete primitive registry.
 
-The next required member is an opposite-charge mobile carrier. An
-electron-like carrier is one possible result, but no familiar label may select
-it. The current `m_e` floor coordinate can become one input to its mass proof
-only after its degree of freedom, mass relation, charge, spin, statistics,
-current, stability, validity, and every other required role are independently
-established.
+The second local profile now supplies two opposite-charge mobile carriers as
+one charge-orientation-invariant orbit. The `m_e` floor coordinate enters only
+through an explicit mass and uncertainty ancestry proof. The profile separately
+binds its degree of freedom, mass relation, charge, spin, statistics, current,
+mobility, scoped stability, validity, and transition roles. It does not prove
+complete primitive membership, global stability, or conditioned support.
 
 ### 3. Composite and nuclear states
 
@@ -213,11 +232,14 @@ report a bound disposition. A touching or overlapping band remains
 near-degenerate under the Gap Law. A band above a threshold exposes an open
 channel.
 
-PR #215 now contains two independent exact threshold algorithms as a dormant
-diagnostic. They canonicalize channel identity, reject missing or duplicate
-coverage, preserve overlap, and emit `authority_effect=none`. They cannot prove
-that the solver is correct or that its channel census is complete. Production
-has no coverage-proof constructor, so this kernel cannot mint a species.
+PR #215 now binds the independent exact threshold algorithms to one
+claim-scoped coverage capability from the neutral-profile authority pair. They
+canonicalize channel identity, reject missing or duplicate coverage, preserve
+overlap, and emit `authority_effect=none`. The live neutral candidate lies
+strictly below its covered free-constituent channel. A separate neutral
+massless-carrier family remains energetically open. The pair proves neither a
+complete channel census nor global stability, so it mints no conditioned
+support.
 
 For a Terran validation profile, the nuclear rung needs a strong-like
 confining sector, constituent masses and couplings, composite binding spectra,
@@ -351,30 +373,37 @@ Floating point remains confirmation-only.
    relative charge, conjugation closure, explicit `m_e` uncertainty transport,
    Fermi statistics, current, mobility, scoped stability, and transitions.
    Global vocabulary, stability, support, and familiar identity remain open.
-7. **Bound-state evidence integration.** NEXT: bind solver-produced level bands,
-   complete threshold coverage, conservation, and decay channels into the
-   physical registry. Promote the dormant threshold pair only after live
-   canaries and the authority-watchdog receipt exist.
-8. **Complete primitive registry and support.** Prove membership coverage,
+7. **Bound-state evidence integration.** DONE FOR ONE NEUTRAL TWO-BODY
+   PROFILE: independent variational and factorization paths agree on the exact
+   lowest-level coefficient, reduced mass, normalization, zero residual,
+   conservation, two-coordinate uncertainty interval, and strict separation
+   below the free-constituent threshold. The open neutral-carrier decay family
+   prevents a lifetime, support, or global-stability claim.
+8. **Strong-interaction profile.** NEXT: derive or fully admit the first
+   confining law and carrier premises without importing a familiar core
+   template. Bind every surviving irreducible premise to the complete
+   derive-first, Buckingham Pi, Gap plus Chaos, Residual, unique-slot, owner,
+   and independent-watchdog route.
+9. **Complete primitive registry and support.** Prove membership coverage,
    conditioned support, explicit zeros, normalization, resource bounds, and
    exact mean particle mass.
-9. **Composite core profile.** Add the confining and transition sectors needed
+10. **Composite core profile.** Add the confining and transition sectors needed
    to enumerate stable and metastable cores for one admitted profile, while
    leaving unfamiliar sectors open.
-10. **Atomic solver cache.** Produce certified spectra and shell projections
+11. **Atomic solver cache.** Produce certified spectra and shell projections
    without an exception list.
-11. **Nucleosynthesis and abundance history.** Generate local isotope support,
+12. **Nucleosynthesis and abundance history.** Generate local isotope support,
    atomic weights, opacity, and chemistry from the stellar and disk history.
-12. **Candidate-substrate migration.** Replace each consumer of the terrestrial
+13. **Candidate-substrate migration.** Replace each consumer of the terrestrial
    reference table with a typed derived cache adapter, one invariant at a time.
    The reference table remains validation-only until no canonical consumer
    needs it.
 
-The next code target is slice 7, interaction evidence and one neutral
-bound-state profile. It must consume the exact charged-orbit and null-sector
-capabilities without naming a familiar atom. A solver-produced negative level
-relative to a proved separation threshold, normalization, convergence,
-conservation, validity, uncertainty transport, and independent threshold
-coverage must precede membership. Independent serialization, owner review,
-citations, and nonzero digests do not substitute for executable physical
-evidence.
+The next code target is slice 8, one strong-interaction profile. It must derive
+or fully admit its law, carrier, applicability, validity, conservation, and
+confinement premises without naming a familiar constituent or core. A later
+multi-constituent spectrum must expose every separation and decay channel,
+converge under independent solvers, transport all floor uncertainties, and
+preserve unfamiliar interaction sectors. Independent serialization, owner
+review, citations, and nonzero digests do not substitute for executable
+physical evidence.

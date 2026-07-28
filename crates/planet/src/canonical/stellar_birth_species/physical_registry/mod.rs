@@ -2,12 +2,14 @@
 //!
 //! The current repository supplies independently projected physical
 //! coordinates plus claim-local, irreducibly admitted unbroken abelian and
-//! charge-conjugate matter profiles. The executable production result closes
-//! those three local members while keeping global vocabulary coverage, complete
-//! species membership, and conditioned support false.
+//! charge-conjugate matter profiles, then one neutral two-body bound profile.
+//! The executable production result closes those four local members while
+//! keeping global vocabulary coverage, complete species membership,
+//! conditioned support, and global stability false.
 
 mod charged_profile;
 mod model;
+pub(in crate::canonical::stellar_birth_species) mod neutral_bound_profile;
 mod primitive_profile;
 mod producer;
 mod repository_roots;
@@ -115,6 +117,45 @@ pub(super) struct RepositoryChargedProfileFrontier {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct RepositoryNeutralBoundProfileFrontier {
+    pub(super) receipt_schema_id: &'static str,
+    pub(super) claim_id: &'static str,
+    pub(super) profile_id: &'static str,
+    pub(super) theory_class_id: &'static str,
+    pub(super) residual_slot_id: &'static str,
+    pub(super) producer_id: &'static str,
+    pub(super) watchdog_id: &'static str,
+    pub(super) artifact_count: u32,
+    pub(super) admission_census: Vec<RepositoryRootAdmissionCensusRow>,
+    pub(super) member_sha256: [u8; 32],
+    pub(super) pair_receipt_sha256: [u8; 32],
+    pub(super) solver_producer_sha256: [u8; 32],
+    pub(super) solver_watchdog_sha256: [u8; 32],
+    pub(super) normalization_producer_sha256: [u8; 32],
+    pub(super) normalization_watchdog_sha256: [u8; 32],
+    pub(super) threshold_coverage_producer_sha256: [u8; 32],
+    pub(super) threshold_coverage_watchdog_sha256: [u8; 32],
+    pub(super) uncertainty_transport_producer_sha256: [u8; 32],
+    pub(super) uncertainty_transport_watchdog_sha256: [u8; 32],
+    pub(super) conservation_producer_sha256: [u8; 32],
+    pub(super) conservation_watchdog_sha256: [u8; 32],
+    pub(super) constituent_threshold_channel_sha256: [u8; 32],
+    pub(super) decay_channel_family_sha256: [u8; 32],
+    pub(super) binding_disposition_id: &'static str,
+    pub(super) decay_disposition_id: &'static str,
+    pub(super) mass_interval_sha256: [u8; 32],
+    pub(super) threshold_interval_sha256: [u8; 32],
+    pub(super) derive_first_status_id: &'static str,
+    pub(super) buckingham_pi_status_id: &'static str,
+    pub(super) gap_law_status_id: &'static str,
+    pub(super) chaos_protocol_status_id: &'static str,
+    pub(super) residual_law_status_id: &'static str,
+    pub(super) residual_slot_status_id: &'static str,
+    pub(super) conditioned_support_authority: bool,
+    pub(super) global_stability_claim: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct RepositoryPhysicalRegistryFrontier {
     pub(super) registry_schema_id: &'static str,
     pub(super) proof_graph_schema_id: &'static str,
@@ -140,6 +181,7 @@ pub(super) struct RepositoryPhysicalRegistryFrontier {
     pub(super) membership_authority: bool,
     pub(super) primitive_profile: RepositoryPrimitiveProfileFrontier,
     pub(super) charged_profile: RepositoryChargedProfileFrontier,
+    pub(super) neutral_bound_profile: RepositoryNeutralBoundProfileFrontier,
     pub(super) vocabulary_receipt_schema_id: String,
     pub(super) vocabulary_claim_id: String,
     pub(super) vocabulary_producer_id: String,
@@ -253,7 +295,7 @@ fn inspect_physical_registry(
 
 fn repository_input() -> Result<PhysicalRegistryInput, PhysicalRegistryRefusalCode> {
     repository_input_and_projection()
-        .map(|(input, _, _, _)| input)
+        .map(|(input, _, _, _, _)| input)
         .map_err(|error| error.physical_code())
 }
 
@@ -263,6 +305,7 @@ fn repository_input_and_projection() -> Result<
         RepositoryRootProjectionReceipt,
         primitive_profile::PrimitiveProfileReceipt,
         charged_profile::ChargedProfileReceipt,
+        neutral_bound_profile::NeutralBoundProfileReceipt,
     ),
     RepositoryInputError,
 > {
@@ -298,12 +341,21 @@ fn repository_input_and_projection() -> Result<
         RepositoryInputError::Physical(PhysicalRegistryRefusalCode::ChargedProfileProjectionInvalid)
     })?;
     let charged_profile_receipt = charged_profile.receipt.clone();
+    let neutral_bound_profile =
+        neutral_bound_profile::project_admitted_profile().map_err(|_| {
+            RepositoryInputError::Physical(
+                PhysicalRegistryRefusalCode::NeutralBoundProfileProjectionInvalid,
+            )
+        })?;
+    let neutral_bound_profile_receipt = neutral_bound_profile.receipt.clone();
     let mut declared_members = vec![primitive_profile.member];
     declared_members.extend(charged_profile.members.iter().copied());
+    declared_members.push(neutral_bound_profile.member);
     declared_members.sort_unstable();
     let mut admitted_artifacts = root_projection.admitted_artifacts;
     admitted_artifacts.extend(primitive_profile.admitted_artifacts);
     admitted_artifacts.extend(charged_profile.admitted_artifacts);
+    admitted_artifacts.extend(neutral_bound_profile.admitted_artifacts);
     let vocabulary_binding = vocabulary::derive_binding(&admitted_artifacts).map_err(|()| {
         RepositoryInputError::Physical(
             PhysicalRegistryRefusalCode::PhysicalVocabularyBindingMismatch,
@@ -361,6 +413,7 @@ fn repository_input_and_projection() -> Result<
         projection_receipt,
         primitive_profile_receipt,
         charged_profile_receipt,
+        neutral_bound_profile_receipt,
     ))
 }
 
@@ -407,9 +460,14 @@ fn root_admission_census(
 
 pub(super) fn repository_physical_registry_frontier(
 ) -> Result<RepositoryPhysicalRegistryFrontier, RepositoryPhysicalRegistryFrontierError> {
-    let (input, receipt, primitive_profile_receipt, charged_profile_receipt) =
-        repository_input_and_projection()
-            .map_err(RepositoryPhysicalRegistryFrontierError::from_input_error)?;
+    let (
+        input,
+        receipt,
+        primitive_profile_receipt,
+        charged_profile_receipt,
+        neutral_bound_profile_receipt,
+    ) = repository_input_and_projection()
+        .map_err(RepositoryPhysicalRegistryFrontierError::from_input_error)?;
     let admitted_artifact_count = u32::try_from(input.admitted_artifacts.len())
         .map_err(|_| RepositoryPhysicalRegistryFrontierError::from_code("root_count_overflow"))?;
     let admitted_root_count = u32::try_from(
@@ -458,6 +516,7 @@ pub(super) fn repository_physical_registry_frontier(
         .map_err(|_| RepositoryPhysicalRegistryFrontierError::from_code("member_count_overflow"))?;
     let mut expected_members = vec![primitive_profile_receipt.member];
     expected_members.extend(charged_profile_receipt.members.iter().copied());
+    expected_members.push(neutral_bound_profile_receipt.member);
     expected_members.sort_unstable();
     if registry_member_count != u32::try_from(expected_members.len()).unwrap_or(u32::MAX)
         || registry
@@ -499,6 +558,16 @@ pub(super) fn repository_physical_registry_frontier(
         .cloned()
         .collect::<Vec<_>>();
     let charged_profile_admission_census = root_admission_census(&charged_profile_artifacts)?;
+    let neutral_bound_profile_artifacts = input
+        .admitted_artifacts
+        .iter()
+        .filter(|artifact| {
+            artifact.admission_capability_kind() == AdmissionCapabilityKind::NeutralBoundProfile
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let neutral_bound_profile_admission_census =
+        root_admission_census(&neutral_bound_profile_artifacts)?;
     if repository_root_admission_census.len()
         != usize::try_from(admitted_root_count).unwrap_or(usize::MAX)
         || repository_root_admission_census
@@ -559,6 +628,44 @@ pub(super) fn repository_physical_registry_frontier(
     {
         return Err(RepositoryPhysicalRegistryFrontierError::from_code(
             "charged_profile_admission_census_invalid",
+        ));
+    }
+    if neutral_bound_profile_admission_census.len()
+        != usize::try_from(neutral_bound_profile_receipt.artifact_count).unwrap_or(usize::MAX)
+        || neutral_bound_profile_admission_census.len() != neutral_bound_profile::ARTIFACT_COUNT
+        || neutral_bound_profile_admission_census
+            .iter()
+            .filter(|row| {
+                row.tier_id == "residue"
+                    && row.provenance_tag == "[A]"
+                    && row.route_id == "irreducible"
+            })
+            .count()
+            != 1
+        || neutral_bound_profile_admission_census
+            .iter()
+            .filter(|row| {
+                row.tier_id == "residue" && row.provenance_tag == "[D]" && row.route_id == "derived"
+            })
+            .count()
+            != neutral_bound_profile::ARTIFACT_COUNT
+                .checked_sub(1)
+                .ok_or_else(|| {
+                    RepositoryPhysicalRegistryFrontierError::from_code(
+                        "neutral_bound_profile_artifact_count_underflow",
+                    )
+                })?
+        || neutral_bound_profile_receipt.binding_disposition_id
+            != "strictly_below_free_constituent_threshold"
+        || neutral_bound_profile_receipt.decay_disposition_id
+            != "energetically_open_neutral_massless_carrier_family"
+        || neutral_bound_profile_receipt.membership_authority
+        || neutral_bound_profile_receipt.conditioned_support_authority
+        || neutral_bound_profile_receipt.global_stability_claim
+        || neutral_bound_profile_receipt.authority_effect != "none"
+    {
+        return Err(RepositoryPhysicalRegistryFrontierError::from_code(
+            "neutral_bound_profile_admission_census_invalid",
         ));
     }
     Ok(RepositoryPhysicalRegistryFrontier {
@@ -670,6 +777,64 @@ pub(super) fn repository_physical_registry_frontier(
             residual_law_status_id: charged_profile_receipt.protocol.residual_law_status_id,
             residual_slot_status_id: charged_profile_receipt.protocol.residual_slot_status_id,
         },
+        neutral_bound_profile: RepositoryNeutralBoundProfileFrontier {
+            receipt_schema_id: neutral_bound_profile_receipt.schema_id,
+            claim_id: neutral_bound_profile_receipt.claim_id,
+            profile_id: neutral_bound_profile_receipt.profile_id,
+            theory_class_id: neutral_bound_profile_receipt.theory_class_id,
+            residual_slot_id: neutral_bound_profile_receipt.residual_slot_id,
+            producer_id: neutral_bound_profile_receipt.producer_id,
+            watchdog_id: neutral_bound_profile_receipt.watchdog_id,
+            artifact_count: neutral_bound_profile_receipt.artifact_count,
+            admission_census: neutral_bound_profile_admission_census,
+            member_sha256: neutral_bound_profile_receipt.member.0,
+            pair_receipt_sha256: neutral_bound_profile_receipt.pair_receipt_sha256,
+            solver_producer_sha256: neutral_bound_profile_receipt.solver_producer_sha256,
+            solver_watchdog_sha256: neutral_bound_profile_receipt.solver_watchdog_sha256,
+            normalization_producer_sha256: neutral_bound_profile_receipt
+                .normalization_producer_sha256,
+            normalization_watchdog_sha256: neutral_bound_profile_receipt
+                .normalization_watchdog_sha256,
+            threshold_coverage_producer_sha256: neutral_bound_profile_receipt
+                .threshold_coverage_producer_sha256,
+            threshold_coverage_watchdog_sha256: neutral_bound_profile_receipt
+                .threshold_coverage_watchdog_sha256,
+            uncertainty_transport_producer_sha256: neutral_bound_profile_receipt
+                .uncertainty_transport_producer_sha256,
+            uncertainty_transport_watchdog_sha256: neutral_bound_profile_receipt
+                .uncertainty_transport_watchdog_sha256,
+            conservation_producer_sha256: neutral_bound_profile_receipt
+                .conservation_producer_sha256,
+            conservation_watchdog_sha256: neutral_bound_profile_receipt
+                .conservation_watchdog_sha256,
+            constituent_threshold_channel_sha256: neutral_bound_profile_receipt
+                .constituent_threshold_channel_identity,
+            decay_channel_family_sha256: neutral_bound_profile_receipt
+                .decay_channel_family_identity,
+            binding_disposition_id: neutral_bound_profile_receipt.binding_disposition_id,
+            decay_disposition_id: neutral_bound_profile_receipt.decay_disposition_id,
+            mass_interval_sha256: neutral_bound_profile_receipt.mass_interval_sha256,
+            threshold_interval_sha256: neutral_bound_profile_receipt.threshold_interval_sha256,
+            derive_first_status_id: neutral_bound_profile_receipt
+                .protocol
+                .derive_first_status_id,
+            buckingham_pi_status_id: neutral_bound_profile_receipt
+                .protocol
+                .buckingham_pi_status_id,
+            gap_law_status_id: neutral_bound_profile_receipt.protocol.gap_law_status_id,
+            chaos_protocol_status_id: neutral_bound_profile_receipt
+                .protocol
+                .chaos_protocol_status_id,
+            residual_law_status_id: neutral_bound_profile_receipt
+                .protocol
+                .residual_law_status_id,
+            residual_slot_status_id: neutral_bound_profile_receipt
+                .protocol
+                .residual_slot_status_id,
+            conditioned_support_authority: neutral_bound_profile_receipt
+                .conditioned_support_authority,
+            global_stability_claim: neutral_bound_profile_receipt.global_stability_claim,
+        },
         vocabulary_receipt_schema_id: input.vocabulary_binding.schema_id,
         vocabulary_claim_id: input.vocabulary_binding.claim_id,
         vocabulary_producer_id: input.vocabulary_binding.producer_id,
@@ -718,8 +883,9 @@ pub(super) fn repository_physical_registry_frontier(
             "complete_global_physical_vocabulary_coverage",
             "complete_registry_closure_domain",
             "conditioned_species_support",
-            "bound_state_interaction_evidence",
-            "neutral_bound_state_profile",
+            "strong-interaction-profile",
+            "multi-constituent-bound-state-spectrum",
+            "reaction-network-closure",
         ],
     })
 }

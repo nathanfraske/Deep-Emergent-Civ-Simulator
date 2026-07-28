@@ -33,15 +33,15 @@ use watchdog::validate_analysis;
 use super::COMPLETE_SPECIES_STATE_MEAN_PARTICLE_MASS_LAW_ID;
 
 pub(in crate::canonical) const SPECIES_DERIVATION_ANALYSIS_SCHEMA_ID: &str =
-    "civsim.planet.stellar-birth-species-derivation-analysis.v9";
+    "civsim.planet.stellar-birth-species-derivation-analysis.v10";
 pub(in crate::canonical) const SPECIES_DERIVATION_ANALYSIS_CHECKER_ID: &str =
-    "civsim.planet.stellar-birth-species-derivation-watchdog.v10";
+    "civsim.planet.stellar-birth-species-derivation-watchdog.v11";
 
 const FLOOR_ANCHOR_ID: &str = "fundamental.m_e";
 const FLOOR_ANCHOR_SYMBOL: &str = "m_e";
 const FLOOR_ANCHOR_ROLE: &str = "mass_coordinate_anchor_only";
 const FRONTIER_SOURCE_ID: &str = "repository_physical_registry_partial_closure";
-const FRONTIER_SCOPE_ID: &str = "three_local_members_then_open_global_obligations";
+const FRONTIER_SCOPE_ID: &str = "four_local_members_then_open_global_obligations";
 pub(super) const LIVE_PHYSICAL_REGISTRY_ATTEMPT_ID: &str =
     "stellar_birth.species_derivation.partial_physical_registry_closure";
 
@@ -323,6 +323,7 @@ impl SpeciesDerivationAnalysisArtifact {
 mod tests {
     use super::*;
     use crate::canonical::{floor_magnitudes::AuditedFloorView, sealed_absolute_physics_floor};
+    use std::collections::BTreeSet;
 
     fn analysis() -> SpeciesDerivationAnalysisArtifact {
         let floor = sealed_absolute_physics_floor().expect("the physical floor seals");
@@ -332,7 +333,7 @@ mod tests {
     }
 
     #[test]
-    fn production_analysis_exposes_three_local_members_without_support_authority() {
+    fn production_analysis_exposes_four_local_members_without_support_authority() {
         let artifact = analysis();
         let view = SpeciesDerivationAnalysisView::new(&artifact);
 
@@ -419,7 +420,7 @@ mod tests {
                 view.law_premise_content_identity_sha256().unwrap(),
             ))
         );
-        assert_eq!(view.premise_admission_route_counts(), Some((1, 58, 72, 3)));
+        assert_eq!(view.premise_admission_route_counts(), Some((1, 88, 105, 4)));
         assert_eq!(
             view.premise_admission_route_decisions(),
             Some(("derived", "next_target_not_bound"))
@@ -446,14 +447,14 @@ mod tests {
             Some(1)
         );
         assert_eq!(view.physical_registry_admitted_root_count(), Some(4));
-        assert_eq!(view.physical_registry_admitted_artifact_count(), Some(72));
+        assert_eq!(view.physical_registry_admitted_artifact_count(), Some(105));
         assert_eq!(view.physical_registry_membership_authority(), Some(false));
-        assert_eq!(view.physical_vocabulary_counts(), Some((72, 58, 72, 3)));
+        assert_eq!(view.physical_vocabulary_counts(), Some((105, 88, 105, 4)));
         assert_eq!(view.physical_vocabulary_scope(), Some((true, false, false)));
         assert_eq!(
             view.physical_vocabulary_relation_target_identities()
                 .map(|identities| identities.len()),
-            Some(72)
+            Some(105)
         );
         assert_ne!(view.physical_vocabulary_receipt_sha256(), Some([0; 32]));
         assert_eq!(
@@ -502,9 +503,54 @@ mod tests {
             ))
         );
         assert_eq!(view.charged_profile_admissions().count(), 39);
+        assert_eq!(
+            view.neutral_bound_profile_identity()
+                .map(|identity| identity.2),
+            Some("bound-profile.neutral-equal-mass-opposite-charge-ground-level.v1")
+        );
+        assert_eq!(view.neutral_bound_profile_counts(), Some((33, 1)));
+        assert_ne!(view.neutral_bound_profile_member_sha256(), Some([0; 32]));
+        assert_ne!(view.neutral_bound_profile_receipt_sha256(), Some([0; 32]));
+        let checker_evidence = view
+            .neutral_bound_profile_checker_evidence_sha256()
+            .expect("neutral bound checker evidence is visible");
+        assert!(checker_evidence.iter().all(|digest| *digest != [0; 32]));
+        assert_eq!(
+            checker_evidence
+                .iter()
+                .copied()
+                .collect::<BTreeSet<_>>()
+                .len(),
+            checker_evidence.len()
+        );
+        assert!(view
+            .neutral_bound_profile_channel_digests()
+            .is_some_and(|digests| [digests.0, digests.1, digests.2, digests.3]
+                .into_iter()
+                .all(|digest| digest != [0; 32])));
+        assert_eq!(
+            view.neutral_bound_profile_dispositions(),
+            Some((
+                "strictly_below_free_constituent_threshold",
+                "energetically_open_neutral_massless_carrier_family",
+            ))
+        );
+        assert_eq!(view.neutral_bound_profile_scope(), Some((false, false)));
+        assert_eq!(
+            view.neutral_bound_profile_protocol_statuses(),
+            Some((
+                "executed_open_frontier",
+                "semantic_inapplicability_paired",
+                "executed_and_bound",
+                "nondynamical_inapplicability_paired",
+                "executed_and_bound",
+                "collision_checked_unique",
+            ))
+        );
+        assert_eq!(view.neutral_bound_profile_admissions().count(), 33);
         assert_eq!(view.physical_registry_refusal_code(), Some("none"));
-        assert_eq!(view.physical_registry_member_count(), Some(3));
-        assert_eq!(view.physical_registry_open_obligations().len(), 5);
+        assert_eq!(view.physical_registry_member_count(), Some(4));
+        assert_eq!(view.physical_registry_open_obligations().len(), 6);
         assert_ne!(view.physical_registry_root_receipt_sha256(), Some([0; 32]));
         assert_eq!(
             view.frontier_source_id(),
@@ -512,10 +558,10 @@ mod tests {
         );
         assert_eq!(
             view.frontier_scope_id(),
-            Some("three_local_members_then_open_global_obligations")
+            Some("four_local_members_then_open_global_obligations")
         );
         assert_eq!(view.frontier_completeness_claim(), Some(false));
-        assert_eq!(view.candidate_member_count(), Some(3));
+        assert_eq!(view.candidate_member_count(), Some(4));
         assert_eq!(view.verified_support_member_count(), Some(0));
         assert_eq!(view.species_support_value_payload_present(), Some(false));
         assert_eq!(view.residual_slot_claim(), Some(true));
@@ -541,11 +587,12 @@ mod tests {
         assert_eq!(
             view.open_proof_ids(),
             [
-                "bound_state_interaction_evidence",
                 "complete_global_physical_vocabulary_coverage",
                 "complete_registry_closure_domain",
                 "conditioned_species_support",
-                "neutral_bound_state_profile",
+                "multi-constituent-bound-state-spectrum",
+                "reaction-network-closure",
+                "strong-interaction-profile",
             ]
             .into_iter()
             .map(str::to_owned)
@@ -560,6 +607,7 @@ mod tests {
                 "planet.stellar-species-floor-coordinate-projection",
                 "planet.primitive-excitation.unbroken-abelian-null-mode",
                 "planet.charged-matter.charge-conjugate-massive-spinor-pair",
+                "planet.neutral-bound-state.equal-mass-opposite-charge-central-ground-level",
                 "civsim.planet.stellar-birth-physical-vocabulary.partition.v1",
             ]
         );

@@ -19,6 +19,9 @@ mod watchdog;
 #[cfg(test)]
 mod tests;
 
+use super::physical_registry::neutral_bound_profile::{
+    threshold_binding_sha256, ExactInterval, ThresholdCoverageCapability,
+};
 use civsim_units::bignum::BigRat;
 
 const MAX_SEPARATION_THRESHOLDS: usize = 4_096;
@@ -52,7 +55,7 @@ enum BoundStateThresholdDisposition {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BoundStateThresholdRefusal {
+pub(in crate::canonical::stellar_birth_species) enum BoundStateThresholdRefusal {
     InvalidCandidateBand,
     EmptyThresholdSet,
     ThresholdCapacityExceeded,
@@ -63,13 +66,29 @@ enum BoundStateThresholdRefusal {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct BoundStateThresholdReport {
+pub(in crate::canonical::stellar_birth_species) struct BoundStateThresholdReport {
     disposition: BoundStateThresholdDisposition,
 }
 
 impl BoundStateThresholdReport {
-    const fn authority_effect(self) -> &'static str {
+    pub(in crate::canonical::stellar_birth_species) const fn authority_effect(
+        &self,
+    ) -> &'static str {
         "none"
+    }
+
+    pub(in crate::canonical::stellar_birth_species) const fn disposition_id(&self) -> &'static str {
+        match self.disposition {
+            BoundStateThresholdDisposition::StrictlyBelowAllThresholds { .. } => {
+                "strictly_below_all_thresholds"
+            }
+            BoundStateThresholdDisposition::TouchesOrOverlapsThreshold { .. } => {
+                "touches_or_overlaps_threshold"
+            }
+            BoundStateThresholdDisposition::EnergeticallyOpenChannel { .. } => {
+                "energetically_open_channel"
+            }
+        }
     }
 }
 
@@ -87,4 +106,62 @@ fn inspect_bound_state_thresholds(
         (Err(produced), Err(watched)) if produced == watched => Err(produced),
         _ => Err(BoundStateThresholdRefusal::CheckerDisagreement),
     }
+}
+
+/// Consume the claim-local coverage capability minted by the neutral-profile
+/// pair, then run the pre-existing independent exact threshold algorithms.
+///
+/// The capability binds one candidate band and one covered separation channel.
+/// It cannot admit a premise or member, and the resulting report keeps
+/// `authority_effect=none`.
+pub(in crate::canonical::stellar_birth_species) fn inspect_authorized_thresholds(
+    candidate_lower: &BigRat,
+    candidate_upper: &BigRat,
+    thresholds: &[([u8; 32], BigRat, BigRat)],
+    covered_channels: &[[u8; 32]],
+    capability: &ThresholdCoverageCapability,
+) -> Result<BoundStateThresholdReport, BoundStateThresholdRefusal> {
+    if thresholds.len() != 1 || covered_channels.len() != 1 {
+        return Err(BoundStateThresholdRefusal::ThresholdCoverageMismatch);
+    }
+    let (channel_identity, threshold_lower, threshold_upper) = &thresholds[0];
+    let expected_binding = threshold_binding_sha256(
+        &ExactInterval {
+            lower: candidate_lower.clone(),
+            upper: candidate_upper.clone(),
+        },
+        *channel_identity,
+        &ExactInterval {
+            lower: threshold_lower.clone(),
+            upper: threshold_upper.clone(),
+        },
+    )
+    .map_err(|_| BoundStateThresholdRefusal::ThresholdCoverageMismatch)?;
+    if capability.binding_sha256() != expected_binding
+        || capability.producer_receipt_sha256() == [0; 32]
+        || capability.watchdog_receipt_sha256() == [0; 32]
+        || capability.producer_receipt_sha256() == capability.watchdog_receipt_sha256()
+        || covered_channels[0] != *channel_identity
+    {
+        return Err(BoundStateThresholdRefusal::ThresholdCoverageMismatch);
+    }
+    let candidate = ExactClosedLevelBand {
+        lower: candidate_lower.clone(),
+        upper: candidate_upper.clone(),
+    };
+    let separation_thresholds = thresholds
+        .iter()
+        .map(|(channel_identity, lower, upper)| SeparationThreshold {
+            channel_identity: *channel_identity,
+            level: ExactClosedLevelBand {
+                lower: lower.clone(),
+                upper: upper.clone(),
+            },
+        })
+        .collect::<Vec<_>>();
+    let coverage = ThresholdCoverageProof {
+        covered_channels: covered_channels.to_vec(),
+        _seal: ThresholdCoverageSeal,
+    };
+    inspect_bound_state_thresholds(&candidate, &separation_thresholds, &coverage)
 }

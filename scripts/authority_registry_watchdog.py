@@ -107,11 +107,18 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "ad77326e8ac1004ad8c086f6d6b3eaaa7f39c618e5ef9a8375765498e817b505",
     ),
     (
+        "planet.neutral-bound-profile-admission",
+        "authority",
+        "scientific",
+        "active",
+        "14d894eee864bd931f4dea422827b08813d4b3053923be33ca12dccca985f7b4",
+    ),
+    (
         "planet.physical-vocabulary-partition",
         "diagnostic",
         None,
         "diagnostic",
-        "3c72d3cbf6cde2668a12efaf0ee5c5bfad9e823bd3aec9ae1d127622a8cdb8fd",
+        "b22d861f4b714b9831669ba360c207bffa10323964c1e18d13c310f86c6ff36c",
     ),
     (
         "planet.primitive-profile-admission",
@@ -125,7 +132,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "diagnostic",
         None,
         "diagnostic",
-        "f641b7fd27731581017c6895c1bfc0c426d962b16bf1690acb6d06a6fda33133",
+        "0364515737501208b5c8899913b43b68a38f950d2b86a263133b98c728b937c2",
     ),
     (
         "planet.species-state-support",
@@ -153,7 +160,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "authority",
         "scientific",
         "active",
-        "5c67629ed706fe636ca0d10c09953cdc65f24d424822db3f4bfaa14836db5ee9",
+        "95a30ad85a29d7d549693c657d4a869187f3ce60bdad2b97fb77d792eefafd92",
     ),
     (
         "planet.symmetry-operator-exclusion",
@@ -198,7 +205,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "3bfb94aa0c3f507ad8ba9762e91ca9009284becc9d9752d7b7b896cb9a26ca7d",
     ),
 )
-EXPECTED_COUNTS = (12, 11, 2, 25)
+EXPECTED_COUNTS = (13, 11, 2, 26)
 
 META_EXPECTATIONS = (
     ("producer_path", "scripts/authority_watchdog_gate.py"),

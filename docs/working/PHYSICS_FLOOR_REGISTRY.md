@@ -19,7 +19,7 @@ The lists below are GENERATED from `crates/physics/data/*.toml`, `crates/physics
 
 ## Deriving substrates (check here BEFORE authoring: what the world derives, and where)
 
-The 112 deriving subsystems below live outside the absolute floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
+The 113 deriving subsystems below live outside the absolute floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
 
 ### `crates/core/src/fixed.rs`
 
@@ -181,6 +181,9 @@ The 112 deriving subsystems below live outside the absolute floor. Each produces
 - the disk-truncation gas/angular-momentum residual ledger <- the static viscous-similarity gas profile partitioned at the resonant truncation radius R_t=f*R_L, the retained budget and the removed residual an interpretation-neutral conservation account for the binarity cap (`crates/planet-substrate/src/giants.rs:484`)
 - the truncation-residual system gas budget and its named sink label <- the interpretation-neutral truncation gas ledger under a selected physical reading, the removed residual accounted by the checked retained-plus-removed-equals-total conservation invariant and tagged with a named sink label under the dynamic reading (`crates/planet-substrate/src/giants.rs:676`)
 - the giant-planet gap-opening mass M_gap <- the Crida 2006 thermal-viscous gap criterion P(q)=(3/4)(H/R_H)+50/(qR)=1 solved for the mass ratio, over the disk aspect ratio and Reynolds number, the accretion-termination scale (`crates/planet-substrate/src/giants.rs:806`)
+### `crates/planet/src/canonical/stellar_birth_species/physical_registry/neutral_bound_profile/mod.rs`
+
+- one neutral two-body mass interval and strict free-constituent separation <- the sealed m_e and alpha coordinates, the admitted charged orbit, the admitted abelian carrier sector, and the claim-local leading central interaction (`crates/planet/src/canonical/stellar_birth_species/physical_registry/neutral_bound_profile/mod.rs:393`)
 
 ## Stored material and quantity axes (derive-first audit population)
 

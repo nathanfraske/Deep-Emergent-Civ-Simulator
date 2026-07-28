@@ -48,6 +48,11 @@ REQUIRED_PROFILES: dict[str, tuple[str, str | None, str]] = {
         "scientific",
         "blocked",
     ),
+    "planet.neutral-bound-profile-admission": (
+        "authority",
+        "scientific",
+        "active",
+    ),
     "planet.physical-vocabulary-partition": ("diagnostic", None, "diagnostic"),
     "planet.primitive-profile-admission": (
         "authority",
@@ -106,13 +111,14 @@ REQUIRED_PROFILE_DIGESTS: dict[str, str] = {
     "planet.completed-snapshot": "5c09a8d95b7de145110a9f97f773bb0e0a63d6d6dc0f964eeb8beb62efff5575",
     "planet.derived-law-premise-eps0": "9ce5e04b3cf043616148062cb4f7eada303fe03a421aef004fa02970d41e26c2",
     "planet.law-premise-admission-route": "ad77326e8ac1004ad8c086f6d6b3eaaa7f39c618e5ef9a8375765498e817b505",
-    "planet.physical-vocabulary-partition": "3c72d3cbf6cde2668a12efaf0ee5c5bfad9e823bd3aec9ae1d127622a8cdb8fd",
+    "planet.neutral-bound-profile-admission": "14d894eee864bd931f4dea422827b08813d4b3053923be33ca12dccca985f7b4",
+    "planet.physical-vocabulary-partition": "b22d861f4b714b9831669ba360c207bffa10323964c1e18d13c310f86c6ff36c",
     "planet.primitive-profile-admission": "aeefd698a2a29dd2ffcc82d17302b77c331d027cd81734803c7c4c01813e7981",
-    "planet.species-derivation-frontier": "f641b7fd27731581017c6895c1bfc0c426d962b16bf1690acb6d06a6fda33133",
+    "planet.species-derivation-frontier": "0364515737501208b5c8899913b43b68a38f950d2b86a263133b98c728b937c2",
     "planet.species-state-support": "7264ff58ee5ef96f3d4275fe8dfda949e40b1f6316b498e88c5c1d0e225f3519",
     "planet.stage1-dimensional-census": "21140b26c937f9cca7a8066b98e9fa75e9366f483ca44ffd1cc5206315f2b5dc",
     "planet.stellar-birth-proof-tokens": "68f58f019ab4f620194133e673c64240d4ad066f97404698ba0bfbf8b96935d1",
-    "planet.stellar-species-floor-coordinate-projection": "5c67629ed706fe636ca0d10c09953cdc65f24d424822db3f4bfaa14836db5ee9",
+    "planet.stellar-species-floor-coordinate-projection": "95a30ad85a29d7d549693c657d4a869187f3ce60bdad2b97fb77d792eefafd92",
     "planet.symmetry-operator-exclusion": "31359d3cda1a4d74b0519dd7d589c843b60949719f311e2d95e0443519e10747",
     "planet.symmetry-scope-applicability": "1ab66defe77dd4532c3a306f905fdfb09d867427db48b1d0ce4ba0e1dc625298",
     "units.certified-formula-projection": "7ee2a9a60f102d0ea34bc5700d2070b079390c050d10c2d685e1525a0f091005",
@@ -121,10 +127,10 @@ REQUIRED_PROFILE_DIGESTS: dict[str, str] = {
     "units.wide-integer-arithmetic": "3bfb94aa0c3f507ad8ba9762e91ca9009284becc9d9752d7b7b896cb9a26ca7d",
 }
 REQUIRED_COUNTS = {
-    "active": 12,
+    "active": 13,
     "blocked": 11,
     "diagnostic": 2,
-    "total": 25,
+    "total": 26,
 }
 META_PAIR = {
     "producer_path": "scripts/authority_watchdog_gate.py",

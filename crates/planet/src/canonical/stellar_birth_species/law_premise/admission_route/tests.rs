@@ -169,9 +169,9 @@ fn repository_frontier_reports_the_derived_seed_and_completed_local_profile_prot
         frontier.producer_result_sha256,
         frontier.watchdog_result_sha256
     );
-    assert_eq!(frontier.current_descriptor_role_count, 58);
-    assert_eq!(frontier.current_relation_target_count, 72);
-    assert_eq!(frontier.current_constraint_law_count, 3);
+    assert_eq!(frontier.current_descriptor_role_count, 88);
+    assert_eq!(frontier.current_relation_target_count, 105);
+    assert_eq!(frontier.current_constraint_law_count, 4);
     assert_eq!(frontier.next_target_decision_id, "next_target_not_bound");
     assert!(!frontier.derivation_frontier_complete);
     assert!(frontier.irreducible_protocol_started);

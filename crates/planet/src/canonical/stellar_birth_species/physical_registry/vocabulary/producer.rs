@@ -214,6 +214,17 @@ fn validate_admission(artifact: &AdmittedArtifact) -> Result<(), VocabularyRefus
                 return Err(VocabularyRefusalCode::AdmissionCapabilityMismatch);
             }
         }
+        AdmissionCapabilityKind::NeutralBoundProfile => {
+            if artifact
+                .neutral_bound_profile_pair_receipt_sha256()
+                .is_none_or(|digest| digest == [0; 32])
+                || artifact
+                    .neutral_bound_profile_root_identity()
+                    .is_none_or(|identity| identity.0 == [0; 32])
+            {
+                return Err(VocabularyRefusalCode::AdmissionCapabilityMismatch);
+            }
+        }
         #[cfg(test)]
         AdmissionCapabilityKind::ExactTest => {}
     }

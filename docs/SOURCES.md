@@ -12,7 +12,7 @@ Custody is one of three. `in_repo`: bytes held in-tree, checksum verifiable with
 witness. `external`: bytes in local custody outside the repo, checksum plus archive snapshot.
 The licence decides which is permitted; see `docs/working/FETCH_PIPELINE_PLAN.md` section 3.
 
-**49 sources** (18 registry, 31 mirrored).
+**51 sources** (20 registry, 31 mirrored).
 
 ## Registry (hand-maintained)
 
@@ -144,6 +144,30 @@ National Institute of Standards and Technology, Fundamental Physical Constants: 
 - scope: The seven exact SI representation rows and three measured physical-invariant rows used by crates/units/src/fundamentals.rs, including each printed value, uncertainty or exact marker, and SI unit. Only fine-structure constant, Newtonian constant of gravitation, and electron mass are physical-floor candidates; the SI-defining rows are noncausal representation metadata. The 2018 adjustment remains pinned for this transcript schema; this entry does not authorize silent replacement by a later adjustment.
 - custody: witness
 - licence (redistribution unconfirmed): NIST identifies the constants database as Standard Reference Database 121, and the Standard Reference Data Act permits copyright in SRD compilations. No redistribution grant for these table bytes was established. The repository therefore holds no copy and records only the citation, factual row values, checksum, and public archive witness.
+
+### `nist_dlmf_18_39_coulomb_bound_states`
+
+National Institute of Standards and Technology, Digital Library of Mathematical Functions, section 18.39(ii), The Quantum Coulomb Problem, DLMF version 1.2.7, release date 15 March 2026, edited by F. W. J. Olver et al.
+
+- sha256: `c57ce71322118fb1ffed17237ee4398085830364310190ddb72a9f65f072735a`
+- archive pending: The Internet Archive CDX query returned no capture for this exact section URL on 2026-07-27. The complete fetched HTML is retained in external local custody under the recorded checksum, so the record does not rely on a live hyperlink while an archive witness is pending.
+- scope: The dimensionless attractive Coulomb Hamiltonian, its negative discrete spectrum, and the lowest bound-state energy in section 18.39(ii). Used only to support the leading, local, nonrelativistic, central two-body profile after the repository's independent admission protocol. It does not establish completeness of the physical vocabulary, constituent stability, a lifetime, a periodic table, or applicability outside the declared profile.
+- custody: external
+- licence (**NOT redistributable**): No repository-compatible redistribution grant for a wholesale DLMF HTML page was established. The DLMF copyright guidance permits limited copying for research and teaching but restricts bulk or open redistribution, so the full page remains outside the repository and only its citation, factual equations, checksum, and narrow extract are recorded here.
+- licence evidence: https://dlmf.nist.gov/about/copyright
+- free route (publisher-open): https://dlmf.nist.gov/18.39
+
+### `nist_dlmf_33_22_two_body_coulomb`
+
+National Institute of Standards and Technology, Digital Library of Mathematical Functions, section 33.22(v), Particle Scattering and Atomic and Molecular Spectra, DLMF version 1.2.7, release date 15 March 2026, edited by F. W. J. Olver et al.
+
+- sha256: `2169602261e5563744f26ed9ac38ddb06d73bab356babbe3d644ad9df9aa15eb`
+- archive pending: The Internet Archive CDX query returned no capture for this exact section URL on 2026-07-27. The complete fetched HTML is retained in external local custody under the recorded checksum, so the record does not rely on a live hyperlink while an archive witness is pending.
+- scope: The two-particle reduced-mass radial equation and the attractive-Coulomb bound-state statement in section 33.22(v). Used only as a companion check on the equal-mass reduction inside the declared leading, local, nonrelativistic profile. It does not supply a fitted value or authorize any species.
+- custody: external
+- licence (**NOT redistributable**): No repository-compatible redistribution grant for a wholesale DLMF HTML page was established. The DLMF copyright guidance permits limited copying for research and teaching but restricts bulk or open redistribution, so the full page remains outside the repository and only its citation, factual equations, checksum, and narrow extract are recorded here.
+- licence evidence: https://dlmf.nist.gov/about/copyright
+- free route (publisher-open): https://dlmf.nist.gov/33.22
 
 ### `nsrds_nbs8`
 

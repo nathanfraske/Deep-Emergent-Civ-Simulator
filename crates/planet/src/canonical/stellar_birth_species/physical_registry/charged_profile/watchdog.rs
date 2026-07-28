@@ -592,8 +592,10 @@ fn reconstruct_candidates(
             },
             scope: super::super::model::MassProjectionScope::SpeciesRestMass,
             uncertainty_transport: Some(super::super::model::MassUncertaintyTransportProof {
-                source_coordinate: packet.mass_scalar_identity,
-                source_pair_receipt: packet.root_pair_receipt.clone(),
+                sources: vec![super::super::model::MassUncertaintySourceProof {
+                    source_coordinate: packet.mass_scalar_identity,
+                    source_pair_receipt: packet.root_pair_receipt.clone(),
+                }],
                 producer_receipt: receipt_binding(
                     "civsim.charged-profile.mass-uncertainty-forward.v1",
                     mass_transport_producer_sha256,

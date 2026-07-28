@@ -74,6 +74,55 @@ licence = "The paper states copyright 2021 by the U.S. Secretary of Commerce on 
 note = "Live and archived bytes were fetched independently on 2026-07-20 and were byte-identical at 2,312,070 bytes with the recorded SHA-256."
 
 # ---------------------------------------------------------------------------------------------------
+# Documentary custody for the exact Coulomb bound-state and reduced-mass equations used to test one
+# neutral two-body profile. These records do not admit the interaction premise. The claim-local
+# derive-first, Gap Law, typed Chaos Protocol, Residual Law, owner gate, and independent semantic pair
+# remain the only admission route.
+# ---------------------------------------------------------------------------------------------------
+
+[[source]]
+id = "nist_dlmf_18_39_coulomb_bound_states"
+citation = "National Institute of Standards and Technology, Digital Library of Mathematical Functions, section 18.39(ii), The Quantum Coulomb Problem, DLMF version 1.2.7, release date 15 March 2026, edited by F. W. J. Olver et al."
+url = "https://dlmf.nist.gov/18.39"
+archive_pending = "The Internet Archive CDX query returned no capture for this exact section URL on 2026-07-27. The complete fetched HTML is retained in external local custody under the recorded checksum, so the record does not rely on a live hyperlink while an archive witness is pending."
+sha256 = "c57ce71322118fb1ffed17237ee4398085830364310190ddb72a9f65f072735a"
+bytes = 557709
+recipe = "curl -L https://dlmf.nist.gov/18.39 (HTTP 200, text/html), fetched 2026-07-27 and retained byte-for-byte in external local custody."
+grade = "reference derivation and exact special-function result, documentary evidence only"
+scope = "The dimensionless attractive Coulomb Hamiltonian, its negative discrete spectrum, and the lowest bound-state energy in section 18.39(ii). Used only to support the leading, local, nonrelativistic, central two-body profile after the repository's independent admission protocol. It does not establish completeness of the physical vocabulary, constituent stability, a lifetime, a periodic table, or applicability outside the declared profile."
+custody = "external"
+external_path = "~/.claude/vendored-sources/nist_dlmf_coulomb_2026-07-27/dlmf_18.39.html"
+licence = "No repository-compatible redistribution grant for a wholesale DLMF HTML page was established. The DLMF copyright guidance permits limited copying for research and teaching but restricts bulk or open redistribution, so the full page remains outside the repository and only its citation, factual equations, checksum, and narrow extract are recorded here."
+redistributable = false
+licence_evidence = "https://dlmf.nist.gov/about/copyright"
+free_route = "https://dlmf.nist.gov/18.39"
+free_route_kind = "publisher-open"
+slim = "KEPT EXTERNALLY: the complete fetched HTML for section 18.39, including equation assets, navigation metadata, references, and version identity. DROPPED FROM THE REPOSITORY: all source bytes, because redistribution permission was not established. The load-bearing anchors are equations 18.39.27 through 18.39.31 and the surrounding negative-discrete-spectrum discussion."
+read_channels = "Semantic HTML text and the equation identifiers embedded by the publisher were inspected together. No numerical table or visual plot was transcribed."
+note = "DOCUMENTARY CUSTODY ONLY. A cited exact result is not an authored input and does not select the repository's interaction premise. The neutral profile may consume this witness only after its claim-local derive-first and irreducible-route evidence closes."
+
+[[source]]
+id = "nist_dlmf_33_22_two_body_coulomb"
+citation = "National Institute of Standards and Technology, Digital Library of Mathematical Functions, section 33.22(v), Particle Scattering and Atomic and Molecular Spectra, DLMF version 1.2.7, release date 15 March 2026, edited by F. W. J. Olver et al."
+url = "https://dlmf.nist.gov/33.22"
+archive_pending = "The Internet Archive CDX query returned no capture for this exact section URL on 2026-07-27. The complete fetched HTML is retained in external local custody under the recorded checksum, so the record does not rely on a live hyperlink while an archive witness is pending."
+sha256 = "2169602261e5563744f26ed9ac38ddb06d73bab356babbe3d644ad9df9aa15eb"
+bytes = 162156
+recipe = "curl -L https://dlmf.nist.gov/33.22 (HTTP 200, text/html), fetched 2026-07-27 and retained byte-for-byte in external local custody."
+grade = "reference derivation and reduced-mass formulation, documentary evidence only"
+scope = "The two-particle reduced-mass radial equation and the attractive-Coulomb bound-state statement in section 33.22(v). Used only as a companion check on the equal-mass reduction inside the declared leading, local, nonrelativistic profile. It does not supply a fitted value or authorize any species."
+custody = "external"
+external_path = "~/.claude/vendored-sources/nist_dlmf_coulomb_2026-07-27/dlmf_33.22.html"
+licence = "No repository-compatible redistribution grant for a wholesale DLMF HTML page was established. The DLMF copyright guidance permits limited copying for research and teaching but restricts bulk or open redistribution, so the full page remains outside the repository and only its citation, factual equations, checksum, and narrow extract are recorded here."
+redistributable = false
+licence_evidence = "https://dlmf.nist.gov/about/copyright"
+free_route = "https://dlmf.nist.gov/33.22"
+free_route_kind = "publisher-open"
+slim = "KEPT EXTERNALLY: the complete fetched HTML for section 33.22, including equation assets, navigation metadata, references, and version identity. DROPPED FROM THE REPOSITORY: all source bytes, because redistribution permission was not established. The load-bearing anchor is subsection 33.22(v), especially the reduced-mass radial equation and its attractive-Coulomb bound-state paragraph."
+read_channels = "Semantic HTML text and the equation identifiers embedded by the publisher were inspected together. No numerical table or visual plot was transcribed."
+note = "DOCUMENTARY COMPANION, NOT AN INDEPENDENT MEASUREMENT. This second DLMF section cross-checks the reduced-mass formulation, while the repository's producer and watchdog independently prove the exact dimensionless result."
+
+# ---------------------------------------------------------------------------------------------------
 # Documentary custody for one narrow Standard Model statement. This source record and the held bytes
 # grant no project authority and admit no primitive physical profile.
 # ---------------------------------------------------------------------------------------------------

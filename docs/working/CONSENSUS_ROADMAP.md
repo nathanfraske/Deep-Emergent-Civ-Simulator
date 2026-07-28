@@ -16,8 +16,8 @@ observer independence bind the full runpath.
 ## Active arcs
 
 - 2026-07-21  PR #215 is the draft integration base -> branch `claude/thermoelastic-rung3`, `HANDOFFS.md`
-- 2026-07-27  Two local profile authorities now close three members across a 72-artifact current-input partition; global vocabulary, conditioned support, and registry completeness remain open -> `TODOS.md` P-STELLAR-SPECIES-DERIVATION-ROOTS
-- 2026-07-27  Floor-to-periodicity now has the derived `eps_0` premise, grounded derive-first routing, one null excitation, and a two-member charged conjugation orbit; neutral bound-state interaction evidence is next -> `docs/PERIODICITY_EMERGENCE_PIPELINE.md`
+- 2026-07-27  Three local profile authorities now close four members across a 105-artifact current-input partition; global vocabulary, conditioned support, global stability, and registry completeness remain open -> `TODOS.md` P-STELLAR-SPECIES-DERIVATION-ROOTS
+- 2026-07-27  Floor-to-periodicity now has the derived `eps_0` premise, grounded derive-first routing, one null excitation, a two-member charged conjugation orbit, and one neutral composite below its covered free-pair threshold; a strong-interaction profile is next -> `docs/PERIODICITY_EMERGENCE_PIPELINE.md`
 - 2026-07-21  Stage 1 SI-native adapters are blocked until both stellar-birth measure leaves close -> `TODOS.md` P-STAGE1-ADAPTERS
 - 2026-07-21  Canonical GPU use remains blocked on typed adapters and exact CPU/GPU Q32.32 parity for every enabled backend -> `TODOS.md` P-GPU-BIT-PARITY
 - 2026-07-20  Stage 1 star, collapse, disk, and embryo-system realization -> `TODOS.md` P-STAR-DISK-SYSTEM
@@ -37,15 +37,16 @@ observer independence bind the full runpath.
 ## Refusals and owner gates
 
 - 2026-07-20  Current canonical run enters Stage 1 and refuses on `stellar_birth.realization_measure`; no snapshot is emitted -> `crates/planet/src/canonical/`
-- 2026-07-27  Both birth-measure leaves remain unresolved; three local registry members have no conditioned support or global closure and cannot close the joint measure -> `crates/planet/src/canonical/stellar_birth_measure.rs`
+- 2026-07-27  Both birth-measure leaves remain unresolved; four local registry members have no conditioned support or global closure and cannot close the joint measure -> `crates/planet/src/canonical/stellar_birth_measure.rs`
 - 2026-07-21  The executable evaluator reports both exact open leaves; neither repository-owned proof capability exists yet -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`
 
 ## Recent landings
 
+- 2026-07-27  A paired neutral-bound-profile authority independently solves one lowest two-body level, exact normalization and residual, two-coordinate uncertainty transport, strict free-pair separation, and one neutral member while preserving an energetically open decay family and denying support or global stability -> `crates/planet/src/canonical/stellar_birth_species/physical_registry/neutral_bound_profile/`
 - 2026-07-27  A paired charged-matter authority closes an orientation-invariant two-member Fermi orbit with explicit mass-uncertainty transport and an independent `[A]/[D]` census -> `crates/planet/src/canonical/stellar_birth_species/physical_registry/charged_profile/`
-- 2026-07-27  Species analysis v9 and the observer-only viewer expose three member identities, both local profiles, conjugation evidence, mass transport, and the neutral bound-state frontier without a causal return edge -> `crates/planet/src/canonical/stellar_birth_species/authority_analysis/`
+- 2026-07-27  Species analysis v10 and the observer-only viewer expose four member identities, all three local profiles, solver, normalization, threshold, decay, conservation, conjugation, and mass-transport evidence without a causal return edge -> `crates/planet/src/canonical/stellar_birth_species/authority_analysis/`
 - 2026-07-25  V5 root agreement canonicalizes arrival order, refuses stale identity binding, and keeps alien inspection test-only -> `crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/`
-- 2026-07-26  Registry v5 requires scoped exact-zero evidence from distinct encoders; live membership remains empty -> `crates/planet/src/canonical/stellar_birth_species/physical_registry/`
+- 2026-07-27  Registry v6 and proof graph v5 require complete canonical uncertainty-source sets for species-rest-mass expressions; missing, duplicate, extra, or reordered source rows refuse under both validators -> `crates/planet/src/canonical/stellar_birth_species/physical_registry/`
 - 2026-07-26  The `eps_0` pair independently binds floor ancestry, claim-local scale, results, and canaries into one non-species capability -> `crates/planet/src/canonical/stellar_birth_species/law_premise/`
 - 2026-07-23  Independent bounded structural validators agree on canonical species descriptors and explicit positive or proved-zero conditioned support without minting physical authority or changing run bytes -> `crates/planet/src/canonical/stellar_birth_species/support_packet/`
 - 2026-07-23  Portable per-gate execution locks prevent cross-process cache stampedes, while one marker-backed build anchor runs Stone 0 per canonical Cargo graph and an independent pair checks its exact wiring -> `scripts/gate_runner.py`, `crates/stone0-build`, `scripts/stone0_build_wiring_gate.py`

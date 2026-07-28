@@ -79,6 +79,26 @@ impl BigUint {
         }
     }
 
+    /// Minimal unsigned big-endian bytes, with zero encoded as one zero byte.
+    ///
+    /// This is an encoding primitive only. It does not parse caller bytes or
+    /// select a numerical result.
+    fn minimal_be_bytes(&self) -> Vec<u8> {
+        if self.limbs.is_empty() {
+            return vec![0];
+        }
+        let mut bytes = Vec::with_capacity(self.limbs.len() * 4);
+        for limb in self.limbs.iter().rev() {
+            bytes.extend_from_slice(&limb.to_be_bytes());
+        }
+        let first_nonzero = bytes
+            .iter()
+            .position(|byte| *byte != 0)
+            .unwrap_or(bytes.len() - 1);
+        bytes.drain(..first_nonzero);
+        bytes
+    }
+
     /// Bit `i` (0 = least significant).
     fn test_bit(&self, i: u32) -> bool {
         let limb = (i / 32) as usize;
@@ -292,6 +312,14 @@ pub struct BigRat {
     den: BigUint,
 }
 
+impl PartialEq for BigRat {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp_rat(other) == Ordering::Equal
+    }
+}
+
+impl Eq for BigRat {}
+
 impl BigRat {
     /// A rational from a signed integer.
     pub fn from_i64(v: i64) -> Self {
@@ -416,6 +444,29 @@ impl BigRat {
     /// The absolute value.
     pub fn abs(&self) -> BigRat {
         BigRat::new(false, self.num.clone(), self.den.clone())
+    }
+
+    /// Canonical sign, numerator, and denominator bytes under an explicit
+    /// component-size bound.
+    ///
+    /// The value is reduced before encoding, so algebraically equal rationals
+    /// receive identical bytes even when their intermediate limb forms differ.
+    /// This method exposes no parser or authority surface. Callers must choose
+    /// and receipt a finite bound before exact arithmetic enters a bitstream.
+    pub fn bounded_canonical_components(
+        &self,
+        max_component_bytes: usize,
+    ) -> Result<(bool, Vec<u8>, Vec<u8>), String> {
+        if max_component_bytes == 0 {
+            return Err("canonical rational component bound is zero".to_owned());
+        }
+        let reduced = self.reduce();
+        let numerator = reduced.num.minimal_be_bytes();
+        let denominator = reduced.den.minimal_be_bytes();
+        if numerator.len() > max_component_bytes || denominator.len() > max_component_bytes {
+            return Err("canonical rational component exceeds declared byte bound".to_owned());
+        }
+        Ok((reduced.neg, numerator, denominator))
     }
 
     /// Numerator and denominator bit lengths for fail-closed resource checks
@@ -774,6 +825,24 @@ mod tests {
                 .cmp_rat(&BigRat::from_i64(3).div(&BigRat::from_i64(8))),
             Ordering::Equal
         ); // 3/8
+    }
+
+    #[test]
+    fn canonical_rational_components_reduce_and_enforce_the_bound() {
+        let unreduced = BigRat::new(false, BigUint::from_u64(6), BigUint::from_u64(8));
+        let reduced = BigRat::from_i64(3).div(&BigRat::from_i64(4));
+        assert_eq!(
+            unreduced.bounded_canonical_components(1).unwrap(),
+            reduced.bounded_canonical_components(1).unwrap()
+        );
+        assert_eq!(
+            BigRat::from_i64(0).bounded_canonical_components(1).unwrap(),
+            (false, vec![0], vec![1])
+        );
+        assert!(BigRat::from_i64(256)
+            .bounded_canonical_components(1)
+            .is_err());
+        assert!(BigRat::from_i64(1).bounded_canonical_components(0).is_err());
     }
 
     #[test]
