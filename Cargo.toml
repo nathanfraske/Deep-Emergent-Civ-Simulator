@@ -44,5 +44,14 @@ opt-level = 3
 # dev profile only and does not alter release semantics.
 debug = "line-tables-only"
 
+[profile.test]
+# The authority suites are dominated by exact integer, rational, digest, and graph work. Low-level
+# optimization keeps their semantics unchanged while making the repeated adversarial checks practical
+# during development. Overflow checks and debug assertions stay explicit and enabled.
+opt-level = 1
+debug = "line-tables-only"
+overflow-checks = true
+debug-assertions = true
+
 [profile.release.build-override]
 opt-level = 3

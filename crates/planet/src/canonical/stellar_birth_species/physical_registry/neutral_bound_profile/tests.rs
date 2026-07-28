@@ -1,5 +1,13 @@
 use super::*;
 use std::cmp::Ordering;
+use std::sync::OnceLock;
+
+fn profile_projection() -> NeutralBoundProfileProjection {
+    static BASELINE: OnceLock<NeutralBoundProfileProjection> = OnceLock::new();
+    BASELINE
+        .get_or_init(|| construct_profile_projection().expect("profile projection constructs"))
+        .clone()
+}
 
 #[test]
 fn independent_pair_agrees_on_one_exact_neutral_bound_member() {
@@ -49,7 +57,7 @@ fn independent_pair_agrees_on_one_exact_neutral_bound_member() {
 
 #[test]
 fn projection_keeps_constituent_binding_separate_from_open_decay() {
-    let projection = construct_profile_projection().unwrap();
+    let projection = profile_projection();
     assert_eq!(projection.candidate_artifacts.len(), ARTIFACT_COUNT);
     assert_eq!(projection.receipt.artifact_count, ARTIFACT_COUNT as u32);
     assert_eq!(
@@ -79,7 +87,7 @@ fn both_live_canary_suites_cover_the_same_nonzero_case_count() {
 
 #[test]
 fn exact_threshold_capability_does_not_mint_authority() {
-    let projection = construct_profile_projection().unwrap();
+    let projection = profile_projection();
     let produced = producer::inspect(&producer::sealed_packet().unwrap()).unwrap();
     assert_eq!(projection.receipt.member, produced.member);
     assert_eq!(projection.receipt.authority_effect, "none");

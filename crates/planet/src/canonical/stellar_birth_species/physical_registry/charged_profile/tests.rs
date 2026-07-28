@@ -1,9 +1,19 @@
 use super::*;
 use civsim_ledger::Provenance;
+use std::sync::OnceLock;
+
+fn profile_projection() -> ChargedProfileProjection {
+    static BASELINE: OnceLock<ChargedProfileProjection> = OnceLock::new();
+    BASELINE
+        .get_or_init(|| {
+            construct_profile_projection().expect("charged profile projection constructs")
+        })
+        .clone()
+}
 
 #[test]
 fn charged_profile_closes_one_orientation_invariant_pair() {
-    let projection = construct_profile_projection().expect("charged profile projection constructs");
+    let projection = profile_projection();
     assert_eq!(projection.candidate_artifacts.len(), ARTIFACT_COUNT);
     assert_eq!(projection.members.len(), MEMBER_COUNT);
     assert!(projection.members.windows(2).all(|pair| pair[0] < pair[1]));
@@ -49,7 +59,7 @@ fn charge_input_order_does_not_select_the_pair() {
 
 #[test]
 fn independent_canary_transcripts_are_nonempty_and_distinct() {
-    let projection = construct_profile_projection().expect("charged profile projection constructs");
+    let projection = profile_projection();
     assert!(projection.receipt.producer_canary.case_count >= 30);
     assert_eq!(
         projection.receipt.producer_canary.case_count,

@@ -323,13 +323,18 @@ impl SpeciesDerivationAnalysisArtifact {
 mod tests {
     use super::*;
     use crate::canonical::{floor_magnitudes::AuditedFloorView, sealed_absolute_physics_floor};
-    use std::collections::BTreeSet;
+    use std::{collections::BTreeSet, sync::OnceLock};
 
     fn analysis() -> SpeciesDerivationAnalysisArtifact {
-        let floor = sealed_absolute_physics_floor().expect("the physical floor seals");
-        let floor_view =
-            AuditedFloorView::from_floor(&floor).expect("the floor has typed magnitudes");
-        analyze_repository_species_state_support(&floor_view)
+        static BASELINE: OnceLock<SpeciesDerivationAnalysisArtifact> = OnceLock::new();
+        BASELINE
+            .get_or_init(|| {
+                let floor = sealed_absolute_physics_floor().expect("the physical floor seals");
+                let floor_view =
+                    AuditedFloorView::from_floor(&floor).expect("the floor has typed magnitudes");
+                analyze_repository_species_state_support(&floor_view)
+            })
+            .clone()
     }
 
     #[test]

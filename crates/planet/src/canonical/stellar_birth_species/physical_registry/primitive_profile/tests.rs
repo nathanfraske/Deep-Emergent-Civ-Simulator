@@ -1,9 +1,17 @@
 use super::*;
 use civsim_ledger::Provenance;
+use std::sync::OnceLock;
+
+fn profile_projection() -> PrimitiveProfileProjection {
+    static BASELINE: OnceLock<PrimitiveProfileProjection> = OnceLock::new();
+    BASELINE
+        .get_or_init(|| construct_profile_projection().expect("profile projection constructs"))
+        .clone()
+}
 
 #[test]
 fn profile_projection_binds_executed_admission_and_symmetry_evidence() {
-    let projection = construct_profile_projection().expect("profile projection constructs");
+    let projection = profile_projection();
     assert_eq!(projection.candidate_artifacts.len(), ARTIFACT_COUNT);
     assert_ne!(projection.member.0, [0; 32]);
     assert_eq!(projection.receipt.member, projection.member);
@@ -97,7 +105,7 @@ fn profile_projection_binds_executed_admission_and_symmetry_evidence() {
 
 #[test]
 fn fixture_canary_transcripts_are_distinct_and_nonempty() {
-    let projection = construct_profile_projection().expect("profile projection constructs");
+    let projection = profile_projection();
     assert_ne!(
         projection.receipt.producer_canary.transcript_id,
         projection.receipt.watchdog_canary.transcript_id

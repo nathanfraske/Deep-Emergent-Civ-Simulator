@@ -5,6 +5,14 @@ use super::{
     root_admission_census, watchdog,
 };
 use civsim_units::{bignum::BigUint, digest::sha256};
+use std::sync::OnceLock;
+
+fn repository_fixture_input() -> PhysicalRegistryInput {
+    static BASELINE: OnceLock<PhysicalRegistryInput> = OnceLock::new();
+    BASELINE
+        .get_or_init(|| repository_input().expect("repository bindings are available"))
+        .clone()
+}
 
 #[derive(Debug, Clone, Copy)]
 enum FixtureDerivation {
@@ -142,7 +150,7 @@ fn build_fixture(
     massless: bool,
     defects: FixtureDefects,
 ) -> Fixture {
-    let mut input = repository_input().expect("repository bindings are available");
+    let mut input = repository_fixture_input();
     let mut artifacts = Vec::new();
 
     let mass_numerator = if defects.zero_projection { 0 } else { 7 };
@@ -404,7 +412,7 @@ fn massless_fixture(base_tag: u8) -> Fixture {
 fn composite_fixture() -> Fixture {
     let first = elementary_fixture(11);
     let second = massless_fixture(71);
-    let mut input = repository_input().expect("repository bindings are available");
+    let mut input = repository_fixture_input();
     let mut by_identity = std::collections::BTreeMap::new();
     for artifact in first
         .input
@@ -882,7 +890,7 @@ fn repository_result_closes_four_local_members_without_global_authority() {
             && admission.provenance_tag == "[D]"
             && admission.route_id == "derived"
     }));
-    let input = repository_input().unwrap();
+    let input = repository_fixture_input();
     assert_eq!(
         input
             .admitted_artifacts
@@ -977,7 +985,7 @@ fn repository_result_closes_four_local_members_without_global_authority() {
 
 #[test]
 fn local_closure_does_not_require_a_false_global_vocabulary_claim() {
-    let repository = repository_input().expect("repository profile is available");
+    let repository = repository_fixture_input();
     assert!(repository.admitted_artifacts.iter().any(|artifact| {
         artifact.admission_capability_kind() == AdmissionCapabilityKind::RepositoryRoot
     }));
@@ -989,6 +997,19 @@ fn local_closure_does_not_require_a_false_global_vocabulary_claim() {
     let registry = inspect_physical_registry(&repository).expect("bounded local closure");
     assert_eq!(registry.members.len(), 4);
     assert_eq!(registry.authority_effect, AuthorityEffect::None);
+}
+
+#[test]
+fn cached_repository_fixture_returns_isolated_clones() {
+    let mut changed = repository_fixture_input();
+    let expected = changed.clone();
+    changed.schema_id.push_str(".mutated");
+    changed.admitted_artifacts.pop();
+    changed.declared_members.clear();
+
+    let fresh = repository_fixture_input();
+    assert_eq!(fresh, expected);
+    assert_ne!(fresh, changed);
 }
 
 #[test]
@@ -1519,7 +1540,7 @@ fn a_name_only_mass_coordinate_and_evidence_only_citation_never_create_membershi
         .find(|artifact| artifact.claimed_identity == fixture.scalar)
         .unwrap()
         .clone();
-    let mut name_only = repository_input().unwrap();
+    let mut name_only = repository_fixture_input();
     let mut scalar = scalar;
     let ArtifactPayload::ScalarCoordinate(coordinate) = &mut scalar.payload else {
         panic!("fixture scalar");

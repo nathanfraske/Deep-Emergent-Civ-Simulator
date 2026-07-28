@@ -1,3 +1,13 @@
+> # PR #215 TEST-CYCLE ACCELERATION (2026-07-28, `claude/thermoelastic-rung3`, draft PR #215).
+>
+> **RESULT.** The canonical planet all-target test route now passes in 370.91 seconds including an 82-second rebuild. The library, CLI, and public-observation test binaries completed in 118.23, 101.93, and 54.82 seconds. The prior library-only reference was 1,716.05 seconds.
+>
+> **MECHANISM.** The test profile uses optimization level 1 with overflow checks and debug assertions explicitly enabled. Test-only `OnceLock` baselines hold complete sealed registry, profile, and analysis fixtures, and each mutable test receives an owned clone. The isolated-clone regression mutates schema, artifacts, and membership, then proves the next fixture is unchanged. Production construction, producer and watchdog algorithms, receipts, canonical bytes, and refusal behavior are untouched.
+>
+> **MEASUREMENT.** One sealed repository setup fell from 100.60 seconds to 14.65 seconds, a 6.87-fold reduction. The paired integer-power slice completes two tests in the same setup interval. WSL remains deliberately bounded to 18 logical cores, the managed target is 12 GiB under its 32 GiB hard cap, and the existing optional `sccache` path is active on this machine with an 8 GiB cache bound.
+>
+> **VALIDATION AND NEXT.** The full merge-grade PR receipt passes in 1,076.19 seconds, down from 3,917.1 seconds. Continue with the strong-interaction profile. The scientific acceptance boundary is unchanged.
+>
 > # PR #215 FIRST NEUTRAL TWO-BODY BOUND PROFILE (2026-07-27, `claude/thermoelastic-rung3`, draft PR #215).
 >
 > **RESULT.** The canonical physical registry now closes four local members across three narrow profiles: one source-free unbroken rank-one abelian null excitation, a two-member equal-mass opposite-charge Fermi orbit, and one neutral two-body composite. No familiar particle, atom, core, element, stellar class, or desired outcome enters the causal path.
