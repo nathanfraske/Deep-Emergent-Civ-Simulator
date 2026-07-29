@@ -17,6 +17,11 @@ viewer keeps eight historical planet-construction expectations ignored because
 they require fusion-volume evidence that is absent; its active replacement test
 asserts the structured Gap Law refusal instead of supplying a value.
 
+Automatic pull-request and scheduled CI do not build this workspace. The
+manual `parked compatibility maintenance` GitHub workflow retains the complete
+diagnostic route for deliberate archaeology or compatibility work. Its result
+cannot block or certify the canonical runpath.
+
 Compatibility package names are explicit: `civsim-physics-legacy`,
 `civsim-units-legacy`, `civsim-world-legacy`, `civsim-materials-legacy`, and
 `civsim-gpu-legacy`. They preserve old callers without re-exporting organism,

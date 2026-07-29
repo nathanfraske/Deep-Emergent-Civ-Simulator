@@ -1,0 +1,37 @@
+# Copyright 2026 Nathan M. Fraske
+# Licensed under the Apache License, Version 2.0; see LICENSE.
+
+name: parked compatibility maintenance
+
+# Parked code is historical and cannot supply canonical readiness evidence.
+# Run this workflow only when a maintainer deliberately inspects compatibility.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  parked-compatibility:
+    name: parked compatibility diagnostics
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned Rust toolchain
+        run: rustup show
+      - name: Install Just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+      - name: Print the ordered legacy gate ids
+        run: just gates-list legacy
+      - name: Parked audit ratchets
+        run: just audit-parked
+      - name: Parked routine crate tests
+        run: just test-legacy-routine
+      - name: Mixed legacy compatibility compile
+        run: cargo check --manifest-path parked/Cargo.toml --target-dir target/parked -p civsim-sim -p civsim-viewer-legacy
+      - name: Parked ignored and slow tests
+        run: cargo test --manifest-path parked/Cargo.toml --target-dir target/parked --workspace --exclude civsim-gpu-legacy --all-targets -- --ignored

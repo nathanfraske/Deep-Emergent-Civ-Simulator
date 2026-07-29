@@ -1,3 +1,13 @@
+> # PR #215 CANONICAL-ONLY AUTOMATIC CI (2026-07-29, `claude/thermoelastic-rung3`, draft PR #215).
+>
+> **RESULT.** Pull-request, main-push, and scheduled CI now run only Stone 0 and the canonical planet quality route. The prior parked compatibility job took 31 minutes 4 seconds, became the hosted workflow critical path after the canonical job fell to 24 minutes 5 seconds, and supplied no canonical readiness evidence.
+>
+> **BOUNDARY.** The lightweight `docs.legacy-archive` gate remains automatic to preserve the maintained historical document structure. The canonical planet-boundary gate still inspects both workspace manifests and complete parked crate sources to prove that no parked package enters the active dependency graph. Biology, civilization, calibration, and the retired causal viewer are therefore still mechanically excluded without compiling or testing them on each canonical change.
+>
+> **MANUAL COMPATIBILITY.** `.github/workflows/parked-maintenance.yml` is `workflow_dispatch` only. It retains legacy ratchets, routine crate tests, the mixed compatibility compile, and ignored slow tests for deliberate archaeology. Its result has no physical, admission, merge, or planetary-readiness authority.
+>
+> **NEXT.** The first bounded physical rung remains confining-sector constituent content: exact internal representation, running or scale relation, excitation profiles, masses, charges, statistics, applicability, validity, conservation, transition coverage, and independent checker agreement. The parallel observer-only rung is domain-separated artifact identity and parent-bound materialization keys. Neither may accept a familiar constituent name, desired system, viewer query, or authored magnitude as causal input.
+>
 > # PR #215 VERIFICATION THROUGHPUT SCHEDULER (2026-07-29, `claude/thermoelastic-rung3`, draft PR #215).
 >
 > **RESULT.** A measured nonphysical throughput pass cuts the complete PR-quality route from 651.68 seconds to 227.83 seconds on the current 18-core WSL host, a 2.86-fold reduction. The canonical all-target test gate falls from 566.88 seconds at 4.83 average cores to 182.87 seconds at 14.73 average cores. An isolated parallel receipt completes in 176.85 seconds at 15.60 average cores. Detector self-tests fall from 10.81 to 6.80 seconds while retaining fixed phase barriers.

@@ -6,7 +6,7 @@ remaining_non_inventory = [
   "Cargo format, Clippy, test, and Rustdoc commands remain in justfile.",
   "Native Stone 0 credential and tombstone scans remain in civsim-stone0.",
   "Pushed-history credential scanning remains in the tracked pre-push and CI scripts.",
-  "Parked crate compilation, tests, and ignored tests remain in justfile and CI.",
+  "Parked crate compilation, tests, and ignored tests remain in justfile and the manual maintenance workflow.",
 ]
 
 # Every command is an argument array. The runner never passes these values to a

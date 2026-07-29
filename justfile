@@ -293,7 +293,8 @@ check: check-pr
 check-full:
     just _ci full
 
-# Scheduled canonical checks use their distinct gate tier; parked ignored tests remain a separate CI job.
+# Scheduled canonical checks use their distinct gate tier. Parked compatibility
+# remains available through its explicit manual workflow.
 check-nightly:
     #!/usr/bin/env bash
     set -euo pipefail

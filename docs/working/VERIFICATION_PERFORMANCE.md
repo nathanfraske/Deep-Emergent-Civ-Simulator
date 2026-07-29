@@ -35,6 +35,14 @@ The complete-route reduction is 2.86-fold. The test-gate reduction is
 3.10-fold in the complete receipts and 3.21-fold against the isolated parallel
 receipt.
 
+On GitHub's hosted runner, the canonical planet job fell from 43 minutes 10
+seconds to 24 minutes 5 seconds, a 1.79-fold reduction. The former automatic
+parked compatibility job then became the 31-minute workflow critical path.
+That job supplied no canonical readiness evidence, so automatic PR and
+scheduled CI now contain only Stone 0 and the canonical planet route. The
+complete parked compatibility suite remains available through a
+`workflow_dispatch`-only maintenance workflow.
+
 The baseline began with a colder target and grew it by 3.76 GB. The final route
 grew it by 194 MB, so compiler state contributes to the full-route comparison.
 Cargo reported 41.68 seconds of compilation inside the baseline test gate.
@@ -122,6 +130,11 @@ preserves Cargo's independent serial executor. `just check-nightly` runs the
 ordinary quality route and then the serial cross-check, so the checker remains
 sparse and independent without charging every development cycle.
 
+The canonical package-boundary and archive-structure gates remain in every PR
+route. They prove the nested parked workspace cannot enter the root dependency
+graph and preserve the maintained historical document structure without
+compiling biology, civilization, or the retired causal viewer.
+
 The independent serial replay passed the same all-target selection after the
 parallel route. It used 2,364.15 child CPU-seconds over 535.19 wall-seconds.
 The final parallel run used 2,692.89 child CPU-seconds, a 13.9 percent CPU-work
@@ -132,9 +145,9 @@ time. The extra CPU work is visible and bounded rather than hidden.
 
 The test route is close to its CPU-work lower bound. Further scheduling changes
 have a small ceiling and need measured evidence before adoption. The next
-useful optimization targets are inside the three longest complete binaries:
-planet, physics, and the canonical CLI integration suite. Any fixture or
-algorithm change must preserve complete coverage and exact receipt behavior.
+useful automatic-CI optimization targets are inside the three longest complete
+binaries: planet, physics, and the canonical CLI integration suite. Any fixture
+or algorithm change must preserve complete coverage and exact receipt behavior.
 
 Structural post gates, Rustdoc, and Clippy have spare core capacity, but their
 combined wall share is now small. Overlapping authority phases or compiler
