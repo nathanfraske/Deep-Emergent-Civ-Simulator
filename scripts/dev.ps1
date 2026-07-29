@@ -36,6 +36,9 @@ param(
         "ledger-inventory",
         "ledger-inventory-check",
         "verify",
+        "profile-pr",
+        "profile-fast",
+        "profile-test-serial",
         "check-fast",
         "confirm-planet",
         "check",
@@ -49,6 +52,7 @@ param(
         "ci-legacy",
         "ci-list-legacy",
         "test",
+        "test-serial",
         "test-gpu-cpu-sparse",
         "test-gpu-vulkan-sparse",
         "test-gpu-cuda-cpu-cross",
@@ -149,6 +153,9 @@ just doctor
     "ledger-inventory" = "just ledger-inventory"
     "ledger-inventory-check" = "just ledger-inventory-check"
     "verify"           = "just verify"
+    "profile-pr"       = "just profile-pr"
+    "profile-fast"     = "just profile-fast"
+    "profile-test-serial" = "just profile-test-serial"
     "check-fast"       = "just check-fast"
     "confirm-planet"   = "just confirm-planet"
     "check"            = "just check-pr"
@@ -162,6 +169,7 @@ just doctor
     "ci-legacy"        = "just ci-legacy"
     "ci-list-legacy"   = "just ci-list-legacy"
     "test"             = "just test"
+    "test-serial"      = "just test-serial"
     "test-gpu-cpu-sparse" = "just test-gpu-cpu-sparse"
     "test-gpu-vulkan-sparse" = "just test-gpu-vulkan-sparse"
     "test-gpu-cuda-cpu-cross" = "just test-gpu-cuda-cpu-cross"

@@ -806,6 +806,41 @@ path_triggers = ["scripts/post.py"]
             self.assertLess(result.stdout.index("first"), result.stdout.index("second"))
             self.assertLess(result.stdout.index("second"), result.stdout.index("post"))
 
+            for marker in ("pre.done", "first.ready", "second.ready"):
+                (root / marker).unlink()
+            self_test_result = subprocess.run(
+                [
+                    sys.executable,
+                    str(scripts / "gate_runner.py"),
+                    "self-tests",
+                    "--tier",
+                    "synthetic",
+                    "--jobs",
+                    "2",
+                ],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                self_test_result.returncode,
+                0,
+                self_test_result.stdout + self_test_result.stderr,
+            )
+            self.assertLess(
+                self_test_result.stdout.index("pre"),
+                self_test_result.stdout.index("first"),
+            )
+            self.assertLess(
+                self_test_result.stdout.index("first"),
+                self_test_result.stdout.index("second"),
+            )
+            self.assertLess(
+                self_test_result.stdout.index("second"),
+                self_test_result.stdout.index("post"),
+            )
+
     def test_pre_push_list_mode_matches_the_authority(self) -> None:
         bash = self.require_bash()
         expected = self.authority_ids("pr")

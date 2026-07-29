@@ -131,8 +131,17 @@ doctor:
     {{cargo_dev}} run -q -p civsim-stone0 --bin stone0-gate -- --ci
     python3 scripts/gate_runner.py run --tier doctor --phase post
 
-# Test the canonical abiotic package set. Parked and legacy compatibility packages are intentionally separate.
+# Test the canonical abiotic package set with a compile-once, complete-binary
+# scheduler. Cargo metadata independently cross-checks the runnable inventory.
 test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source scripts/wsl_dev_env.sh --quiet
+    python3 scripts/parallel_cargo_test.py --self-test
+    python3 scripts/parallel_cargo_test.py {{canonical_packages}}
+
+# Preserve Cargo's serial executor as the independent sparse cross-check.
+test-serial:
     {{cargo_dev}} test {{canonical_packages}} --all-targets
 
 # Run the device-free independent CPU codegen evidence outside the routine PR lane.
@@ -212,6 +221,28 @@ _ci tier:
 ci:
     just _ci pr
 
+# Profile the current PR-quality route. The output is diagnostic and has no
+# merge, value-admission, or scientific authority.
+profile-pr *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source scripts/wsl_dev_env.sh --quiet
+    python3 scripts/quality_profile.py pr {{args}}
+
+# Profile the non-certifying fast developer route.
+profile-fast *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source scripts/wsl_dev_env.sh --quiet
+    python3 scripts/quality_profile.py fast {{args}}
+
+# Profile the sparse independent Cargo serial cross-check.
+profile-test-serial *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source scripts/wsl_dev_env.sh --quiet
+    python3 scripts/quality_profile.py serial-test {{args}}
+
 # Fast, non-certifying developer loop. The PR tier remains the merge receipt.
 check-fast:
     #!/usr/bin/env bash
@@ -264,7 +295,10 @@ check-full:
 
 # Scheduled canonical checks use their distinct gate tier; parked ignored tests remain a separate CI job.
 check-nightly:
+    #!/usr/bin/env bash
+    set -euo pipefail
     just _ci nightly
+    just test-serial
 
 # Common checks over the legacy workspace. This is not CI parity or planetary readiness. UNIX.
 check-legacy: fmt-check-legacy lint-legacy test-legacy verify

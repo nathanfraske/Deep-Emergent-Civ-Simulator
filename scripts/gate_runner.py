@@ -1403,25 +1403,115 @@ def command_self_tests(inventory: Inventory, args: argparse.Namespace) -> int:
     selected = _select_from_args(inventory, args)
     if not selected:
         raise InventoryError("gate selection is empty")
+    selected = tuple(gate for gate in selected if gate.self_test is not None)
+    if not selected:
+        raise InventoryError("selected gates expose no self-test commands")
+    jobs = max(1, getattr(args, "jobs", 1))
+    if getattr(args, "fail_fast", False):
+        jobs = 1
     tested = 0
     ok = True
-    for gate in selected:
-        if gate.self_test is None:
+    stop = False
+    for phase in PHASE_SEQUENCE:
+        phase_gates = tuple(gate for gate in selected if gate.phase == phase)
+        if not phase_gates:
             continue
-        tested += 1
-        outcome = execute_gate(
-            gate,
-            gate.self_test,
-            dry_run=args.dry_run,
-            manifest_path=inventory.source,
-        )
-        passed = outcome is GateOutcome.Passed
-        ok = passed and ok
-        if not passed and args.fail_fast:
+        if jobs > 1 and len(phase_gates) > 1:
+            results = _execute_self_tests_parallel(
+                inventory,
+                phase_gates,
+                jobs=jobs,
+                dry_run=args.dry_run,
+            )
+            tested += len(results)
+            ok = all(results) and ok
+            continue
+        for gate in phase_gates:
+            tested += 1
+            outcome = execute_gate(
+                gate,
+                gate.self_test,
+                dry_run=args.dry_run,
+                manifest_path=inventory.source,
+            )
+            passed = outcome is GateOutcome.Passed
+            ok = passed and ok
+            if not passed and args.fail_fast:
+                stop = True
+                break
+        if stop:
             break
-    if tested == 0:
-        raise InventoryError("selected gates expose no self-test commands")
     return 0 if ok else 1
+
+
+def _parallel_self_test_process(
+    inventory: Inventory,
+    gate: Gate,
+    *,
+    dry_run: bool,
+) -> tuple[bool, str, str]:
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--manifest",
+        str(inventory.source),
+        "self-tests",
+        "--id",
+        gate.gate_id,
+        "--jobs",
+        "1",
+    ]
+    if dry_run:
+        command.append("--dry-run")
+    try:
+        result = subprocess.run(
+            command,
+            cwd=ROOT,
+            env=os.environ.copy(),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="strict",
+            timeout=(2 * gate.timeout_seconds) + (2 * EXECUTION_LOCK_GRACE_SECONDS),
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeError) as error:
+        return (
+            False,
+            "",
+            f"[FAIL] {gate.gate_id}: parallel self-test worker failed: {error}\n",
+        )
+    return result.returncode == 0, result.stdout, result.stderr
+
+
+def _execute_self_tests_parallel(
+    inventory: Inventory,
+    gates: Sequence[Gate],
+    *,
+    jobs: int,
+    dry_run: bool,
+) -> list[bool]:
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(jobs, len(gates))
+    ) as executor:
+        results = list(
+            executor.map(
+                lambda gate: _parallel_self_test_process(
+                    inventory,
+                    gate,
+                    dry_run=dry_run,
+                ),
+                gates,
+            )
+        )
+    passed: list[bool] = []
+    for gate_passed, stdout, stderr in results:
+        if stdout:
+            print(stdout.rstrip())
+        if stderr:
+            print(stderr.rstrip(), file=sys.stderr)
+        passed.append(gate_passed)
+    return passed
 
 
 def _expect_invalid(data: Mapping[str, Any], needle: str) -> None:
@@ -1629,6 +1719,12 @@ def build_parser() -> argparse.ArgumentParser:
     _add_selection_arguments(tests_parser)
     tests_parser.add_argument("--dry-run", action="store_true")
     tests_parser.add_argument("--fail-fast", action="store_true")
+    tests_parser.add_argument(
+        "--jobs",
+        type=_positive_integer,
+        default=_default_jobs(),
+        help="run independent self-tests concurrently within phase barriers (default: CIVSIM_GATE_JOBS or up to 4)",
+    )
     return parser
 
 
