@@ -1070,6 +1070,95 @@ impl<'a> SpeciesDerivationAnalysisView<'a> {
         })
     }
 
+    pub fn confining_constituent_frontier_identity(
+        self,
+    ) -> Option<(&'a str, &'a str, &'a str, &'a str)> {
+        self.computed().map(|analysis| {
+            let frontier = &analysis
+                .physical_registry_frontier
+                .confining_constituent_frontier;
+            (
+                frontier.diagnostic_schema_id,
+                frontier.claim_id,
+                frontier.producer_id,
+                frontier.watchdog_id,
+            )
+        })
+    }
+
+    pub fn confining_constituent_frontier_decision(self) -> Option<&'a str> {
+        self.computed().map(|analysis| {
+            analysis
+                .physical_registry_frontier
+                .confining_constituent_frontier
+                .decision_id
+        })
+    }
+
+    pub fn confining_constituent_frontier_counts(self) -> Option<(usize, usize, u32)> {
+        self.computed().map(|analysis| {
+            let frontier = &analysis
+                .physical_registry_frontier
+                .confining_constituent_frontier;
+            (
+                frontier.internal_seed_identities.len(),
+                frontier.missing_authority_ids.len(),
+                frontier.constituent_candidate_count,
+            )
+        })
+    }
+
+    pub fn confining_constituent_internal_seed_identities(self) -> Option<&'a [[u8; 32]]> {
+        self.computed().map(|analysis| {
+            analysis
+                .physical_registry_frontier
+                .confining_constituent_frontier
+                .internal_seed_identities
+                .as_slice()
+        })
+    }
+
+    pub fn confining_constituent_missing_authority_ids(self) -> Option<&'a [&'static str]> {
+        self.computed().map(|analysis| {
+            analysis
+                .physical_registry_frontier
+                .confining_constituent_frontier
+                .missing_authority_ids
+                .as_slice()
+        })
+    }
+
+    pub fn confining_constituent_frontier_scope(self) -> Option<(bool, bool, &'a str)> {
+        self.computed().map(|analysis| {
+            let frontier = &analysis
+                .physical_registry_frontier
+                .confining_constituent_frontier;
+            (
+                frontier.membership_authority,
+                frontier.spectrum_authority,
+                frontier.authority_effect,
+            )
+        })
+    }
+
+    pub fn confining_constituent_frontier_digests(self) -> Option<[[u8; 32]; 8]> {
+        self.computed().map(|analysis| {
+            let frontier = &analysis
+                .physical_registry_frontier
+                .confining_constituent_frontier;
+            [
+                frontier.source_profile_receipt_sha256,
+                frontier.producer_result_sha256,
+                frontier.watchdog_result_sha256,
+                frontier.producer_trace_sha256,
+                frontier.watchdog_trace_sha256,
+                frontier.producer_resource_sha256,
+                frontier.watchdog_resource_sha256,
+                frontier.receipt_sha256,
+            ]
+        })
+    }
+
     pub fn physical_registry_membership_authority(self) -> Option<bool> {
         self.computed()
             .map(|analysis| analysis.physical_registry_frontier.membership_authority)

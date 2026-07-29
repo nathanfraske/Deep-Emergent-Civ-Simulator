@@ -17,7 +17,7 @@ observer independence bind the full runpath.
 
 - 2026-07-21  PR #215 is the draft integration base -> branch `claude/thermoelastic-rung3`, `HANDOFFS.md`
 - 2026-07-28  Four local profile authorities close four members across a 125-artifact current-input partition; global vocabulary, support, stability, and completeness remain open -> `TODOS.md` P-STELLAR-SPECIES-DERIVATION-ROOTS
-- 2026-07-28  One zero-member confining profile adds nonlinear carrier grammar and an invariant-only asymptotic boundary; exact constituent content is next -> `docs/PERIODICITY_EMERGENCE_PIPELINE.md`
+- 2026-07-29  The zero-member confining profile now feeds a paired one-seed, zero-candidate frontier with eight typed content gaps; representation closure is next -> `docs/PERIODICITY_EMERGENCE_PIPELINE.md`
 - 2026-07-21  Stage 1 SI-native adapters are blocked until both stellar-birth measure leaves close -> `TODOS.md` P-STAGE1-ADAPTERS
 - 2026-07-21  Canonical GPU use remains blocked on typed adapters and exact CPU/GPU Q32.32 parity for every enabled backend -> `TODOS.md` P-GPU-BIT-PARITY
 - 2026-07-20  Stage 1 star, collapse, disk, and embryo-system realization -> `TODOS.md` P-STAR-DISK-SYSTEM
@@ -44,9 +44,9 @@ observer independence bind the full runpath.
 
 - 2026-07-27  A paired neutral-bound-profile authority independently solves one lowest two-body level, exact normalization and residual, two-coordinate uncertainty transport, strict free-pair separation, and one neutral member while preserving an energetically open decay family and denying support or global stability -> `crates/planet/src/canonical/stellar_birth_species/physical_registry/neutral_bound_profile/`
 - 2026-07-27  A paired charged-matter authority closes an orientation-invariant two-member Fermi orbit with explicit mass-uncertainty transport and an independent `[A]/[D]` census -> `crates/planet/src/canonical/stellar_birth_species/physical_registry/charged_profile/`
-- 2026-07-28  Species analysis v11 and the observer-only viewer expose four members plus all four profile receipts without a causal return edge -> `crates/planet/src/canonical/stellar_birth_species/authority_analysis/`
+- 2026-07-29  Species analysis v12 and watchdog v13 expose four members, all four profiles, and the typed constituent frontier without a causal return edge -> `crates/planet/src/canonical/stellar_birth_species/authority_analysis/`
 - 2026-07-25  V5 root agreement canonicalizes arrival order, refuses stale identity binding, and keeps alien inspection test-only -> `crates/planet/src/canonical/stellar_birth_species/physical_registry/repository_roots/`
-- 2026-07-28  Registry v7 and proof graph v6 bind 125 artifacts, four members, and the zero-member confining profile under both validators -> `crates/planet/src/canonical/stellar_birth_species/physical_registry/`
+- 2026-07-29  Registry v7 and proof graph v6 bind 125 artifacts, four members, the zero-member confining profile, and its independent bounded constituent diagnostic -> `crates/planet/src/canonical/stellar_birth_species/physical_registry/`
 - 2026-07-26  The `eps_0` pair independently binds floor ancestry, claim-local scale, results, and canaries into one non-species capability -> `crates/planet/src/canonical/stellar_birth_species/law_premise/`
 - 2026-07-23  Independent bounded structural validators agree on canonical species descriptors and explicit positive or proved-zero conditioned support without minting physical authority or changing run bytes -> `crates/planet/src/canonical/stellar_birth_species/support_packet/`
 - 2026-07-23  Portable per-gate execution locks prevent cross-process cache stampedes, while one marker-backed build anchor runs Stone 0 per canonical Cargo graph and an independent pair checks its exact wiring -> `scripts/gate_runner.py`, `crates/stone0-build`, `scripts/stone0_build_wiring_gate.py`
@@ -57,7 +57,7 @@ observer independence bind the full runpath.
 - 2026-07-22  Observer-only scene DTOs expose transcript order, exact noncausal SI representation integers, stage reachability, refusal leaves, and open analyses while marking value payload accounting opaque at the viewer boundary -> `crates/viewer/src/scene.rs`
 - 2026-07-22  Direct public-API evidence pins the three measured floor records, one derived ancestry hop, complete Stage 1 refusal frontier, seven-stage reachability vector, and absence of realization, written state, and contingency -> `crates/planet/tests/canonical_observation.rs`
 - 2026-07-22  GitHub-rendered canonical derivation and observer-only viewer map distinguishes current refusal from future authority, artifact, materialization, and rendering layers -> `docs/DERIVATION_AND_VIEWER_PIPELINE.md`
-- 2026-07-28  The viewer projects the sealed physical frontier, including four profile receipts and confining scope, without a causal return edge -> `crates/viewer/src/scene/frontier.rs`
+- 2026-07-29  The viewer projects four profile receipts plus constituent seed, typed gaps, scope, and checker digests without a causal return edge -> `crates/viewer/src/scene/frontier.rs`
 - 2026-07-26  Viewer dimensional scenes expose `G^-1 * sound_speed^3` and its open eigenstructure and measure -> `crates/viewer/src/scene/frontier/dimensional.rs`
 - 2026-07-22  A private exact species-state kernel verifies complete normalized support and reduces mean particle mass without familiar tables or switches; production authority and support remain absent -> `crates/planet/src/canonical/stellar_birth_species.rs`
 - 2026-07-21  Physical floor normalized to three measured invariants; exact SI definitions moved to an untagged representation receipt and all execution constants derive from sealed relations -> `docs/working/PR215_LIVE_SOURCE_AUDIT.md`

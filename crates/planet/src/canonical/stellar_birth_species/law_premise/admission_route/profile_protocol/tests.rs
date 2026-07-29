@@ -84,3 +84,72 @@ fn alien_identity_renaming_preserves_structure_but_changes_receipts() {
         renamed.producer_receipts.coverage_sha256
     );
 }
+
+#[test]
+fn every_checker_receipt_binds_the_exact_role_and_content_target() {
+    let baseline = inspect(&input()).unwrap();
+    let mut substituted = input();
+    substituted.role_identity = id(111);
+    substituted.content_identity = id(112);
+    let observed = inspect(&substituted).unwrap();
+    for (before, after) in [
+        (
+            baseline.producer_receipts.coverage_sha256,
+            observed.producer_receipts.coverage_sha256,
+        ),
+        (
+            baseline.producer_receipts.buckingham_pi_sha256,
+            observed.producer_receipts.buckingham_pi_sha256,
+        ),
+        (
+            baseline.producer_receipts.gap_law_sha256,
+            observed.producer_receipts.gap_law_sha256,
+        ),
+        (
+            baseline.producer_receipts.chaos_protocol_sha256,
+            observed.producer_receipts.chaos_protocol_sha256,
+        ),
+        (
+            baseline.producer_receipts.residual_law_sha256,
+            observed.producer_receipts.residual_law_sha256,
+        ),
+        (
+            baseline.producer_receipts.residual_slot_sha256,
+            observed.producer_receipts.residual_slot_sha256,
+        ),
+        (
+            baseline.producer_receipts.owner_admission_sha256,
+            observed.producer_receipts.owner_admission_sha256,
+        ),
+        (
+            baseline.watchdog_receipts.coverage_sha256,
+            observed.watchdog_receipts.coverage_sha256,
+        ),
+        (
+            baseline.watchdog_receipts.buckingham_pi_sha256,
+            observed.watchdog_receipts.buckingham_pi_sha256,
+        ),
+        (
+            baseline.watchdog_receipts.gap_law_sha256,
+            observed.watchdog_receipts.gap_law_sha256,
+        ),
+        (
+            baseline.watchdog_receipts.chaos_protocol_sha256,
+            observed.watchdog_receipts.chaos_protocol_sha256,
+        ),
+        (
+            baseline.watchdog_receipts.residual_law_sha256,
+            observed.watchdog_receipts.residual_law_sha256,
+        ),
+        (
+            baseline.watchdog_receipts.residual_slot_sha256,
+            observed.watchdog_receipts.residual_slot_sha256,
+        ),
+        (
+            baseline.watchdog_receipts.owner_admission_sha256,
+            observed.watchdog_receipts.owner_admission_sha256,
+        ),
+    ] {
+        assert_ne!(before, after);
+    }
+}

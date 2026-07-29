@@ -61,7 +61,7 @@ fn profile_projection_binds_executed_admission_and_symmetry_evidence() {
     assert_ne!(projection.receipt.derivation_catalog_sha256, [0; 32]);
     assert_ne!(projection.receipt.repository_catalog_sha256, [0; 32]);
     assert_ne!(projection.receipt.protocol_producer_result_sha256, [0; 32]);
-    assert_eq!(
+    assert_ne!(
         projection.receipt.protocol_producer_result_sha256,
         projection.receipt.protocol_watchdog_result_sha256
     );

@@ -32,6 +32,7 @@ pub(super) fn produce_frontier(physical: &RepositoryPhysicalRegistryFrontier) ->
             physical.charged_profile.claim_id.to_owned(),
             physical.neutral_bound_profile.claim_id.to_owned(),
             physical.strong_profile.claim_id.to_owned(),
+            physical.confining_constituent_frontier.claim_id.to_owned(),
             physical.vocabulary_claim_id.clone(),
         ],
         open_proof_ids: physical

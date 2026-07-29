@@ -870,6 +870,12 @@ pub(super) fn encode_checker_output(
                 .admission_evidence
                 .irreducible_protocol_capability_sha256,
         ),
+        (
+            31,
+            output
+                .admission_evidence
+                .profile_protocol_pair_receipt_sha256,
+        ),
     ] {
         append_field(&mut bytes, tag, &digest);
     }

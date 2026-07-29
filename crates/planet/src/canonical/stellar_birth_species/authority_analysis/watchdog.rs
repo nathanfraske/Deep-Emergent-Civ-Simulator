@@ -22,7 +22,7 @@ const CHECKED_FLOOR_ANCHOR_ROLE: &str = "mass_coordinate_anchor_only";
 const CHECKED_REDUCER_LAW_ID: &str = "candidate.composition_weighted_particle_mass";
 const CHECKED_FRONTIER_SOURCE_ID: &str = "repository_physical_registry_partial_closure";
 const CHECKED_FRONTIER_SCOPE_ID: &str =
-    "four_local_members_plus_confining_profile_then_open_global_obligations";
+    "four_local_members_plus_confining_constituent_frontier_then_open_global_obligations";
 const CHECKED_LIVE_ATTEMPT_ID: &str =
     "stellar_birth.species_derivation.partial_physical_registry_closure";
 
@@ -187,6 +187,9 @@ pub(super) fn validate_analysis(
                 expected_physical_frontier.charged_profile.claim_id,
                 expected_physical_frontier.neutral_bound_profile.claim_id,
                 expected_physical_frontier.strong_profile.claim_id,
+                expected_physical_frontier
+                    .confining_constituent_frontier
+                    .claim_id,
                 expected_physical_frontier.vocabulary_claim_id.as_str(),
             ]
         || !matches_strings(

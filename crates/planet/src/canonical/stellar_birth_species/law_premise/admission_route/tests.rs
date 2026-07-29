@@ -211,7 +211,7 @@ fn repository_theory_profile_executes_the_full_irreducible_route() {
         occupied_profile_slots: Vec::new(),
         owner_admission_record: "owner-reviewed-test-profile-v1".to_owned(),
     };
-    let evidence = inspect_theory_profile_admission(&request).unwrap();
+    let evidence = inspect_theory_profile_protocol(&request).unwrap();
     assert_eq!(
         evidence.decision_id,
         "irreducible_protocol_structurally_bound"
@@ -224,19 +224,32 @@ fn repository_theory_profile_executes_the_full_irreducible_route() {
     assert_ne!(evidence.derivation_catalog_sha256, [0; 32]);
     assert_ne!(evidence.repository_catalog_sha256, [0; 32]);
     assert_ne!(evidence.protocol_producer_result_sha256, [0; 32]);
-    assert_eq!(
+    assert_ne!(
         evidence.protocol_producer_result_sha256,
         evidence.protocol_watchdog_result_sha256
     );
     assert_ne!(evidence.open_producer_result_sha256, [0; 32]);
-    assert_eq!(
+    assert_ne!(
         evidence.open_producer_result_sha256,
         evidence.open_watchdog_result_sha256
     );
     assert_ne!(evidence.final_producer_result_sha256, [0; 32]);
-    assert_eq!(
+    assert_ne!(
         evidence.final_producer_result_sha256,
         evidence.final_watchdog_result_sha256
+    );
+    assert_ne!(
+        evidence.profile_protocol_producer_trace_sha256,
+        evidence.profile_protocol_watchdog_trace_sha256
+    );
+    assert_ne!(evidence.profile_protocol_pair_receipt_sha256, [0; 32]);
+    assert_eq!(
+        evidence.profile_protocol_schema_id,
+        "civsim.planet.theory-profile-protocol-capability.v1"
+    );
+    assert_ne!(
+        evidence.profile_protocol_producer_id,
+        evidence.profile_protocol_watchdog_id
     );
     assert_ne!(evidence.derivation_coverage_capability_sha256, [0; 32]);
     assert_ne!(evidence.irreducible_protocol_capability_sha256, [0; 32]);
@@ -249,6 +262,7 @@ fn repository_theory_profile_executes_the_full_irreducible_route() {
         evidence.residual_slot_receipt_sha256,
         evidence.owner_admission_receipt_sha256,
         evidence.independent_watchdog_receipt_sha256,
+        evidence.profile_protocol_pair_receipt_sha256,
     ];
     assert!(receipts.iter().all(|receipt| *receipt != [0; 32]));
     assert_eq!(
@@ -261,7 +275,7 @@ fn repository_theory_profile_executes_the_full_irreducible_route() {
         .occupied_profile_slots
         .push(collision.residual_slot_id.clone());
     assert_eq!(
-        inspect_theory_profile_admission(&collision),
+        inspect_theory_profile_protocol(&collision),
         Err("profile_protocol_residual_slot_collision")
     );
 
@@ -270,7 +284,7 @@ fn repository_theory_profile_executes_the_full_irreducible_route() {
     alien.role_identity = id(162);
     alien.content_identity = id(163);
     alien.residual_slot_id = "planet.test.alien-theory-profile.v1".to_owned();
-    let alien_evidence = inspect_theory_profile_admission(&alien).unwrap();
+    let alien_evidence = inspect_theory_profile_protocol(&alien).unwrap();
     assert_eq!(
         alien_evidence.decision_id,
         "irreducible_protocol_structurally_bound"

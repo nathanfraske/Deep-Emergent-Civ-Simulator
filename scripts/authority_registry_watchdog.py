@@ -83,7 +83,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "authority",
         "scientific",
         "active",
-        "98951a462e69e2076f4e837dd42da6d90130a5f84b6725c48139addccc7d336f",
+        "bf25f00fdf77165403022377797dd2b320a825849bbb449a7d51a880a347b4c2",
     ),
     (
         "planet.completed-snapshot",
@@ -97,7 +97,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "authority",
         "scientific",
         "active",
-        "9ae77146b6dfbee2d9e9b7645b07c7adc4e61a66e0d8554682238907407c0d37",
+        "ebb6f778511e67a8ea2794cacbf296f03ec0912d904d84185948ca472baa48aa",
     ),
     (
         "planet.derived-law-premise-eps0",
@@ -118,7 +118,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "authority",
         "scientific",
         "active",
-        "14d894eee864bd931f4dea422827b08813d4b3053923be33ca12dccca985f7b4",
+        "68a9224196e287ac8250037d21e6d3f2c0ba928532286ae63f9e6c67b593eec2",
     ),
     (
         "planet.physical-vocabulary-partition",
@@ -132,14 +132,14 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "authority",
         "scientific",
         "active",
-        "aeefd698a2a29dd2ffcc82d17302b77c331d027cd81734803c7c4c01813e7981",
+        "fa4afeaab276f1f3302dc6b8e34647b620a856f0523d51b66cd46082e7bd20c1",
     ),
     (
         "planet.species-derivation-frontier",
         "diagnostic",
         None,
         "diagnostic",
-        "a8dc6cbee19f3ace007a38ab2a32258ba716104d1192a11620393ac1c9af0685",
+        "8c29fdf5dd04d3ef6ada48c3685154aac9d6f059a82a6fd66b3826ec9103dd2c",
     ),
     (
         "planet.species-state-support",
@@ -184,6 +184,13 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "1ab66defe77dd4532c3a306f905fdfb09d867427db48b1d0ce4ba0e1dc625298",
     ),
     (
+        "planet.theory-profile-protocol",
+        "authority",
+        "scientific",
+        "active",
+        "dbb1f8d7f2db02b3ec3aa8d466d5af836c64a6100f53904740c6bffa9db452b0",
+    ),
+    (
         "units.certified-formula-projection",
         "authority",
         "scientific",
@@ -212,7 +219,21 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "3bfb94aa0c3f507ad8ba9762e91ca9009284becc9d9752d7b7b896cb9a26ca7d",
     ),
 )
-EXPECTED_COUNTS = (14, 11, 2, 27)
+EXPECTED_COUNTS = (15, 11, 2, 28)
+
+# This checker derives its own lookup from the independently ordered profile.
+# Only these four reviewed consumers may name the separately enrolled protocol
+# pair; every other active pair must declare no semantic dependency.
+EXPECTED_ENROLLED_UPSTREAM_HELPERS: dict[str, tuple[str, ...]] = {
+    "planet.charged-profile-admission": ("planet.theory-profile-protocol",),
+    "planet.confining-profile-admission": ("planet.theory-profile-protocol",),
+    "planet.neutral-bound-profile-admission": ("planet.theory-profile-protocol",),
+    "planet.primitive-profile-admission": ("planet.theory-profile-protocol",),
+}
+EXPECTED_PROFILES_BY_ID = {
+    identifier: (kind, domain, status)
+    for identifier, kind, domain, status, _fingerprint in EXPECTED_PROFILE
+}
 
 META_EXPECTATIONS = (
     ("producer_path", "scripts/authority_watchdog_gate.py"),
@@ -544,10 +565,16 @@ def _inspect_active(
         raise RegistryWatchdogFailure(
             f"{context} repeats one implementation identity"
         )
-    if _word_vector(entry, "shared_semantic_helpers", context) != ():
+    helpers = _word_vector(entry, "shared_semantic_helpers", context)
+    if helpers != EXPECTED_ENROLLED_UPSTREAM_HELPERS.get(mechanism_id, ()):
         raise RegistryWatchdogFailure(
-            f"{context} declares a shared semantic decision helper"
+            f"{context} has an unreviewed semantic-helper enrollment"
         )
+    for helper in helpers:
+        if EXPECTED_PROFILES_BY_ID.get(helper) != ("authority", "scientific", "active"):
+            raise RegistryWatchdogFailure(
+                f"{context} names a helper outside the active authority profile"
+            )
     if len(_word_vector(entry, "shared_primitives", context)) == 0:
         raise RegistryWatchdogFailure(f"{context} omits shared primitives")
     if len(_word_vector(entry, "canaries", context)) < 3:

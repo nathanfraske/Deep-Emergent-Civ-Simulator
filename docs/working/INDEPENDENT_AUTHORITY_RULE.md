@@ -13,8 +13,11 @@ cross-checker over the same canonical input bytes.
 The producer and cross-checker may share canonical serialization, hashing, and
 small checked integer primitives. They may not share semantic expected outputs,
 budgets, classifications, membership lists, coverage lists, decision helpers,
-or acceptance booleans. A self-consistency test may remain useful, but it is
-recorded as non-authoritative.
+or acceptance booleans. An outer pair may instead consume an opaque,
+claim-scoped capability minted by a separately enrolled upstream pair; that
+upstream pair must be named in the inventory and the outer paths may not call
+its semantic decision helper. A self-consistency test may remain useful, but it
+is recorded as non-authoritative.
 
 Active agreement produces a claim-scoped receipt. The receipt binds the exact
 input digest, claim identity, producer implementation identity, cross-checker
@@ -409,15 +412,36 @@ fixture still mints no authority. The generic production route can replay the
 already admitted exact `eps_0` premise as one grounded seed, but it has no
 authority to close an arbitrary target or rule universe.
 
-`planet.primitive-profile-admission` is the first active claim-local instance
-of that order. Its protocol producer scans a centralized registered premise
-catalog and every occupied residual slot through ordered traversals. Its
-watchdog independently indexes target-scoped entries and scans slots in
-reverse through ordered maps. Both find zero profile-target seeds and rules,
-classify the categorical request as Buckingham-Pi inapplicable and
+`planet.theory-profile-protocol` is the separately enrolled upstream pair for
+this narrow structural work. Its forward authority reconstructs the exact
+owner-bounded current catalog of one sealed `eps_0` seed and zero rules, then
+scans every occupied residual slot through ordered traversals. Its reverse
+authority independently reconstructs that same bounded catalog, indexes
+target-scoped entries, and scans slots in reverse through ordered maps. Both
+start from the raw claim-scoped request, find zero profile-target seeds and
+rules, classify the categorical request as Buckingham-Pi inapplicable and
 nondynamical, execute Gap and Residual disposition, and agree on one
-collision-free slot. Distinct outer producer and watchdog implementations then
-reconstruct the complete profile without a shared semantic decision helper.
+collision-free slot. This is not repository-global catalog completeness or an
+auto-enrollment mechanism. It seals only a request-bound non-minting evidence
+record: premise admission, species membership, global derivation coverage, and
+authority effect remain false or `none`.
+
+Before that record can seal, the forward path executes live zero-claim,
+noncanonical-slot, and coverage-capability substitution canaries. The reverse
+path independently executes noncanonical-owner, aliased applicability-validity
+receipt, and watchdog-coverage-binding substitutions. Each side binds its full
+canonical mutant-preimage digest and exact observed refusal through a distinct
+transcript encoding. The outer pair receipt binds both transcript identities,
+equal nonzero case counts, and distinct nonzero transcript digests.
+
+The primitive, charged, neutral-bound, and confining profile rows each declare
+that enrolled pair in `shared_semantic_helpers`. That is a reviewed capability
+dependency, not permission to share a decision function: each outer producer
+and watchdog validates the schema, implementation identities, pair receipt,
+distinct traces, and false authority flags before consuming the opaque
+capability, and neither outer side calls the upstream semantic decision helper.
+`planet.primitive-profile-admission` is the first active claim-local consumer
+of that order.
 
 The active receipt binds one Residue `[A]` claim, 28 Residue `[D]`
 consequences, the lower independent basis, action, and scope receipts, all
@@ -472,7 +496,7 @@ booleans from the other.
 Both receipts bind the registry SHA-256, schema and closed-world marker,
 ordered mechanism profiles with their complete-profile SHA-256 pins, exact
 active, blocked, and diagnostic counts, and a sorted semantic-closure
-path-to-SHA-256 manifest. The current closed profile contains ten active
+path-to-SHA-256 manifest. The current closed profile contains fifteen active
 authorities, eleven blocked authorities, and two diagnostics. The agreement
 receipt therefore changes when a semantic field changes, when any closure
 implementation, adapter, shared primitive, or orchestrator changes, or when a
@@ -508,7 +532,9 @@ Before an authority-bearing mechanism can move from `blocked` to `active`:
 1. Name one narrow semantic claim.
 2. Define canonical input bytes without an expected answer field.
 3. Implement the producer and cross-checker through distinct semantic paths.
-4. List every shared primitive and prove that no shared semantic helper exists.
+4. List every shared primitive and every separately enrolled upstream semantic
+   dependency; prove each outer implementation does not call the upstream
+   semantic decision helper.
 5. Bind results, implementation identities, inputs, and canaries in a receipt.
    When the claim relies on executable canaries, bind their
    production-executed transcript identities, case counts, and digests rather

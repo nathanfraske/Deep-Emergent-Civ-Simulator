@@ -83,6 +83,7 @@ REQUIRED_PROFILES: dict[str, tuple[str, str | None, str]] = {
         "scientific",
         "blocked",
     ),
+    "planet.theory-profile-protocol": ("authority", "scientific", "active"),
     "units.certified-formula-projection": (
         "authority",
         "scientific",
@@ -91,6 +92,17 @@ REQUIRED_PROFILES: dict[str, tuple[str, str | None, str]] = {
     "units.si-execution-table": ("authority", "scientific", "blocked"),
     "units.si-representation-policy": ("authority", "scientific", "blocked"),
     "units.wide-integer-arithmetic": ("authority", "scientific", "blocked"),
+}
+
+# A narrow outer pair can consume a named upstream capability only when that
+# helper itself is separately enrolled as an active scientific authority.
+# Every other active pair must keep this vector empty; the vector is a reviewed
+# relation rather than an open-ended allowance for shared decision code.
+ENROLLED_UPSTREAM_HELPERS: dict[str, tuple[str, ...]] = {
+    "planet.charged-profile-admission": ("planet.theory-profile-protocol",),
+    "planet.confining-profile-admission": ("planet.theory-profile-protocol",),
+    "planet.neutral-bound-profile-admission": ("planet.theory-profile-protocol",),
+    "planet.primitive-profile-admission": ("planet.theory-profile-protocol",),
 }
 
 # Each digest pins the complete canonical JSON encoding of one reviewed TOML
@@ -108,31 +120,32 @@ REQUIRED_PROFILE_DIGESTS: dict[str, str] = {
     "governance.authority-inventory": "c2a6095c66f8dc4d9b2384a3b46c5da06142b27fad99b10ce6fc34239f5c5100",
     "governance.external-adverse-claim-release": "a8a74e0c6032ee15d125b7c2e00e4accf77de2c9ac7f9e675f5848f80f38295d",
     "governance.stone0-build-wiring": "ff8dc217d4473b4264bc1a15ed6ad541e78455e0e95dedae5b3fdd89aba197c8",
-    "planet.charged-profile-admission": "98951a462e69e2076f4e837dd42da6d90130a5f84b6725c48139addccc7d336f",
+    "planet.charged-profile-admission": "bf25f00fdf77165403022377797dd2b320a825849bbb449a7d51a880a347b4c2",
     "planet.completed-snapshot": "5c09a8d95b7de145110a9f97f773bb0e0a63d6d6dc0f964eeb8beb62efff5575",
-    "planet.confining-profile-admission": "9ae77146b6dfbee2d9e9b7645b07c7adc4e61a66e0d8554682238907407c0d37",
+    "planet.confining-profile-admission": "ebb6f778511e67a8ea2794cacbf296f03ec0912d904d84185948ca472baa48aa",
     "planet.derived-law-premise-eps0": "9ce5e04b3cf043616148062cb4f7eada303fe03a421aef004fa02970d41e26c2",
     "planet.law-premise-admission-route": "ad77326e8ac1004ad8c086f6d6b3eaaa7f39c618e5ef9a8375765498e817b505",
-    "planet.neutral-bound-profile-admission": "14d894eee864bd931f4dea422827b08813d4b3053923be33ca12dccca985f7b4",
+    "planet.neutral-bound-profile-admission": "68a9224196e287ac8250037d21e6d3f2c0ba928532286ae63f9e6c67b593eec2",
     "planet.physical-vocabulary-partition": "d858bcf769f9e3e0eaa9e9d19d047f5abfd6fac3a0092f64811b4d8d4cdb5c1f",
-    "planet.primitive-profile-admission": "aeefd698a2a29dd2ffcc82d17302b77c331d027cd81734803c7c4c01813e7981",
-    "planet.species-derivation-frontier": "a8dc6cbee19f3ace007a38ab2a32258ba716104d1192a11620393ac1c9af0685",
+    "planet.primitive-profile-admission": "fa4afeaab276f1f3302dc6b8e34647b620a856f0523d51b66cd46082e7bd20c1",
+    "planet.species-derivation-frontier": "8c29fdf5dd04d3ef6ada48c3685154aac9d6f059a82a6fd66b3826ec9103dd2c",
     "planet.species-state-support": "d537f116e5d0d665fd74a8308a8868aa4700c59b13ccd1e42ca2b3d5476bea6b",
     "planet.stage1-dimensional-census": "21140b26c937f9cca7a8066b98e9fa75e9366f483ca44ffd1cc5206315f2b5dc",
     "planet.stellar-birth-proof-tokens": "68f58f019ab4f620194133e673c64240d4ad066f97404698ba0bfbf8b96935d1",
     "planet.stellar-species-floor-coordinate-projection": "95a30ad85a29d7d549693c657d4a869187f3ce60bdad2b97fb77d792eefafd92",
     "planet.symmetry-operator-exclusion": "31359d3cda1a4d74b0519dd7d589c843b60949719f311e2d95e0443519e10747",
     "planet.symmetry-scope-applicability": "1ab66defe77dd4532c3a306f905fdfb09d867427db48b1d0ce4ba0e1dc625298",
+    "planet.theory-profile-protocol": "dbb1f8d7f2db02b3ec3aa8d466d5af836c64a6100f53904740c6bffa9db452b0",
     "units.certified-formula-projection": "7ee2a9a60f102d0ea34bc5700d2070b079390c050d10c2d685e1525a0f091005",
     "units.si-execution-table": "2eca0ae6da0ad4483e3038e5aa6bbf1cd3d158bf3ca49df78aab7224b8927d5e",
     "units.si-representation-policy": "db7449a52dbf7f56b598828fe3888d0505e833c170c89de99a6b390a8057698b",
     "units.wide-integer-arithmetic": "3bfb94aa0c3f507ad8ba9762e91ca9009284becc9d9752d7b7b896cb9a26ca7d",
 }
 REQUIRED_COUNTS = {
-    "active": 14,
+    "active": 15,
     "blocked": 11,
     "diagnostic": 2,
-    "total": 27,
+    "total": 28,
 }
 META_PAIR = {
     "producer_path": "scripts/authority_watchdog_gate.py",
@@ -323,10 +336,17 @@ def _validate_active(
         raise AuthorityInventoryError(
             f"{label} producer and checker implementation identities must differ"
         )
-    if _required_text_list(row, "shared_semantic_helpers", label):
+    helpers = tuple(_required_text_list(row, "shared_semantic_helpers", label))
+    expected_helpers = ENROLLED_UPSTREAM_HELPERS.get(mechanism_id, ())
+    if helpers != expected_helpers:
         raise AuthorityInventoryError(
-            f"{label} active pair may not share semantic decision helpers"
+            f"{label} shared semantic helper relation differs from its reviewed enrollment"
         )
+    for helper in helpers:
+        if REQUIRED_PROFILES.get(helper) != ("authority", "scientific", "active"):
+            raise AuthorityInventoryError(
+                f"{label} shared semantic helper is not an active enrolled authority pair"
+            )
     if not _required_text_list(row, "shared_primitives", label):
         raise AuthorityInventoryError(
             f"{label} must state its shared low-level primitives"

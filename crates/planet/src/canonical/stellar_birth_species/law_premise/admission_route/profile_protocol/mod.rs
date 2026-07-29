@@ -75,6 +75,7 @@ pub(super) struct ProfileProtocolCheckerOutput {
     pub(super) receipts: ProfileProtocolCheckerReceipts,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ProfileProtocolPairEvidence {
     pub(super) assessment: ProfileProtocolAssessment,
@@ -84,6 +85,19 @@ pub(super) struct ProfileProtocolPairEvidence {
     pub(super) watchdog_result_sha256: [u8; 32],
 }
 
+pub(super) fn inspect_forward(
+    input: &ProfileProtocolInput,
+) -> Result<ProfileProtocolCheckerOutput, &'static str> {
+    producer::inspect(input)
+}
+
+pub(super) fn inspect_reverse(
+    input: &ProfileProtocolInput,
+) -> Result<ProfileProtocolCheckerOutput, &'static str> {
+    watchdog::inspect(input)
+}
+
+#[cfg(test)]
 pub(super) fn inspect(
     input: &ProfileProtocolInput,
 ) -> Result<ProfileProtocolPairEvidence, &'static str> {
@@ -125,6 +139,7 @@ pub(super) fn inspect(
     })
 }
 
+#[cfg(test)]
 fn receipts_invalid(receipts: ProfileProtocolCheckerReceipts) -> bool {
     let values = [
         receipts.coverage_sha256,

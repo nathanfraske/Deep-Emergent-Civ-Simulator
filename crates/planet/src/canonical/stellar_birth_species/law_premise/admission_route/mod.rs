@@ -18,14 +18,16 @@
 
 mod producer;
 mod profile_protocol;
+mod theory_profile_protocol;
 mod watchdog;
 
 #[cfg(test)]
 mod tests;
 
-use super::{derived_relation, ClaimScopedPremiseCapability, LawClaimIdentity, PremiseKey};
-#[cfg(test)]
-use super::{PhysicalContentIdentity, SemanticRoleIdentity};
+use super::{
+    derived_relation, ClaimScopedPremiseCapability, LawClaimIdentity, PhysicalContentIdentity,
+    PremiseKey, SemanticRoleIdentity,
+};
 use crate::canonical::stellar_birth_species::physical_registry;
 use civsim_units::digest::sha256;
 
@@ -266,6 +268,9 @@ pub(in crate::canonical::stellar_birth_species) struct TheoryProfileAdmissionReq
 /// profile target. The report carries no species capability.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::canonical::stellar_birth_species) struct TheoryProfileAdmissionEvidence {
+    pub(in crate::canonical::stellar_birth_species) profile_protocol_schema_id: &'static str,
+    pub(in crate::canonical::stellar_birth_species) profile_protocol_producer_id: &'static str,
+    pub(in crate::canonical::stellar_birth_species) profile_protocol_watchdog_id: &'static str,
     pub(in crate::canonical::stellar_birth_species) target_claim_identity: [u8; 32],
     pub(in crate::canonical::stellar_birth_species) target_role_identity: [u8; 32],
     pub(in crate::canonical::stellar_birth_species) target_content_identity: [u8; 32],
@@ -291,8 +296,33 @@ pub(in crate::canonical::stellar_birth_species) struct TheoryProfileAdmissionEvi
     pub(in crate::canonical::stellar_birth_species) residual_slot_receipt_sha256: [u8; 32],
     pub(in crate::canonical::stellar_birth_species) owner_admission_receipt_sha256: [u8; 32],
     pub(in crate::canonical::stellar_birth_species) independent_watchdog_receipt_sha256: [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) profile_protocol_producer_trace_sha256:
+        [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) profile_protocol_watchdog_trace_sha256:
+        [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) profile_protocol_producer_canary_transcript_id:
+        &'static str,
+    pub(in crate::canonical::stellar_birth_species) profile_protocol_producer_canary_case_count:
+        u32,
+    pub(in crate::canonical::stellar_birth_species) profile_protocol_producer_canary_sha256:
+        [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) profile_protocol_watchdog_canary_transcript_id:
+        &'static str,
+    pub(in crate::canonical::stellar_birth_species) profile_protocol_watchdog_canary_case_count:
+        u32,
+    pub(in crate::canonical::stellar_birth_species) profile_protocol_watchdog_canary_sha256:
+        [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) profile_protocol_pair_receipt_sha256: [u8; 32],
+    pub(in crate::canonical::stellar_birth_species) premise_admission_authority: bool,
+    pub(in crate::canonical::stellar_birth_species) species_membership_authority: bool,
+    pub(in crate::canonical::stellar_birth_species) global_derivation_coverage: bool,
+    pub(in crate::canonical::stellar_birth_species) authority_effect: &'static str,
     pub(in crate::canonical::stellar_birth_species) decision_id: &'static str,
+    _seal: TheoryProfileProtocolSeal,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TheoryProfileProtocolSeal;
 
 const PROFILE_GAP_DOMAIN: &[u8] = b"civsim.planet.theory-profile-gap-law.v1";
 const PROFILE_SLOT_IDENTITY_DOMAIN: &[u8] =
@@ -303,7 +333,7 @@ const PROFILE_CHAOS_PAIR_DOMAIN: &[u8] = b"civsim.planet.theory-profile-chaos-pa
 const PROFILE_RESIDUAL_PAIR_DOMAIN: &[u8] = b"civsim.planet.theory-profile-residual-pair.v1";
 const PROFILE_SLOT_PAIR_DOMAIN: &[u8] = b"civsim.planet.theory-profile-residual-slot-pair.v1";
 const PROFILE_OWNER_PAIR_DOMAIN: &[u8] = b"civsim.planet.theory-profile-owner-admission-pair.v2";
-const PROFILE_WATCHDOG_DOMAIN: &[u8] = b"civsim.planet.theory-profile-independent-watchdog.v1";
+const PROFILE_WATCHDOG_DOMAIN: &[u8] = b"civsim.planet.theory-profile-independent-watchdog.v2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PremiseAdmissionRefusal {
@@ -409,7 +439,17 @@ fn inspect_premise_admission_route(
     }
 }
 
-pub(in crate::canonical::stellar_birth_species) fn inspect_theory_profile_admission(
+pub(in crate::canonical::stellar_birth_species) fn inspect_theory_profile_protocol(
+    request: &TheoryProfileAdmissionRequest,
+) -> Result<TheoryProfileAdmissionEvidence, &'static str> {
+    theory_profile_protocol::inspect(request)
+}
+
+/// Retained only as a non-authoritative regression oracle while the paired
+/// protocol owns production admission.
+#[cfg(test)]
+#[allow(dead_code)]
+fn legacy_shared_theory_profile_admission_oracle(
     request: &TheoryProfileAdmissionRequest,
 ) -> Result<TheoryProfileAdmissionEvidence, &'static str> {
     let fixed_digests = [
@@ -665,6 +705,9 @@ pub(in crate::canonical::stellar_birth_species) fn inspect_theory_profile_admiss
     }
 
     Ok(TheoryProfileAdmissionEvidence {
+        profile_protocol_schema_id: "legacy.non-authoritative.theory-profile-admission-oracle",
+        profile_protocol_producer_id: "legacy.shared",
+        profile_protocol_watchdog_id: "legacy.shared",
         target_claim_identity: request.claim_identity,
         target_role_identity: request.role_identity,
         target_content_identity: request.content_identity,
@@ -689,7 +732,21 @@ pub(in crate::canonical::stellar_birth_species) fn inspect_theory_profile_admiss
         residual_slot_receipt_sha256,
         owner_admission_receipt_sha256,
         independent_watchdog_receipt_sha256,
+        profile_protocol_producer_trace_sha256: [1; 32],
+        profile_protocol_watchdog_trace_sha256: [2; 32],
+        profile_protocol_producer_canary_transcript_id: "legacy.shared.no-live-canary",
+        profile_protocol_producer_canary_case_count: 0,
+        profile_protocol_producer_canary_sha256: [0; 32],
+        profile_protocol_watchdog_canary_transcript_id: "legacy.shared.no-live-canary",
+        profile_protocol_watchdog_canary_case_count: 0,
+        profile_protocol_watchdog_canary_sha256: [0; 32],
+        profile_protocol_pair_receipt_sha256: [3; 32],
+        premise_admission_authority: false,
+        species_membership_authority: false,
+        global_derivation_coverage: false,
+        authority_effect: "none",
         decision_id: final_report.decision_id(),
+        _seal: TheoryProfileProtocolSeal,
     })
 }
 

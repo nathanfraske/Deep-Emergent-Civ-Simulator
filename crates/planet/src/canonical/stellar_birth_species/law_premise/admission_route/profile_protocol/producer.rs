@@ -11,13 +11,13 @@ const ASSESSMENT_SCHEMA: &[u8] = b"civsim.planet.theory-profile-protocol-assessm
 const CATALOG_DOMAIN: &[u8] = b"civsim.planet.theory-profile-catalog.v1";
 const SLOT_DOMAIN: &[u8] = b"civsim.planet.theory-profile-slot-inventory.v1";
 const RECEIPT_DOMAINS: [&[u8]; 7] = [
-    b"civsim.planet.theory-profile-coverage.producer.v2",
-    b"civsim.planet.theory-profile-buckingham-pi.producer.v2",
-    b"civsim.planet.theory-profile-gap-law.producer.v2",
-    b"civsim.planet.theory-profile-chaos.producer.v2",
-    b"civsim.planet.theory-profile-residual.producer.v2",
-    b"civsim.planet.theory-profile-slot.producer.v2",
-    b"civsim.planet.theory-profile-owner.producer.v2",
+    b"civsim.planet.theory-profile-coverage.producer.v3",
+    b"civsim.planet.theory-profile-buckingham-pi.producer.v3",
+    b"civsim.planet.theory-profile-gap-law.producer.v3",
+    b"civsim.planet.theory-profile-chaos.producer.v3",
+    b"civsim.planet.theory-profile-residual.producer.v3",
+    b"civsim.planet.theory-profile-slot.producer.v3",
+    b"civsim.planet.theory-profile-owner.producer.v3",
 ];
 
 pub(super) fn inspect(
@@ -65,10 +65,17 @@ pub(super) fn inspect(
     .map_err(|_| "catalog_count_overflow")?;
     let repository_catalog_sha256 = catalog_digest(&seeds, &rules);
 
+    if input
+        .occupied_residual_slots
+        .iter()
+        .any(|slot| !valid_canonical_text(slot))
+    {
+        return Err("invalid_occupied_slot_inventory");
+    }
     let slots = input
         .occupied_residual_slots
         .iter()
-        .map(|slot| slot.trim().to_owned())
+        .cloned()
         .collect::<BTreeSet<_>>();
     if slots.len() != input.occupied_residual_slots.len()
         || slots.iter().any(|slot| !valid_text(slot))
@@ -114,8 +121,8 @@ fn validate_fixed(input: &ProfileProtocolInput) -> Result<(), &'static str> {
             .iter()
             .enumerate()
             .any(|(index, digest)| fixed[index + 1..].contains(digest))
-        || !valid_text(input.residual_slot_id.trim())
-        || !valid_text(input.owner_admission_record.trim())
+        || !valid_canonical_text(&input.residual_slot_id)
+        || !valid_canonical_text(&input.owner_admission_record)
     {
         return Err("invalid_profile_protocol_input");
     }
@@ -228,6 +235,8 @@ fn build_receipts(
         push(&mut bytes, 7, &input.applicability_receipt_sha256);
         push(&mut bytes, 8, &input.validity_receipt_sha256);
         push(&mut bytes, 9, &input.derivation_catalog_sha256);
+        push(&mut bytes, 10, &input.role_identity);
+        push(&mut bytes, 11, &input.content_identity);
         sha256(&bytes)
     });
     ProfileProtocolCheckerReceipts {
@@ -255,4 +264,8 @@ fn usize_be(value: usize) -> [u8; 8] {
     u64::try_from(value)
         .expect("bounded profile protocol inventory")
         .to_be_bytes()
+}
+
+fn valid_canonical_text(value: &str) -> bool {
+    valid_text(value) && value == value.trim()
 }

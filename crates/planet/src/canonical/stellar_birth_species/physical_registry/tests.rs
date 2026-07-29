@@ -942,6 +942,33 @@ fn repository_result_closes_four_local_members_without_global_authority() {
     ] {
         assert_ne!(producer, watchdog);
     }
+    let confining_frontier = &frontier.confining_constituent_frontier;
+    assert_eq!(confining_frontier.decision_id, "blocked_open_proofs");
+    assert_eq!(
+        confining_frontier.internal_seed_identities,
+        vec![frontier.strong_profile.carrier_identity_sha256]
+    );
+    assert_eq!(confining_frontier.missing_authority_ids.len(), 8);
+    assert_eq!(confining_frontier.constituent_candidate_count, 0);
+    assert!(!confining_frontier.membership_authority);
+    assert!(!confining_frontier.spectrum_authority);
+    assert_eq!(confining_frontier.authority_effect, "none");
+    assert_ne!(
+        confining_frontier.producer_result_sha256,
+        confining_frontier.watchdog_result_sha256
+    );
+    assert_ne!(
+        confining_frontier.producer_trace_sha256,
+        confining_frontier.watchdog_trace_sha256
+    );
+    assert_ne!(confining_frontier.receipt_sha256, [0; 32]);
+    assert_eq!(frontier.open_obligations.len(), 13);
+    assert!(frontier
+        .open_obligations
+        .contains(&"confining.dynamics_scale_or_equivalent"));
+    assert!(!frontier
+        .open_obligations
+        .contains(&"confining-sector-constituent-content"));
     assert_eq!(frontier.root_admission_census.len(), 4);
     assert!(frontier.root_admission_census.iter().all(|admission| {
         admission.tier_id == "universal"

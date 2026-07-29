@@ -475,6 +475,55 @@ impl<'a> RepositoryStrongProfileScene<'a> {
     }
 }
 
+/// Read-only projection of the confining constituent input frontier.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepositoryConfiningConstituentFrontierScene<'a> {
+    identity: (&'a str, &'a str, &'a str, &'a str),
+    decision_id: &'a str,
+    counts: (usize, usize, u32),
+    internal_seed_identities: Vec<[u8; 32]>,
+    missing_authority_ids: Vec<&'static str>,
+    scope: (bool, bool, &'a str),
+    digests: [[u8; 32]; 8],
+}
+
+impl<'a> RepositoryConfiningConstituentFrontierScene<'a> {
+    /// Diagnostic schema, claim, producer, and watchdog identities.
+    pub const fn identity(&self) -> (&'a str, &'a str, &'a str, &'a str) {
+        self.identity
+    }
+
+    /// Current paired structural decision.
+    pub const fn decision_id(&self) -> &'a str {
+        self.decision_id
+    }
+
+    /// Internal seed count, missing authority count, and candidate count.
+    pub const fn counts(&self) -> (usize, usize, u32) {
+        self.counts
+    }
+
+    /// Opaque internal roles inherited from the admitted confining profile.
+    pub fn internal_seed_identities(&self) -> &[[u8; 32]] {
+        &self.internal_seed_identities
+    }
+
+    /// Exact upstream authorities still required before constituent solving.
+    pub fn missing_authority_ids(&self) -> &[&'static str] {
+        &self.missing_authority_ids
+    }
+
+    /// Membership authority, spectrum authority, and authority effect.
+    pub const fn scope(&self) -> (bool, bool, &'a str) {
+        self.scope
+    }
+
+    /// Source, checker, trace, resource, and agreement-receipt digests.
+    pub const fn digests(&self) -> [[u8; 32]; 8] {
+        self.digests
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepositoryPhysicalRegistryFrontierScene<'a> {
     registry_schema_id: &'a str,
@@ -503,6 +552,7 @@ pub struct RepositoryPhysicalRegistryFrontierScene<'a> {
     charged_profile: RepositoryChargedProfileScene<'a>,
     neutral_bound_profile: RepositoryNeutralBoundProfileScene<'a>,
     strong_profile: RepositoryStrongProfileScene<'a>,
+    confining_constituent_frontier: RepositoryConfiningConstituentFrontierScene<'a>,
     vocabulary_receipt_schema_id: &'a str,
     vocabulary_claim_id: &'a str,
     vocabulary_producer_id: &'a str,
@@ -666,6 +716,13 @@ impl<'a> RepositoryPhysicalRegistryFrontierScene<'a> {
     /// The claim-local confining profile and its non-membership boundary.
     pub const fn strong_profile(&self) -> &RepositoryStrongProfileScene<'a> {
         &self.strong_profile
+    }
+
+    /// Typed non-authorizing frontier immediately after the confining profile.
+    pub const fn confining_constituent_frontier(
+        &self,
+    ) -> &RepositoryConfiningConstituentFrontierScene<'a> {
+        &self.confining_constituent_frontier
     }
 
     /// Exact identity-keyed tier, provenance, and route census for admitted roots.
@@ -1476,6 +1533,32 @@ impl<'a> RefusalScene<'a> {
                                                         protocol_statuses: view
                                                             .strong_profile_protocol_statuses()?,
                                                     },
+                                                confining_constituent_frontier:
+                                                    RepositoryConfiningConstituentFrontierScene {
+                                                        identity: view
+                                                            .confining_constituent_frontier_identity(
+                                                            )?,
+                                                        decision_id: view
+                                                            .confining_constituent_frontier_decision(
+                                                            )?,
+                                                        counts: view
+                                                            .confining_constituent_frontier_counts(
+                                                            )?,
+                                                        internal_seed_identities: view
+                                                            .confining_constituent_internal_seed_identities(
+                                                            )?
+                                                            .to_vec(),
+                                                        missing_authority_ids: view
+                                                            .confining_constituent_missing_authority_ids(
+                                                            )?
+                                                            .to_vec(),
+                                                        scope: view
+                                                            .confining_constituent_frontier_scope(
+                                                            )?,
+                                                        digests: view
+                                                            .confining_constituent_frontier_digests(
+                                                            )?,
+                                                    },
                                                 vocabulary_receipt_schema_id: view
                                                     .physical_vocabulary_receipt_schema_id()?,
                                                 vocabulary_claim_id: view
@@ -1915,6 +1998,32 @@ mod tests {
                     "collision_checked_unique",
                 ),
             },
+            confining_constituent_frontier: RepositoryConfiningConstituentFrontierScene {
+                identity: (
+                    "civsim.planet.confining-constituent-frontier-agreement.v1",
+                    "planet.confining-sector.constituent-input-frontier",
+                    "confining-constituent-producer",
+                    "confining-constituent-watchdog",
+                ),
+                decision_id: "blocked_open_proofs",
+                counts: (1, 8, 0),
+                internal_seed_identities: vec![[46; 32]],
+                missing_authority_ids: vec![
+                    "confining.representation_family_membership_closure",
+                    "confining.dynamics_scale_or_equivalent",
+                    "confining.excitation_profile_coverage",
+                    "confining.exact_rest_mass_or_massless_proof",
+                    "confining.charge_state_statistics_disposition_coverage",
+                    "confining.constituent_applicability_validity",
+                    "confining.constituent_conservation_binding",
+                    "confining.transition_separation_channel_coverage",
+                ],
+                scope: (false, false, "none"),
+                digests: [
+                    [62; 32], [63; 32], [64; 32], [65; 32], [66; 32], [67; 32], [68; 32],
+                    [69; 32],
+                ],
+            },
             vocabulary_receipt_schema_id:
                 "civsim.planet.stellar-birth-physical-vocabulary-agreement.v1",
             vocabulary_claim_id: "civsim.planet.stellar-birth-physical-vocabulary.partition.v1",
@@ -1942,7 +2051,14 @@ mod tests {
                 "complete_global_physical_vocabulary_coverage",
                 "complete_registry_closure_domain",
                 "conditioned_species_support",
-                "confining-sector-constituent-content",
+                "confining.representation_family_membership_closure",
+                "confining.dynamics_scale_or_equivalent",
+                "confining.excitation_profile_coverage",
+                "confining.exact_rest_mass_or_massless_proof",
+                "confining.charge_state_statistics_disposition_coverage",
+                "confining.constituent_applicability_validity",
+                "confining.constituent_conservation_binding",
+                "confining.transition_separation_channel_coverage",
                 "multi-constituent-bound-state-spectrum",
                 "reaction-network-closure",
             ],
@@ -2095,6 +2211,22 @@ mod tests {
             frontier.strong_profile().scope(),
             (false, false, false, false, false, true, "none")
         );
+        assert_eq!(
+            frontier.confining_constituent_frontier().identity().1,
+            "planet.confining-sector.constituent-input-frontier"
+        );
+        assert_eq!(
+            frontier.confining_constituent_frontier().decision_id(),
+            "blocked_open_proofs"
+        );
+        assert_eq!(
+            frontier.confining_constituent_frontier().counts(),
+            (1, 8, 0)
+        );
+        assert_eq!(
+            frontier.confining_constituent_frontier().scope(),
+            (false, false, "none")
+        );
         assert_eq!(frontier.root_admissions().len(), 4);
         assert!(frontier.root_admissions().iter().all(|admission| {
             admission.tier_id() == "universal"
@@ -2131,7 +2263,14 @@ mod tests {
                 "complete_global_physical_vocabulary_coverage",
                 "complete_registry_closure_domain",
                 "conditioned_species_support",
-                "confining-sector-constituent-content",
+                "confining.representation_family_membership_closure",
+                "confining.dynamics_scale_or_equivalent",
+                "confining.excitation_profile_coverage",
+                "confining.exact_rest_mass_or_massless_proof",
+                "confining.charge_state_statistics_disposition_coverage",
+                "confining.constituent_applicability_validity",
+                "confining.constituent_conservation_binding",
+                "confining.transition_separation_channel_coverage",
                 "multi-constituent-bound-state-spectrum",
                 "reaction-network-closure",
             ]

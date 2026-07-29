@@ -78,7 +78,7 @@ flowchart TB
 
         STRUCTURE["Value-free stellar structure v2<br/>Open components, species, coordinates,<br/>dimensions, sectors, regimes,<br/>histories, and classifications"]
         CENSUS["Exact dimensional census v4<br/>Non-admitting diagnostic<br/>closure_effect = none<br/>coverage_claim = false"]
-        SPECIES_ANALYSIS["Species derivation analysis v11<br/>Independent watchdog v12<br/>Live premise, four-profile, root, and vocabulary frontiers<br/>Four local members, zero verified support,<br/>four claim-local residual slots"]
+        SPECIES_ANALYSIS["Species derivation analysis v12<br/>Independent watchdog v13<br/>Live premise, four-profile, constituent,<br/>root, and vocabulary frontiers<br/>Four local members, zero verified support"]
         SPECIES_PACKET["CURRENT bounded structural packet pair<br/>Canonical descriptors plus conditioned support<br/>Independent algorithms agree on bytes only<br/>No physical member or authority"]
         CURRENT_PROOFS["CURRENT production resolver<br/>Joint physical measure = None<br/>Coordinate law = None"]
         CURRENT_REFUSAL["CURRENT Stage 1 refusal<br/>stellar_birth.realization_measure<br/>Both open leaves remain visible"]
@@ -104,9 +104,10 @@ flowchart TB
         CHARGED_PROFILE["CURRENT charged profile authority<br/>1 Residue [A] plus 38 Residue [D]<br/>Two-member conjugation orbit<br/>Mass uncertainty transport"]
         NEUTRAL_PROFILE["CURRENT neutral bound profile authority<br/>1 Residue [A] plus 32 Residue [D]<br/>One member below the free-pair threshold<br/>Open decay family remains visible"]
         CONFINING_PROFILE["CURRENT confining profile authority<br/>1 Residue [A] plus 19 Residue [D]<br/>Nonlinear carrier grammar<br/>Invariant-only asymptotic boundary<br/>Zero members"]
+        CONFINING_CONTENT_FRONTIER["CURRENT paired constituent frontier<br/>One opaque carrier-content seed<br/>Eight typed missing authorities<br/>Zero candidates and no authority"]
         PREMISE_AUTHORITY["CURRENT blocked premise authority<br/>Target and rule capabilities<br/>Complete rule-universe coverage<br/>Paired Pi, Gap plus Chaos, Residual,<br/>unique slot, live canaries, and mint"]
         LOCAL_MEMBERS["CURRENT four local members<br/>One null excitation, two charged carriers,<br/>and one neutral two-body composite<br/>No familiar identity or global support"]
-        SPECIES_LAWS["NEXT confining-sector constituent content<br/>Exact representation, running or scale,<br/>mass, charge, spin, statistics,<br/>applicability, validity, and transitions"]
+        SPECIES_LAWS["NEXT constituent authority pairs<br/>Representation closure and dynamics scale<br/>Mass or massless proof, state, statistics,<br/>validity, conservation, and channels"]
         REGISTRY["FUTURE realized species registry<br/>Complete lawful membership<br/>Familiarity-independent"]
         MECHANISMS["FUTURE admitted mechanism set<br/>Thermal, opacity, EOS, collapse,<br/>transport, spectra, topology,<br/>conservation, and validity laws"]
         JOINT["FUTURE correlation-preserving<br/>joint physical measure proof"]
@@ -141,12 +142,15 @@ flowchart TB
         CHARGED_PROFILE --> PHYSICAL_REGISTRY
         NEUTRAL_PROFILE --> PHYSICAL_REGISTRY
         CONFINING_PROFILE --> PHYSICAL_REGISTRY
+        CONFINING_PROFILE --> CONFINING_CONTENT_FRONTIER
+        CONFINING_CONTENT_FRONTIER --> PHYSICAL_REGISTRY
         PRIMITIVE_PROFILE --> LOCAL_MEMBERS
         CHARGED_PROFILE --> LOCAL_MEMBERS
         NEUTRAL_PROFILE --> LOCAL_MEMBERS
         LOCAL_MEMBERS --> PHYSICAL_REGISTRY
         PREMISE_ROUTE -. "Remains generic for later targets" .-> PREMISE_AUTHORITY
         PREMISE_AUTHORITY --> SPECIES_LAWS
+        CONFINING_CONTENT_FRONTIER --> SPECIES_LAWS
         SPECIES_LAWS --> PHYSICAL_REGISTRY
         PHYSICAL_REGISTRY -. "Requires roots and separate authority receipt" .-> REGISTRY
         REGISTRY --> MECHANISMS

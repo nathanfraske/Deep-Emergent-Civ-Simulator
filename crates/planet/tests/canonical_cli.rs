@@ -512,14 +512,14 @@ fn species_live_refusal_has_a_typed_read_only_api() {
     );
     assert_eq!(
         species.frontier_scope_id(),
-        Some("four_local_members_plus_confining_profile_then_open_global_obligations")
+        Some("four_local_members_plus_confining_constituent_frontier_then_open_global_obligations")
     );
     assert_eq!(species.frontier_completeness_claim(), Some(false));
     assert_eq!(species.attempts().len(), 1);
     assert!(species
         .open_proof_ids()
         .iter()
-        .any(|id| id == "confining-sector-constituent-content"));
+        .any(|id| id == "confining.dynamics_scale_or_equivalent"));
     assert!(!species
         .open_proof_ids()
         .iter()

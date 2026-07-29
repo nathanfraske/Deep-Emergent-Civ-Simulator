@@ -636,8 +636,8 @@ fn reconstruct_candidates(
             input_sha256.as_slice(),
         ],
     );
-    let admission_evidence = law_premise::inspect_theory_profile_admission(
-        &law_premise::TheoryProfileAdmissionRequest {
+    let admission_evidence =
+        law_premise::inspect_theory_profile_protocol(&law_premise::TheoryProfileAdmissionRequest {
             claim_identity,
             role_identity: profile_role_identity.0,
             content_identity: profile_root_identity.0,
@@ -648,13 +648,27 @@ fn reconstruct_candidates(
             residual_slot_id: packet.residual_slot_id.clone(),
             occupied_profile_slots: vec![packet.primitive_residual_slot_id.clone()],
             owner_admission_record: packet.owner_admission_record.clone(),
-        },
-    )
-    .map_err(|_| ChargedProfileRefusal::ArtifactConstructionFailure)?;
+        })
+        .map_err(|_| ChargedProfileRefusal::ArtifactConstructionFailure)?;
     if admission_evidence.decision_id != "irreducible_protocol_structurally_bound"
         || admission_evidence.target_claim_identity != claim_identity
         || admission_evidence.target_role_identity != profile_role_identity.0
         || admission_evidence.target_content_identity != profile_root_identity.0
+        || admission_evidence.profile_protocol_schema_id
+            != "civsim.planet.theory-profile-protocol-capability.v1"
+        || admission_evidence.profile_protocol_producer_id
+            != "civsim.planet.theory-profile-protocol.forward-authority.v1"
+        || admission_evidence.profile_protocol_watchdog_id
+            != "civsim.planet.theory-profile-protocol.reverse-authority.v1"
+        || admission_evidence.profile_protocol_pair_receipt_sha256 == [0; 32]
+        || admission_evidence.profile_protocol_producer_trace_sha256 == [0; 32]
+        || admission_evidence.profile_protocol_watchdog_trace_sha256 == [0; 32]
+        || admission_evidence.profile_protocol_producer_trace_sha256
+            == admission_evidence.profile_protocol_watchdog_trace_sha256
+        || admission_evidence.premise_admission_authority
+        || admission_evidence.species_membership_authority
+        || admission_evidence.global_derivation_coverage
+        || admission_evidence.authority_effect != "none"
     {
         return Err(ChargedProfileRefusal::ArtifactConstructionFailure);
     }
@@ -1317,6 +1331,13 @@ fn write_output(
         &reconstruction
             .admission_evidence
             .irreducible_protocol_capability_sha256,
+    );
+    write_field(
+        &mut bytes,
+        14,
+        &reconstruction
+            .admission_evidence
+            .profile_protocol_pair_receipt_sha256,
     );
     bytes
 }

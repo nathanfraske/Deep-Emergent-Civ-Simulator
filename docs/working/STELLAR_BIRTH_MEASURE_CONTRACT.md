@@ -290,8 +290,8 @@ molecular convention.
 This does not derive a complete species state or mean species mass. The
 repository resolver still returns `None`, so no production path can call the
 conditioned-support reducer. The joint-measure refusal now includes
-`civsim.planet.stellar-birth-species-derivation-analysis.v11`, checked by
-`civsim.planet.stellar-birth-species-derivation-watchdog.v12`. The analysis
+`civsim.planet.stellar-birth-species-derivation-analysis.v12`, checked by
+`civsim.planet.stellar-birth-species-derivation-watchdog.v13`. The analysis
 binds the audited floor, sealed floor digest, structure schemas, live physical
 root pair, derived `eps_0` premise, all four profile authority receipts,
 registered-catalog protocol results, symmetry, conjugation, solver,
@@ -328,14 +328,24 @@ artifact with its exact identity, tier, provenance tag, and admission route.
 The local physical registry closes four members with `registry_refusal_code=none`
 while `registry_coverage_claim=false` and `authority_effect=none`.
 
-The open proofs are copied from the live six-obligation frontier and checked
-against a fresh registry result. Unreached support and mean-mass paths remain
-absent rather than populated from authored guesses. The bitstream states
-`frontier.scope=four_local_members_plus_confining_profile_then_open_global_obligations` and
+The paired confining-constituent diagnostic consumes only the admitted
+confining-profile receipt. It derives that profile's carrier role as one
+opaque internal seed, constructs zero constituent candidates, and reports
+eight exact missing authorities: representation-family membership closure, a
+confining dynamics scale or equivalent, excitation-profile coverage, exact
+rest mass or an exact massless proof, charge-state-statistics dispositions,
+constituent applicability and validity, constituent conservation binding, and
+transition and separation-channel coverage. Both a pure-gauge closure and an
+unfamiliar or thaumic extension use the same variable-cardinality input.
+
+The open proofs are copied from the live thirteen-obligation frontier and
+checked against a fresh registry result. Unreached support and mean-mass paths
+remain absent rather than populated from authored guesses. The bitstream states
+`frontier.scope=four_local_members_plus_confining_constituent_frontier_then_open_global_obligations` and
 `frontier.completeness_claim=false`. The analysis has `closure_effect=none`
 and `coverage_claim=false`. The observer-only viewer projects the same source,
-profile, member, protocol, census, scope, and completeness fields without a
-return edge to the run.
+profile, constituent-frontier, member, protocol, census, scope, and
+completeness fields without a return edge to the run.
 
 The byte-neutral structural packet is private and landed. It separates a
 complete descriptor packet from conditioned support, uses content-derived
@@ -532,14 +542,15 @@ The no-argument runner serializes the separate SI representation receipt and
 three physical floor values, derives `eps_0`, enters Stage 1, and returns
 `stellar_birth.realization_measure`. It emits six transcript events: three
 floor records, one derived-value record, one Stage 1 entry, and one refusal.
-It emits no `[X]`, no `[W]` realization, and no snapshot. One fresh
-`just run-derived` execution after the confining-profile and analysis v11
-integration emits `676,904` stdout bytes at SHA-256
-`77985d93557d8deb7555643a502bbfdf4e933196507eca65f1ac910531f0ebec`
-and exits `2` as expected with empty stderr. The changed bytes bind four local
-members and all four profile authority chains while preserving the Stage 1
-refusal. The current receipt is `civsim.planet.run.v14`; its transcript schema
-major is `11`.
+It emits no `[X]`, no `[W]` realization, and no snapshot. One fresh direct
+runner execution after the confining-constituent frontier and analysis v12
+integration emits `692,372` stdout bytes at SHA-256
+`5933946673391620f55a3f22bd903151aa5290463dfe2b5a5f2e37a8202e940e`
+and exits `2` as expected. The changed bytes bind four local members, all four
+profile authority chains, one opaque confining carrier seed, eight exact
+constituent gaps, and thirteen total open obligations while preserving the
+Stage 1 refusal. The current receipt is `civsim.planet.run.v14`; its transcript
+schema major is `11`.
 
 The three-node graph now executes as a fixed-order conjunction over two opaque
 repository-owned proof capabilities. The production resolver currently

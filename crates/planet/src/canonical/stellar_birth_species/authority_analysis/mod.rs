@@ -33,16 +33,16 @@ use watchdog::validate_analysis;
 use super::COMPLETE_SPECIES_STATE_MEAN_PARTICLE_MASS_LAW_ID;
 
 pub(in crate::canonical) const SPECIES_DERIVATION_ANALYSIS_SCHEMA_ID: &str =
-    "civsim.planet.stellar-birth-species-derivation-analysis.v11";
+    "civsim.planet.stellar-birth-species-derivation-analysis.v12";
 pub(in crate::canonical) const SPECIES_DERIVATION_ANALYSIS_CHECKER_ID: &str =
-    "civsim.planet.stellar-birth-species-derivation-watchdog.v12";
+    "civsim.planet.stellar-birth-species-derivation-watchdog.v13";
 
 const FLOOR_ANCHOR_ID: &str = "fundamental.m_e";
 const FLOOR_ANCHOR_SYMBOL: &str = "m_e";
 const FLOOR_ANCHOR_ROLE: &str = "mass_coordinate_anchor_only";
 const FRONTIER_SOURCE_ID: &str = "repository_physical_registry_partial_closure";
 const FRONTIER_SCOPE_ID: &str =
-    "four_local_members_plus_confining_profile_then_open_global_obligations";
+    "four_local_members_plus_confining_constituent_frontier_then_open_global_obligations";
 pub(super) const LIVE_PHYSICAL_REGISTRY_ATTEMPT_ID: &str =
     "stellar_birth.species_derivation.partial_physical_registry_closure";
 
@@ -590,9 +590,29 @@ mod tests {
             ))
         );
         assert_eq!(view.strong_profile_admissions().count(), 20);
+        assert_eq!(
+            view.confining_constituent_frontier_identity()
+                .map(|identity| identity.1),
+            Some("planet.confining-sector.constituent-input-frontier")
+        );
+        assert_eq!(
+            view.confining_constituent_frontier_decision(),
+            Some("blocked_open_proofs")
+        );
+        assert_eq!(
+            view.confining_constituent_frontier_counts(),
+            Some((1, 8, 0))
+        );
+        assert_eq!(
+            view.confining_constituent_frontier_scope(),
+            Some((false, false, "none"))
+        );
+        assert!(view
+            .confining_constituent_frontier_digests()
+            .is_some_and(|digests| digests.into_iter().all(|digest| digest != [0; 32])));
         assert_eq!(view.physical_registry_refusal_code(), Some("none"));
         assert_eq!(view.physical_registry_member_count(), Some(4));
-        assert_eq!(view.physical_registry_open_obligations().len(), 6);
+        assert_eq!(view.physical_registry_open_obligations().len(), 13);
         assert_ne!(view.physical_registry_root_receipt_sha256(), Some([0; 32]));
         assert_eq!(
             view.frontier_source_id(),
@@ -600,7 +620,9 @@ mod tests {
         );
         assert_eq!(
             view.frontier_scope_id(),
-            Some("four_local_members_plus_confining_profile_then_open_global_obligations")
+            Some(
+                "four_local_members_plus_confining_constituent_frontier_then_open_global_obligations"
+            )
         );
         assert_eq!(view.frontier_completeness_claim(), Some(false));
         assert_eq!(view.candidate_member_count(), Some(4));
@@ -632,7 +654,14 @@ mod tests {
                 "complete_global_physical_vocabulary_coverage",
                 "complete_registry_closure_domain",
                 "conditioned_species_support",
-                "confining-sector-constituent-content",
+                "confining.charge_state_statistics_disposition_coverage",
+                "confining.constituent_applicability_validity",
+                "confining.constituent_conservation_binding",
+                "confining.dynamics_scale_or_equivalent",
+                "confining.exact_rest_mass_or_massless_proof",
+                "confining.excitation_profile_coverage",
+                "confining.representation_family_membership_closure",
+                "confining.transition_separation_channel_coverage",
                 "multi-constituent-bound-state-spectrum",
                 "reaction-network-closure",
             ]
@@ -651,6 +680,7 @@ mod tests {
                 "planet.charged-matter.charge-conjugate-massive-spinor-pair",
                 "planet.neutral-bound-state.equal-mass-opposite-charge-central-ground-level",
                 "planet.interaction-profile.compact-noncommutative-confining-asymptotic-boundary",
+                "planet.confining-sector.constituent-input-frontier",
                 "civsim.planet.stellar-birth-physical-vocabulary.partition.v1",
             ]
         );

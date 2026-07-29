@@ -8,6 +8,7 @@
 //! conditioned support, and global stability false.
 
 mod charged_profile;
+mod confining_constituent_frontier;
 mod model;
 pub(in crate::canonical::stellar_birth_species) mod neutral_bound_profile;
 mod primitive_profile;
@@ -202,6 +203,29 @@ pub(super) struct RepositoryStrongProfileFrontier {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct RepositoryConfiningConstituentFrontier {
+    pub(super) diagnostic_schema_id: &'static str,
+    pub(super) claim_id: &'static str,
+    pub(super) producer_id: &'static str,
+    pub(super) watchdog_id: &'static str,
+    pub(super) decision_id: &'static str,
+    pub(super) source_profile_receipt_sha256: [u8; 32],
+    pub(super) internal_seed_identities: Vec<[u8; 32]>,
+    pub(super) missing_authority_ids: Vec<&'static str>,
+    pub(super) constituent_candidate_count: u32,
+    pub(super) membership_authority: bool,
+    pub(super) spectrum_authority: bool,
+    pub(super) authority_effect: &'static str,
+    pub(super) producer_result_sha256: [u8; 32],
+    pub(super) watchdog_result_sha256: [u8; 32],
+    pub(super) producer_trace_sha256: [u8; 32],
+    pub(super) watchdog_trace_sha256: [u8; 32],
+    pub(super) producer_resource_sha256: [u8; 32],
+    pub(super) watchdog_resource_sha256: [u8; 32],
+    pub(super) receipt_sha256: [u8; 32],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct RepositoryPhysicalRegistryFrontier {
     pub(super) registry_schema_id: &'static str,
     pub(super) proof_graph_schema_id: &'static str,
@@ -229,6 +253,7 @@ pub(super) struct RepositoryPhysicalRegistryFrontier {
     pub(super) charged_profile: RepositoryChargedProfileFrontier,
     pub(super) neutral_bound_profile: RepositoryNeutralBoundProfileFrontier,
     pub(super) strong_profile: RepositoryStrongProfileFrontier,
+    pub(super) confining_constituent_frontier: RepositoryConfiningConstituentFrontier,
     pub(super) vocabulary_receipt_schema_id: String,
     pub(super) vocabulary_claim_id: String,
     pub(super) vocabulary_producer_id: String,
@@ -770,6 +795,47 @@ pub(super) fn repository_physical_registry_frontier(
             "strong_profile_admission_census_invalid",
         ));
     }
+    let confining_constituent_receipt =
+        confining_constituent_frontier::repository_frontier(&strong_profile_receipt)
+            .map_err(|refusal| RepositoryPhysicalRegistryFrontierError::from_code(refusal.id()))?;
+    if confining_constituent_receipt.decision_id != "blocked_open_proofs"
+        || confining_constituent_receipt.source_profile_receipt_sha256
+            != strong_profile_receipt.pair_receipt_sha256
+        || confining_constituent_receipt.internal_seed_identities.len() != 1
+        || confining_constituent_receipt.internal_seed_identities[0]
+            != strong_profile_receipt.carrier_identity
+        || confining_constituent_receipt
+            .missing_authority_ids
+            .is_empty()
+        || confining_constituent_receipt.constituent_candidate_count != 0
+        || confining_constituent_receipt.membership_authority
+        || confining_constituent_receipt.spectrum_authority
+        || confining_constituent_receipt.authority_effect != "none"
+        || confining_constituent_receipt.producer_result_sha256
+            == confining_constituent_receipt.watchdog_result_sha256
+        || confining_constituent_receipt.producer_trace_sha256
+            == confining_constituent_receipt.watchdog_trace_sha256
+        || confining_constituent_receipt.receipt_sha256 == [0; 32]
+    {
+        return Err(RepositoryPhysicalRegistryFrontierError::from_code(
+            "confining_constituent_frontier_invalid",
+        ));
+    }
+    let mut open_obligations = vec![
+        "complete_global_physical_vocabulary_coverage",
+        "complete_registry_closure_domain",
+        "conditioned_species_support",
+    ];
+    open_obligations.extend(
+        confining_constituent_receipt
+            .missing_authority_ids
+            .iter()
+            .copied(),
+    );
+    open_obligations.extend([
+        "multi-constituent-bound-state-spectrum",
+        "reaction-network-closure",
+    ]);
     Ok(RepositoryPhysicalRegistryFrontier {
         registry_schema_id: REGISTRY_SCHEMA_ID,
         proof_graph_schema_id: PROOF_GRAPH_SCHEMA_ID,
@@ -982,6 +1048,32 @@ pub(super) fn repository_physical_registry_frontier(
                 .confining_asymptotic_boundary_admitted,
             authority_effect: strong_profile_receipt.authority_effect,
         },
+        confining_constituent_frontier: RepositoryConfiningConstituentFrontier {
+            diagnostic_schema_id: confining_constituent_receipt.schema_id,
+            claim_id: confining_constituent_receipt.claim_id,
+            producer_id: confining_constituent_receipt.producer_id,
+            watchdog_id: confining_constituent_receipt.watchdog_id,
+            decision_id: confining_constituent_receipt.decision_id,
+            source_profile_receipt_sha256: confining_constituent_receipt
+                .source_profile_receipt_sha256,
+            internal_seed_identities: confining_constituent_receipt
+                .internal_seed_identities
+                .iter()
+                .map(|identity| identity.0)
+                .collect(),
+            missing_authority_ids: confining_constituent_receipt.missing_authority_ids,
+            constituent_candidate_count: confining_constituent_receipt.constituent_candidate_count,
+            membership_authority: confining_constituent_receipt.membership_authority,
+            spectrum_authority: confining_constituent_receipt.spectrum_authority,
+            authority_effect: confining_constituent_receipt.authority_effect,
+            producer_result_sha256: confining_constituent_receipt.producer_result_sha256,
+            watchdog_result_sha256: confining_constituent_receipt.watchdog_result_sha256,
+            producer_trace_sha256: confining_constituent_receipt.producer_trace_sha256,
+            watchdog_trace_sha256: confining_constituent_receipt.watchdog_trace_sha256,
+            producer_resource_sha256: confining_constituent_receipt.producer_resource_sha256,
+            watchdog_resource_sha256: confining_constituent_receipt.watchdog_resource_sha256,
+            receipt_sha256: confining_constituent_receipt.receipt_sha256,
+        },
         vocabulary_receipt_schema_id: input.vocabulary_binding.schema_id,
         vocabulary_claim_id: input.vocabulary_binding.claim_id,
         vocabulary_producer_id: input.vocabulary_binding.producer_id,
@@ -1026,13 +1118,6 @@ pub(super) fn repository_physical_registry_frontier(
         registry_member_count,
         registry_coverage_claim: false,
         registry_authority_effect: registry.authority_effect.id(),
-        open_obligations: vec![
-            "complete_global_physical_vocabulary_coverage",
-            "complete_registry_closure_domain",
-            "conditioned_species_support",
-            "confining-sector-constituent-content",
-            "multi-constituent-bound-state-spectrum",
-            "reaction-network-closure",
-        ],
+        open_obligations,
     })
 }

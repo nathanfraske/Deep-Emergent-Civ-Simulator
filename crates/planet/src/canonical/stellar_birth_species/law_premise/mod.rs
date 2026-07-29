@@ -25,7 +25,7 @@ mod watchdog;
 mod tests;
 
 pub(super) use admission_route::{
-    inspect_theory_profile_admission, repository_premise_admission_frontier,
+    inspect_theory_profile_protocol, repository_premise_admission_frontier,
     RepositoryPremiseAdmissionFrontier, TheoryProfileAdmissionEvidence,
     TheoryProfileAdmissionRequest,
 };

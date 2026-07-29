@@ -631,6 +631,13 @@ pub(super) fn encode_checker_output(output: &StrongCheckerOutput) -> Vec<u8> {
         append_field(&mut bytes, 23, &candidate.identity.0);
         append_field(&mut bytes, 24, &encode_admission(&candidate.admission));
     }
+    append_field(
+        &mut bytes,
+        25,
+        &output
+            .admission_evidence
+            .profile_protocol_pair_receipt_sha256,
+    );
     bytes
 }
 

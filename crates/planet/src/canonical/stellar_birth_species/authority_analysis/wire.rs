@@ -548,6 +548,30 @@ fn write_physical_registry_frontier(
             "strong_profile_authority_effect",
             frontier.strong_profile.authority_effect,
         ),
+        (
+            "confining_constituent_frontier_schema",
+            frontier.confining_constituent_frontier.diagnostic_schema_id,
+        ),
+        (
+            "confining_constituent_frontier_claim_id",
+            frontier.confining_constituent_frontier.claim_id,
+        ),
+        (
+            "confining_constituent_frontier_producer_id",
+            frontier.confining_constituent_frontier.producer_id,
+        ),
+        (
+            "confining_constituent_frontier_watchdog_id",
+            frontier.confining_constituent_frontier.watchdog_id,
+        ),
+        (
+            "confining_constituent_frontier_decision",
+            frontier.confining_constituent_frontier.decision_id,
+        ),
+        (
+            "confining_constituent_frontier_authority_effect",
+            frontier.confining_constituent_frontier.authority_effect,
+        ),
         ("registry_refusal_code", frontier.registry_refusal_code),
         (
             "registry_authority_effect",
@@ -829,6 +853,52 @@ fn write_physical_registry_frontier(
             "strong_profile_asymptotic_watchdog.sha256",
             frontier.strong_profile.asymptotic_watchdog_sha256,
         ),
+        (
+            "confining_constituent_source_profile_receipt.sha256",
+            frontier
+                .confining_constituent_frontier
+                .source_profile_receipt_sha256,
+        ),
+        (
+            "confining_constituent_producer_result.sha256",
+            frontier
+                .confining_constituent_frontier
+                .producer_result_sha256,
+        ),
+        (
+            "confining_constituent_watchdog_result.sha256",
+            frontier
+                .confining_constituent_frontier
+                .watchdog_result_sha256,
+        ),
+        (
+            "confining_constituent_producer_trace.sha256",
+            frontier
+                .confining_constituent_frontier
+                .producer_trace_sha256,
+        ),
+        (
+            "confining_constituent_watchdog_trace.sha256",
+            frontier
+                .confining_constituent_frontier
+                .watchdog_trace_sha256,
+        ),
+        (
+            "confining_constituent_producer_resource.sha256",
+            frontier
+                .confining_constituent_frontier
+                .producer_resource_sha256,
+        ),
+        (
+            "confining_constituent_watchdog_resource.sha256",
+            frontier
+                .confining_constituent_frontier
+                .watchdog_resource_sha256,
+        ),
+        (
+            "confining_constituent_receipt.sha256",
+            frontier.confining_constituent_frontier.receipt_sha256,
+        ),
     ] {
         write_digest(f, &frontier_prefix, field, digest)?;
     }
@@ -1068,6 +1138,64 @@ fn write_physical_registry_frontier(
     ] {
         writeln!(f, "{frontier_prefix}.{field}={value}")?;
     }
+    writeln!(
+        f,
+        "{frontier_prefix}.confining_constituent_internal_seed_count={}",
+        frontier
+            .confining_constituent_frontier
+            .internal_seed_identities
+            .len()
+    )?;
+    for (index, identity) in frontier
+        .confining_constituent_frontier
+        .internal_seed_identities
+        .iter()
+        .enumerate()
+    {
+        write_digest(
+            f,
+            &frontier_prefix,
+            &format!("confining_constituent_internal_seed.{index:04}.sha256"),
+            *identity,
+        )?;
+    }
+    writeln!(
+        f,
+        "{frontier_prefix}.confining_constituent_missing_authority_count={}",
+        frontier
+            .confining_constituent_frontier
+            .missing_authority_ids
+            .len()
+    )?;
+    for (index, authority_id) in frontier
+        .confining_constituent_frontier
+        .missing_authority_ids
+        .iter()
+        .enumerate()
+    {
+        writeln!(
+            f,
+            "{frontier_prefix}.confining_constituent_missing_authority.{index:04}={}",
+            canonical_text(authority_id)
+        )?;
+    }
+    writeln!(
+        f,
+        "{frontier_prefix}.confining_constituent_candidate_count={}",
+        frontier
+            .confining_constituent_frontier
+            .constituent_candidate_count
+    )?;
+    writeln!(
+        f,
+        "{frontier_prefix}.confining_constituent_membership_authority={}",
+        frontier.confining_constituent_frontier.membership_authority
+    )?;
+    writeln!(
+        f,
+        "{frontier_prefix}.confining_constituent_spectrum_authority={}",
+        frontier.confining_constituent_frontier.spectrum_authority
+    )?;
     writeln!(
         f,
         "{frontier_prefix}.root_admission_count={}",

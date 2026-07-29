@@ -11,13 +11,13 @@ const ASSESSMENT_SCHEMA: &[u8] = b"civsim.planet.theory-profile-protocol-assessm
 const CATALOG_DOMAIN: &[u8] = b"civsim.planet.theory-profile-catalog.v1";
 const SLOT_DOMAIN: &[u8] = b"civsim.planet.theory-profile-slot-inventory.v1";
 const RECEIPT_DOMAINS: [&[u8]; 7] = [
-    b"civsim.planet.theory-profile-coverage.watchdog.v2",
-    b"civsim.planet.theory-profile-buckingham-pi.watchdog.v2",
-    b"civsim.planet.theory-profile-gap-law.watchdog.v2",
-    b"civsim.planet.theory-profile-chaos.watchdog.v2",
-    b"civsim.planet.theory-profile-residual.watchdog.v2",
-    b"civsim.planet.theory-profile-slot.watchdog.v2",
-    b"civsim.planet.theory-profile-owner.watchdog.v2",
+    b"civsim.planet.theory-profile-coverage.watchdog.v3",
+    b"civsim.planet.theory-profile-buckingham-pi.watchdog.v3",
+    b"civsim.planet.theory-profile-gap-law.watchdog.v3",
+    b"civsim.planet.theory-profile-chaos.watchdog.v3",
+    b"civsim.planet.theory-profile-residual.watchdog.v3",
+    b"civsim.planet.theory-profile-slot.watchdog.v3",
+    b"civsim.planet.theory-profile-owner.watchdog.v3",
 ];
 
 pub(super) fn inspect(
@@ -57,11 +57,15 @@ pub(super) fn inspect(
     })?;
     let repository_catalog_sha256 = catalog_digest(&seeds, &rules);
 
-    let mut slots = input
+    if input
         .occupied_residual_slots
         .iter()
-        .map(|slot| slot.trim().to_owned())
-        .collect::<Vec<_>>();
+        .rev()
+        .any(|slot| !valid_canonical_text(slot))
+    {
+        return Err("invalid_occupied_slot_inventory");
+    }
+    let mut slots = input.occupied_residual_slots.to_vec();
     slots.sort_unstable();
     if slots.windows(2).any(|pair| pair[0] == pair[1])
         || slots.iter().rev().any(|slot| !valid_text(slot))
@@ -108,8 +112,8 @@ fn validate_fixed_reverse(input: &ProfileProtocolInput) -> Result<(), &'static s
         || distinct
             .iter()
             .any(|digest| digest.iter().all(|byte| *byte == 0))
-        || !valid_text(input.residual_slot_id.trim())
-        || !valid_text(input.owner_admission_record.trim())
+        || !valid_canonical_text(&input.residual_slot_id)
+        || !valid_canonical_text(&input.owner_admission_record)
     {
         return Err("invalid_profile_protocol_input");
     }
@@ -139,7 +143,7 @@ fn invalid_rule(rule: &CatalogRule) -> bool {
 }
 
 fn valid_text(value: &str) -> bool {
-    value.is_ascii() && (1..=192).contains(&value.len())
+    (1..=192).contains(&value.len()) && value.is_ascii()
 }
 
 fn catalog_digest(seeds: &[CatalogSeed], rules: &[CatalogRule]) -> [u8; 32] {
@@ -245,6 +249,8 @@ fn build_receipts(
             (3, input.profile_input_sha256.to_vec()),
             (2, input.claim_identity.to_vec()),
             (1, canonical_bytes.to_vec()),
+            (10, input.role_identity.to_vec()),
+            (11, input.content_identity.to_vec()),
         ];
         fields.sort_unstable_by_key(|(tag, _)| *tag);
         let mut bytes = domain.to_vec();
@@ -272,4 +278,8 @@ fn field(bytes: &mut Vec<u8>, tag: u16, value: &[u8]) {
             .to_be_bytes(),
     );
     bytes.extend_from_slice(value);
+}
+
+fn valid_canonical_text(value: &str) -> bool {
+    valid_text(value) && value == value.trim()
 }

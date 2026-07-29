@@ -75,6 +75,15 @@ consequences. Confinement is an explicit scoped premise, not a claimed
 four-dimensional theorem. The profile fixes no group, rank, representation
 size, coupling, transition scale, constituent mass, spectrum, or member.
 
+The next structural seam is now executable. A paired forward inventory and
+reverse obligation reconstruction consume only the admitted confining-profile
+receipt. They preserve its carrier content as one opaque internal seed while
+constructing zero constituent candidates. The current decision is
+`blocked_open_proofs`, with eight typed missing authorities. Adding unfamiliar
+or thaumic internal identities cannot relabel or displace the carrier-content
+seed. No placeholder input can remove a gap. A future gap may close only when
+its claim-scoped upstream authority pair supplies a sealed receipt.
+
 The live vocabulary now partitions 125 admitted artifacts into 107 descriptor
 roles, 125 relation targets, and five constraint laws. This is complete only
 for the current input. Global physical-vocabulary coverage, global membership
@@ -110,7 +119,8 @@ flowchart TB
     COMPOSITE["CURRENT neutral two-body profile<br/>exact lowest-level coefficient<br/>complete free-pair threshold<br/>open decay remains visible"]
     THRESHOLD["CURRENT claim-scoped threshold pair<br/>strictly below the covered threshold<br/>overlap stays unresolved<br/>coverage receipts remain distinct"]
     STRONG["CURRENT confining interaction profile<br/>nonlinear carrier grammar<br/>invariant-only asymptotic boundary<br/>zero species members"]
-    CONSTITUENT["NEXT confining-sector content<br/>exact representation and scales<br/>constituent excitation profiles<br/>no familiar core template"]
+    CONSTITUENT_FRONTIER["CURRENT confining constituent frontier<br/>one opaque internal carrier-content seed<br/>eight typed missing authorities<br/>zero constituent candidates"]
+    CONSTITUENT["NEXT constituent authority pairs<br/>exact representation closure and scale<br/>excitation, mass, state, statistics,<br/>validity, conservation, and channels"]
     NUCLEAR["FUTURE multi-constituent cores<br/>binding spectra, decay channels<br/>charge and neutral conserved content"]
     ELEMENT["FUTURE element identity projection<br/>same derived core-charge vector<br/>isotopes differ by neutral content or state"]
     ATOM["FUTURE atomic many-body solve<br/>mobile opposite-charge carriers<br/>statistics, relativistic corrections<br/>ground and excited spectra"]
@@ -134,7 +144,8 @@ flowchart TB
     CHARGED --> COMPOSITE
     THRESHOLD -. "Reusable arithmetic after authority closes" .-> COMPOSITE
     COMPOSITE --> STRONG
-    STRONG --> CONSTITUENT
+    STRONG --> CONSTITUENT_FRONTIER
+    CONSTITUENT_FRONTIER --> CONSTITUENT
     CONSTITUENT --> NUCLEAR
     NUCLEAR --> ELEMENT
     ELEMENT --> ATOM
@@ -399,10 +410,17 @@ Floating point remains confirmation-only.
    Residue `[D]` consequences enter the current-input vocabulary. Confinement
    remains a scoped premise, not a theorem, and the profile grants no member,
    group, rank, representation size, coupling, scale, or spectrum.
-9. **Confining-sector constituent content.** NEXT: derive or fully admit the
-   exact internal representation, running or scale relation, constituent
-   excitation profiles, masses, charges, statistics, applicability, and
-   validity needed to ask a multi-constituent solver a physical question.
+9a. **Confining-sector constituent frontier.** DONE: independent forward and
+   reverse algorithms bind the strong-profile receipt, preserve one opaque
+   carrier-content seed, and expose eight typed prerequisites. They are
+   permutation-neutral, bounded, extension-monotone under unfamiliar and
+   thaumic seeds, and non-authorizing. They mint no artifact, constituent
+   candidate, member, or spectrum capability.
+9b. **Confining-sector constituent authorities.** NEXT: derive or fully admit
+   representation-family membership closure, a running or alternative
+   dynamics-scale relation, excitation profiles, exact masses or massless
+   proofs, charge-state-statistics dispositions, applicability and validity,
+   conservation, and complete transition and separation-channel coverage.
    Familiar constituent and core names may appear only in validation or view
    projections.
 10. **Composite core profile.** Add the confining and transition sectors needed
@@ -421,12 +439,13 @@ Floating point remains confirmation-only.
    The reference table remains validation-only until no canonical consumer
    needs it.
 
-The next code target is slice 9, the constituent content for the admitted
-confining sector. It must derive or fully admit every representation, scale,
-mass, state, statistics, conservation, applicability, and validity premise
-without naming a familiar constituent or core. The later multi-constituent
-spectrum must expose every separation and decay channel, converge under
-independent solvers, transport all floor uncertainties, and preserve
-unfamiliar interaction sectors. Independent serialization, owner review,
-citations, and nonzero digests do not substitute for executable physical
-evidence.
+The next code target is slice 9b, the first authority pair consumed by the
+typed confining frontier. Representation-family membership closure comes
+first because it can lawfully close to a pure-gauge sector or expand to any
+variable-cardinality unfamiliar content. A separate dynamics-scale authority
+then determines whether masses and spectra can be asked for at all. The later
+multi-constituent spectrum must expose every separation and decay channel,
+converge under independent solvers, transport all floor uncertainties, and
+preserve unfamiliar interaction sectors. Independent serialization, owner
+review, citations, and nonzero digests do not substitute for executable
+physical evidence.
