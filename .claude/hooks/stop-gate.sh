@@ -11,6 +11,7 @@
 # stop_hook_active.
 
 set -u
+set -o pipefail
 ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 input="$(cat)"
 
@@ -27,18 +28,31 @@ fi
 
 cd "$ROOT" || exit 0
 
-if ! bash scripts/verify.sh >/tmp/civsim_stop_verify.out 2>&1; then
+verify_tmp="$(mktemp "${TMPDIR:-/tmp}/civsim-stop-verify.XXXXXX")" || {
+  echo "stop-gate: could not allocate verification output." >&2
+  exit 2
+}
+trap 'rm -f "$verify_tmp"' EXIT
+
+if ! python3 scripts/gate_runner.py run --tier stop --phase pre >"$verify_tmp" 2>&1; then
   echo "stop-gate: the maintained documents are not clean; the turn cannot end." >&2
-  echo "Run scripts/verify.sh and fix the FAIL lines, then finish." >&2
-  tail -25 /tmp/civsim_stop_verify.out >&2
+  echo "Run the Stop pre-phase gates and fix the FAIL lines, then finish." >&2
+  tail -25 "$verify_tmp" >&2
   exit 2
 fi
 
-docs_changed="$(git -C "$ROOT" status --porcelain -- docs/design.md docs/audit.md 2>/dev/null)"
-mem_changed="$(git -C "$ROOT" status --porcelain -- HANDOFFS.md TODOS.md 2>/dev/null)"
-if [ -n "$docs_changed" ] && [ -z "$mem_changed" ]; then
-  echo "stop-gate: a maintained document changed but HANDOFFS.md / TODOS.md were not updated." >&2
-  echo "Append a dated HANDOFFS entry and update TODOS before finishing (CLAUDE.md section 10)." >&2
+# Every implementation or repository-entrypoint segment updates both memory
+# surfaces. Checking them independently prevents an edit to one from masking a
+# stale other file.
+memory_trigger_changed="$(git -C "$ROOT" status --porcelain -- \
+  crates Cargo.toml Cargo.lock parked/Cargo.toml parked/Cargo.lock parked/crates parked/README.md \
+  justfile Makefile scripts .github .claude docs/working AGENTS.md CLAUDE.md RUNBOOK.md README.md \
+  2>/dev/null)"
+handoff_changed="$(git -C "$ROOT" status --porcelain -- HANDOFFS.md 2>/dev/null)"
+todos_changed="$(git -C "$ROOT" status --porcelain -- TODOS.md 2>/dev/null)"
+if [ -n "$memory_trigger_changed" ] && { [ -z "$handoff_changed" ] || [ -z "$todos_changed" ]; }; then
+  echo "stop-gate: repository work changed but HANDOFFS.md and TODOS.md were not both updated." >&2
+  echo "Append the current HANDOFFS entry and update the bounded canonical queue before finishing." >&2
   exit 2
 fi
 
@@ -49,7 +63,10 @@ fi
 # flagged), and the board must never go stale. Only fires when the roadmap exists.
 roadmap_file="docs/working/CONSENSUS_ROADMAP.md"
 if [ -f "$roadmap_file" ]; then
-  work_changed="$(git -C "$ROOT" status --porcelain -- crates docs/design.md docs/audit.md ROADMAP.md 2>/dev/null)"
+  work_changed="$(git -C "$ROOT" status --porcelain -- \
+    crates Cargo.toml Cargo.lock justfile Makefile scripts .github .claude \
+    AGENTS.md CLAUDE.md RUNBOOK.md README.md docs/working \
+    ':(exclude)docs/working/CONSENSUS_ROADMAP.md' 2>/dev/null)"
   roadmap_changed="$(git -C "$ROOT" status --porcelain -- "$roadmap_file" 2>/dev/null)"
   if [ -n "$work_changed" ] && [ -z "$roadmap_changed" ]; then
     echo "stop-gate: source or design files changed but the CONSENSUS_ROADMAP was not updated." >&2
@@ -62,7 +79,9 @@ fi
 # pastes its detail inline instead of pointing at it, which is how the old board reached half a
 # megabyte and made every parallel agent collide on it. A hard byte cap keeps the board a board.
 if [ -f "$roadmap_file" ]; then
-  roadmap_bytes="$(wc -c < "$ROOT/$roadmap_file" 2>/dev/null || echo 0)"
+  # Count the repository form. A Windows CRLF checkout must not consume the
+  # board budget with one extra byte per line.
+  roadmap_bytes="$(python3 -c 'import sys; print(len(open(sys.argv[1], "rb").read().replace(b"\r\n", b"\n")))' "$ROOT/$roadmap_file" 2>/dev/null || echo 0)"
   if [ "$roadmap_bytes" -gt 16384 ]; then
     echo "stop-gate: the CONSENSUS_ROADMAP is $roadmap_bytes bytes, over the 16384-byte cap." >&2
     echo "Trim it back to one short line per item (a date, a few words, a pointer). Move any inlined detail behind its pointer, and prune tombstoned landings that have gone stale. The retired long-form board is docs/working/CONSENSUS_ROADMAP_HISTORY.md; do not grow the live board back into it." >&2
@@ -70,79 +89,43 @@ if [ -f "$roadmap_file" ]; then
   fi
 fi
 
-# Floor-registry gate. The physics floor registry (docs/working/PHYSICS_FLOOR_REGISTRY.md) is the
-# enforced reference for the derive-vs-author line and the physics-substrate map: the generated list of
-# every authored floor axis and substance AND every law kernel (declared in the floor data or direct in
-# laws.rs), each with file:line. It is generated from the floor data and laws.rs, so if it is stale (a
-# floor axis, a law kernel, or the generator changed and the registry was not regenerated) the reference
-# is wrong and an audit against it is unsound. The
-# gate regenerates to a temp and compares, never touching the working tree. Inert until both the
-# generator and the registry exist.
-# Provenance ratchet, at TURN scope rather than build scope. The Stone 0 gate runs from
-# crates/sim/build.rs, so it only fires when a build touches civsim-sim. A package-scoped command such as
-# `cargo test -p civsim-physics` never fires it, which means a physics-only change can be written,
-# verified, and committed without the provenance ratchet ever running. That happened: an unclassified
-# from_decimal_str site rode in on a physics-only commit and surfaced later, on an unrelated build.
-#
-# This closes it without touching the build graph, so no build gets slower and no gate is duplicated. The
-# script list is READ FROM the Rust source rather than copied here, so there is ONE list: a gate added to
-# PROVENANCE_SCRIPTS is picked up here automatically and the two cannot drift apart.
-if [ -n "$(git -C "$ROOT" status --porcelain -- crates 2>/dev/null)" ]; then
-  scripts_list="$(sed -n '/const PROVENANCE_SCRIPTS/,/];/p' "$ROOT/crates/stone0/src/lib.rs" 2>/dev/null \
-    | grep -oE '"scripts/[a-z0-9_]+\.py"' | tr -d '"')"
-  for s in $scripts_list; do
-    [ -f "$ROOT/$s" ] || continue
-    if ! out="$(cd "$ROOT" && python3 "$s" 2>&1)"; then
-      echo "stop-gate: the provenance ratchet failed in $s." >&2
-      echo "This runs at turn scope because a package-scoped cargo command does not fire crates/sim/build.rs," >&2
-      echo "so a physics-only change would otherwise skip the Stone 0 gate entirely." >&2
+# Provenance ratchet, at TURN scope rather than build scope. Package-scoped
+# cargo commands do not prove the complete canonical boundary, and the boundary
+# gate also reads Cargo manifests and viewer sources. Membership, order,
+# arguments, timeouts, hashes, and self-test metadata come from gates.toml.
+repo_changed="$(git -C "$ROOT" status --porcelain -- . 2>/dev/null)"
+if [ -n "$repo_changed" ]; then
+  if ! out="$(cd "$ROOT" && python3 scripts/gate_runner.py --self-test 2>&1)"; then
+    echo "stop-gate: the declarative gate authority failed its synthetic self-test." >&2
+    printf '%s\n' "$out" | tail -20 >&2
+    exit 2
+  fi
+  if ! out="$(cd "$ROOT" && python3 scripts/gate_runner.py self-tests --tier stop 2>&1)"; then
+    echo "stop-gate: a declared detector self-test failed." >&2
+    printf '%s\n' "$out" | tail -30 >&2
+    exit 2
+  fi
+  if [ -n "$(git -C "$ROOT" status --porcelain -- crates/stone0 2>/dev/null)" ]; then
+    if ! out="$(cd "$ROOT" && bash scripts/cargo_dev.sh run -q -p civsim-stone0 --bin stone0-gate -- --self-test 2>&1)"; then
+      echo "stop-gate: the Stone 0 native self-test failed." >&2
       printf '%s\n' "$out" | tail -20 >&2
       exit 2
     fi
-  done
-fi
-
-# Derives-coverage gate. The registry's staleness check cannot see an UNMARKED deriving function: the
-# generator regenerates identically and the check passes while the map is wrong, which is how the physics
-# substrate ended up with 818 public functions and no markers at all. This ratchets that shut.
-if [ -f "$ROOT/scripts/derives_gate.py" ] && [ -f "$ROOT/scripts/derives_baseline.tsv" ]; then
-  if ! python3 "$ROOT/scripts/derives_gate.py" >/tmp/civsim_derives.out 2>&1; then
-    echo "stop-gate: the derives-coverage gate failed." >&2
-    tail -20 /tmp/civsim_derives.out >&2
+  fi
+  if ! out="$(cd "$ROOT" && python3 scripts/gate_runner.py run --tier stop --phase provenance 2>&1)"; then
+    echo "stop-gate: the declarative provenance ratchet failed." >&2
+    echo "This runs at turn scope because a package-scoped cargo command can skip canonical boundary inputs." >&2
+    printf '%s\n' "$out" | tail -30 >&2
     exit 2
   fi
 fi
 
-# Sources gate. A vendored source is checksummed, archived, scoped, slimmed and licence-cleared, or it does
-# not land. The generator check runs first: the gate reads the mirrored registry, so a stale mirror would
-# have it checking a wrong picture of the tree and passing on it. Inert until both scripts and the baseline
-# exist, so it does not fire on a branch that predates them.
-if [ -f "$ROOT/scripts/sources_gate.py" ] && [ -f "$ROOT/scripts/sources_baseline.tsv" ]; then
-  if ! python3 "$ROOT/scripts/gen_sources.py" --check >/tmp/civsim_gensources.out 2>&1; then
-    echo "stop-gate: the source registry or the bibliography is stale." >&2
-    tail -10 /tmp/civsim_gensources.out >&2
-    exit 2
-  fi
-  if ! python3 "$ROOT/scripts/sources_gate.py" >/tmp/civsim_sources.out 2>&1; then
-    echo "stop-gate: the sources gate failed." >&2
-    tail -20 /tmp/civsim_sources.out >&2
-    exit 2
-  fi
-fi
-
-reg="docs/working/PHYSICS_FLOOR_REGISTRY.md"
-gen="scripts/gen_floor_registry.py"
-if [ -f "$ROOT/$gen" ] && [ -f "$ROOT/$reg" ]; then
-  tmpreg="$(mktemp)"
-  if python3 "$ROOT/$gen" "$tmpreg" >/dev/null 2>&1; then
-    if ! diff -q "$tmpreg" "$ROOT/$reg" >/dev/null 2>&1; then
-      rm -f "$tmpreg"
-      echo "stop-gate: the physics floor registry is stale (a floor axis, a laws.rs kernel, or the generator changed but it was not regenerated)." >&2
-      echo "Run: python3 scripts/gen_floor_registry.py   then commit docs/working/PHYSICS_FLOOR_REGISTRY.md. The registry is the enforced derive-vs-author reference; a stale one is a wrong reference." >&2
-      exit 2
-    fi
-  fi
-  rm -f "$tmpreg"
+# Canonical ledger accounting inventory. Counts and memberships are generated from the audited catalog; a hand-edited
+# report or a catalog change without regeneration is a stale central ledger view and blocks completion.
+if ! out="$(cd "$ROOT" && python3 scripts/gate_runner.py run --tier stop --phase post 2>&1)"; then
+  echo "stop-gate: a declarative Stop post-phase gate failed." >&2
+  printf '%s\n' "$out" | tail -20 >&2
+  exit 2
 fi
 
 exit 0

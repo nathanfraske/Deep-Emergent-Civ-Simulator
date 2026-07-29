@@ -1,17 +1,10 @@
-# Determinism gate baseline (Q1 Stone 1, item 0). The proven-safe existing occurrences of the
-# nondeterminism-vector patterns in the determinism-critical crates (core, physics, sim, world).
-# The current tree is provably deterministic (the five canonical pins reproduce bit-exact across
-# separate runs, which a state-feeding wall-clock or hash-order iteration would break); each site
-# below is grandfathered with the reason it is determinism-safe. The gate (scripts/determinism_gate.py)
-# fails on any count ABOVE its baseline (a new vector) and on any count BELOW it (update this file,
-# with a reason, when a site is legitimately removed). Columns: pattern<TAB>path<TAB>count<TAB>reason.
+# Canonical determinism baseline. The active state substrate is core, ledger, materials, physics,
+# planet, units, and world. Each row was inspected at its use site. This is an exact ratchet: a count
+# above the row is a new vector to review, and a count below it is a stale exemption to remove.
+# Columns: pattern<TAB>path<TAB>count<TAB>reason.
 #
-# Rayon / par_iter is deliberately NOT a scanned pattern: the engine's parallel reductions are
-# order-independent by design (the saturating-sum and min-fold, proven by the width-invariant pins),
-# the sanctioned parallelism, not a hazard. This gate ratchets INTRODUCTION of a vector; it does not
-# prove a grandfathered map stays lookup-only (that stays the reviewer's job at the site).
-Instant::now	crates/foundation/src/profile.rs	1	profiling timer scope; the elapsed time is accumulated and reported to stderr, never read into canonical state
-Instant::now	crates/sim/src/world.rs	7	tick_timed profiling variant; per-phase nanoseconds are returned for a report, never state (the canonical tick is untimed)
-HashMap	crates/core/src/id.rs	3	StableId to EntityLocation lookup index (import, field, constructor); point-lookups by id only, never iterated into canonical state
-HashMap	crates/core/src/event.rs	2	StableId to Vec<EventId> lookup index (import, field); point-lookups by id only, never iterated into canonical state
-HashMap	crates/foundation/src/calibration.rs	3	calibration manifest String to ReservedValue lookups (import, field, constructor); require_* reads by key, never iterated into canonical state
+# The gate catches type names, not semantics. Review still owns the proof that an accepted unordered
+# container cannot leak process-random order into state.
+HashMap	crates/core/src/event.rs	2	StableId provenance index; ordinary access is by key and the whole-index accessor sorts StableId keys before yielding
+HashMap	crates/core/src/id.rs	3	StableId location index; every whole-map canonical walk goes through entries_sorted, which sorts by StableId before hashing
+HashMap	crates/units/src/lib.rs	4	dimension scratch-map output is sorted by base index before storage; quantity-name index is key lookup only while ordered Vec storage drives iteration

@@ -28,7 +28,7 @@
 //! not a bare `g_0`, at condensation temperatures; those level energies are a small NIST ASD `[M]` column, the atomic
 //! electronic follow-on. This module takes `g_0` as a caller argument so both cases are expressible.
 
-use crate::saha::{ln_fundamental, ln_of_decimal};
+use crate::saha::{ln_of_decimal, ln_si_representation};
 use civsim_core::Fixed;
 
 /// The molar gas constant `R = N_A k_B` (J/mol/K, about 8.314), DERIVED from the register (not a fetched constant):
@@ -36,8 +36,8 @@ use civsim_core::Fixed;
 /// resolve.
 pub fn molar_gas_constant() -> Option<Fixed> {
     Some(
-        ln_fundamental("N_A")?
-            .checked_add(ln_fundamental("k_B")?)?
+        ln_si_representation("N_A")?
+            .checked_add(ln_si_representation("k_B")?)?
             .exp(),
     )
 }
@@ -47,10 +47,10 @@ pub fn molar_gas_constant() -> Option<Fixed> {
 /// speed of light from m/s to cm/s so `omega` in cm^-1 gives an energy `h c omega`. `None` on a register miss.
 fn second_radiation_constant_k_per_cm() -> Option<Fixed> {
     Some(
-        ln_fundamental("h")?
-            .checked_add(ln_fundamental("c")?)?
+        ln_si_representation("h")?
+            .checked_add(ln_si_representation("c")?)?
             .checked_add(Fixed::from_int(100).ln())?
-            .checked_sub(ln_fundamental("k_B")?)?
+            .checked_sub(ln_si_representation("k_B")?)?
             .exp(),
     )
 }
@@ -58,7 +58,7 @@ fn second_radiation_constant_k_per_cm() -> Option<Fixed> {
 /// `ln` of the translational partition function per molecule at the standard pressure `P0 = 1 bar = 1e5 Pa` (the
 /// Sackur-Tetrode momentum-space volume): `z_trans = (2 pi m k_B T / h^2)^(3/2) * (k_B T / P0)`, with `m` the
 /// molecular mass. The intermediate `2 pi m k_B T / h^2 ~ 1e21 m^-2` overflows fixed-point, so `ln z_trans` is
-/// ASSEMBLED from the `ln` of its factors (each register constant through [`ln_fundamental`], the order-one
+/// ASSEMBLED from the `ln` of its factors (each register constant through [`ln_si_representation`], the order-one
 /// quantities through `Fixed::ln`), never formed directly. `m = M_amu / (N_A * 1000)` kg. `None` on a non-positive
 /// mass or temperature or a register miss.
 pub fn ln_translational_partition(
@@ -72,11 +72,11 @@ pub fn ln_translational_partition(
     // ln m (kg) = ln M_amu - ln N_A - ln 1000.
     let ln_m = molecular_mass_amu
         .ln()
-        .checked_sub(ln_fundamental("N_A")?)?
+        .checked_sub(ln_si_representation("N_A")?)?
         .checked_sub(Fixed::from_int(1000).ln())?;
-    let ln_kb = ln_fundamental("k_B")?;
+    let ln_kb = ln_si_representation("k_B")?;
     let ln_t = temperature_k.ln();
-    let two_ln_h = ln_fundamental("h")?.checked_mul(Fixed::from_int(2))?;
+    let two_ln_h = ln_si_representation("h")?.checked_mul(Fixed::from_int(2))?;
     let ln_p0 = ln_of_decimal("1e5")?;
     // ln(2 pi m k_B T / h^2).
     let ln_arg = ln_2pi
@@ -113,7 +113,7 @@ pub fn ln_rotational_partition_linear(
     // ln I = ln mu - ln N_A - ln 1000 + 2 (ln r_pm + ln 1e-12), I in kg m^2.
     let ln_i = reduced_mass_amu
         .ln()
-        .checked_sub(ln_fundamental("N_A")?)?
+        .checked_sub(ln_si_representation("N_A")?)?
         .checked_sub(Fixed::from_int(1000).ln())?
         .checked_add(
             Fixed::from_int(2)
@@ -125,10 +125,10 @@ pub fn ln_rotational_partition_linear(
         .ln();
     ln_8pi2
         .checked_add(ln_i)?
-        .checked_add(ln_fundamental("k_B")?)?
+        .checked_add(ln_si_representation("k_B")?)?
         .checked_add(temperature_k.ln())?
         .checked_sub(Fixed::from_int(symmetry_number as i32).ln())?
-        .checked_sub(ln_fundamental("h")?.checked_mul(Fixed::from_int(2))?)
+        .checked_sub(ln_si_representation("h")?.checked_mul(Fixed::from_int(2))?)
 }
 
 /// The vibrational entropy of one harmonic mode in units of `R`: `S_vib/R = x/(e^x - 1) - ln(1 - e^-x)`, with the

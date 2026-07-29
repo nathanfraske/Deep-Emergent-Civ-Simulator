@@ -12,27 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! THE HAYASHI-WALL EFFECTIVE-TEMPERATURE GRID: the top-of-the-track `T_eff` a pre-main-sequence star sits at as a
-//! function of its mass, read from the vendored BHAC15 tracks (`data/hayashi_wall.toml`, the cited-data column
-//! whose witness is `data/bhac15/`).
+//! BHAC15 HAYASHI-WALL CANDIDATE GRID: top-of-track `T_eff` as a function of stellar mass, read from the vendored
+//! model tracks in `data/bhac15/` through `data/hayashi_wall.toml`.
 //!
 //! # WHAT IT SUPPLIES, AND WHY IT IS A GRID
 //!
-//! The pre-main-sequence luminosity and convective-turnover reads (`civsim_sim::astro`) rest on the wall `T_eff`.
-//! It was a single authored constant (`HAYASHI_WALL_T_EFF_K`, carrying the wrong `4000 K` solar digit); it is a
-//! CITED GRID keyed on stellar mass, because the wall runs from about `2388 K` at the hydrogen-burning limit to
-//! about `4647 K` at `1.4 Msun`, and one number for every star is a Terran (or here a solar) fixture. The read
-//! INTERPOLATES in the table's own mass spacing and never snaps to the nearest row, so a `0.55 Msun` star gets its
-//! own wall rather than the `0.5` or `0.6` grid value (the condensation-grid quantization defect, refused here).
+//! Pre-migration stellar code can read this grid instead of a single authored solar constant. Canonical Stage 1
+//! cannot consume it until the theory-model rows complete Residue `[E]` admission. The read interpolates in the
+//! table's own mass spacing and never snaps to the nearest row, so a `0.55 Msun` query is not quantized to `0.5`
+//! or `0.6`. Evidence custody and the remaining admission obligations are tracked in
+//! `docs/working/ABIOTIC_EVIDENCE_DEBT.md`.
 //!
 //! # THE CHORD AND THE DOMAIN
 //!
 //! The wall is a CHORD OVER AGE: [`WallReading`] carries the drift band (`drift_lo_k`, `drift_hi_k`, the min and
 //! max `T_eff` over the first 2 Myr of the descent) beside the top-of-track value, so a consumer reads the wall
-//! with the age uncertainty it actually carries. The domain guards are TWO-ENDED and refuse BY NAME: below the
+//! with its age uncertainty. The domain guards are TWO-ENDED and refuse BY NAME: below the
 //! table's `0.010 Msun` and above its `1.400 Msun`, the high side pointing at the planned radiative-branch
-//! dispatch (machinery planned, not absent). GRADE: theory (stellar-evolution model tracks, solar composition
-//! `[M/H] = 0`); the Siess-class metallicity conditioning is a scoped follow-on carried on the grid, not here.
+//! dispatch. The rows are theory-model evidence conditioned on solar `[M/H] = 0`, so they are proposed Residue
+//! `[E]`, not measurements. A different composition requires a derived branch or refusal.
 
 use std::path::Path;
 

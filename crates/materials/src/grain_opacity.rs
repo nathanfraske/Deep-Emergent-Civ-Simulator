@@ -35,6 +35,7 @@ use civsim_physics::opacity::{
 };
 use civsim_physics::optical_constants::OpticalConstants;
 use civsim_physics::periodic::PeriodicTable;
+use civsim_units::constants::SiExecutionMagnitudes;
 
 /// The alien-phase optical estimator, Rule 1's second rung: for a condensate with no measured optical-constants
 /// table, produce its complex index `(n, k)` at a wavelength from first principles (the phonon estimator in
@@ -253,6 +254,7 @@ impl<'a> GrainMixture<'a> {
 /// wherever grains are present).
 #[allow(clippy::too_many_arguments)]
 pub fn disk_total_rosseland_opacity(
+    execution: &SiExecutionMagnitudes,
     temperature_k: Fixed,
     density_g_per_cm3: Fixed,
     ln_density_g_cm3: Fixed,
@@ -266,6 +268,7 @@ pub fn disk_total_rosseland_opacity(
     mixture: &GrainMixture,
 ) -> Option<Fixed> {
     total_gas_and_grain_rosseland_opacity(
+        execution,
         temperature_k,
         density_g_per_cm3,
         ln_density_g_cm3,
@@ -538,12 +541,15 @@ mod tests {
         // closure. The grain term joins the monochromatic sum, so the disk total exceeds the gas-only total. (Grains
         // at 6000 K are a WIRING fixture: the physical disk sublimates them; this checks the plumbing end to end.)
         let tbl = PeriodicTable::standard().expect("the periodic table loads");
+        let execution = civsim_units::constants::canonical_si_execution_magnitudes()
+            .expect("the sealed floor projects");
         let temp = Fixed::from_int(6000);
         let species = [
             ("H", civsim_physics::saha::ln_of_decimal("1e17").unwrap()),
             ("K", civsim_physics::saha::ln_of_decimal("1e10").unwrap()),
         ];
-        let state = civsim_physics::saha::electron_density_saha(temp, &species, &tbl).unwrap();
+        let state =
+            civsim_physics::saha::electron_density_saha(&execution, temp, &species, &tbl).unwrap();
         let rho = Fixed::from_ratio(24, 100_000_000);
         let ln_rho = civsim_physics::saha::ln_of_decimal("2.4e-7").unwrap();
         let ln_ne = state.ln_electron_density_cm3;
@@ -559,6 +565,7 @@ mod tests {
         )
         .unwrap();
         let total = disk_total_rosseland_opacity(
+            &execution,
             temp,
             rho,
             ln_rho,

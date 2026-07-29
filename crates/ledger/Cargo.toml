@@ -1,0 +1,12 @@
+[package]
+name = "civsim-ledger"
+description = "The canonical seven-type, four-tier provenance ledger for derived planetary state."
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints.clippy]
+disallowed_types = "deny"

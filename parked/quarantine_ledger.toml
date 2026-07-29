@@ -1,0 +1,577 @@
+# QUARANTINE LEDGER: the parked living-world substrate's reserved values with no or deprecated provenance.
+#
+# These are authored world-content values in the parked biology / creature / plant / entity / cognition
+# substrate (crates/sim/src) that do not clear the current value-authoring line: they carry no basis at all,
+# or a basis that no longer suffices (a magnitude with no citation, a Terran-tuned or Terran-assuming number,
+# a placeholder, or a value a built substrate could now derive). They are NOT removed: the parked world still
+# runs on them, byte-identical. They are QUARANTINED, named here in one register and frozen, so active
+# development does not build on them as if they were derived or cited. Each owes a derive-or-cite before it
+# can leave the ledger. This is debt isolation, not an immediate fix; nothing here is scheduled to merge up.
+#
+# Surfaced by a nine-agent living-world sweep (2026-07-15), each finding verified to resolve in its file.
+# The gate scripts/quarantine_gate.py keeps this register honest: when a quarantined site is edited or the
+# value is derived away, its anchor stops resolving and CI fails until the entry is updated or retired.
+#
+# verdict: no-provenance | deprecated-provenance
+# defect_class: bare-literal-no-basis | basis-without-citation | earth-or-terran-tuned |
+#               interim-placeholder-label | authored-should-derive-from-body-or-floor | terran-biology-assumption
+
+[[entry]]
+id = "q-absence-01"
+file = "crates/sim/src/absence.rs"
+anchor = "AbsenceScheduleDef"
+value = "Fixed::ONE, Fixed::from_int(2), Fixed::from_int(4) (dev_default fixture; the reserved field is AbsenceStage::multiplier)"
+shapes = "The presumed-dead absence window per stage: window = base_check_interval * (stage.multiplier / visibility). The multiplier sets how much longer a deeper absence stage runs before a being is presumed dead, a magnitude driving the evidence/death subsystem's treatment of an absent entity."
+verdict = "deprecated-provenance"
+defect_class = "basis-without-citation"
+owed = "cite-owner-source: a per-world reserved escalation must carry a cited/owner-set basis (in reserved.toml) for the specific magnitudes, not only a monotonicity constraint; the current basis states direction only, no source for the 2x/4x steps."
+
+[[entry]]
+id = "q-affordance_percept-01"
+file = "crates/sim/src/affordance_percept.rs"
+anchor = "AffordancePerceptRefs"
+value = "Fixed::from_int(10) (dev_refs fixture; the reserved field is AffordancePerceptRefs::reference_stress)"
+shapes = "The fracture-potential affordance percept: reference_stress over a substance's fracture_hardness sets how breakable nearby matter reads to a being, which the discovery loop uses to propose and score candidate actions (a world-content rate on creature behaviour)."
+verdict = "deprecated-provenance"
+defect_class = "authored-should-derive-from-body-or-floor"
+owed = "derive-from-perceiver-body-axis: the perceiver-keyed replacement substrate (SingleAxisTransduction with ReferenceSource::PerceiverBodyAxis, the general form of FracturePotential) is ALREADY BUILT and tested in this same file; only the runner.rs wire that feeds the being's own body into the read is deferred. Also owes a citation for the ordinary-actor stress basis."
+
+[[entry]]
+id = "q-anatomy-01"
+file = "parked/crates/bio/src/anatomy.rs"
+anchor = "sample_body_plan"
+value = "1 + range(4) (one to four organs; siblings: want_senses = 1 + range(3), want_weapons = (layer).min(3))"
+shapes = "how many organs a creature draws, i.e. the richness of its reserve/metabolic endowment (and, for the siblings, sensory and weapon endowment)"
+verdict = "no-provenance"
+defect_class = "bare-literal-no-basis"
+owed = "derive-from a heritable per-species organ-count trait or reserve-with-basis; the authored count magnitude directly shapes a creature's biological endowment"
+
+[[entry]]
+id = "q-anatomy-02"
+file = "parked/crates/bio/src/anatomy.rs"
+anchor = "BodyPlanRegistry"
+value = "fat-body energy_density ONE / water_fraction Fixed::from_ratio(1,10); glycogen-store 3/4 & 1/4; generalist-viscera 1/2 & 1/2"
+shapes = "organ tissue compositions from which reserve capacities (energy/water endurance) are derived"
+verdict = "deprecated-provenance"
+defect_class = "basis-without-citation"
+owed = "cite-biology-source for each composition magnitude (the data-defined registry form is correct; the fixture values need a real source or per-world calibration with a citation)"
+
+[[entry]]
+id = "q-anatomy-03"
+file = "parked/crates/bio/src/anatomy.rs"
+anchor = "BodyPlanRegistry"
+value = "mat.fracture_strength Fixed::from_int(3)"
+shapes = "the muscle tissue strength the whole-body work force integrates over (a body's exertion force / effective strength)"
+verdict = "deprecated-provenance"
+defect_class = "basis-without-citation"
+owed = "cite-materials-datasheet for muscle strength or derive from the materials substrate; chained to the uncited body.rs FLESH fixture value"
+
+[[entry]]
+id = "q-anatomy-04"
+file = "parked/crates/bio/src/anatomy.rs"
+anchor = "BodyPlanRegistry"
+value = "opt.emissivity '0.95'"
+shapes = "the covering surface emissivity the radiant thermoregulation term and the thermal-signal (perceivable-feature) read (a creature's heat loss and how perceptible its thermal signature is)"
+verdict = "deprecated-provenance"
+defect_class = "basis-without-citation"
+owed = "cite-spectral-emissivity source per covering material (the covering_emissivity read already keys on the being's own covering; the authored datum needs a source, and the uniform 0.95 is a Terran biological-tissue value picked for byte-parity)"
+
+[[entry]]
+id = "q-anatomy-05"
+file = "parked/crates/bio/src/anatomy.rs"
+anchor = "BodyPlanRegistry"
+value = "organic profile ('0.95','0.96','0.94'); keratin/mineral profile ('0.99','0.88','0.98')"
+shapes = "the per-band spectral emissivity shape a perceiver keys a heritable weight on (a creature's spectral thermal signature, feeding predation/fleeing perception)"
+verdict = "deprecated-provenance"
+defect_class = "basis-without-citation"
+owed = "cite-spectral-emissivity source for each material profile; per-world reserved value carries a basis but no citation"
+
+[[entry]]
+id = "q-anatomy-06"
+file = "parked/crates/bio/src/anatomy.rs"
+anchor = "BodyPlanRegistry"
+value = "mat.fracture_energy '3' (soft/keratin coverings) / '8' (rigid/mineral coverings)"
+shapes = "the covering's Griffith fracture tolerance the coarse whole-body wound branch reads (how hard a creature's outer layer is to breach)"
+verdict = "deprecated-provenance"
+defect_class = "basis-without-citation"
+owed = "cite-materials-datasheet or derive from the materials substrate; value is inherited from the uncited body.rs hide/bone fixtures via an authored analogue mapping"
+
+[[entry]]
+id = "q-base_rates-01"
+file = "crates/sim/src/base_rates.rs"
+anchor = "dev_low_hazard"
+value = "Curve[(0,1/100),(50,1/20),(80,1/2),(120,1)] and [(0,1/5),(20,1/2),(40,1)]"
+shapes = "A race's natural (background) per-age mortality hazard (its life table): the base rate P(cause true anyway) a death-implying trace is weighed against in the evidence engine, and (per R-AGING) the demographic mortality curve."
+verdict = "deprecated-provenance"
+defect_class = "authored-should-derive-from-body-or-floor"
+owed = "derive-from-anatomy (mass, metabolism, organ integrity) when R-AGING is built, per the lifespan-derive-from-anatomy directive; the hazard curve is a hand-drawn fixture standing where the life table should be computed from the body."
+
+[[entry]]
+id = "q-base_rates-02"
+file = "crates/sim/src/base_rates.rs"
+anchor = "dev_default"
+value = "visibility: Fixed::from_ratio(3,4) and (1,4); decay_multiplier: Fixed::ONE and Fixed::from_ratio(3,2)"
+shapes = "How a race's absence window scales (visibility: a less visible race is presumed dead later) and how fast its remains decay versus a trace kind (decay_multiplier), feeding the evidence engine's implication weights and absence windows."
+verdict = "deprecated-provenance"
+defect_class = "interim-placeholder-label"
+owed = "key-on-being-data: per-race visibility from size/mode-of-life and decay_multiplier from tissue chemistry, plus a citation; the fixture numbers are stand-ins with no derive-down."
+
+[[entry]]
+id = "q-biosphere-01"
+file = "crates/sim/src/biosphere.rs"
+anchor = "layers"
+value = "layers: 4; niches_per_layer: 9"
+shapes = "The number of trophic layers seeded and niche draw sites attempted per layer per region: the depth of the food web and the richness (species count) of the generated ecology."
+verdict = "deprecated-provenance"
+defect_class = "basis-without-citation"
+owed = "derive trophic depth from productivity/energy-flux (10% transfer ceiling limits layers) and richness from area/productivity; currently tuned to a subjective 'richer ecology' target with no cited basis."
+
+[[entry]]
+id = "q-biosphere-02"
+file = "crates/sim/src/biosphere.rs"
+anchor = "producer_rooted_prior"
+value = "97/100 and 3/100"
+shapes = "The prior probability a producer/consumer body grows rooted rather than mobile at seed time (species morphology: sessile vs mobile, e.g. whether a walking tree or a sessile filter-feeder can arise)."
+verdict = "deprecated-provenance"
+defect_class = "basis-without-citation"
+owed = "cite or derive from a body-plan energetics substrate (motility cost vs autotrophic gain); the direction is argued but the magnitudes 0.97/0.03 are uncited fixtures."
+
+[[entry]]
+id = "q-biosphere-03"
+file = "crates/sim/src/biosphere.rs"
+anchor = "breadth_min"
+value = "15/100 and 45/100"
+shapes = "The min/max fundamental-niche tolerance breadth a generated species may draw (how wide a species' environmental tolerance is: generalist vs specialist width across every env axis)."
+verdict = "deprecated-provenance"
+defect_class = "interim-placeholder-label"
+owed = "reserve with a cited ecological basis (or derive from environmental-gradient scale); the fixture band has no citation and no derive-down."
+
+[[entry]]
+id = "q-biosphere-04"
+file = "crates/sim/src/biosphere.rs"
+anchor = "fit_cutoff"
+value = "1/10"
+shapes = "The biome-fit suitability cutoff tau_fit: a candidate species scoring below it does not fit a region, gating which species are seeded into the biosphere."
+verdict = "deprecated-provenance"
+defect_class = "interim-placeholder-label"
+owed = "reserve with a cited basis or derive from the niche-response tent geometry; 0.1 is an uncited fixture threshold."
+
+[[entry]]
+id = "q-biosphere-05"
+file = "crates/sim/src/biosphere.rs"
+anchor = "open_min"
+value = "8/100"
+shapes = "The limiting-similarity floor D_min: a candidate closer than this to a same-layer resident in niche space is rejected as overlap (controls species packing density per trophic layer)."
+verdict = "deprecated-provenance"
+defect_class = "interim-placeholder-label"
+owed = "reserve with a cited limiting-similarity basis or derive from niche-breadth; 0.08 is an uncited fixture floor."
+
+[[entry]]
+id = "q-biosphere-06"
+file = "crates/sim/src/biosphere.rs"
+anchor = "pool_size"
+value = "200"
+shapes = "The effective size a freshly seeded species pool carries, which sets the magnitude of genetic drift and starting heterozygosity for every founded species."
+verdict = "deprecated-provenance"
+defect_class = "interim-placeholder-label"
+owed = "reserve with a cited basis or derive from region area x population density; 200 is an uncited effective-size fixture."
+
+[[entry]]
+id = "q-biosphere-07"
+file = "crates/sim/src/biosphere.rs"
+anchor = "ploidy"
+value = "2"
+shapes = "The ploidy (haplotype copies) of a grown species' genome, normalizing the morphogen block's dosage-additive effect (target/ploidy) and thus a species' expressed morphology."
+verdict = "deprecated-provenance"
+defect_class = "terran-biology-assumption"
+owed = "key-on-being-data: the mechanism already reads a data field (admits alien), but the fixture default is Earth's diploidy tied to Race::ploidy()=2 with no citation; set per-world with basis. Low severity."
+
+[[entry]]
+id = "q-body-01"
+file = "crates/sim/src/body.rs"
+anchor = "Body"
+value = "Fixed::from_ratio(1, 4), Fixed::from_ratio(1, 2), Fixed::from_ratio(1, 4)"
+shapes = "the relative depths of hide/flesh/bone layers and weapon-part mass in a promoted body (its tissue geometry, which governs woundability and strike energetics)"
+verdict = "no-provenance"
+defect_class = "bare-literal-no-basis"
+owed = "derive-from morphogen-grown Structure (the grown-body path) so layer depths and part masses come from grown anatomy rather than authored vertebrate-layout ratios"
+
+[[entry]]
+id = "q-body-02"
+file = "crates/sim/src/body.rs"
+anchor = "apply_insult"
+value = "Fixed::from_ratio(1, 2) and Fixed::from_ratio(3, 4)"
+shapes = "the wound-severity thresholds at which a cut/burn breaches a fluid vessel (whether a wound starts a fatal bleed)"
+verdict = "no-provenance"
+defect_class = "bare-literal-no-basis"
+owed = "derive-from the vessel's depth within the part's tissue (a breach when the wound depth reaches the vessel layer), not a flat authored severity fraction"
+
+[[entry]]
+id = "q-body-03"
+file = "crates/sim/src/body.rs"
+anchor = "BodyParams"
+value = "breach_bleed: Fixed::from_ratio(1, 20)"
+shapes = "the blood-loss volume a full-depth breach opens per tick as a fraction of vessel volume (bleed rate after a wound)"
+verdict = "deprecated-provenance"
+defect_class = "basis-without-citation"
+owed = "cite-physiology-source or derive from vessel geometry/pressure; per-world value needs basis AND citation"
+
+[[entry]]
+id = "q-body-04"
+file = "crates/sim/src/body.rs"
+anchor = "BodyParams"
+value = "fracture_damage: Fixed::from_ratio(9, 10)"
+shapes = "the integrity a clean fracture costs a part (how disabling a blunt break is)"
+verdict = "deprecated-provenance"
+defect_class = "basis-without-citation"
+owed = "cite or derive from the part's structural role/material; per-world value needs basis AND citation"
+
+[[entry]]
+id = "q-body-05"
+file = "crates/sim/src/body.rs"
+anchor = "FluidRegistry"
+value = "clot_rate: Fixed::from_ratio(1, 200)"
+shapes = "how fast a breach seals per tick (whether a wounded creature survives a bleed)"
+verdict = "deprecated-provenance"
+defect_class = "basis-without-citation"
+owed = "cite-physiology-source for a coagulation timescale, or derive from the fluid's composition; per-world value needs basis AND citation"
+
+[[entry]]
+id = "q-body-06"
+file = "crates/sim/src/body.rs"
+anchor = "TissueRegistry"
+value = "e.g. BONE hardness Fixed::from_ratio(120,1), fracture_strength Fixed::from_ratio(150,1), elastic_modulus Fixed::from_ratio(18000,1000); FLESH hardness 1, fracture_strength 3; HIDE hardness 2; ORGAN 0.5"
+shapes = "tissue mechanical properties the wound laws read to decide cut depth, fracture onset, and thermal cracking (a creature's woundability/lethality)"
+verdict = "deprecated-provenance"
+defect_class = "basis-without-citation"
+owed = "cite-materials-datasheet for each property, or derive-from the composition->properties materials substrate once built; values are Terran tissue magnitudes chosen without a source"
+
+[[entry]]
+id = "q-body-07"
+file = "crates/sim/src/body.rs"
+anchor = "BodyParams"
+value = "torso_mass_fraction: Fixed::from_ratio(1, 2)"
+shapes = "the fraction of body mass the torso carries (the rest splits over head/limbs), which sets each part's mass and thus strike energetics and part woundability"
+verdict = "deprecated-provenance"
+defect_class = "earth-or-terran-tuned"
+owed = "derive-from body plan / morphogen-grown anatomy, or key on the being's own segment layout; the value reproduces Terran body-segment mass fractions with no source"
+
+[[entry]]
+id = "q-body-08"
+file = "crates/sim/src/body.rs"
+anchor = "BodyParams"
+value = "base_thickness: Fixed::from_ratio(1, 20)"
+shapes = "the base tissue thickness of the torso at unit body mass (the tissue depth a wound must reach to sever/breach, i.e. how hard a creature is to kill)"
+verdict = "deprecated-provenance"
+defect_class = "earth-or-terran-tuned"
+owed = "derive-from morphogen-grown tissue depth or body allometry; value reproduces Terran tissue depths with no cited source"
+
+[[entry]]
+id = "q-body-09"
+file = "crates/sim/src/body.rs"
+anchor = "BodyParams"
+value = "burn_scale: Fixed::from_int(200)"
+shapes = "the temperature rise (floor units) that a full-severity burn corresponds to (thermal-wound severity mapping)"
+verdict = "deprecated-provenance"
+defect_class = "terran-biology-assumption"
+owed = "key-on-being-data: burn severity should read the being's own tissue thermal-damage threshold, not assume protein-denaturation biochemistry; needs a cited thermal-damage basis"
+
+[[entry]]
+id = "q-body-10"
+file = "crates/sim/src/body.rs"
+anchor = "FluidRegistry"
+value = "critical_fraction: Fixed::from_ratio(1, 3)"
+shapes = "the fraction of a fluid pool that may be lost before the body dies of blood loss (bleed-out mortality threshold)"
+verdict = "deprecated-provenance"
+defect_class = "terran-biology-assumption"
+owed = "key-on-being-data: the survivable-loss fraction should read the being's own circulatory/physiology data, not assume mammalian blood-volume physiology; per-world value needs basis AND citation"
+
+[[entry]]
+id = "q-conviction_experience-01"
+file = "crates/sim/src/conviction_experience.rs"
+anchor = "FeltConvictionCalib"
+value = "Fixed::from_ratio(1, 100)"
+shapes = "The entrenchment gate the felt drive |polarity * association| must clear to MOVE a conviction (below it the felt evidence is absorbed without moving the stance). A threshold that governs whether lived experience changes a being's belief."
+verdict = "deprecated-provenance"
+defect_class = "authored-should-derive-from-body-or-floor"
+owed = "derive-from the axiom kernel's entrenchment_threshold(curve, self.entrenchment rank) so a calcified and a labile conviction gate differently, rather than a flat literal"
+
+[[entry]]
+id = "q-conviction_experience-02"
+file = "crates/sim/src/conviction_experience.rs"
+anchor = "FeltConvictionCalib"
+value = "Fixed::from_ratio(1, 4)"
+shapes = "The step scale of the felt-experience conviction MOVE: the fraction of the gap to the target pole closed per unit of cleared pressure. A magnitude governing how far lived experience shifts a being's belief per event."
+verdict = "deprecated-provenance"
+defect_class = "authored-should-derive-from-body-or-floor"
+owed = "derive-from the being's own Mind::plasticity phenotype (per-being, per-race), rather than a global flat literal"
+
+[[entry]]
+id = "q-conviction_experience-03"
+file = "crates/sim/src/conviction_experience.rs"
+anchor = "FeltConvictionCalib"
+value = "Fixed::from_ratio(15, 16)"
+shapes = "The retention (leak) rate of the per-being felt-experience-to-conviction association accumulator: how fast lived valence fades from the belief record, i.e. how many ticks of a being's felt experience bear on each conviction it holds. A magnitude that shapes belief formation and defeasibility. Read fail-loud from the manifest in a Calibrated run but authored here as the dev fixture that feeds test AND harness (non-manifest) paths."
+verdict = "deprecated-provenance"
+defect_class = "basis-without-citation"
+owed = "cite-source for the lived-experience integration window, or key-on-being-data (derive the window from the being's own lifespan) once R-AGING is built"
+
+[[entry]]
+id = "q-decompose-01"
+file = "crates/foundation/src/decompose.rs"
+anchor = "dev_fixture"
+value = "DecomposerDriver::conditions(Fixed::from_ratio(1,4), Fixed::ONE, Fixed::from_int(10)); DecomposerDriver::life(Fixed::ONE)"
+shapes = "The moisture saturation, oxygen (respirable) reference, warmth span, and decomposer-biomass reference that set a cell's decomposition activity in [0,1] (rot rate -> matter cycle -> soil-nutrient recovery -> productivity)."
+verdict = "deprecated-provenance"
+defect_class = "earth-or-terran-tuned"
+owed = "cite the soil/microbial-kinetics sources (field capacity, Q10, open-air O2, decomposer standing crop) and reserve per-world; the reference bases are Terran-microbial anchors carried without citations, and the fixture values (1/4, 1, 10, 1) are explicitly illustrative."
+
+[[entry]]
+id = "q-discovery-01"
+file = "crates/sim/src/discovery.rs"
+anchor = "DiscoveryCalib"
+value = "Fixed::from_ratio(1, 4)"
+shapes = "The baseline exploration-vs-exploitation floor: the relative weight (chance) a being proposes an action it does NOT yet believe pays off, so discovery of new techniques never stops even with a rewarded habit. Directly shapes which behaviours/techniques emerge. Authored here as the dev fixture feeding tests and pre-wire (non-manifest) scenarios."
+verdict = "deprecated-provenance"
+defect_class = "basis-without-citation"
+owed = "cite-source (behavioural-ecology explore/exploit basis) for the per-world reserved floor"
+
+[[entry]]
+id = "q-discovery-02"
+file = "crates/sim/src/discovery.rs"
+anchor = "DiscoveryCalib"
+value = "Fixed::ONE"
+shapes = "The exploration variance gain: how much a being's prediction-error surprise LIFTS its effective exploration propensity above its heritable base (effective enact rate = base * (1 + surprise_gain * surprise)). Shapes how strongly a mispredicted outcome drives a being to explore."
+verdict = "deprecated-provenance"
+defect_class = "basis-without-citation"
+owed = "cite-source, or derive-from the EXPLORE heading-noise scale and sensorium JND it is tuned relative to, for the per-world reserved gain"
+
+[[entry]]
+id = "q-discovery-03"
+file = "crates/sim/src/discovery.rs"
+anchor = "DiscoveryCalib"
+value = "Fixed::ONE"
+shapes = "The target-value quantization step that buckets a candidate's perceived affordance VALUE into a coarse kind, the just-noticeable difference at which 'strike a hard thing' and 'strike a soft thing' become DISTINCT learned techniques. Directly shapes the granularity of emergent technique specialisation."
+verdict = "deprecated-provenance"
+defect_class = "basis-without-citation"
+owed = "cite-source for the sensorium just-noticeable difference (per-world reserved), consistent with the sibling harm/reward feature_granularity values"
+
+[[entry]]
+id = "q-edibility-01"
+file = "crates/sim/src/edibility.rs"
+anchor = "dev_for_registry"
+value = "requirements.insert(class, Fixed::ONE); assimilation.insert(class, Fixed::ONE)"
+shapes = "A consumer's per-nutrient-class requirement and assimilation efficiency (its nutrition intake and Liebig satisfaction) — unit requirement and perfect assimilation for every backed class, carried into the real express() path."
+verdict = "deprecated-provenance"
+defect_class = "authored-should-derive-from-body-or-floor"
+owed = "derive-from-body: assimilation efficiency and requirement should key on the being's own digestive/metabolic anatomy (admit-the-alien), not a unit stand-in; per-race physiology data plus citation."
+
+[[entry]]
+id = "q-edibility-02"
+file = "crates/sim/src/edibility.rs"
+anchor = "dev_salinity"
+value = "hill: 2"
+shapes = "The integer-Hill dose-response steepness for the salinity toxin class: how sharply harm rises with dose in the net_harm law (world-content: the shape of a being's toxin response)."
+verdict = "deprecated-provenance"
+defect_class = "basis-without-citation"
+owed = "cite a dose-response source or key the Hill exponent on the toxin class's own chemistry; 'moderately steep' is a hand-wave, not a basis or citation."
+
+[[entry]]
+id = "q-edibility-03"
+file = "crates/sim/src/edibility.rs"
+anchor = "dev_default"
+value = "total_harm_cap: Fixed::from_int(4), margin_cap: Fixed::from_int(8) (harm_cap: Fixed::ONE)"
+shapes = "The per-class harm ceiling, aggregate harm ceiling, and safety-margin cap the floor edibility laws use to compute net harm and the food/poison safety margin (whether a tissue reads as poison)."
+verdict = "deprecated-provenance"
+defect_class = "interim-placeholder-label"
+owed = "derive-from-floor: the harm/margin ceilings should come from the material yield/toxicity data the physics floor defines, or be reserved with a cited basis; the 4 and 8 are bare fixture magnitudes."
+
+[[entry]]
+id = "q-epoch-01"
+file = "crates/sim/src/epoch.rs"
+anchor = "allele_presence"
+value = "Fixed::from_ratio(9, 10)"
+shapes = "joint Hardy-Weinberg cross probability at which a Dobzhansky-Muller incompatibility pair counts as active: gates the discrete genetic-firewall path to reproductive isolation"
+verdict = "deprecated-provenance"
+defect_class = "interim-placeholder-label"
+owed = "wire the declared reserved id genome.allele_presence_threshold fail-loud with a cited/derived basis"
+
+[[entry]]
+id = "q-epoch-02"
+file = "crates/sim/src/epoch.rs"
+anchor = "extinction_floor"
+value = "Fixed::from_ratio(12, 100)"
+shapes = "suitability floor below which a species' carrying capacity is treated as collapse and the species goes extinct: directly sets which lineages die in the pre-dawn biosphere"
+verdict = "deprecated-provenance"
+defect_class = "interim-placeholder-label"
+owed = "cite-source or derive-from-carrying-capacity-floor with a stated basis, and wire a from_manifest fail-loud reserved reader"
+
+[[entry]]
+id = "q-epoch-03"
+file = "crates/sim/src/epoch.rs"
+anchor = "founder_size"
+value = "6"
+shapes = "founder effective population size at a speciation fork: the bottleneck Ne that sets genetic-drift strength during founding, shaping which alleles survive into the daughter species"
+verdict = "deprecated-provenance"
+defect_class = "interim-placeholder-label"
+owed = "cite-population-genetics-source or derive-from-scenario for the founding Ne, and wire a fail-loud reserved reader"
+
+[[entry]]
+id = "q-epoch-04"
+file = "crates/sim/src/epoch.rs"
+anchor = "pop_regen"
+value = "Fixed::from_ratio(3, 10)"
+shapes = "per-generation population regeneration rate feeding each species' Stock, shaping population recovery and thus which species persist"
+verdict = "deprecated-provenance"
+defect_class = "interim-placeholder-label"
+owed = "cite-source or derive-from-life-history with a stated basis, and wire a from_manifest fail-loud reserved reader"
+
+[[entry]]
+id = "q-epoch-05"
+file = "crates/sim/src/epoch.rs"
+anchor = "recovery_size"
+value = "200"
+shapes = "post-fork recovery effective population size: the Ne to which a daughter rebounds, governing drift-versus-selection balance after founding"
+verdict = "deprecated-provenance"
+defect_class = "interim-placeholder-label"
+owed = "cite-source or derive-from-scenario for the recovery Ne, and wire a fail-loud reserved reader"
+
+[[entry]]
+id = "q-epoch-06"
+file = "crates/sim/src/epoch.rs"
+anchor = "sel_strength"
+value = "Fixed::from_ratio(2, 10)"
+shapes = "selection-strength scale k_sel: how strongly a suitability shortfall pushes allele frequencies toward or against adaptive alleles in the pre-dawn radiation"
+verdict = "deprecated-provenance"
+defect_class = "interim-placeholder-label"
+owed = "cite-population-genetics-source with a stated basis, and wire a from_manifest fail-loud reserved reader (EpochParams currently never reads the manifest)"
+
+[[entry]]
+id = "q-epoch-07"
+file = "crates/sim/src/epoch.rs"
+anchor = "speciation_cadence"
+value = "10"
+shapes = "generations between founder-forks off each live species: sets how frequently speciation is attempted and thus the tempo of the adaptive radiation"
+verdict = "deprecated-provenance"
+defect_class = "interim-placeholder-label"
+owed = "cite-source or derive-from-mutation-and-isolation-rates for the fork cadence, and wire a fail-loud reserved reader"
+
+[[entry]]
+id = "q-epoch-08"
+file = "crates/sim/src/epoch.rs"
+anchor = "speciation_dist_threshold"
+value = "Fixed::from_ratio(1, 100)"
+shapes = "allele-frequency divergence at which a founder-fork counts as a new (reproductively isolated) species: sets the speciation rate and species richness of the biosphere"
+verdict = "deprecated-provenance"
+defect_class = "interim-placeholder-label"
+owed = "wire the declared reserved id speciation.distance_threshold fail-loud, cite/derive its basis, and remove the outcome-tuning-for-dev-run rationale"
+
+[[entry]]
+id = "q-evolve-01"
+file = "crates/sim/src/evolve.rs"
+anchor = "thermal_episode_survival"
+value = "Fixed::from_int(37) (setpoint), Fixed::from_int(8) (half_band), 37-16 cold / 37+16 hot lethal bounds"
+shapes = "The viable thermal band (BeingThermal.setpoint/half_band and the field's lethal-cold/-hot centres) a being must hold in the thermal-selection scoring harness feeding pub evolve_thermal / evolve_thermal_sensed / evolve_thermal_bidirectional. It sets which thermotaxis controllers survive selection, i.e. the thermal-regulation behaviour bred into a creature."
+verdict = "deprecated-provenance"
+defect_class = "terran-biology-assumption"
+owed = "key-on-being-data: BeingThermal.setpoint/half_band should derive from the being's own thermal physiology/body (a being with a different setpoint, or a photosynthetic/silicon being with no 37 degC analogue, is a data row), not a hardcoded 37"
+
+[[entry]]
+id = "q-homeostasis-01"
+file = "crates/sim/src/homeostasis.rs"
+anchor = "HomeostaticRegistry"
+value = "energy base_drain Fixed::from_ratio(1, 400); water base_drain Fixed::from_ratio(1, 300)"
+shapes = "the resting per-tick reserve drain (how fast a creature starves/dehydrates), i.e. its metabolic mortality clock"
+verdict = "deprecated-provenance"
+defect_class = "authored-should-derive-from-body-or-floor"
+owed = "derive-from-body: crate::physiology::derive_base_drain (Kleiber P=a*m^(3/4) + thermoregulatory heat-loss over the being's own mass/tissue/medium) already produces this; the scalar is the retired fixture path consumed only by metabolize(), superseded by metabolize_derived()"
+
+[[entry]]
+id = "q-homeostasis-02"
+file = "crates/sim/src/homeostasis.rs"
+anchor = "HomeostaticRegistry"
+value = "energy exertion_drain Fixed::from_ratio(1, 100); water exertion_drain Fixed::from_ratio(1, 400)"
+shapes = "the added per-tick reserve drain per unit of exertion (how much moving/working costs a creature)"
+verdict = "deprecated-provenance"
+defect_class = "authored-should-derive-from-body-or-floor"
+owed = "derive-from-body: crate::physiology::derive_exertion_coupling (work power force*velocity bridged to a reserve fraction) already derives this; scalar is fixture-path-only, superseded by metabolize_derived()"
+
+[[entry]]
+id = "q-homeostasis-03"
+file = "crates/sim/src/homeostasis.rs"
+anchor = "HomeostaticRegistry"
+value = "water capacity_per_mass Fixed::from_ratio(6, 10)"
+shapes = "the water reserve size as a multiple of body mass (a creature's hydration endurance) on the from_mass fallback path"
+verdict = "deprecated-provenance"
+defect_class = "authored-should-derive-from-body-or-floor"
+owed = "derive-from-body: the canonical Homeostasis::new already derives reserve capacity as the development-weighted sum over organs of their bio.* composition; this mass-proxy leaks size back into the reserve and is the pre-anatomy fallback"
+
+[[entry]]
+id = "q-mate_choice-01"
+file = "parked/crates/bio/src/mate_choice.rs"
+anchor = "hybrid_viability"
+value = "Fixed::from_ratio(1, 2)"
+shapes = "The fitness scalar assigned to a sterile Dobzhansky-Muller hybrid offspring. It feeds the genome-derived offspring fitness (multiplied into heterozygosity in evolve_featured_preference / read in choose_by_viability and pairing_viability) that drives mate-choice and assortative-mating selection, so it is a coefficient changing which mate preferences and crosses survive."
+verdict = "no-provenance"
+defect_class = "bare-literal-no-basis"
+owed = "derive-from-reproductive-consequence (a sterile individual produces no offspring, so its realized genetic fitness is ~0 rather than 1/2, or a stated reason for a reduced-but-nonzero value) or cite-source"
+
+[[entry]]
+id = "q-medium-01"
+file = "crates/sim/src/medium.rs"
+anchor = "const"
+value = "Fixed::from_int(1000)"
+shapes = "The fallback body density (kg/m^3) that body_density() returns for a body whose organs declare no mat.density, feeding buoyancy() (float vs sink) and any density-dependent physics, so it decides whether an undeclared-density body floats or sinks in a medium."
+verdict = "deprecated-provenance"
+defect_class = "terran-biology-assumption"
+owed = "key-on-being-data: an undeclared-density body should read the substrate absence convention (or derive density from its own declared tissue/floor), not be silently assigned Terran water density (a body being mostly water), which bakes one chemistry into a fallback and denies the alien its own density as a data row."
+
+[[entry]]
+id = "q-morphogen-01"
+file = "crates/sim/src/morphogen.rs"
+anchor = "const"
+value = "16"
+shapes = "The reference segment count that maps a grown structure to body_mass (Structure::digest: body_mass = segment_count / 16) and sets each segment's development weight (composition_sum: per_segment = 1/16), so it directly scales a grown creature's body mass AND its extensive metabolic quantities: reserve capacity, muscle force, and exchange surface."
+verdict = "deprecated-provenance"
+defect_class = "authored-should-derive-from-body-or-floor"
+owed = "derive-from-grown-geometry: a volumetric aggregate over the grown segment geometry (dimensions x mat.density), as the comment itself names, so body_mass and reserve scale come from the body's own grown structure rather than a fixed segment-count reference."
+
+[[entry]]
+id = "q-morphogen-02"
+file = "crates/sim/src/morphogen.rs"
+anchor = "const"
+value = "Fixed::from_bits(1i64 << (Fixed::FRAC_BITS - 3)) // 1/8"
+shapes = "The bound on the multiplicative geometry jitter each grown child segment carries (grow_child: jitter in [1 - JITTER_MAG, 1 + JITTER_MAG]), so it sets how much a lineage's body geometry varies per being around its programmed growth, an emergent-morphology magnitude."
+verdict = "deprecated-provenance"
+defect_class = "basis-without-citation"
+owed = "cite-developmental-variation-source and give it a per-world reserved.toml home with a citation; a baked inline const with a bare 1/8 and a reason but no source fails the citation half of the newer line."
+
+[[entry]]
+id = "q-morphogen-03"
+file = "crates/sim/src/morphogen.rs"
+anchor = "const"
+value = "Fixed::from_bits(1i64 << (Fixed::FRAC_BITS - 1)) // 1/2"
+shapes = "The lower bound of the per-generation segment growth factor (growth_factor and actuator scaling map the [0,1] growth fraction into [GROWTH_LO, GROWTH_HI]), so it sets the strongest taper a child segment can take from its parent, shaping a grown body's per-tier size change and overall size."
+verdict = "deprecated-provenance"
+defect_class = "basis-without-citation"
+owed = "cite-developmental-allometry-source and move to a per-world reserved home; a hardcoded const with a reason but no cited source fails the newer standard's citation requirement."
+
+[[entry]]
+id = "q-morphogen-04"
+file = "crates/sim/src/morphogen.rs"
+anchor = "const"
+value = "Fixed::from_bits(3i64 << (Fixed::FRAC_BITS - 1)) // 3/2"
+shapes = "The upper bound of the per-generation segment growth factor (same map into [GROWTH_LO, GROWTH_HI]), so it caps the largest per-tier enlargement a child segment takes, shaping a grown body's per-tier size change and overall size."
+verdict = "deprecated-provenance"
+defect_class = "basis-without-citation"
+owed = "cite-developmental-allometry-source and move to a per-world reserved home; hardcoded const with a reason but no cited source."
+
+[[entry]]
+id = "q-trace-01"
+file = "crates/sim/src/trace.rs"
+anchor = "decay"
+value = "TransformKind::corrosion(Fixed::from_ratio(-44, 100), Fixed::from_ratio(1, 100), Fixed::from_int(7), Fixed::ONE)"
+shapes = "the corrosion decay-law parameters governing how fast a corroded-blade trace loses perceptibility (salience), i.e. how long a being can still perceive and infer from the trace"
+verdict = "deprecated-provenance"
+defect_class = "authored-should-derive-from-body-or-floor"
+owed = "derive-from-materials/physics-corrosion-law: the built physics corrosion kernel already keys on material_potential, fluid_potential, susceptibility, and acidity, so a corroded object's decay should derive from its composition and environment rather than a fixture tuple; else cite per-kind data"

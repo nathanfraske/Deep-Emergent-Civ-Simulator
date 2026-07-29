@@ -31,15 +31,12 @@
 //! `TargetTe` in this module and no field a derivation should hit. A row records what a field campaign measured
 //! and the conditions it measured under; the engine's `T_e` is compared against it and is never nudged toward it.
 //!
-//! # THE PREREGISTERED HOLDOUT IS DECLARED IN THE DATA, BEFORE ANY FIT
+//! # THE REFERENCE PARTITION IS DECLARED IN THE DATA
 //!
-//! Each row carries a [`SampleRole`]. Earth's oceanic seamounts are the ONLY Mirror-class instance, because Earth
-//! is the one world whose other inputs are independently pinned, so it is the only row a licensed inversion could
-//! ever spend (RUNBOOK section 12, condition 6). Mars and Venus are OUT-OF-SAMPLE by construction. The partition
-//! is DATA on the row, not a runtime choice, because a row spent on calibration can never again be claimed as
-//! validation, and that can only hold if the split was declared before anyone looked at the fit. The calibration
-//! ledger is empty today, and the invariant that the validation set strictly exceeds the calibration set holds
-//! trivially here: one Mirror-calibratable row against sixteen out-of-sample rows.
+//! Each row carries a [`SampleRole`]. Earth's oceanic seamounts are a reference diagnostic because their loading
+//! context is independently described. Mars and Venus are independent validation rows. The distinction is DATA
+//! on the row, not a runtime choice, and neither role authorizes an inversion or supplies a canonical value. A
+//! mismatch remains Residual Law evidence and cannot steer the physical realization.
 //!
 //! # THE ROWS ARE `T_e(elastic)`, WHICH IS WHY THE COMPARISON IS IN RIGIDITY SPACE
 //!
@@ -108,22 +105,16 @@
 
 use civsim_core::Fixed;
 
-/// WHICH KNOWLEDGE PARTITION a row belongs to, DECLARED BEFORE ANY FIT (RUNBOOK section 12, condition 6).
+/// Which non-authoritative diagnostic partition a row belongs to.
 ///
-/// There are exactly two partitions because the constitution defines exactly two: the one Mirror-class instance
-/// whose inversion would be well-posed, and everything else, held out. This is not a taxonomy that grows with the
-/// world; it is the preregistered-holdout split, and its two-ness is the point.
+/// Both partitions are observer-only evidence. Neither can provide a canonical
+/// magnitude, alter a derived band, or choose a realization.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SampleRole {
-    /// Earth's oceanic seamounts: the ONLY Mirror-class instance, hence the only row a licensed inversion could
-    /// ever spend. Earth is the one world whose other inputs are independently pinned, so an inversion there has a
-    /// single unknown and is well-posed. Not yet spent: the calibration ledger is empty, which is the state to
-    /// preserve.
-    MirrorCalibratable,
-    /// Out-of-sample by construction: Mars, Venus, and every non-Earth world. On an alien row an inversion would
-    /// be a degenerate fit of everything at once, so these rows are validation only and are never calibrated
-    /// against. The engine's predictive claims rest on rows it never touched.
-    OutOfSample,
+    /// A contextual reference used only to diagnose a forward-model result.
+    ReferenceDiagnostic,
+    /// A row reserved for independent observer-side validation.
+    IndependentValidation,
 }
 
 /// WHETHER THE ROW'S `T_e` IS A PURE ELASTIC-RIGIDITY FIT OR A YIELD-STRENGTH-ENVELOPE MOMENT EQUIVALENCE.
@@ -274,7 +265,7 @@ pub struct ElasticThicknessRow {
     pub method: HindcastMethod,
     /// The `(E, nu)` the row is conditioned on, absent where the source does not state it.
     pub modulus_pair: ModulusPair,
-    /// The preregistered-holdout partition.
+    /// The observer-only evidence partition.
     pub sample_role: SampleRole,
     /// The load class or geometry, as the source characterizes it.
     pub load_class: &'static str,
@@ -317,7 +308,7 @@ pub fn calmant_oceanic_seamounts() -> ElasticThicknessRow {
                       older flexure literature. Grade MEDIUM: a back-solve, not a printed correction. nu = 0.5 is \
                       printed but unconfirmed (LOW), worth 7.7 percent in Te.",
         },
-        sample_role: SampleRole::MirrorCalibratable,
+        sample_role: SampleRole::ReferenceDiagnostic,
         load_class: "oceanic intraplate volcanic (seamounts and oceanic islands), modelled as an axisymmetric 3-D \
                      load over real bathymetry; isolated-circular against chain-line-load is a per-load choice \
                      priced at about a factor of 3.6 (Watts et al. 1988, second-hand)",
@@ -400,7 +391,7 @@ pub fn mars_ruiz_rows() -> [ElasticThicknessRow; 13] {
             kind: ElasticThicknessKind::TeElastic,
             method,
             modulus_pair: ModulusPair::Absent,
-            sample_role: SampleRole::OutOfSample,
+            sample_role: SampleRole::IndependentValidation,
             load_class,
             epoch,
             citation: "Ruiz, J., 2014, Sci. Rep. 4, 4338, DOI 10.1038/srep04338, Table 1 (compiling McGovern et \
@@ -576,7 +567,7 @@ pub fn venus_smrekar_anderson_rows() -> [ElasticThicknessRow; 3] {
             kind: ElasticThicknessKind::TeElastic,
             method: HindcastMethod::GravityTopographyAdmittance,
             modulus_pair: ModulusPair::Absent,
-            sample_role: SampleRole::OutOfSample,
+            sample_role: SampleRole::IndependentValidation,
             load_class,
             epoch: "global admittance map (Magellan gravity and topography); no per-region epoch stated",
             citation: "Smrekar, S. E. and Anderson, F. S., 2005, LPSC XXXVI abstract 1804 (the conference version \
@@ -634,7 +625,7 @@ mod tests {
     fn earth_row_carries_calmant_eq6_as_a_rate_relation_never_a_target() {
         let row = calmant_oceanic_seamounts();
         assert_eq!(row.body, "Earth");
-        assert_eq!(row.sample_role, SampleRole::MirrorCalibratable);
+        assert_eq!(row.sample_role, SampleRole::ReferenceDiagnostic);
         assert_eq!(row.kind, ElasticThicknessKind::TeElastic);
         assert_eq!(row.method, HindcastMethod::ThreeDNumericalPlateFit);
         match row.observed {
@@ -718,7 +709,7 @@ mod tests {
         assert_eq!(rows.len(), 13);
         for r in &rows {
             assert_eq!(r.body, "Mars");
-            assert_eq!(r.sample_role, SampleRole::OutOfSample);
+            assert_eq!(r.sample_role, SampleRole::IndependentValidation);
             assert_eq!(r.kind, ElasticThicknessKind::TeElastic);
             assert_eq!(
                 r.modulus_pair,
@@ -798,7 +789,7 @@ mod tests {
         assert_eq!(rows.len(), 3);
         for r in &rows {
             assert_eq!(r.body, "Venus");
-            assert_eq!(r.sample_role, SampleRole::OutOfSample);
+            assert_eq!(r.sample_role, SampleRole::IndependentValidation);
             assert_eq!(r.method, HindcastMethod::GravityTopographyAdmittance);
             assert_eq!(r.modulus_pair, ModulusPair::Absent);
         }
@@ -847,31 +838,28 @@ mod tests {
     }
 
     #[test]
-    fn the_preregistered_holdout_partitions_cleanly_and_validation_exceeds_calibration() {
-        // RUNBOOK section 12's invariant, encoded over the row set: exactly one Mirror-calibratable row (Earth's
-        // seamounts), the rest out-of-sample, and the validation set strictly exceeds the calibration set.
+    fn the_observer_only_reference_partitions_are_stable() {
         let rows = all_hindcast_rows();
         assert_eq!(rows.len(), 1 + 13 + 3);
-        let calibratable = rows
+        let reference = rows
             .iter()
-            .filter(|r| r.sample_role == SampleRole::MirrorCalibratable)
+            .filter(|r| r.sample_role == SampleRole::ReferenceDiagnostic)
             .count();
-        let out_of_sample = rows
+        let independent = rows
             .iter()
-            .filter(|r| r.sample_role == SampleRole::OutOfSample)
+            .filter(|r| r.sample_role == SampleRole::IndependentValidation)
             .count();
-        assert_eq!(calibratable, 1, "only Earth's oceanic row is Mirror-class");
-        assert_eq!(out_of_sample, 16);
-        assert!(
-            out_of_sample > calibratable,
-            "the validation set strictly exceeds the calibration set (16 > 1)"
+        assert_eq!(
+            reference, 1,
+            "only Earth's oceanic row is the reference diagnostic"
         );
-        // The one Mirror-class row is Earth, and it is the only one that could ever be spent.
-        let mirror = rows
+        assert_eq!(independent, 16);
+        assert!(independent > reference);
+        let earth = rows
             .iter()
-            .find(|r| r.sample_role == SampleRole::MirrorCalibratable)
+            .find(|r| r.sample_role == SampleRole::ReferenceDiagnostic)
             .unwrap();
-        assert_eq!(mirror.body, "Earth");
+        assert_eq!(earth.body, "Earth");
     }
 
     #[test]

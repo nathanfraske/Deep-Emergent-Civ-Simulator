@@ -12,20 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The integer-Gaussian approximation (design 25.10), a stamped world-identity value.
+//! Deterministic integer-Gaussian candidate mechanisms.
 //!
-//! Several deep-time mechanisms need a mean-zero Gaussian deviate: the quantitative
-//! breeding-value spine of the genome (Part 25), the continuous additive mutation step,
-//! the behaviour-controller mutation (Part 8), and the axiom-seed mutation (Part 28). The
-//! shape of that deviate is an owner method decision, not a fabricated constant, because
-//! it is folded into every quantitative lineage: changing it re-rolls the world. It is
-//! therefore a stamped measure identity ([`GaussApprox`]), carried in the calibration
-//! manifest as `genome.gauss_approx` and folded into state hashes so the choice is visible
-//! in identity.
+//! The arithmetic supplies reproducible mean-zero deviates without floating point. The
+//! approximation shape remains value-bearing method content. This module does not choose
+//! or admit one: a canonical caller must derive it, complete a floor-admission receipt, or
+//! refuse. Pre-migration planetary assembly carries the choice explicitly so it cannot be
+//! hidden in the numeric provider.
 //!
 //! Everything here is integer and fixed-point over the counter-keyed [`Rng`]: a deviate is
-//! a pure function of its stream and counter, so a genome, a lineage, and a whole
-//! population's history are bit-identical across machines and thread counts (Principle 3).
+//! a pure function of its stream and counter, so a derived realization is bit-identical
+//! across machines and thread counts.
 //! There is no float. The one square root the scale can need (`sqrt(12/k)` for a
 //! non-canonical `k`) is a single [`Fixed::sqrt`] computed once per call, never inside the
 //! sub-draw loop; the stamped `k = 12` returns unit scale without any square root at all.
@@ -34,38 +31,33 @@ use crate::fixed::Fixed;
 use crate::hash::StateHasher;
 use crate::rng::Rng;
 
-/// The integer-Gaussian approximation method (design 25.10). A stamped world-identity value:
-/// the choice is folded into every quantitative lineage, so changing it re-rolls the world,
-/// and it is recorded in the calibration manifest (`genome.gauss_approx`) and folded into
-/// state identity ([`GaussApprox::hash_into`]). The mechanism is fixed Rust; which method and
-/// its precision are the owner's stamped datum.
+/// An integer-Gaussian approximation method carried explicitly by a caller.
+///
+/// This is a mechanism selector, not an admitted default. Changing it changes the generated
+/// realization, so canonical use requires a derived or admitted method identity upstream.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum GaussApprox {
     /// The central-limit sum of `k` counter-keyed unit draws, centred by subtracting `k/2` and
-    /// scaled by `sqrt(12/k)` to unit variance. `k = 12` is the stamped identity: the scale is
-    /// exactly one, and the deviate's tails are bounded to `+/- 6` (a documented honest limit of
-    /// the approximation, since a true Gaussian is unbounded). A larger `k` is closer to Gaussian
-    /// but wider in the tail bound and costlier per draw.
+    /// scaled by `sqrt(12/k)` to unit variance. At `k = 12` the scale is exactly one and the
+    /// deviate's tails are bounded to `+/- 6`. A larger `k` changes both cost and shape.
     SumOfUniforms { k: u8 },
-    /// An inverse-CDF table lookup at `bits` of precision (the alternative measure identity). It
-    /// is reserved and not built; [`gaussian_unit`] panics on it rather than fabricating a shape.
+    /// An inverse-CDF table lookup at `bits` of precision. It is not built;
+    /// [`gaussian_unit`] panics rather than fabricating a shape.
     InvCdfTable { bits: u8 },
 }
 
 impl Default for GaussApprox {
-    /// The loud-fail sentinel for an unset stamp. `SumOfUniforms { k: 0 }` is not a usable
+    /// The loud-fail sentinel for an unset method. `SumOfUniforms { k: 0 }` is not a usable
     /// approximation (a zero-term sum has no variance), so [`gaussian_unit`] panics on it rather
     /// than silently choosing a shape. A pool or scheme that will draw a Gaussian must have its
-    /// stamp set from the manifest's `genome.gauss_approx`; one that never draws (a flat additive
-    /// spine) keeps the sentinel harmlessly.
+    /// method supplied upstream; a caller that never draws can retain the sentinel.
     fn default() -> Self {
         GaussApprox::SumOfUniforms { k: 0 }
     }
 }
 
 impl GaussApprox {
-    /// Fold the stamp into a state hash in a fixed byte order, so the measure identity is part
-    /// of the world's reproducible identity (a variant tag then its parameter).
+    /// Fold the method identity into a state hash in a fixed byte order.
     #[inline]
     pub fn hash_into(&self, hasher: &mut StateHasher) {
         match *self {
@@ -100,19 +92,18 @@ fn unit_variance_scale(k: u8) -> Fixed {
 /// For `SumOfUniforms { k }` it sums the `k` unit draws at counters `base_counter ..
 /// base_counter + k` on one stream, subtracts `k/2` to centre the sum, and multiplies by
 /// `sqrt(12/k)` to reach unit variance. The result is bounded to `+/- (k/2) * sqrt(12/k)` (for
-/// the stamped `k = 12`, `+/- 6`), the honest limit of the central-limit approximation. The draw
+/// `k = 12`, `+/- 6`), the declared limit of the central-limit approximation. The draw
 /// is a pure function of the stream and the base counter, so it reproduces bit for bit on any
 /// machine and thread count.
 ///
-/// Panics on the unset sentinel `SumOfUniforms { k: 0 }` (an unstamped approximation) and on
-/// `InvCdfTable` (reserved, not built), rather than fabricating a shape.
+/// Panics on the unset sentinel `SumOfUniforms { k: 0 }` and on `InvCdfTable`, rather
+/// than fabricating a shape.
 pub fn gaussian_unit(rng: &Rng, base_counter: u64, approx: GaussApprox) -> Fixed {
     match approx {
         GaussApprox::SumOfUniforms { k } => {
             assert!(
                 k > 0,
-                "gauss approximation is unset (sentinel k = 0); the world-identity \
-                 genome.gauss_approx must be set before a Gaussian is drawn"
+                "gauss approximation is unset (sentinel k = 0); an upstream derived or admitted method identity is required before a Gaussian is drawn"
             );
             let mut sum = Fixed::ZERO;
             for i in 0..k as u64 {
@@ -122,9 +113,7 @@ pub fn gaussian_unit(rng: &Rng, base_counter: u64, approx: GaussApprox) -> Fixed
             centered.mul(unit_variance_scale(k))
         }
         GaussApprox::InvCdfTable { .. } => {
-            panic!(
-                "InvCdfTable gaussian approximation is reserved and not yet built (design 25.10)"
-            )
+            panic!("InvCdfTable gaussian approximation is unavailable")
         }
     }
 }

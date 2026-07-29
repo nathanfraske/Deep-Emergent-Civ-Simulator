@@ -6,6 +6,7 @@ person happened to run one grep before building on it:
 
   1. k/kappa: `ColumnParams.thermal_diffusivity` STORES a number while `laws::thermal_diffusivity` DERIVES
      the same quantity from three fields the same struct carries. They disagree by 20x. Nothing compared them.
+     RETIRED AT SOURCE 2026-07-20: the field is gone and the compatibility path delegates to the law.
   2. Slack/Hofmeister: two physical models of thermal conductivity, which would have disagreed ~5x on the
      target class had a census not run first.
   3. The A-source: the viewer re-declared `kernel_conductivity = 2` and `kernel_density = 1` locally, the SAME
@@ -33,7 +34,8 @@ THIS GATE'S BLINDNESS SET, STATED BESIDE ITS DISCRIMINATING POWER, because a gat
 is a gate and a gate that does not is a comfort. Measured against the THREE instances that motivated building
 it, THIS GATE CATCHES ONE:
 
-  CATCHES: a quantity with a laws.rs kernel AND a pub struct field OF THE SAME NAME (k/kappa, found).
+  CATCHES: a quantity with a laws.rs kernel AND a pub struct field OF THE SAME NAME (k/kappa, caught and
+    retired; the synthetic canary preserves the detector after the live defect is gone).
 
   BLIND 1, DIFFERENT-NAMED PROVIDERS: Slack (`lattice_thermal_conductivity_w_per_m_k`) versus Hofmeister
     (`hofmeister_lattice_conductivity`) are two models of one quantity under two names, and NEITHER is a laws.rs
@@ -67,8 +69,9 @@ Usage:  python3 scripts/diamond_gate.py [--strict] [--self-test]
           convention, matching determinism_gate/constructor_gate/provenance_gate/stone0: "prove every
           detector fires"). The canary also runs on every normal invocation, so the gate cannot report a
           sweep it is too blind to trust.
-        --strict exits non-zero on any unarbitrated diamond. NOT the current CI posture: the sweep still
-          reports output caches and cross-domain name collisions, so strict would cry wolf.
+        --strict exits non-zero on every unarbitrated twin provider, every new law-versus-field diamond,
+          and every stale known-open ledger row. Known law-versus-field debt stays visible and counted
+          without becoming an amnesty. CI, Stone 0, doctor, and the Stop hook use this strict posture.
 """
 
 import re
@@ -196,9 +199,9 @@ def law_providers():
     out = {}
     _scan_providers(LAWS, "crates/physics/src/laws.rs", out, name_is_quantity=True)
 
-    # THE CROSS-CRATE SWEEP. `laws.rs` is not where the collisions live, and this gate's own scorecard says so:
-    # Slack and Hofmeister sit in `crates/materials`, and the two logsumexp implementations sit in
-    # `physics/saha.rs` and `materials/creep.rs`. A gate that reads one file audits one file. So EVERY `.rs`
+    # THE CROSS-CRATE SWEEP. `laws.rs` is not where every collision lived, and this gate's scorecard says so:
+    # Slack and Hofmeister sit in `crates/materials`, and the retired logsumexp twin crossed physics and
+    # materials before unification in core. A gate that reads one file audits one file. So EVERY `.rs`
     # under `crates/` is swept for `@provides`, and a file outside laws.rs contributes ONLY where a human wrote
     # the annotation: no bare `pub fn` out there is guessed to provide the quantity its name states, because
     # outside the law kernels that guess would be noise rather than signal. Declared providers only, which keeps
@@ -328,9 +331,9 @@ def detect_twin_providers(laws, registry):
     THE SWEEP IS CROSS-CRATE (`law_providers` reads every `.rs` under `crates/`, not `laws.rs` alone). This
     docstring said "reads laws.rs alone ... a provider in another crate is outside its reach" until 2026-07-17,
     which was STALE: true of the first laws.rs-only version, false once the cross-crate sweep landed, and a
-    doc-drift defect sitting in the very gate whose job is to catch doc-drift. The cross-crate sweep is what finds
-    the `log_sum_exp` twin (`saha.rs` and `materials/creep.rs`), the one a human census found by hand, so a
-    DECLARED cross-crate collision IS now mechanically visible.
+    doc-drift defect sitting in the very gate whose job is to catch doc-drift. The cross-crate sweep found the
+    now-retired `log_sum_exp` twin in Saha and materials creep, so a DECLARED cross-crate collision is
+    mechanically visible.
 
     ITS OWN BLINDNESS, stated beside its power and named plainly: it sees only providers that DECLARE themselves
     with `@provides`, so an UNDECLARED twin is still invisible, and the annotation is hand-authored, so this
@@ -410,34 +413,15 @@ def main():
     # unresolved diamond be retired by calling it registered, which is the bypass the registry's own
     # docstring warns about.
     #
-    # WHY IT EXISTS AT ALL. CI ran only `--self-test`, which returns before scanning, so these six have
-    # been passing invisibly. Turning the real scan on without a ledger means either fixing six diamonds
-    # in one sitting or leaving the scan off again; the ledger is what lets the scan run TODAY and convict
-    # anything new while these stay counted and visible.
+    # WHY IT EXISTS AT ALL. CI ran only `--self-test`, which returns before scanning, so the original six
+    # passed invisibly. The optical-depth field and the learning-weight homonym left the canonical tree
+    # with their legacy owners. Three unrelated same-name quantities were renamed at their law surfaces,
+    # the real thermal-diffusivity duplicate was retired by computing it from its three source facts, and the
+    # log-domain numerical twin was unified behind the sole core provider.
     #
     # It is a RATCHET, not an amnesty: the count is printed on every run, a new diamond is not in it and
     # so fails, and an entry removed from the code must be removed from here (the gate says so below).
-    KNOWN_OPEN = {
-        "log_sum_exp": "two independent implementations of one numerical primitive "
-        "(materials::creep::logsumexp_canonical and physics::saha::log_sum_exp). A real duplicate: one "
-        "should consume the other. Not yet done.",
-        "friction": "laws::friction() derives a force while momentum.rs, runout.rs and "
-        "moment_equivalence.rs store coefficients or a FrictionLaw. Probably homonyms rather than one "
-        "quantity, but nobody has SHOWN that, and the gate's own guidance says an unshown homonym gets "
-        "renamed rather than assumed.",
-        "optical_depth": "laws::optical_depth() against a stored field in perception_reach.rs. "
-        "Unexamined: it may be a cached output of the law (which needs registering) or a different "
-        "quantity (which needs renaming).",
-        "shear": "laws::shear() against materials_oracle's PropertyEstimate and Fixed. Likely the "
-        "oracle's estimator ladder, which would be a REGISTERED relationship once someone states the "
-        "rung order and the overlap sentinel.",
-        "thermal_diffusivity": "laws::thermal_diffusivity() against the stored ColumnParams field. The "
-        "sharpest of the six and the one I made worse: #205 added a COMPUTED sibling "
-        "(ColumnThermalProperties::thermal_diffusivity) while leaving the stored field in place, so "
-        "there are now three ways to get this number. Retiring the stored field is the fix.",
-        "weight": "laws::weight() against a u64 in redistribute.rs and a Fixed in learn.rs. The learn.rs "
-        "one is a learning weight and almost certainly a homonym; the redistribute.rs one is unexamined.",
-    }
+    KNOWN_OPEN = {}
 
     laws = law_providers()
     fields = stored_providers()
@@ -465,20 +449,31 @@ def main():
     report_twins(twins)
     print()
 
+    # The ledger spans both finding shapes. Compute its staleness before the
+    # deriving-plus-storing early return so a twin-only scan cannot hide an old
+    # row or print a false all-clear while a twin remains above.
+    detected = {f[0] for f in findings} | {q for q, _ in twins}
+    stale_ledger = sorted(set(KNOWN_OPEN) - detected)
+
     if not findings:
-        print("no unarbitrated diamonds found.")
-        return 1 if (strict and twins) else 0
+        print("no unarbitrated deriving-plus-storing diamonds found.")
+        if twins:
+            print(f"{len(twins)} unarbitrated twin-provider quantity(s) remain.")
+        if stale_ledger:
+            print(
+                "STALE LEDGER: these are recorded as known-open but no longer detected. "
+                "Delete their rows before trusting the ratchet:"
+            )
+            for q in stale_ledger:
+                print(f"  - {q}")
+        return 1 if (strict and (twins or stale_ledger)) else 0
 
 
     new_findings = [f for f in findings if f[0] not in KNOWN_OPEN]
     carried = [f for f in findings if f[0] in KNOWN_OPEN]
-    # THE LEDGER COVERS BOTH FINDING SHAPES. `log_sum_exp` is a TWIN PROVIDER (two deriving kernels for
-    # one quantity), not a law-versus-field diamond, so checking staleness against `findings` alone
-    # reported it as stale while the gate was reporting it two paragraphs above. A ledger that contradicts
-    # the same run's output is worse than no ledger.
-    detected = {f[0] for f in findings} | {q for q, _ in twins}
-    stale_ledger = sorted(set(KNOWN_OPEN) - detected)
-
+    # THE LEDGER COVERS BOTH FINDING SHAPES. Checking staleness against `findings` alone once reported a
+    # twin-provider row as stale while the gate reported it above. A ledger that contradicts the same run's
+    # output is worse than no ledger.
     if carried:
         print(f"CARRIED (known-open, {len(carried)} of {len(KNOWN_OPEN)} ledger entries still present):")
         for quantity, _law_site, _sites in carried:
@@ -510,12 +505,13 @@ def main():
     print("     that computes and reports the rungs' disagreement wherever both evaluate.")
     print("  3. SHOW IT IS NOT ONE: the name collides but the quantities differ. Then rename, because a name")
     print("     that reads as a diamond will be read as one by the next person too.")
-    # THE RATCHET. A NEW diamond fails under --strict; a known-open one is carried, counted and printed.
-    # A stale ledger row also fails, because a ledger that keeps entries for things nobody detects any
-    # more is how an amnesty forms: the row stays, the defect comes back under it, and nothing notices.
+    # THE RATCHET. A NEW law-versus-field diamond fails under --strict; a known-open field candidate is
+    # carried, counted and printed until its model-owning slice can discharge it. Every twin deriving
+    # provider fails strict even when its age is recorded: two executable derivations of one quantity can
+    # diverge silently, so age cannot buy a canonical pass. A stale ledger row also fails, because a ledger
+    # that keeps entries for things nobody detects any more is how an amnesty forms.
     if strict:
-        new_twins = [q for q, _ in twins if q not in KNOWN_OPEN]
-        return 1 if (new_findings or new_twins or stale_ledger) else 0
+        return 1 if (new_findings or twins or stale_ledger) else 0
     return 0
 
 

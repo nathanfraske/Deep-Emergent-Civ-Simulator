@@ -14,7 +14,7 @@
 
 set -u
 python3 -c '
-import json, re, sys
+import json, os, re, sys
 
 try:
     data = json.loads(sys.stdin.read() or "{}")
@@ -22,30 +22,56 @@ except Exception:
     sys.exit(0)
 
 ti = data.get("tool_input", {}) or {}
+def maintained(path):
+    normalized = str(path).replace("\\", "/")
+    return normalized.endswith(("parked/docs/design.md", "parked/docs/audit.md"))
+
+paths = []
 fp = ti.get("file_path", "") or ""
-if not (fp.endswith("docs/design.md") or fp.endswith("docs/audit.md")):
-    sys.exit(0)
+if maintained(fp):
+    paths.append(fp)
 
-try:
-    with open(fp, encoding="utf-8") as fh:
-        text = fh.read()
-except OSError:
-    sys.exit(0)
+# Codex apply_patch may touch several files and supplies their names inside the
+# patch command rather than tool_input.file_path.
+command = ti.get("command")
+if isinstance(command, str):
+    for line in command.splitlines():
+        m = re.match(r"^\*\*\* (?:Add|Update) File:\s*(.+?)\s*$", line)
+        if not m:
+            m = re.match(r"^\*\*\* Move to:\s*(.+?)\s*$", line)
+        if m and maintained(m.group(1)):
+            paths.append(m.group(1))
 
-issues = []
-em = text.count("—")
-if em:
-    issues.append("%d em dash(es)" % em)
-adv = re.findall(r"genuinely|honestly|\bactually\b", text, re.I)
-if adv:
-    uniq = ", ".join(sorted({a.lower() for a in adv}))
-    issues.append("banned adverb(s): " + uniq)
-if text.count("```") % 2:
-    issues.append("unbalanced code fences")
+root = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+reports = []
+for fp in dict.fromkeys(paths):
+    normalized = fp.replace("\\", "/")
+    if re.match(r"^[A-Za-z]:/", normalized):
+        normalized = "/mnt/" + normalized[0].lower() + normalized[2:]
+    elif not os.path.isabs(normalized):
+        normalized = os.path.join(root, normalized)
+    try:
+        with open(normalized, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        continue
 
-if issues:
+    issues = []
+    em = text.count("—")
+    if em:
+        issues.append("%d em dash(es)" % em)
+    adv = re.findall(r"genuinely|honestly|\bactually\b", text, re.I)
+    if adv:
+        uniq = ", ".join(sorted({a.lower() for a in adv}))
+        issues.append("banned adverb(s): " + uniq)
+    if text.count("```") % 2:
+        issues.append("unbalanced code fences")
+    if issues:
+        reports.append(fp + ": " + "; ".join(issues))
+
+if reports:
     sys.stderr.write(
-        "post-edit-check found issues in " + fp + ": " + "; ".join(issues)
+        "post-edit-check found issues in " + " | ".join(reports)
         + ". Fix before finishing (CLAUDE.md section 8).\n"
     )
     sys.exit(2)

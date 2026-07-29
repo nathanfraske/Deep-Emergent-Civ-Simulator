@@ -1,0 +1,168 @@
+# Held-source manifest for the Gruneisen volume-exponent q cited column (../thermoelastic_anchors.toml).
+# The vendored-primary idiom: file / receipt / anchors, in the shape of the sibling gruneisen manifest.
+#
+# BOTH SOURCES ARE CITATION-PLUS-WITNESS (custody = "witness"), and the paywall question was asked FIRST.
+# Both papers are Geophysical Journal International, and both are "bronze" open access: free to read at the
+# publisher with NO open licence attached, which is free-to-read rather than free-to-redistribute. Their
+# bytes are therefore NOT held in this repository. They sit in local custody
+# (~/.claude/vendored-sources/thermoelastic_anchors/ for the 2011 paper,
+# ~/.claude/vendored-sources/gruneisen/ for the 2005 paper, which the gruneisen fetch already retrieved),
+# sha256-verifiable, with a retrievable Internet Archive snapshot recorded as archived_url. Each archived
+# snapshot was RE-FETCHED AND HASHED on 2026-07-19 and is byte-identical to the receipt below, so the
+# public witness holds exactly the bytes the values were read from. The redistribution finding for each id
+# lives in sources/licences.toml, which the gate merges on at load time.
+#
+# BLOCK KIND [[source]], a vendored-artifact receipt (the JANAF / convection-scaling / gruneisen held-source
+# idiom), NOT a reserved floor kind: these witnesses do not participate in the floor real/fantasy
+# authorship axis.
+#
+# THE TWO SOURCES ARE NOT INDEPENDENT WITNESSES, and the [[claim]] blocks below say so rather than filling
+# the secondary slot with a copy. The 2011 paper is the same two authors' later global inversion, drawing
+# on an overlapping experimental corpus, so it is a SUCCESSOR to the 2005 fit rather than a second opinion
+# from a separate group. Where they agree that is a consistency check on the transcription; where they
+# disagree (periclase, enstatite) it is a revision, and the manifest records which.
+#
+# WHY THE 2005 PAPER IS THE PRIMARY FOR SIX ROWS. q and gamma_0 are correlated parameters of one
+# least-squares inversion, so they must be read from the same fit. The banked gamma_0 (gruneisen.toml
+# gamma_eos_debye) is transcribed from the 2005 Table 1, so the 2005 q is the one that pairs with it.
+# Quartz is the exception: it exists only in the 2011 table, its q there is from systematics, and its
+# companion gamma_0 is both assumed and absent from the bank.
+#
+# THE 2005 HELD PDF IS AN ACCEPTED-MANUSCRIPT PREPRINT, not the publisher's version of record. It is
+# typeset from the authors' LaTeX with the journal class file ("This paper has been produced using the
+# Blackwell Publishing GJI LATEX2e class file"), runs 43 pages with its own 1-based pagination and running
+# heads reading "Mantle Thermodynamics", and does NOT carry the GJI pagination 610-632. Page anchors below
+# are therefore in the PREPRINT's pagination, and its parameter table prints as "Table 1" while the paper's
+# own text refers to it as "Table A1". The sibling gruneisen manifest cites the same bytes without
+# recording the preprint status; that gap is closed here rather than repeated.
+#
+# THE 2011 HELD PDF IS THE PUBLISHER'S VERSION OF RECORD: 34 pages, GJI running heads, printed pagination
+# 1180-1213, produced through the publisher's typesetting chain (pdfinfo Creator "dvips(k) 5.95a",
+# Producer "PDFlib PLOP 2.0.0p6 (SunOS)/Acrobat Distiller 7.0.5 for Macintosh", CreationDate 2011-01-31).
+# Page anchors for it are PRINTED page numbers.
+#
+# THE FIT-VERSUS-SYSTEMATICS GRADE WAS READ THROUGH A SECOND CHANNEL, because the first one cannot see it.
+# Both tables carry the footnote "Italicized entries are from systematics", and `pdftotext` discards
+# italics, so a text-only read would have transcribed an assumed cell as a fitted one. Every q cell was
+# therefore additionally read from the PDF FONT METADATA (`pdftohtml -xml`, mapping each glyph span to its
+# font subset), with a known-italic neighbour row used as the control in each table to prove the read
+# discriminates. This is the dual channel for these artifacts, and it is the reason quartz's q is graded
+# unverified_measurement_candidate rather than measured.
+
+# PRIMARY for periclase, corundum, spinel, forsterite, fayalite, enstatite: the self-consistent mantle
+# thermodynamics inversion whose Table 1 also supplies the banked gruneisen.toml gamma_eos_debye column.
+# Bytes already in local custody from the gruneisen fetch; the receipt is the same document.
+[[source]]
+name = "slb_2005_mantle_minerals_i"
+file = "stixrude_lithgow-bertelloni_gji_2005.pdf"
+custody = "witness"
+url = "https://www.perplex.ethz.ch/thermo_course/chapter_5/stixrude_GJI_05.pdf"
+archived_url = "https://web.archive.org/web/20260718151531/https://www.perplex.ethz.ch/thermo_course/chapter_5/stixrude_GJI_05.pdf"
+witness_verified = "Wayback capture re-fetched 2026-07-19 and hashed: 538634 bytes, sha256 BYTE-IDENTICAL to the receipt below. The public witness holds exactly the bytes these q values were read from."
+sha256 = "95e1cd9b58c28874b2617e68937a61c22ad78032ba4bc2b5a2305a104dc54604"
+bytes = 538634
+pages = 43
+citation = "Stixrude, L. & Lithgow-Bertelloni, C., 2005, Thermodynamics of mantle minerals - I. Physical properties, Geophysical Journal International 162(2), 610-632, DOI 10.1111/j.1365-246X.2005.02642.x."
+recipe = "GET the open perplex.ethz.ch course copy of the GJI 2005 paper (accepted-manuscript preprint, 43 pp). Read the q column of the parameter table on PDF page 30 via `pdftotext -layout`, then re-read the same cells via `pdftohtml -xml -f 30 -l 30` and map each span's font subset (CHDPDM+Times-Italic = systematics, CHDPEO+Times-Roman = fit)."
+grade = "compilation (self-consistent global inversion); per-cell fit-versus-systematics grade read from the source typography"
+scope = "Ambient reference state V_0 at 300 K, 1 bar, for 31 MANTLE species in the MgO-FeO-CaO-Al2O3-SiO2-Na2O system. q is the constant exponent of gamma = gamma_0 (V/V_0)^q, valid over the upper-mantle to lower-mantle P,T range the inversion was fit across. NOT applicable to ferric phases (no Fe2O3), and the only SiO2 polymorph present is stishovite, which must never be read for quartz."
+anchor = "PDF page 30, 'Table 1. Properties of mantle species' (the paper's own text calls it Table A1), q column: periclase (MgO) 1.5 (2); corundum (AlAlO3) 1.3 (2); spinel ((Mg3Al)(Al7Mg)O16) 2.8 (6); forsterite (Mg2SiO4) 2.1 (2); fayalite (Fe2SiO4) 3.6 (10); enstatite (Mg4Si4O12) 7.8 (11). All six cells Times-Roman, that is fit rather than systematics. The companion gamma_0 column on the same rows is the source of gruneisen.toml's gamma_eos_debye: 1.50(2), 1.32(4), 1.02(4), 0.99(3), 1.06(7), 0.67(4)."
+extract = "Table 1 footnote: 'Italicized entries are from systematics.' Table 1 rows, columns V0 / K0 / K0' / theta0 / gamma0 / q: 'magnesiowustite (mw)  periclase  MgO  11.24  161 (3)  3.9 (2)  773 (9)  1.50 (2)  1.5 (2)'; 'akimotoite  corundum  AlAlO3  25.58  253 (5)  4.3 (2)  933 (3)  1.32 (4)  1.3 (2)'; 'spinel (sp)  spinel  (Mg3Al)(Al7Mg)O16  159.05  197 (1)  5.7 (2)  900 (3)  1.02 (4)  2.8 (6)'; 'olivine (ol)  forsterite  Mg2SiO4  43.60  128 (2)  4.2 (2)  809 (1)  0.99 (3)  2.1 (2)'; 'olivine  fayalite  Fe2SiO4  46.29  135 (2)  4.2 (10)  619 (2)  1.06 (7)  3.6 (10)'; 'orhopyroxene (opx)  enstatite  Mg4Si4O12  125.35  107 (2)  7.1 (4)  810 (8)  0.67 (4)  7.8 (11)'. Section A: 'We have estimated unknown parameters on the basis of systematics. We assume that K0', gamma0, q0, K0, and G0' are approximately constant across isostructural series so that if constraints exist for one end-member of a phase, but not the others, we assume that the same values apply to all end-members of that phase.' Section A on how q is determined: 'q0 is determined by a least squares fit to measurements of the bulk modulus at high temperature, via eq. (32), or if these are not available to measurements of the pressure-volume-temperature equation of state, via eq. (21).'"
+note = "Accepted-manuscript preprint, not the version of record. Bytes are the same document the gruneisen manifest witnesses under the id gruneisen.stixrude_lithgow_bertelloni_2005, so the sources gate reports the two ids as one document carried twice; that notice is correct and the receipts are identical."
+
+# The SUCCESSOR inversion. Sole source for quartz (assumed q), and the second channel for the six mantle
+# phases, where it revises periclase and enstatite.
+[[source]]
+name = "slb_2011_mantle_minerals_ii"
+file = "slb2011.pdf"
+custody = "witness"
+url = "https://www.homepages.ucl.ac.uk/~ucfbls0/stixrudelithgowbertelloni_11.pdf"
+archived_url = "https://web.archive.org/web/20221029182918/https://www.homepages.ucl.ac.uk/~ucfbls0/stixrudelithgowbertelloni_11.pdf"
+witness_verified = "Wayback capture re-fetched 2026-07-19 and hashed: 1378171 bytes, sha256 BYTE-IDENTICAL to the receipt below. The live author URL now 404s and the publisher's own OA PDF at academic.oup.com returns HTTP 403 to a crawler, so the Wayback capture is the only retrievable route and it was verified rather than assumed."
+sha256 = "9266dc9405085d7f89dc68c84e7b2cf69dc0a5b09b576f5935dd703aa5647797"
+bytes = 1378171
+pages = 34
+citation = "Stixrude, L. & Lithgow-Bertelloni, C., 2011, Thermodynamics of mantle minerals - II. Phase equilibria, Geophysical Journal International 184(3), 1180-1213, DOI 10.1111/j.1365-246X.2010.04890.x."
+recipe = "The DOI resolves to Wiley and the OpenAlex-reported OA PDF at academic.oup.com/gji/article-pdf/184/3/1180/27638878/184-3-1180.pdf returns HTTP 403 to a crawler; the author copy at homepages.ucl.ac.uk 404s live. Located via the Wayback CDX index for www.homepages.ucl.ac.uk/~ucfbls0/* and fetched with `curl -L 'https://web.archive.org/web/20221029182918id_/https://www.homepages.ucl.ac.uk/~ucfbls0/stixrudelithgowbertelloni_11.pdf'` (HTTP 200, application/pdf, 1378171 bytes). Read the q_0 column of Table A1 on printed pages 1207-1208 via `pdftotext -layout`, then re-read the same cells via `pdftohtml -xml`; the table is ROTATED 90 degrees, so rows group by the `left` coordinate and cells run along `top`. Font subsets: OPEGNK+TimesNewRomanPS-Italic = systematics, OPEGOM+TimesNewRomanPS = fit."
+grade = "compilation (self-consistent global inversion); MIXED per-cell grade, fit and systematics, boundary read from the source typography"
+scope = "Ambient reference state V_0 at 300 K, 1 bar, for the mantle phase-equilibrium species set. q_0 is the constant exponent of gamma = gamma_0 (V/V_0)^q over the P,T range of the phase-equilibrium inversion. The quartz entry covers ALPHA-quartz with the alpha-beta displacive transition carried by a SEPARATE Landau term, so the quartz row does not describe the phase across that transition. No ferric phases: Fe2O3 is absent."
+anchor = "Printed pages 1207-1208, 'Table A1' and 'Table A1. (Continued.)', q_0 column: spinel 2.7 (6); forsterite 2.1 (2); fayalite 3.6 (10); enstatite (MgMgSi2O6) 3.4 (4); corundum 1.3 (2); quartz 1.0 (10) in ITALIC; periclase 1.7 (2). All Roman (fit) except quartz, which is italic (systematics). Companion gamma_0 on the same rows: 1.02(4), 0.99(3), 1.06(7), 0.78(4), 1.32(4), 0.00(5) italic, 1.36(5)."
+extract = "Table A1 footnote: 'Italicized entries are from systematics.' Table A1 rows, columns F0 / V0 / KT0 / KT0' / theta0 / gamma0 / q0: 'quartz (qtz)  Quartz (qtz)  SiO2  -859 (1)  23.67  50 (1)  4.3 (1)  816 (31)  0.00 (5)  1.0 (10)' with the gamma0 and q0 cells set in italic; 'orthopyroxene  Enstatite (en)  MgMgSi2O6  -2913 (2)  62.68  107 (2)  7.0 (4)  812 (4)  0.78 (4)  3.4 (4)'; 'magnesiowustite  Periclase (pe)  MgO  -569  11.24  161 (3)  3.8 (2)  767 (9)  1.36 (5)  1.7 (2)'; 'spinel (sp)  Spinel (sp)  (Mg3Al)(Al7Mg)O16  -8668 (32)  159.05  197 (1)  5.7 (2)  843 (33)  1.02 (4)  2.7 (6)'; 'olivine (ol)  Forsterite (fo)  Mg2SiO4  -2055 (2)  43.60  128 (2)  4.2 (2)  809 (1)  0.99 (3)  2.1 (2)'; 'olivine  Fayalite (fa)  Fe2SiO4  -1371 (1)  46.29  135 (2)  4.2 (10)  619 (2)  1.06 (7)  3.6 (10)'; 'akimotoite  Corundum (co)  AlAlO3  -1582 (1)  25.58  253 (5)  4.3 (2)  933 (3)  1.32 (4)  1.3 (2)'."
+note = "Publisher's version of record. Sole source for quartz, whose q_0 is italic (from systematics) and whose companion gamma_0 of 0.00 (5) is also italic; gamma_0 = 0 makes the MGD thermal pressure identically zero whatever q is, so the quartz q is inoperative as well as assumed."
+
+# ---------------------------------------------------------------------------------------------------
+# CLAIMS: one per value carried in ../thermoelastic_anchors.toml, each naming the fit its q came from and
+# whether that fit's gamma_0 reproduces the banked gruneisen.toml gamma_eos_debye. The secondary slot is
+# left empty WITH A STATED REASON rather than filled with the sibling compilation, because the two papers
+# share authors and an overlapping experimental corpus and so are one witness heard twice.
+# ---------------------------------------------------------------------------------------------------
+
+[[claim]]
+id = "q.periclase"
+value = "1.5 +/- 0.2"
+primary = ["thermoelastic_anchors.slb_2005_mantle_minerals_i"]
+single_witness_reason = "One witness. The only other compilation reporting a constant q for this phase is the same authors' 2011 successor inversion, which is a revision rather than an independent determination, and it disagrees: q_0 = 1.7 (2) with gamma_0 moved from 1.50 (2) to 1.36 (5). GAMMA_0 PAIRING: the 2005 fit's gamma_0 = 1.50 (2) matches the banked gruneisen.toml gamma_eos_debye exactly, and the 2011 fit's does NOT, so the primary is the gamma_0-consistent one and the disagreement is reported rather than reconciled."
+
+[[claim]]
+id = "q.corundum"
+value = "1.3 +/- 0.2"
+primary = ["thermoelastic_anchors.slb_2005_mantle_minerals_i"]
+single_witness_reason = "One witness, and the cleanest row: the 2011 successor reproduces q_0 = 1.3 (2) and gamma_0 = 1.32 (4) unchanged, which is a transcription check rather than an independent confirmation because the authors and corpus overlap. GAMMA_0 PAIRING: matches the banked gruneisen.toml gamma_eos_debye exactly in both compilations."
+
+[[claim]]
+id = "q.spinel"
+value = "2.8 +/- 0.6"
+primary = ["thermoelastic_anchors.slb_2005_mantle_minerals_i"]
+single_witness_reason = "One witness. The 2011 successor gives q_0 = 2.7 (6), a shift of 0.1 against a band of 0.6, so the two agree within uncertainty; they are the same authors' successive inversions rather than independent witnesses. GAMMA_0 PAIRING: gamma_0 = 1.02 (4) in both, matching the banked gruneisen.toml gamma_eos_debye exactly. Scope caveat: this is the DISORDERED spinel model, not an ordered single crystal."
+
+[[claim]]
+id = "q.forsterite"
+value = "2.1 +/- 0.2"
+primary = ["thermoelastic_anchors.slb_2005_mantle_minerals_i"]
+single_witness_reason = "One witness. The 2011 successor reproduces q_0 = 2.1 (2) unchanged; same authors, overlapping corpus, so a transcription check rather than a second determination. GAMMA_0 PAIRING: gamma_0 = 0.99 (3) in both, matching the banked gruneisen.toml gamma_eos_debye exactly."
+
+[[claim]]
+id = "q.fayalite"
+value = "3.6 +/- 1.0"
+primary = ["thermoelastic_anchors.slb_2005_mantle_minerals_i"]
+single_witness_reason = "One witness. The 2011 successor reproduces q_0 = 3.6 (10) unchanged; same authors, overlapping corpus. GAMMA_0 PAIRING: gamma_0 = 1.06 (7) in both, matching the banked gruneisen.toml gamma_eos_debye exactly. The band is 28 percent of the value, the loosest fitted q in the column, and the underlying entropy assumes R ln 5 magnetic entropy per Fe."
+
+[[claim]]
+id = "q.enstatite"
+value = "7.8 +/- 1.1"
+primary = ["thermoelastic_anchors.slb_2005_mantle_minerals_i"]
+single_witness_reason = "One witness, and THE MOST UNSETTLED ROW IN THIS COLUMN. The same authors' 2011 successor inversion gives q_0 = 3.4 (4), a factor of 2.3 lower and far outside either band, with gamma_0 moved from 0.67 (4) to 0.78 (4) while K_0' stayed at 7.0 (4) against 7.1 (4). GAMMA_0 PAIRING: the 2005 gamma_0 = 0.67 (4) matches the banked gruneisen.toml gamma_eos_debye exactly and the 2011 value does not, so the banked-consistent q is also the one the later work retracted. The disagreement is reported rather than reconciled and this row needs the owner's ruling. Same phase gruneisen.toml flags as the Slater-inapplicable chain-silicate anomaly."
+
+[[claim]]
+id = "q.quartz"
+value = "1.0 +/- 1.0, ASSUMED (unverified_measurement_candidate), not usable as an anchor"
+primary = ["thermoelastic_anchors.slb_2011_mantle_minerals_ii"]
+single_witness_reason = "One witness and one that does not measure the quantity. Quartz appears in no other compilation read here: the 2005 mantle table carries only stishovite among the SiO2 polymorphs, and stishovite is a different phase. The 2011 q_0 = 1.0 (10) is set in ITALIC, which the table's own footnote defines as from systematics, so it is the authors' assumed default with a band equal to the value rather than a determination; it is graded unverified_measurement_candidate for that reason. GAMMA_0 PAIRING FAILS TWICE: the companion gamma_0 = 0.00 (5) is likewise italic and assumed, and gruneisen.toml carries no gamma for quartz at all, so there is no banked gamma_0 to pair with. gamma_0 = 0 also makes the MGD thermal pressure identically zero whatever q is."
+
+# ---------------------------------------------------------------------------------------------------
+# NOT RETRIEVED / NOT TRANSCRIBABLE, recorded rather than paraphrased from memory, so the next fetch does
+# not repeat the search. HEMATITE (Fe2O3) has NO q row in ../thermoelastic_anchors.toml.
+#
+#   Zerilli, F.J. & Jones, H.D., 1995, "High Pressure Equation of State for Fe2O3", MRS Online Proceedings
+#   Library 418, 421, DOI 10.1557/PROC-418-421. The one source found that states a Debye-Gruneisen EoS for
+#   hematite. CLOSED ACCESS (OpenAlex oa_status "closed", no repository copy; Springer and Cambridge Core
+#   landing pages only). No free legitimate copy was found, so no cell of it can be quoted and the
+#   citation-plus-witness route is unavailable: a witness entry requires an `extract` of the text the value
+#   came from, and an unread paper cannot supply one. NOT USED.
+#
+#   Dorogokupets, P.I., Sokolova, T.S., Dymshits, A.M. & Litasov, K.D., 2016, "Thermodynamic properties of
+#   rock-forming oxides, alpha-Al2O3, Cr2O3, alpha-Fe2O3 and Fe3O4 at high temperatures and pressures",
+#   Geodynamics & Tectonophysics 7(3), 459-476, DOI 10.5800/GT-2016-7-3-0217. Open access (diamond),
+#   retrieved and read (6925854 bytes via the Wayback capture of gt-crust.ru, the live host timing out).
+#   It gives a modern optimized thermal EoS for hematite, and it has NO CONSTANT q TO TRANSCRIBE: the
+#   vibrational term is TWO EINSTEIN oscillators (Theta_01, Theta_02) rather than a Debye model, and the
+#   Gruneisen parameter takes the Al'tshuler form of its eq. (10.2), gamma = gamma_inf + (gamma_0 -
+#   gamma_inf) x^beta, under which q is a VOLUME-DEPENDENT FUNCTION, its eq. (10.3), q = beta x^beta
+#   (gamma_0 - gamma_inf) / gamma. Evaluating that function at ambient volume and writing the result into
+#   the MGD q slot would launder one model's parameter into another's and would carry no band the source
+#   states, so it is NOT USED. Recorded here because it is the right source to revisit if the consumer is
+#   ever generalized past the constant-q power law.
+#
+#   Hematite is unserved by the derivation route as well: its bulk and shear moduli are recorded UNSOURCED
+#   in ../mineral_moduli.toml, so no elastic Debye temperature can be derived for it either.
+# ---------------------------------------------------------------------------------------------------

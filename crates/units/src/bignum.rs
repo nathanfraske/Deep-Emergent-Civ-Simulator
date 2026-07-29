@@ -48,6 +48,17 @@ impl BigUint {
         b
     }
 
+    /// A value from a `u128`, split into the canonical little-endian limb form.
+    pub fn from_u128(v: u128) -> Self {
+        let mut b = BigUint {
+            limbs: (0..4)
+                .map(|index| ((v >> (index * 32)) & 0xFFFF_FFFF) as u32)
+                .collect(),
+        };
+        b.trim();
+        b
+    }
+
     /// True when the value is zero.
     pub fn is_zero(&self) -> bool {
         self.limbs.is_empty()
@@ -66,6 +77,26 @@ impl BigUint {
             None => 0,
             Some(&top) => (self.limbs.len() as u32 - 1) * 32 + (32 - top.leading_zeros()),
         }
+    }
+
+    /// Minimal unsigned big-endian bytes, with zero encoded as one zero byte.
+    ///
+    /// This is an encoding primitive only. It does not parse caller bytes or
+    /// select a numerical result.
+    fn minimal_be_bytes(&self) -> Vec<u8> {
+        if self.limbs.is_empty() {
+            return vec![0];
+        }
+        let mut bytes = Vec::with_capacity(self.limbs.len() * 4);
+        for limb in self.limbs.iter().rev() {
+            bytes.extend_from_slice(&limb.to_be_bytes());
+        }
+        let first_nonzero = bytes
+            .iter()
+            .position(|byte| *byte != 0)
+            .unwrap_or(bytes.len() - 1);
+        bytes.drain(..first_nonzero);
+        bytes
     }
 
     /// Bit `i` (0 = least significant).
@@ -262,6 +293,13 @@ impl BigUint {
         }
         Some(v)
     }
+
+    pub(crate) fn encode_canonical(&self, output: &mut Vec<u8>) {
+        output.extend_from_slice(&(self.limbs.len() as u64).to_le_bytes());
+        for limb in &self.limbs {
+            output.extend_from_slice(&limb.to_le_bytes());
+        }
+    }
 }
 
 /// An exact signed rational `(-1)^neg * num / den`, with `den` never zero. No reduction to lowest terms
@@ -274,6 +312,14 @@ pub struct BigRat {
     den: BigUint,
 }
 
+impl PartialEq for BigRat {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp_rat(other) == Ordering::Equal
+    }
+}
+
+impl Eq for BigRat {}
+
 impl BigRat {
     /// A rational from a signed integer.
     pub fn from_i64(v: i64) -> Self {
@@ -281,6 +327,37 @@ impl BigRat {
             neg: v < 0,
             num: BigUint::from_u64(v.unsigned_abs()),
             den: BigUint::from_u64(1),
+        }
+    }
+
+    /// The exact rational represented by `bits * 2^-scale_bits`.
+    ///
+    /// This is the inverse of [`Self::round_to_scale`] for a published scaled
+    /// integer. Composite floor laws use it so their only numeric inputs are
+    /// the exact projected leaf bits carried by the canonical bitstream.
+    pub fn from_scaled_i128(bits: i128, scale_bits: u32) -> Self {
+        BigRat::new(
+            bits.is_negative(),
+            BigUint::from_u128(bits.unsigned_abs()),
+            BigUint::from_u64(1).shl_bits(scale_bits),
+        )
+        .reduce()
+    }
+
+    /// The exact rational `bits * 2^exponent2`.
+    ///
+    /// Unlike a conventional non-negative fractional scale, a signed binary
+    /// exponent can represent a normalized coefficient whose magnitude itself
+    /// exceeds `i128`. The signed integer remains the bounded significand.
+    pub fn from_binary_i128(bits: i128, exponent2: i32) -> Self {
+        if exponent2 >= 0 {
+            BigRat::new(
+                bits.is_negative(),
+                BigUint::from_u128(bits.unsigned_abs()).shl_bits(exponent2.unsigned_abs()),
+                BigUint::from_u64(1),
+            )
+        } else {
+            BigRat::from_scaled_i128(bits, exponent2.unsigned_abs())
         }
     }
 
@@ -369,6 +446,43 @@ impl BigRat {
         BigRat::new(false, self.num.clone(), self.den.clone())
     }
 
+    /// Canonical sign, numerator, and denominator bytes under an explicit
+    /// component-size bound.
+    ///
+    /// The value is reduced before encoding, so algebraically equal rationals
+    /// receive identical bytes even when their intermediate limb forms differ.
+    /// This method exposes no parser or authority surface. Callers must choose
+    /// and receipt a finite bound before exact arithmetic enters a bitstream.
+    pub fn bounded_canonical_components(
+        &self,
+        max_component_bytes: usize,
+    ) -> Result<(bool, Vec<u8>, Vec<u8>), String> {
+        if max_component_bytes == 0 {
+            return Err("canonical rational component bound is zero".to_owned());
+        }
+        let reduced = self.reduce();
+        let numerator = reduced.num.minimal_be_bytes();
+        let denominator = reduced.den.minimal_be_bytes();
+        if numerator.len() > max_component_bytes || denominator.len() > max_component_bytes {
+            return Err("canonical rational component exceeds declared byte bound".to_owned());
+        }
+        Ok((reduced.neg, numerator, denominator))
+    }
+
+    /// Numerator and denominator bit lengths for fail-closed resource checks
+    /// around exact formula evaluation. This exposes representation size only
+    /// inside the units crate, never the stored magnitudes themselves.
+    pub(crate) fn component_bit_lengths(&self) -> (u32, u32) {
+        (self.num.bit_len(), self.den.bit_len())
+    }
+
+    /// Raw sign and magnitude components for crate-internal independent
+    /// arithmetic authorities. This exposes data only; it does not select or
+    /// attest any rounded result.
+    pub(crate) fn components(&self) -> (bool, &BigUint, &BigUint) {
+        (self.neg, &self.num, &self.den)
+    }
+
     /// Reduce to lowest terms by dividing numerator and denominator by their gcd. The VALUE is unchanged (so
     /// `cmp_rat`, `round_to_scale`, and every other observation return exactly the same result); this only bounds the
     /// limb count so a long chain of exact operations (a Gaussian elimination over many rows) keeps the numerator and
@@ -403,29 +517,56 @@ impl BigRat {
                 }
             }
         }
-        // Fit the magnitude in a non-negative i128 before applying the sign, so a value in
-        // [2^127, 2^128) reports out of range rather than wrapping to a negative i128.
+        // A negative i128 has one more representable magnitude than a positive
+        // i128. Admit exactly 2^127 only on the negative branch so i128::MIN is
+        // not mistaken for an out-of-range value.
         let mag_u = q.to_u128()?;
-        if mag_u > i128::MAX as u128 {
-            return None;
+        if self.neg {
+            let min_magnitude = 1u128 << 127;
+            if mag_u > min_magnitude {
+                None
+            } else if mag_u == min_magnitude {
+                Some(i128::MIN)
+            } else {
+                Some(-(mag_u as i128))
+            }
+        } else if mag_u > i128::MAX as u128 {
+            None
+        } else {
+            Some(mag_u as i128)
         }
-        let mag = mag_u as i128;
-        Some(if self.neg { -mag } else { mag })
+    }
+
+    /// Round to a signed integer significand at binary exponent `exponent2`.
+    /// The result `bits` represents `bits * 2^exponent2`.
+    pub fn round_to_binary_exponent(&self, exponent2: i32) -> Option<i128> {
+        if exponent2 <= 0 {
+            return self.round_to_scale(exponent2.unsigned_abs());
+        }
+        BigRat::new(
+            self.neg,
+            self.num.clone(),
+            self.den.shl_bits(exponent2.unsigned_abs()),
+        )
+        .round_to_scale(0)
     }
 
     /// `floor(log2(|self|))` for a non-zero value, used to bracket a composite's magnitude for the
-    /// per-quantity scale derivation. Computed by scaling the magnitude up by a large power of two and
-    /// reading the bit length, so it is exact integer arithmetic; a rough bracket is all the scale
-    /// derivation needs, and the value never approaches the internal `2^-K` floor for a physical constant.
+    /// per-quantity scale derivation. The numerator and denominator bit lengths leave only two possible
+    /// answers. One exact aligned comparison selects between them without a fixed small-value floor.
     pub fn floor_log2(&self) -> i64 {
         assert!(!self.num.is_zero(), "floor_log2 of zero");
-        const K: u32 = 256;
-        let (q, _r) = self.num.shl_bits(K).divmod(&self.den);
-        assert!(
-            !q.is_zero(),
-            "floor_log2 argument underflows the 2^-256 bracket"
-        );
-        q.bit_len() as i64 - 1 - K as i64
+        let candidate = i64::from(self.num.bit_len()) - i64::from(self.den.bit_len());
+        let at_least_candidate = if candidate >= 0 {
+            self.num.cmp_big(&self.den.shl_bits(candidate as u32)) != Ordering::Less
+        } else {
+            self.num.shl_bits((-candidate) as u32).cmp_big(&self.den) != Ordering::Less
+        };
+        if at_least_candidate {
+            candidate
+        } else {
+            candidate - 1
+        }
     }
 
     /// The place value of a decimal string's last significant digit (its unit in the last place), as an
@@ -452,21 +593,24 @@ impl BigRat {
             .or_else(|| mantissa.strip_prefix('+'))
             .unwrap_or(mantissa);
         let frac_len = match body.split_once('.') {
-            Some((_, f)) => f.len() as i64,
+            Some((_, f)) => decimal_fraction_len(f, s)?,
             None => 0,
         };
-        let net_exp = exp10 - frac_len;
+        let net_exp = exp10
+            .checked_sub(frac_len)
+            .ok_or_else(|| format!("decimal exponent out of range in {s}"))?;
+        let power = decimal_power_exponent(net_exp, s)?;
         if net_exp >= 0 {
             Ok(BigRat::new(
                 false,
-                BigUint::ten_pow(net_exp as u32),
+                BigUint::ten_pow(power),
                 BigUint::from_u64(1),
             ))
         } else {
             Ok(BigRat::new(
                 false,
                 BigUint::from_u64(1),
-                BigUint::ten_pow((-net_exp) as u32),
+                BigUint::ten_pow(power),
             ))
         }
     }
@@ -503,21 +647,39 @@ impl BigRat {
         }
         // Value = digits * 10^(exp10 - frac_len). Build num/den as powers of ten.
         let num_digits = big_from_dec_digits(&digits)?;
-        let net_exp = exp10 - frac_part.len() as i64;
+        let frac_len = decimal_fraction_len(frac_part, s)?;
+        let net_exp = exp10
+            .checked_sub(frac_len)
+            .ok_or_else(|| format!("decimal exponent out of range in {s}"))?;
+        let power = decimal_power_exponent(net_exp, s)?;
         if net_exp >= 0 {
             Ok(BigRat::new(
                 neg,
-                num_digits.mul(&BigUint::ten_pow(net_exp as u32)),
+                num_digits.mul(&BigUint::ten_pow(power)),
                 BigUint::from_u64(1),
             ))
         } else {
-            Ok(BigRat::new(
-                neg,
-                num_digits,
-                BigUint::ten_pow((-net_exp) as u32),
-            ))
+            Ok(BigRat::new(neg, num_digits, BigUint::ten_pow(power)))
         }
     }
+
+    pub(crate) fn canonical_bytes(&self) -> Vec<u8> {
+        let mut output = Vec::new();
+        output.push(u8::from(self.neg));
+        self.num.encode_canonical(&mut output);
+        self.den.encode_canonical(&mut output);
+        output
+    }
+}
+
+fn decimal_fraction_len(fraction: &str, source: &str) -> Result<i64, String> {
+    i64::try_from(fraction.len())
+        .map_err(|_| format!("fractional digit count out of range in {source}"))
+}
+
+fn decimal_power_exponent(net_exp: i64, source: &str) -> Result<u32, String> {
+    u32::try_from(net_exp.unsigned_abs())
+        .map_err(|_| format!("decimal exponent out of range in {source}"))
 }
 
 /// Parse a run of decimal digits into a `BigUint` (Horner over base ten).
@@ -564,6 +726,29 @@ mod tests {
                     .unwrap(),
                 (hi - lo) as u128
             );
+        }
+    }
+
+    #[test]
+    fn u128_and_scaled_i128_construction_preserve_all_bits() {
+        for value in [
+            0_u128,
+            1,
+            u64::MAX as u128 + 1,
+            (1_u128 << 127) - 1,
+            u128::MAX,
+        ] {
+            assert_eq!(BigUint::from_u128(value).to_u128(), Some(value));
+        }
+
+        for (bits, scale) in [(7_i128, 3_u32), (-7, 3), (i128::MAX, 97)] {
+            let value = BigRat::from_scaled_i128(bits, scale);
+            assert_eq!(value.round_to_scale(scale), Some(bits));
+        }
+
+        for (bits, exponent) in [(7_i128, -3_i32), (-7, 3), (i128::MAX, -97)] {
+            let value = BigRat::from_binary_i128(bits, exponent);
+            assert_eq!(value.round_to_binary_exponent(exponent), Some(bits));
         }
     }
 
@@ -643,6 +828,24 @@ mod tests {
     }
 
     #[test]
+    fn canonical_rational_components_reduce_and_enforce_the_bound() {
+        let unreduced = BigRat::new(false, BigUint::from_u64(6), BigUint::from_u64(8));
+        let reduced = BigRat::from_i64(3).div(&BigRat::from_i64(4));
+        assert_eq!(
+            unreduced.bounded_canonical_components(1).unwrap(),
+            reduced.bounded_canonical_components(1).unwrap()
+        );
+        assert_eq!(
+            BigRat::from_i64(0).bounded_canonical_components(1).unwrap(),
+            (false, vec![0], vec![1])
+        );
+        assert!(BigRat::from_i64(256)
+            .bounded_canonical_components(1)
+            .is_err());
+        assert!(BigRat::from_i64(1).bounded_canonical_components(0).is_err());
+    }
+
+    #[test]
     fn decimal_ulp_is_the_last_place_value() {
         // "5.670374419e-8" has 9 fractional mantissa digits and exponent -8, so its ULP is 10^-17.
         let u = BigRat::decimal_ulp("5.670374419e-8").unwrap();
@@ -667,6 +870,22 @@ mod tests {
         let big_num = BigUint::from_u64(1).shl_bits(127);
         let v = BigRat::new(false, big_num, BigUint::from_u64(1));
         assert_eq!(v.round_to_scale(0), None);
+
+        let min = BigRat::new(
+            true,
+            BigUint::from_u64(1).shl_bits(127),
+            BigUint::from_u64(1),
+        );
+        assert_eq!(min.round_to_scale(0), Some(i128::MIN));
+
+        let below_min = BigRat::new(
+            true,
+            BigUint::from_u64(1)
+                .shl_bits(127)
+                .add(&BigUint::from_u64(1)),
+            BigUint::from_u64(1),
+        );
+        assert_eq!(below_min.round_to_scale(0), None);
     }
 
     #[test]
@@ -692,6 +911,9 @@ mod tests {
                 .floor_log2(),
             -25
         );
+        // The exact comparison has no fixed underflow bracket.
+        assert_eq!(BigRat::from_binary_i128(1, -4096).floor_log2(), -4096);
+        assert_eq!(BigRat::from_binary_i128(3, -4096).floor_log2(), -4095);
     }
 
     #[test]
@@ -710,5 +932,13 @@ mod tests {
                 .cmp_rat(&BigRat::from_i64(-250)),
             Ordering::Equal
         );
+    }
+
+    #[test]
+    fn decimal_exponents_refuse_before_narrowing_or_signed_overflow() {
+        for source in ["1e4294967296", "1e-4294967296", "1.0e-9223372036854775808"] {
+            assert!(BigRat::from_decimal_str(source).is_err(), "{source}");
+            assert!(BigRat::decimal_ulp(source).is_err(), "{source}");
+        }
     }
 }

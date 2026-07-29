@@ -12,24 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The cited ENDMEMBER MELTING registry (`data/melting_endmembers.toml`): one row per silicate or oxide
+//! The ENDMEMBER MELTING candidate-evidence registry (`data/melting_endmembers.toml`): one row per silicate or oxide
 //! endmember carrying the two-number (plus fusion-volume) melting signature the [`crate::melting`] rung reads,
-//! `(T_m, dH_fus, dV_fus)`. This is a cited `[M]` data column (the melting point and the enthalpy of fusion
-//! are MEASURED quantities), so it wears its OWN block kind (`[[endmember]]`, header-cited), out of the
-//! floor-`[[element]]` real/fantasy policing: a citation file is an immutable transcription of its source,
-//! never a home for the authorship axis (the citation-file-immutability doctrine).
+//! `(T_m, dH_fus, dV_fus)`. This is a candidate-evidence registry. Loading a cited row does not assign a
+//! provenance mark or admit its magnitude to the sealed absolute physics floor. Canonical use still needs
+//! derivation or the complete machine-resolvable floor-admission receipt, which is where accounting marks bind.
 //!
 //! The mechanism (the loader and the melt rung it feeds) is fixed Rust; the membership is data and grows with
 //! the world (Principle 11), a sibling of the phase registry ([`crate::petrology_data`]). An alien crust is a
 //! new row, not a rewrite: the wiring keys off each phase's own `Endmember` signature (admit-the-alien).
 //!
-//! Every value is fixed-point ([`Fixed`]), parsed from a decimal string by integer arithmetic (no float on the
-//! canonical path), and carries its own citation. Two honest edges are declared per row rather than hidden: an
+//! Every candidate is fixed-point ([`Fixed`]), parsed from a decimal string by integer arithmetic, and carries
+//! its own citation. Two honest edges are declared per row rather than hidden: an
 //! INCONGRUENT melter (enstatite melts to forsterite plus liquid at a peritectic near 1830 K at 1 bar) carries
 //! `congruent = false` and its peritectic temperature as the ideal pseudo-endmember signature, never a
-//! fabricated congruent value; a fusion VOLUME with no clean primary source is left empty, which loads as zero
-//! (the pressure-insensitive surface-only rung) with `fusion_volume_sourced = false`, flagged rather than
-//! invented.
+//! fabricated congruent value; a fusion VOLUME with no clean primary source remains [`None`]. Surface equations
+//! that do not contain the pressure-work term may still use the two-number signature. Any nonzero-pressure
+//! evaluation returns a structured refusal rather than substituting zero.
 
 use crate::melting::Endmember;
 use civsim_core::Fixed;
@@ -38,8 +37,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 
-/// One endmember's cited melting row. The `endmember()` accessor projects it to the melt-rung [`Endmember`]
-/// signature the liquidus, eutectic, and melt-fraction machinery reads.
+/// One endmember's candidate-evidence row. The `endmember()` accessor projects it to the melt-rung
+/// [`Endmember`] signature for research evaluation. Projection does not admit the values.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MeltingEndmember {
     /// The endmember's mineral name, for example `forsterite`.
@@ -54,21 +53,18 @@ pub struct MeltingEndmember {
     pub fusion_enthalpy_j_per_mol: Fixed,
     /// The raw decimal string of the fusion enthalpy.
     pub fusion_enthalpy_decimal: String,
-    /// The molar volume change on fusion `dV_fus`, cubic centimetres per mole (the petrology convention),
-    /// zero when unsourced (the pressure-insensitive surface-only rung).
-    pub fusion_volume_cm3_per_mol: Fixed,
-    /// The raw decimal string of the fusion volume; empty when unsourced.
-    pub fusion_volume_decimal: String,
+    /// The molar volume change on fusion `dV_fus`, cubic centimetres per mole (the petrology convention).
+    /// `None` records absent evidence without assigning a numeric value.
+    pub fusion_volume_cm3_per_mol: Option<Fixed>,
+    /// The raw decimal string of the fusion volume, present only when the volume is evidenced.
+    pub fusion_volume_decimal: Option<String>,
     /// Whether the phase melts CONGRUENTLY at one bar. `false` marks an incongruent (peritectic) melter, whose
     /// `melting_point_k` is the peritectic temperature used as the ideal pseudo-endmember signature (labelled).
     pub congruent: bool,
-    /// Whether the fusion volume is cited. `false` marks a fusion volume with no primary source, set to zero
-    /// (the surface-only rung) and flagged rather than fabricated.
-    pub fusion_volume_sourced: bool,
-    /// The citation for the melting point and fusion enthalpy (real-with-source, one row per primary source).
+    /// The candidate citation for the melting point and fusion enthalpy.
     pub source: String,
-    /// The citation for the fusion volume when it is sourced; empty when the volume is unsourced (zeroed).
-    pub fusion_volume_source: String,
+    /// The citation for the fusion volume, present only when the volume is evidenced.
+    pub fusion_volume_source: Option<String>,
 }
 
 impl MeltingEndmember {
@@ -99,8 +95,15 @@ pub enum MeltingError {
         /// What went wrong.
         detail: String,
     },
-    /// An endmember carries no citation (every row is real-with-source).
+    /// An endmember candidate carries no citation.
     MissingSource(String),
+    /// A fusion-volume value and its citation must either both be present or both be absent.
+    FusionVolumeEvidence {
+        /// The endmember.
+        name: String,
+        /// The mismatch between value and citation.
+        detail: String,
+    },
     /// A physical-validity gate failed (a non-positive melting point, or a negative fusion enthalpy the melt
     /// rung's liquidus rejects).
     Unphysical {
@@ -121,9 +124,12 @@ impl fmt::Display for MeltingError {
                 write!(f, "value in endmember '{name}' could not be read: {detail}")
             }
             MeltingError::MissingSource(n) => {
+                write!(f, "endmember candidate '{n}' must declare a citation")
+            }
+            MeltingError::FusionVolumeEvidence { name, detail } => {
                 write!(
                     f,
-                    "endmember '{n}' must declare a citation (real-with-source)"
+                    "fusion-volume evidence in endmember '{name}' is incomplete: {detail}"
                 )
             }
             MeltingError::Unphysical { name, detail } => {
@@ -166,18 +172,19 @@ impl MeltingRegistry {
         Self::from_toml_str(&text)
     }
 
-    /// The embedded standard registry, built from the crate's embedded data so a caller needs no filesystem
-    /// path.
+    /// The embedded candidate-evidence registry, built from the crate's embedded data so a caller needs no
+    /// filesystem path. Loading it does not admit its values.
     pub fn standard() -> Result<Self, MeltingError> {
         Self::from_toml_str(include_str!("../data/melting_endmembers.toml"))
     }
 
-    /// The cited melting row for a formula, for example `Mg2SiO4`.
+    /// The candidate-evidence row for a formula, for example `Mg2SiO4`.
     pub fn by_formula(&self, formula: &str) -> Option<&MeltingEndmember> {
         self.by_formula.get(formula)
     }
 
-    /// The melt-rung [`Endmember`] signature for a formula, or `None` if the formula is not a carried row.
+    /// The research-evaluation [`Endmember`] signature for a formula, or `None` if the formula is not carried.
+    /// This projection is not a floor-admission adapter.
     pub fn endmember_for_formula(&self, formula: &str) -> Option<Endmember> {
         self.by_formula
             .get(formula)
@@ -185,9 +192,9 @@ impl MeltingRegistry {
     }
 
     /// The melt-rung [`Endmember`] for a condensation SPECIES NAME (the formula before its `(cr,...)` or `(l)`
-    /// phase suffix), so a caller looks up straight from the differentiation's floating-phase name. `None` if
-    /// the species name has no formula or the formula is not a carried row (the fail-soft buoyancy fallback the
-    /// wiring names).
+    /// phase suffix), so a research caller can look up from a floating-phase name. `None` if the species name
+    /// has no formula or the formula is not a carried candidate row. This projection is not a floor-admission
+    /// adapter.
     pub fn endmember_for_species(&self, species_name: &str) -> Option<Endmember> {
         let formula = species_name.split('(').next()?;
         self.endmember_for_formula(formula)
@@ -221,7 +228,7 @@ struct EndmemberDef {
     formula: String,
     melting_point_k: String,
     fusion_enthalpy_j_per_mol: String,
-    /// The fusion volume, cm^3/mol; empty declares it UNSOURCED (zeroed, the surface-only rung), flagged.
+    /// The fusion volume, cm^3/mol; empty records absent evidence without assigning a value.
     #[serde(default)]
     fusion_volume_cm3_per_mol: String,
     /// Whether the phase melts congruently at 1 bar; defaults to true, set false for an incongruent melter.
@@ -267,18 +274,33 @@ impl EndmemberDef {
                 detail: "the fusion enthalpy must be non-negative".to_string(),
             });
         }
-        // The fusion volume: empty declares it unsourced, loaded as zero (the pressure-insensitive surface-only
-        // rung), flagged rather than fabricated.
+        // Fusion-volume evidence is atomic: the value and its citation are either both present or both absent.
+        // Absence remains `None`, so a later nonzero-pressure evaluation can refuse without confusing it with a
+        // measured zero.
         let vol_raw = self.fusion_volume_cm3_per_mol.trim();
-        let (fusion_volume_cm3_per_mol, fusion_volume_decimal, fusion_volume_sourced) =
-            if vol_raw.is_empty() {
-                (Fixed::ZERO, String::new(), false)
-            } else {
-                (
-                    read("fusion_volume_cm3_per_mol", vol_raw)?,
-                    vol_raw.to_string(),
-                    true,
-                )
+        let vol_source = self.fusion_volume_source.trim();
+        let (fusion_volume_cm3_per_mol, fusion_volume_decimal, fusion_volume_source) =
+            match (vol_raw.is_empty(), vol_source.is_empty()) {
+                (true, true) => (None, None, None),
+                (true, false) => {
+                    return Err(MeltingError::FusionVolumeEvidence {
+                        name: self.name.clone(),
+                        detail: "a citation is present but the fusion-volume value is absent"
+                            .to_string(),
+                    });
+                }
+                (false, true) => {
+                    return Err(MeltingError::FusionVolumeEvidence {
+                        name: self.name.clone(),
+                        detail: "a fusion-volume value is present but its citation is absent"
+                            .to_string(),
+                    });
+                }
+                (false, false) => (
+                    Some(read("fusion_volume_cm3_per_mol", vol_raw)?),
+                    Some(vol_raw.to_string()),
+                    Some(vol_source.to_string()),
+                ),
             };
         Ok(MeltingEndmember {
             name: self.name.trim().to_string(),
@@ -290,9 +312,8 @@ impl EndmemberDef {
             fusion_volume_cm3_per_mol,
             fusion_volume_decimal,
             congruent: self.congruent,
-            fusion_volume_sourced,
             source: self.source.trim().to_string(),
-            fusion_volume_source: self.fusion_volume_source.trim().to_string(),
+            fusion_volume_source,
         })
     }
 }
@@ -388,7 +409,7 @@ source = "test"
     }
 
     #[test]
-    fn an_unsourced_fusion_volume_loads_as_zero_and_is_flagged() {
+    fn an_unsourced_fusion_volume_remains_absent() {
         let no_vol = r#"
 [[endmember]]
 name = "testmineral"
@@ -399,11 +420,41 @@ source = "test row for the unsourced-volume path"
 "#;
         let r = MeltingRegistry::from_toml_str(no_vol).expect("loads");
         let em = r.by_formula("Xy2SiO4").expect("the test row is present");
-        assert_eq!(em.fusion_volume_cm3_per_mol, Fixed::ZERO);
-        assert!(
-            !em.fusion_volume_sourced,
-            "an unsourced fusion volume is flagged, zeroed (the surface-only rung), never fabricated"
-        );
+        assert_eq!(em.fusion_volume_cm3_per_mol, None);
+        assert_eq!(em.fusion_volume_decimal, None);
+        assert_eq!(em.fusion_volume_source, None);
+        assert_eq!(em.endmember().fusion_volume_cm3_per_mol, None);
+    }
+
+    #[test]
+    fn fusion_volume_and_citation_must_be_present_together() {
+        let incomplete = r#"
+[[endmember]]
+name = "testmineral"
+formula = "Xy2SiO4"
+melting_point_k = "2000"
+fusion_enthalpy_j_per_mol = "100000"
+fusion_volume_cm3_per_mol = "4"
+source = "test row"
+"#;
+        assert!(matches!(
+            MeltingRegistry::from_toml_str(incomplete).unwrap_err(),
+            MeltingError::FusionVolumeEvidence { .. }
+        ));
+
+        let orphan_citation = r#"
+[[endmember]]
+name = "testmineral"
+formula = "Xy2SiO4"
+melting_point_k = "2000"
+fusion_enthalpy_j_per_mol = "100000"
+source = "test row"
+fusion_volume_source = "citation without a value"
+"#;
+        assert!(matches!(
+            MeltingRegistry::from_toml_str(orphan_citation).unwrap_err(),
+            MeltingError::FusionVolumeEvidence { .. }
+        ));
     }
 
     #[test]

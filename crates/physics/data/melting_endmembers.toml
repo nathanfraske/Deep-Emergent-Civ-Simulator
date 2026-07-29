@@ -1,9 +1,8 @@
-# The cited ENDMEMBER MELTING registry (crate::melting_data), the cited [M] data column the melt rung
-# (crate::melting) reads: one row per silicate or oxide endmember carrying its melting signature
-# (T_m in kelvin, dH_fus in J/mol, dV_fus in cm^3/mol). Each value is a MEASURED literature quantity,
-# so this file wears its OWN block kind ([[endmember]]), header-cited, out of the floor-[[element]]
-# real/fantasy policing (the citation-file-immutability doctrine): a citation file is an immutable
-# transcription of its source, never a home for the authorship axis.
+# The ENDMEMBER MELTING candidate-evidence registry (crate::melting_data): one row per silicate or oxide
+# endmember carrying a reported melting signature (T_m in kelvin, dH_fus in J/mol, dV_fus in cm^3/mol).
+# These rows carry candidate source claims. Loading them does not assign a provenance mark or admit a magnitude
+# to the sealed absolute physics floor. Canonical use still requires derivation or a complete machine-resolvable
+# floor-admission receipt, which is where accounting marks bind.
 #
 # The mechanism is fixed Rust; the membership is data and grows with the world (Principle 11), a sibling
 # of the phase registry. An alien crust is a new row, not a rewrite (admit-the-alien).
@@ -12,21 +11,20 @@
 # research pass (per the owner's cited-column-fetch-delegation directive), each cited so the value is
 # back-checkable. Where the literature truly splits, BOTH primaries are recorded (never averaged):
 # forsterite's fusion enthalpy scatters 89-142 kJ/mol (DTA vs calorimetry), corundum's splits 111-120
-# kJ/mol (JANAF vs levitation calorimetry). These, and the unsourced fusion volumes, are surfaced in
-# docs/working/MORNING_REVIEW.md for owner verification, never fabricated.
+# kJ/mol (JANAF vs levitation calorimetry). These, and the absent fusion volumes, are tracked in
+# docs/working/ABIOTIC_EVIDENCE_DEBT.md for evidence resolution and admission review.
 #
 # HONEST EDGES, declared per row rather than hidden:
 #  - INCONGRUENT enstatite (MgSiO3) melts to forsterite + liquid at a peritectic near 1830 K at 1 bar;
 #    fayalite melts slightly incongruently too. Each carries congruent = false and its peritectic (or
 #    metastable-congruent) T as the ideal pseudo-endmember signature, never a fabricated congruent value.
-#  - A fusion VOLUME with no clean primary source is left EMPTY, which loads as zero (the pressure-
-#    insensitive surface-only rung) with fusion_volume_sourced = false, flagged rather than invented.
-#    Four of seven fusion volumes are unsourced (anorthite, fayalite, spinel, corundum), flagged; the
+#  - A fusion VOLUME with no clean primary source is left EMPTY, which loads as explicit absence. Equations
+#    without pressure work may use the two-number signature; any nonzero-pressure evaluation refuses.
+#    Four of seven fusion volumes are absent (anorthite, fayalite, spinel, corundum); the
 #    three that are sourced (forsterite, enstatite, diopside) come from the Clapeyron-slope / molar-volume
 #    primaries below. Enstatite's is HALVED from Ghiorso's Mg2Si2O6 (double-formula) basis to per-MgSiO3.
-#
-# CALIBRATION NOTE: the melt rung is graded ideal-solution (declared, self-checked). These signatures
-# are the whole information content of that rung; the calibrated non-ideality (Margules) is the next rung.
+# The current law form is ideal-solution and declares its residual. Any later excess-energy terms need their
+# own derivation or admission receipts.
 
 [[endmember]]
 name = "forsterite"
@@ -35,7 +33,7 @@ melting_point_k = "2163"
 fusion_enthalpy_j_per_mol = "142000"
 fusion_volume_cm3_per_mol = "3.84"
 congruent = true
-source = "T_m 2163 K congruent: Bowen & Andersen (1914) Am. J. Sci. 37, 487, re-affirmed Richet, Leclerc & Benoist (1993) GRL 20, 1675. dH_fus 142000 J/mol (+/-14000) at 2174 K: Richet, Leclerc & Benoist (1993) GRL 20, 1675 (quantitative DTA). SPREAD FLAG: transposed-drop calorimetry gives 114000 (+/-20000) and 89000 (+/-12000); the literature band is 89-142 kJ/mol, owner to reconcile."
+source = "T_m 2163 K congruent: Bowen & Andersen (1914) Am. J. Sci. 37, 487, re-affirmed Richet, Leclerc & Benoist (1993) GRL 20, 1675. dH_fus 142000 J/mol (+/-14000) at 2174 K: Richet, Leclerc & Benoist (1993) GRL 20, 1675 (quantitative DTA). GAP LAW EVIDENCE: transposed-drop calorimetry gives 114000 (+/-20000) and 89000 (+/-12000); the literature band is 89-142 kJ/mol. Canonical use requires derivation-first exhaustion and, if irreducible, a complete unique residual-slot receipt; otherwise it refuses."
 fusion_volume_source = "3.84 cm3/mol: Ghiorso (2004) Am. J. Sci. 304, 752, from the Clapeyron slope of the measured fusion curve (1.58 GPa/100 K, Davis & England 1964) + the Richet (1993) fusion entropy. Ghiorso's competing model value 7.35 is disfavored as inconsistent with the fusion-curve data."
 
 [[endmember]]
@@ -54,7 +52,7 @@ formula = "Fe2SiO4"
 melting_point_k = "1490"
 fusion_enthalpy_j_per_mol = "89300"
 congruent = false
-source = "T_m 1490 K (Stebbins & Carmichael tie), 1478 K in the original Bowen & Schairer (1932) Am. J. Sci. 24, 177 (1205 C); FLAG: slight incongruence in the FeO-SiO2 pseudo-binary, T_m band 1478-1490 K. dH_fus 89300 J/mol (+/-1100) hypothetical-congruent at 1490 K (88400 equilibrium-incongruent): Stebbins & Carmichael (1984) Am. Mineral. 69, 292 (drop calorimetry). fusion volume UNSOURCED (no primary reports dV_fus; ~6 cm3/mol is a rough bound only), zeroed (surface-only rung), flagged."
+source = "T_m 1490 K (Stebbins & Carmichael tie), 1478 K in the original Bowen & Schairer (1932) Am. J. Sci. 24, 177 (1205 C); FLAG: slight incongruence in the FeO-SiO2 pseudo-binary, T_m band 1478-1490 K. dH_fus 89300 J/mol (+/-1100) hypothetical-congruent at 1490 K (88400 equilibrium-incongruent): Stebbins & Carmichael (1984) Am. Mineral. 69, 292 (drop calorimetry). fusion volume UNSOURCED (no primary reports dV_fus; ~6 cm3/mol is a rough bound only), carried as absent; pressure-dependent evaluation refuses."
 
 [[endmember]]
 name = "anorthite"
@@ -62,7 +60,7 @@ formula = "CaAl2Si2O8"
 melting_point_k = "1830"
 fusion_enthalpy_j_per_mol = "135600"
 congruent = true
-source = "T_m 1830 K congruent (to ~0.9 GPa): Bowen (1913) Am. J. Sci. 35, 577, adopted Weill et al. (1980) / Richet & Bottinga (1984a). dH_fus 135600 J/mol (+/-8800) at 1830 K: Weill, Hon, Carmichael et al. (1980) Contrib. Mineral. Petrol. 74, 95 (drop calorimetry, 32.4 +/-2.1 kcal/mol x 4.184); SECOND PRIMARY: Richet & Bottinga (1984a) EPSL 67, 415 give ~133000. fusion volume UNSOURCED (Ghiorso 2004 flags the anorthite reference-liquid volume as problematic, dV_fus 2.5-9 too wide to assert), zeroed, flagged. Co-author list to back-check against the article header."
+source = "T_m 1830 K congruent (to ~0.9 GPa): Bowen (1913) Am. J. Sci. 35, 577, adopted Weill et al. (1980) / Richet & Bottinga (1984a). dH_fus 135600 J/mol (+/-8800) at 1830 K: Weill, Hon, Carmichael et al. (1980) Contrib. Mineral. Petrol. 74, 95 (drop calorimetry, 32.4 +/-2.1 kcal/mol x 4.184); SECOND PRIMARY: Richet & Bottinga (1984a) EPSL 67, 415 give ~133000. fusion volume UNSOURCED (Ghiorso 2004 flags the anorthite reference-liquid volume as problematic, dV_fus 2.5-9 too wide to assert), carried as absent; pressure-dependent evaluation refuses. Co-author list to back-check against the article header."
 
 [[endmember]]
 name = "diopside"
@@ -72,7 +70,7 @@ fusion_enthalpy_j_per_mol = "138500"
 fusion_volume_cm3_per_mol = "13.2"
 congruent = true
 source = "T_m 1665 K congruent (1392 C; some sources 1670 K): Bowen (1914), adopted Richet & Bottinga (1984a) / Ziegler & Navrotsky (1986). dH_fus 138500 J/mol at 1665 K: Ziegler & Navrotsky (1986) GCA 50, 2461 (direct high-T calorimetry); corroborated 137700 by Richet & Bottinga (1984a)."
-fusion_volume_source = "13.2 cm3/mol (range 12.0-13.8): Rigden, Ahrens & Stolper (1989) JGR 94(B7), 9508, Table 5 (V_liquid 82.34 - V_crystal 69.11 at 1664 K); corroborated by Lange et al. (1990). A large ~19 percent fusion volume, correct for a chain silicate that depolymerizes on melting (melt 2.63 vs crystal 3.13 g/cm3). NOTE the banked melt rung's own test fixture uses ~5.2 cm3/mol, an underestimate flagged for owner reconciliation."
+fusion_volume_source = "13.2 cm3/mol (range 12.0-13.8): Rigden, Ahrens & Stolper (1989) JGR 94(B7), 9508, Table 5 (V_liquid 82.34 - V_crystal 69.11 at 1664 K); corroborated by Lange et al. (1990). A large ~19 percent fusion volume for a chain silicate that depolymerizes on melting (melt 2.63 vs crystal 3.13 g/cm3). GAP LAW EVIDENCE: the retired test fixture used ~5.2 cm3/mol. Canonical use requires derivation-first exhaustion and, if irreducible, a complete unique residual-slot receipt; otherwise it refuses."
 
 [[endmember]]
 name = "corundum"
@@ -80,7 +78,7 @@ formula = "Al2O3"
 melting_point_k = "2327"
 fusion_enthalpy_j_per_mol = "111100"
 congruent = true
-source = "T_m 2327 K (2054 C): NIST-JANAF (Chase 1998) J. Phys. Chem. Ref. Data Monograph 9. dH_fus 111100 J/mol at 2327 K (NIST-JANAF, Chase 1998). GENUINE PRIMARY DISAGREEMENT (both recorded, not averaged): Ushakov & Navrotsky drop-and-catch aerodynamic-levitation calorimetry gives 120000 (+/-10000); band 111-120 kJ/mol, owner to reconcile. fusion volume UNSOURCED (a levitation-density derivation suggests ~6-7 cm3/mol but no primary verified), zeroed (surface-only rung), flagged."
+source = "T_m 2327 K (2054 C): NIST-JANAF (Chase 1998) J. Phys. Chem. Ref. Data Monograph 9. dH_fus 111100 J/mol at 2327 K (NIST-JANAF, Chase 1998). GAP LAW EVIDENCE (both reports recorded, not averaged): Ushakov & Navrotsky drop-and-catch aerodynamic-levitation calorimetry gives 120000 (+/-10000); band 111-120 kJ/mol. Canonical use requires derivation-first exhaustion and, if irreducible, a complete unique residual-slot receipt; otherwise it refuses. fusion volume UNSOURCED (a levitation-density derivation suggests ~6-7 cm3/mol but no primary verified), carried as absent; pressure-dependent evaluation refuses."
 
 [[endmember]]
 name = "spinel"
@@ -88,4 +86,4 @@ formula = "MgAl2O4"
 melting_point_k = "2408"
 fusion_enthalpy_j_per_mol = "107000"
 congruent = true
-source = "T_m 2408 K (2135 C) congruent: adopted Richet, Leclerc & Benoist (1993) GRL 20, 1675 (their DTA fusion is tied to this T). dH_fus 107000 J/mol (+/-11000) at 2408 K: Richet, Leclerc & Benoist (1993) GRL 20, 1675 (quantitative DTA). fusion volume UNSOURCED (no primary located), zeroed (surface-only rung), flagged."
+source = "T_m 2408 K (2135 C) congruent: adopted Richet, Leclerc & Benoist (1993) GRL 20, 1675 (their DTA fusion is tied to this T). dH_fus 107000 J/mol (+/-11000) at 2408 K: Richet, Leclerc & Benoist (1993) GRL 20, 1675 (quantitative DTA). fusion volume UNSOURCED (no primary located), carried as absent; pressure-dependent evaluation refuses."

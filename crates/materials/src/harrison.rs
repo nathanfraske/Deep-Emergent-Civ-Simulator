@@ -28,9 +28,9 @@
 //! s-s negative, p-p positive; pi bond negative).
 //!
 //! THE DIMENSIONAL PREFACTOR, assembled (the dimensionless-constant law). `hbar^2 / m_e = 7.62 eV * Angstrom^2` is
-//! a dimensional constant; it reassembles from the exact SI mantissas of `hbar` and `m_e` and the eV and Angstrom
-//! unit folds, a single power of ten netting out, so no folded dimensional decimal is authored. With `d` in
-//! Angstrom, `V_{ll'm}` comes out in eV.
+//! a dimensional constant; it reassembles from the sealed SI execution projections of `h`, `m_e`, and `e` plus
+//! the exact eV and Angstrom coordinate folds, so no folded dimensional decimal is authored. With `d` in Angstrom,
+//! `V_{ll'm}` comes out in eV.
 //!
 //! THE SP BOND-ORBITAL ESTIMATOR (this slice, unblocked by the owner's Table 4-1 / Table 2-3 / Table 2-2 delivery).
 //! On the two-center primitive the tetrahedral-solid bond-orbital model builds the emergent bonding descriptors: the
@@ -54,6 +54,7 @@
 //! leaf.
 
 use civsim_core::Fixed;
+use civsim_units::constants::SiExecutionMagnitudes;
 
 const ZERO: Fixed = Fixed::ZERO;
 
@@ -83,39 +84,30 @@ pub fn eta(bond: TwoCenterBond) -> Fixed {
 }
 
 /// The Harrison dimensional prefactor `hbar^2 / m_e = 7.62 eV * Angstrom^2` (so `V = eta * prefactor / d^2` is in
-/// eV with `d` in Angstrom). ASSEMBLED from the exact SI mantissas (the dimensionless-constant law, no folded
-/// dimensional decimal): `hbar^2 / m_e` in `eV * Angstrom^2` is
+/// eV with `d` in Angstrom). ASSEMBLED from the verified SI execution capability (no folded dimensional decimal):
+/// `hbar^2 / m_e` in `eV * Angstrom^2` is
 /// `(hbar_mantissa^2 / m_e_mantissa / e_mantissa) * 10^2`, since `hbar^2` carries `10^-68`, `m_e` carries
 /// `10^-31`, the joule-to-eV fold carries `10^19 / e`, and the `m^2`-to-`Angstrom^2` fold carries `10^20`, netting
 /// `10^2`. The constituents underflow Q32.32 alone; only this collapsed form is representable.
-fn harrison_prefactor_ev_angstrom2() -> Fixed {
-    // hbar = 1.054571817e-34 J*s; m_e = 9.1093837015e-31 kg; e = 1.602176634e-19 C (exact SI mantissas).
-    let hbar_mantissa = Fixed::from_ratio(1_054_571_817, 1_000_000_000);
-    let me_mantissa = Fixed::from_ratio(91_093_837_015, 10_000_000_000);
-    let e_mantissa = Fixed::from_ratio(1_602_176_634, 1_000_000_000);
-    let hbar_sq = match hbar_mantissa.checked_mul(hbar_mantissa) {
-        Some(v) => v,
-        None => return ZERO,
-    };
-    // (hbar^2 / m_e / e) * 100: the collapsed 10^2 rides as the *100.
-    hbar_sq
-        .checked_div(me_mantissa)
-        .and_then(|x| x.checked_div(e_mantissa))
-        .and_then(|x| x.checked_mul(Fixed::from_int(100)))
-        .unwrap_or(ZERO)
+fn harrison_prefactor_ev_angstrom2(execution: &SiExecutionMagnitudes) -> Option<Fixed> {
+    execution.harrison_prefactor_ev_angstrom2()
 }
 
 /// The universal two-center tight-binding matrix element `V_{ll'm} = eta_{ll'm} * hbar^2 / (m_e * d^2)` in eV, with
 /// the interatomic distance `d` in Angstrom (Harrison 1980). Reserves no value: `eta` is the pinned canonical
 /// quartet (physics-floor law constants), the prefactor reassembles from `hbar`, `m_e`, and `e`, and `d` is the
 /// caller's structural datum. `None` for a non-positive distance (no bond) or on overflow.
-pub fn two_center_matrix_element(bond: TwoCenterBond, d_angstrom: Fixed) -> Option<Fixed> {
+pub fn two_center_matrix_element(
+    execution: &SiExecutionMagnitudes,
+    bond: TwoCenterBond,
+    d_angstrom: Fixed,
+) -> Option<Fixed> {
     if d_angstrom <= ZERO {
         return None;
     }
     let d_sq = d_angstrom.checked_mul(d_angstrom)?;
     eta(bond)
-        .checked_mul(harrison_prefactor_ev_angstrom2())?
+        .checked_mul(harrison_prefactor_ev_angstrom2(execution)?)?
         .checked_div(d_sq)
 }
 
@@ -133,13 +125,13 @@ fn covalent_coefficient() -> Fixed {
 /// homopolar bonding-antibonding half-splitting of the sp3 bond (Harrison 1980). Reads only the bond length; the
 /// coefficient and the prefactor are cited constants (no reserved value). `None` for a non-positive distance (no
 /// bond) or on overflow. The `V_2 ~ d^-2` law drives the homopolar gap trend (a shorter bond, a wider gap).
-pub fn covalent_energy_v2(d_angstrom: Fixed) -> Option<Fixed> {
+pub fn covalent_energy_v2(execution: &SiExecutionMagnitudes, d_angstrom: Fixed) -> Option<Fixed> {
     if d_angstrom <= ZERO {
         return None;
     }
     let d_sq = d_angstrom.checked_mul(d_angstrom)?;
     covalent_coefficient()
-        .checked_mul(harrison_prefactor_ev_angstrom2())?
+        .checked_mul(harrison_prefactor_ev_angstrom2(execution)?)?
         .checked_div(d_sq)
 }
 
@@ -238,6 +230,11 @@ pub fn covalent_stretch_force_constant_gated(
 mod tests {
     use super::*;
 
+    fn execution() -> SiExecutionMagnitudes {
+        civsim_units::constants::canonical_si_execution_magnitudes()
+            .expect("the sealed physical floor projects")
+    }
+
     fn close(a: Fixed, b: f64, tol: f64) -> bool {
         (a.to_f64_lossy() - b).abs() < tol
     }
@@ -247,7 +244,7 @@ mod tests {
         // THE DIMENSIONLESS-CONSTANT LAW: hbar^2/m_e reassembles to 7.62 eV*Angstrom^2 from the exact SI mantissas
         // of hbar, m_e, and e, with a single collapsed power of ten. The famous Harrison prefactor, not a folded
         // dimensional decimal.
-        let p = harrison_prefactor_ev_angstrom2();
+        let p = harrison_prefactor_ev_angstrom2(&execution()).expect("the prefactor derives");
         assert!(
             close(p, 7.6199, 0.01),
             "hbar^2/m_e ~ 7.62 eV*Angstrom^2, got {}",
@@ -271,29 +268,35 @@ mod tests {
         // V_sssigma ~ -1.93, V_spsigma ~ 2.54, V_pppi ~ -1.12. A cross-check of the primitive against Harrison's own
         // numbers (a consistency check on the pinned quartet and the prefactor, not an independent validation).
         let d = Fixed::from_ratio(235, 100);
-        let pp_sigma = two_center_matrix_element(TwoCenterBond::PpSigma, d).expect("V_ppsigma");
+        let pp_sigma =
+            two_center_matrix_element(&execution(), TwoCenterBond::PpSigma, d).expect("V_ppsigma");
         assert!(
             close(pp_sigma, 4.47, 0.03),
             "Si V_ppsigma ~ 4.47 eV, got {}",
             pp_sigma.to_f64_lossy()
         );
-        let ss_sigma = two_center_matrix_element(TwoCenterBond::SsSigma, d).expect("V_sssigma");
+        let ss_sigma =
+            two_center_matrix_element(&execution(), TwoCenterBond::SsSigma, d).expect("V_sssigma");
         assert!(
             close(ss_sigma, -1.93, 0.03),
             "Si V_sssigma ~ -1.93 eV, got {}",
             ss_sigma.to_f64_lossy()
         );
         // The signs follow Harrison's convention: ss_sigma and pp_pi negative, sp_sigma and pp_sigma positive.
-        assert!(two_center_matrix_element(TwoCenterBond::SpSigma, d).unwrap() > ZERO);
-        assert!(two_center_matrix_element(TwoCenterBond::PpPi, d).unwrap() < ZERO);
+        assert!(two_center_matrix_element(&execution(), TwoCenterBond::SpSigma, d).unwrap() > ZERO);
+        assert!(two_center_matrix_element(&execution(), TwoCenterBond::PpPi, d).unwrap() < ZERO);
     }
 
     #[test]
     fn the_matrix_element_scales_as_the_inverse_square_distance() {
         // V ~ 1/d^2: halving the distance quadruples the magnitude, the Harrison d^-2 law the homopolar gap trend
         // rides on (a wider-gap C has a shorter bond than Si).
-        let short = two_center_matrix_element(TwoCenterBond::PpSigma, Fixed::from_int(2)).unwrap();
-        let long = two_center_matrix_element(TwoCenterBond::PpSigma, Fixed::from_int(4)).unwrap();
+        let short =
+            two_center_matrix_element(&execution(), TwoCenterBond::PpSigma, Fixed::from_int(2))
+                .unwrap();
+        let long =
+            two_center_matrix_element(&execution(), TwoCenterBond::PpSigma, Fixed::from_int(4))
+                .unwrap();
         // (4/2)^2 = 4: the shorter bond's matrix element is 4x the longer.
         assert!(
             close(short.checked_div(long).unwrap(), 4.0, 0.01),
@@ -303,14 +306,19 @@ mod tests {
 
     #[test]
     fn a_non_positive_distance_has_no_bond() {
-        assert!(two_center_matrix_element(TwoCenterBond::PpSigma, ZERO).is_none());
-        assert!(two_center_matrix_element(TwoCenterBond::PpSigma, Fixed::from_int(-1)).is_none());
+        assert!(two_center_matrix_element(&execution(), TwoCenterBond::PpSigma, ZERO).is_none());
+        assert!(two_center_matrix_element(
+            &execution(),
+            TwoCenterBond::PpSigma,
+            Fixed::from_int(-1)
+        )
+        .is_none());
     }
 
     // The estimator's cited test fixtures are the owner-delivered Harrison Table 4-1 bond lengths (Angstrom) and
     // Table 2-2 p-term values (eV), used as clearly-labeled cited inputs, never seeded from memory.
     fn average_gap(d: Fixed, eps_p_a: Fixed, eps_p_b: Fixed) -> Fixed {
-        let v2 = covalent_energy_v2(d).expect("V_2");
+        let v2 = covalent_energy_v2(&execution(), d).expect("V_2");
         let v3 = polar_energy_v3(eps_p_a, eps_p_b).expect("V_3");
         bond_orbital_average_gap_ev(v2, v3).expect("E_g")
     }
@@ -319,13 +327,13 @@ mod tests {
     fn the_covalent_energy_reproduces_harrisons_table_4_1() {
         // V_2 = 2.16 * hbar^2/(m_e d^2). Silicon d = 2.35 A -> 2.98 eV; GaAs d = 2.45 A -> 2.74 eV (Table 4-1). A
         // consistency check of the covalent coefficient and prefactor against Harrison's own tabulated V_2.
-        let si = covalent_energy_v2(Fixed::from_ratio(235, 100)).expect("Si V_2");
+        let si = covalent_energy_v2(&execution(), Fixed::from_ratio(235, 100)).expect("Si V_2");
         assert!(
             close(si, 2.98, 0.02),
             "Si V_2 ~ 2.98 eV, got {}",
             si.to_f64_lossy()
         );
-        let gaas = covalent_energy_v2(Fixed::from_ratio(245, 100)).expect("GaAs V_2");
+        let gaas = covalent_energy_v2(&execution(), Fixed::from_ratio(245, 100)).expect("GaAs V_2");
         assert!(
             close(gaas, 2.74, 0.02),
             "GaAs V_2 ~ 2.74 eV, got {}",
@@ -432,15 +440,15 @@ mod tests {
         // 0.88 -> ZnSe 0.66 (increasingly ionic). The emergent bonding-character trend, and a fourth cross-check that
         // the p-difference V_3 (not the hybrid) is the right one: only the p-difference reproduces this column.
         let ge_ac = bond_covalency(
-            covalent_energy_v2(Fixed::from_ratio(244, 100)).unwrap(),
+            covalent_energy_v2(&execution(), Fixed::from_ratio(244, 100)).unwrap(),
             ZERO,
         )
         .expect("Ge alpha_c");
-        let gaas_v2 = covalent_energy_v2(Fixed::from_ratio(245, 100)).unwrap();
+        let gaas_v2 = covalent_energy_v2(&execution(), Fixed::from_ratio(245, 100)).unwrap();
         let gaas_v3 =
             polar_energy_v3(Fixed::from_ratio(-791, 100), Fixed::from_ratio(-490, 100)).unwrap();
         let gaas_ac = bond_covalency(gaas_v2, gaas_v3).expect("GaAs alpha_c");
-        let znse_v2 = covalent_energy_v2(Fixed::from_ratio(245, 100)).unwrap();
+        let znse_v2 = covalent_energy_v2(&execution(), Fixed::from_ratio(245, 100)).unwrap();
         let znse_v3 =
             polar_energy_v3(Fixed::from_ratio(-953, 100), Fixed::from_ratio(-338, 100)).unwrap();
         let znse_ac = bond_covalency(znse_v2, znse_v3).expect("ZnSe alpha_c");
@@ -462,7 +470,7 @@ mod tests {
         // The average gap is Penn/optical scale (Si 5.96 eV), not the fundamental gap, and is ESTIMATOR grade: fed to
         // the carrier-density activation with GapGrade::Estimator the exponent is barred (None), the exponent rider
         // (owner Part 3). The estimator gap reaches classification, ranking, and optical cast, never the exponent.
-        let si_v2 = covalent_energy_v2(Fixed::from_ratio(235, 100)).unwrap();
+        let si_v2 = covalent_energy_v2(&execution(), Fixed::from_ratio(235, 100)).unwrap();
         let e_g = bond_orbital_average_gap_ev(si_v2, ZERO).unwrap();
         let barred = crate::band_gap::ln_thermal_carrier_activation(
             e_g,
@@ -480,7 +488,7 @@ mod tests {
         // BAND 3 is BLOCKED ON PRIMARY-SOURCE VERIFICATION of the overlap-repulsion exponent n (the literature d^-4
         // is the p-d matrix element t_pd, not the repulsion V_0). The stub returns None rather than evaluate with an
         // unverified exponent: the mechanism is specified, not guessed.
-        let v2 = covalent_energy_v2(Fixed::from_ratio(235, 100)).unwrap();
+        let v2 = covalent_energy_v2(&execution(), Fixed::from_ratio(235, 100)).unwrap();
         assert!(
             covalent_stretch_force_constant_gated(v2, ZERO, Fixed::from_ratio(235, 100), Fixed::from_int(4))
                 .is_none(),

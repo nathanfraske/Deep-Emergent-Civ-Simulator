@@ -8,11 +8,6 @@
       "command": "python3",
       "args": ["${CLAUDE_PROJECT_DIR}/tools/projectops_server.py"],
       "env": { "REPO_ROOT": "${CLAUDE_PROJECT_DIR}" }
-    },
-    "civsim-harness": {
-      "command": "python3",
-      "args": ["${CLAUDE_PROJECT_DIR}/tools/civsim_harness_server.py"],
-      "env": { "REPO_ROOT": "${CLAUDE_PROJECT_DIR}" }
     }
   }
 }

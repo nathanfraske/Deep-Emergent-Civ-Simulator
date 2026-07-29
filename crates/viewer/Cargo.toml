@@ -1,6 +1,6 @@
 [package]
 name = "civsim-viewer"
-description = "A windowed, colour map viewer for the Emergent Civilization Simulator: opens a desktop window onto a generated world and pans and zooms it (design Part 14). The window is an observer that only reads canon (Principle 10); it depends on no determinism-critical crate beyond the spatial layer it draws."
+description = "Observer-only adapter for immutable canonical planet run artifacts."
 authors.workspace = true
 license.workspace = true
 edition.workspace = true
@@ -9,55 +9,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-civsim-core = { path = "../core" }
-civsim-world = { path = "../world" }
-# The superfine zoom draws the living world: the biosphere the simulation genesis produces
-# and places on the map. sim depends on core/world/physics only, no GPU or ECS stack.
-civsim-sim = { path = "../sim" }
-# The parked biology arc: the viewer names anatomy and genome types directly (design Part 56 glyph view).
-civsim-bio = { path = "../bio" }
-# The leaf substrates split out of sim: the viewer reads the orbital geometry for the globe's sun
-# direction and seasons, the playback clock for the observer's time control, and the located-identity
-# join for a tile's occupants. A one-way display read (Principle 10).
-civsim-foundation = { path = "../foundation" }
-# The observability-non-canon Rayleigh sky colour reads the banked polarizability substrate
-# (element_electronic_polarizability_a0_cubed) to DERIVE the atmosphere's scattered-light hue
-# from the gas mix, never an authored RGB. A one-way display read (Principle 10); no
-# determinism-critical crate depends on the viewer.
-civsim-physics = { path = "../physics" }
-# The fundamentals register supplies the second radiation constant (h c / k_B) the sky's
-# Planck star-spectrum weighting derives from, so no physical constant is authored inline.
-civsim-units = { path = "../units" }
-# The observability-non-canon material surface colour reads the banked optics substrate
-# (optical_energies + feature_response_at) and the band-gap / crystal-field columns to DERIVE a
-# material's perceived colour under the star's light from its own absorption spectrum, never an
-# authored per-mineral swatch. A one-way display read (Principle 10); civsim-materials is a leaf,
-# so no determinism-critical crate depends on the viewer.
-civsim-materials = { path = "../materials" }
-# minifb opens a simple framebuffer window with keyboard input on Windows, macOS, Linux,
-# and WSLg, and takes a buffer of 0x00RRGGBB pixels directly, which is exactly the shape
-# `Camera::paint` produces. It is an observer-side rendering dependency only; no
-# determinism-critical crate (core, physics, sim) depends on it.
-minifb = "0.27"
-# The DERIVED-planet globe builds a ~1M-cell surface SAMPLE CACHE (the cube-sphere height field: Airy
-# elevation plus the O(cells x craters) crater-row stamp, plus the resampled province fields). Each cell is
-# INDEPENDENT and computed from immutable inputs, so the cache is built with a data-parallel `par_iter().map().
-# collect::<Vec<_>>()` (index-ordered, so the result is BIT-IDENTICAL to the serial build regardless of thread
-# count). Display-only work off the canon run path (Principle 10); no determinism-critical crate depends on the
-# viewer, and the fixed-point per-cell math is thread-count-independent.
-rayon = "1"
-# NON-CANON GPU globe render (design Part 14, Principle 10), OFF by default so a plain `cargo build`/`cargo test`
-# stays lean and CUDA-free (civsim-gpu carries the heavy CubeCL dependency): the viewer shades the ~1M-pixel globe
-# disk on the GPU when built `--features gpu` and a CUDA device is present, else it falls back to the CPU
-# `render::draw_globe`. A one-way display consumer; no determinism-critical crate depends on the viewer.
-civsim-gpu = { path = "../gpu", optional = true }
-
-[features]
-# Enable the GPU globe render path (the CubeCL/CUDA kernel in civsim-gpu::globe). Auto-detected at run time: with
-# the feature AND a device it renders on the GPU, otherwise it uses the CPU renderer.
-gpu = ["dep:civsim-gpu"]
+civsim-planet = { path = "../planet" }
 
 [lints.clippy]
-# R-CANON-WALK is scoped to the canonical tick-state crates (core, sim, world);
-# this crate holds no hashable simulation state, so the ordered-container lint is off here.
-disallowed_types = "allow"
+disallowed_types = "deny"

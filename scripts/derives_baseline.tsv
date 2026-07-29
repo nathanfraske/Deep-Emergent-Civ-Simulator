@@ -31,10 +31,14 @@ crates/materials/src/band_gap.rs	eigenvalue_provenance	grandfathered	predates th
 crates/materials/src/band_gap.rs	gap_eigenvalue_provenance	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/band_gap.rs	ln_thermal_carrier_activation	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/band_gap.rs	two_kb_ev_per_k	grandfathered	predates the derives-coverage gate; unclassified
+crates/materials/src/conductivity.rs	ambient_frame_pressure_slack_bar	accessor	returns the tolerated offset from the anchors' measured pressure frame; zero while the reserved value conductivity.ambient_frame_pressure_slack_bar is unset, which is the absence of a tolerance rather than a derived one
 crates/materials/src/conductivity.rs	bruggeman_residual	helper	the Bruggeman residual function the bisection solves; pure arithmetic with no world quantity of its own
+crates/materials/src/conductivity.rs	derived_estimator_band_for_cell	accessor	finds the already-derived envelope covering a cell count by asking lattice_exponent_class for its class; a lookup into a list the caller computed, the derivation itself is derived_estimator_bands
 crates/materials/src/conductivity.rs	estimator_anchor_298	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/conductivity.rs	fmt	helper	a Display impl
+crates/materials/src/conductivity.rs	hofmeister_reference_pressure_bar	accessor	returns the sources' own measured reference pressure, the 1 bar frame the cited kappa_298 rows and the banked Grueneisen rows both declare
 crates/materials/src/conductivity.rs	hofmeister_reference_temperature_k	grandfathered	predates the derives-coverage gate; unclassified
+crates/materials/src/conductivity.rs	lattice_exponent_class	accessor	reads where the cited calibration set places a cell count and with what exponent; returns the cited 0.33 for the complex class and names which gap it fell in otherwise, a read of a cited set rather than a derivation
 crates/materials/src/conductivity.rs	lattice_exponent_for_cell	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/conductivity.rs	rung_disagreement_ratio	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/conductivity.rs	solve_bruggeman	helper	the fixed-point bisection that finds the residual's root; the numerical method, not the quantity
@@ -60,7 +64,6 @@ crates/materials/src/creep.rs	creep_total_log_rate	grandfathered	predates the de
 crates/materials/src/creep.rs	lmul	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/creep.rs	ln_boltzmann	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/creep.rs	ln_ten	grandfathered	predates the derives-coverage gate; unclassified
-crates/materials/src/creep.rs	logsumexp_canonical	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/definition.rs	admits_koopmans_gated	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/definition.rs	compound_generation_consistent	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/definition.rs	require_koopmans_gated	grandfathered	predates the derives-coverage gate; unclassified
@@ -72,22 +75,6 @@ crates/materials/src/differentiation.rs	parse_formula	grandfathered	predates the
 crates/materials/src/differentiation.rs	partial_melt_crust_and_mantle	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/differentiation.rs	phase_set_composition	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/differentiation.rs	species_elements	grandfathered	predates the derives-coverage gate; unclassified
-crates/materials/src/disk_composition.rs	draw	grandfathered	predates the derives-coverage gate; unclassified
-crates/materials/src/disk_composition.rs	draw_alpha_fe	grandfathered	predates the derives-coverage gate; unclassified
-crates/materials/src/disk_composition.rs	draw_fe_h	grandfathered	predates the derives-coverage gate; unclassified
-crates/materials/src/disk_composition.rs	from_mdf	grandfathered	predates the derives-coverage gate; unclassified
-crates/materials/src/disk_composition.rs	from_pattern	grandfathered	predates the derives-coverage gate; unclassified
-crates/materials/src/disk_composition.rs	label	grandfathered	predates the derives-coverage gate; unclassified
-crates/materials/src/disk_composition.rs	label	grandfathered	predates the derives-coverage gate; unclassified
-crates/materials/src/disk_composition.rs	link_slot_key	grandfathered	predates the derives-coverage gate; unclassified
-crates/materials/src/disk_composition.rs	local_disk	grandfathered	predates the derives-coverage gate; unclassified
-crates/materials/src/disk_composition.rs	local_disk_solar_pin	grandfathered	predates the derives-coverage gate; unclassified
-crates/materials/src/disk_composition.rs	metallicity_ratio_to_solar	grandfathered	predates the derives-coverage gate; unclassified
-crates/materials/src/disk_composition.rs	mirror	grandfathered	predates the derives-coverage gate; unclassified
-crates/materials/src/disk_composition.rs	pattern	grandfathered	predates the derives-coverage gate; unclassified
-crates/materials/src/disk_composition.rs	ten_pow	grandfathered	predates the derives-coverage gate; unclassified
-crates/materials/src/disk_composition.rs	thick_branch_alpha	grandfathered	predates the derives-coverage gate; unclassified
-crates/materials/src/disk_composition.rs	thick_disk_fraction	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/electronic.rs	avogadro_per_nm3_fold	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/electronic.rs	carrier_density	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/electronic.rs	carrier_density_per_nm3	grandfathered	predates the derives-coverage gate; unclassified
@@ -181,6 +168,10 @@ crates/materials/src/metallic.rs	cohesive_energy_at_volume	grandfathered	predate
 crates/materials/src/metallic.rs	metallic_energy	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/metallic.rs	new	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/metallic.rs	rose_ratio	grandfathered	predates the derives-coverage gate; unclassified
+crates/materials/src/mie_gruneisen_debye.rs	debye_integral	helper	Simpson quadrature of the dimensionless Debye integral; interval count bounds the step, not the count
+crates/materials/src/mie_gruneisen_debye.rs	debye_integrand	helper	the dimensionless integrand x^3/(e^x-1), series-continued through its removable singularity at the origin
+crates/materials/src/mie_gruneisen_debye.rs	from_banked	constructor	assembles the six MGD anchors from one source fit, refusing a mixed-provenance or systematics-graded set
+crates/materials/src/mie_gruneisen_debye.rs	volume	accessor	returns the volume held by either ExpansionEdge variant so the bracket can read it without matching; the spinodal itself is derived in expansion_edge, this only hands it back
 crates/materials/src/nucleation.rs	avrami_grain_size	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/nucleation.rs	critical_atom_count	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/nucleation.rs	critical_radius_over_spacing	grandfathered	predates the derives-coverage gate; unclassified
@@ -302,6 +293,12 @@ crates/materials/src/thermochemical/proposer.rs	prune_lazy	grandfathered	predate
 crates/materials/src/thermochemical/proposer.rs	shell_kind	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/thermochemical/proposer.rs	unconstrained	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/thermochemical/proposer.rs	with_states	grandfathered	predates the derives-coverage gate; unclassified
+crates/materials/src/thermoelastic.rs	abs_diff	helper	absolute difference of two Fixed values; arithmetic, derives nothing
+crates/materials/src/thermoelastic.rs	fmt	helper	Display formatter for ThermoRefusal; renders a refusal
+crates/materials/src/thermoelastic.rs	kelvin	accessor	the elastic Debye temperature's kelvin value; one-way by design, no Fixed goes back in
+crates/materials/src/thermoelastic.rs	key_of	helper	delegates to mineral_moduli::canonical_phase_key; a name lookup, not a derivation
+crates/materials/src/thermoelastic.rs	mie_gruneisen_debye_readiness	predicate	reports which rung-3 anchors are banked; answers a question about the DATA, derives no world quantity
+crates/materials/src/thermoelastic.rs	response_hull	accessor	reports the min/max envelope over branches already computed; a REPORTING ENVELOPE and never a distribution, since its interior holds no model, so it derives no world quantity
 crates/materials/src/verdict.rs	band	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/verdict.rs	candidates	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/verdict.rs	content_key	grandfathered	predates the derives-coverage gate; unclassified
@@ -362,6 +359,7 @@ crates/physics/src/convective_viscosity.rs	solve_ln_effective_viscosity	grandfat
 crates/physics/src/covalent_radii.rs	at_order	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/covalent_radii.rs	bond_length_measured_grade	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/covalent_radii.rs	bond_length_pm	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/covalent_radii.rs	fixed_from_decimal	helper	parses held decimal text exactly and applies the repository Q32.32 rounding rule; it changes representation but derives no world quantity
 crates/physics/src/covalent_radii.rs	from_toml_str	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/covalent_radii.rs	grade	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/covalent_radii.rs	kj_per_mol_per_ev	grandfathered	predates the derives-coverage gate; unclassified
@@ -442,26 +440,58 @@ crates/physics/src/ewald.rs	ewald_energy	grandfathered	predates the derives-cove
 crates/physics/src/ewald.rs	ewald_potential_matrix	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/ewald.rs	madelung_constant	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/ewald.rs	scale	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/flexure.rs	strip_primitive	helper	the odd dimensionless antiderivative of the symmetric line-load shape; pure quadrature, derives no world quantity
+crates/physics/src/flexure.rs	within_envelope	predicate	total two-sided envelope comparison that forms no negation, so it cannot panic at Fixed::MIN the way the abs form did
+crates/physics/src/flexure.rs	uniform_strip_load_admissible	predicate	envelope check; derives the strip bound from MAX_LINE_LOAD_GPA_KM via V0 = q(2a) rather than authoring a ceiling
+crates/physics/src/flexure.rs	classify_elastic_constants	predicate	classifies a modulus pair as physically inadmissible, outside the declared proof envelope, or admissible; reads the envelope constants and the isotropic stability bounds, derives no world quantity
+crates/physics/src/flexure.rs	classify_elastic_thickness	predicate	the thickness arm of the same two-class split: non-positive is not a plate, past MAX_ELASTIC_THICKNESS_KM is a plate the range proof does not reach
+crates/physics/src/flexure.rs	from_gpa_km3	constructor	unit conversion: GPa km^3 into the typed InternalRigidity
+crates/physics/src/flexure.rs	from_internal	constructor	wraps a raw internal number as InternalRigidity; crate-private so only the conversions and the solve may mint one
+crates/physics/src/flexure.rs	internal	accessor	unwraps InternalRigidity to its Fixed for this crate's own arithmetic; the type exists so the unwrap cannot happen outside it
+crates/physics/src/flexure.rs	min_poisson_ratio_physical	accessor	the isotropic stability bound on Poisson's ratio, minus one; where the material stops existing rather than where this kernel stops proving
+crates/physics/src/flexure.rs	to_gpa_km3	constructor	unit conversion: the typed InternalRigidity back into GPa km^3, fallible because some real plates do not fit that unit
+crates/physics/src/moment_equivalence.rs	rigidity	accessor	returns the solved plate's internal rigidity, typed; the carrier that exists for every solved plate including those rigidity_gpa_km3 cannot express
+crates/physics/src/flexural_relief.rs	km	accessor	unwraps ElevationKm to its Fixed; the typed boundary exists so a downward deflection cannot be stored as an elevation, and this is the deliberate exit
+crates/physics/src/flexural_relief.rs	axisymmetric_length_km	accessor	unit readout of the axisymmetric length derived once in from_internal_rigidity
+crates/physics/src/flexural_relief.rs	flexural_parameter_km	accessor	unit readout of the line-load flexural parameter derived once in from_internal_rigidity
+crates/physics/src/flexural_relief.rs	rigidity_internal	accessor	returns the stored internal rigidity the plate was built from; no conversion and no derivation
+crates/physics/src/flexural_relief.rs	periodic_deflection_km	derives	the periodic spectral deflection profile over a closed row, from the per-cell load field, the plate rigidity and the restoring modulus
+crates/physics/src/flexural_relief.rs	periodic_elevation_km	derives	the periodic elevation profile: the periodic deflection through the ElevationKm boundary
+crates/physics/src/flexural_relief.rs	point_coefficient_and_argument	helper	the shared point-load coefficient and Kelvin argument the deflection and its truncation band both read; one home so a band cannot be computed from a different coefficient than the value it bands
 crates/physics/src/flexure.rs	deflection_at	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/flexure.rs	elastic_constants_admissible	predicate	whether a modulus pair sits inside the declared validation envelope
 crates/physics/src/flexure.rs	euler_gamma	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/flexure.rs	external_curvature	constructor	unit conversion: internal curvatures back into 1/km
+crates/physics/src/flexure.rs	external_length	constructor	unit conversion: internal lengths back into km
+crates/physics/src/flexure.rs	external_rigidity	constructor	unit conversion: internal rigidities back into GPa km^3
 crates/physics/src/flexure.rs	flexural_length_axisymmetric	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/flexure.rs	flexural_length_axisymmetric_from_alpha	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/flexure.rs	flexural_parameter	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/flexure.rs	flexural_response_ratio	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/flexure.rs	flexural_rigidity	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/flexure.rs	internal_force	constructor	unit conversion: GPa km^2 into internal forces
+crates/physics/src/flexure.rs	internal_gravity	constructor	unit conversion: km/s^2 into internal accelerations
+crates/physics/src/flexure.rs	internal_length	constructor	unit conversion: km into internal lengths (a division by 32)
+crates/physics/src/flexure.rs	internal_line_load	constructor	unit conversion: GPa km into internal line loads
+crates/physics/src/flexure.rs	internal_rigidity	constructor	unit conversion: GPa km^3 into internal rigidities
 crates/physics/src/flexure.rs	kelvin_kei	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/flexure.rs	kelvin_kei_prime	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/flexure.rs	kelvin_ker	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/flexure.rs	line_load_admissible	predicate	whether a line-load intensity sits inside the declared validation envelope
 crates/physics/src/flexure.rs	line_load_deflection	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/flexure.rs	max_poisson_ratio_magnitude	accessor	the declared validation envelope's Poisson bound, one half
 crates/physics/src/flexure.rs	parameter	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/flexure.rs	point_load_admissible	predicate	whether a point-load magnitude sits inside the declared validation envelope
 crates/physics/src/flexure.rs	point_load_deflection	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/flexure.rs	rigidity	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/floor_provenance.rs	authoring_surface	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/flexure.rs	scaled_rigidity_over_restoring	helper	the shared D/(delta_rho g) quotient both flexural lengths are quarter powers of
+crates/physics/src/floor_provenance.rs	inadmissible_candidates	accessor	filters the candidate-audit records already loaded to report closure and authored rows; it admits no magnitude and computes no world quantity
 crates/physics/src/floor_provenance.rs	derive_first_defects	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/floor_provenance.rs	embedded	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/floor_provenance.rs	from_toml_str	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/floor_provenance.rs	grade	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/floor_provenance.rs	record	accessor	returns an already-loaded candidate-audit record by id; it admits no magnitude and computes no world quantity
 crates/physics/src/force_constant.rs	covalent_bond_force_constant	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/force_constant.rs	fixed_from_decimal	helper	parses held decimal text exactly and applies the repository Q32.32 rounding rule; it changes representation but derives no world quantity
 crates/physics/src/force_constant.rs	force_constant_mdyn_per_angstrom	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/force_constant.rs	from_toml_str	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/force_constant.rs	hl_row	grandfathered	predates the derives-coverage gate; unclassified
@@ -480,8 +510,8 @@ crates/physics/src/geodynamics.rs	airy_isostatic_elevation	grandfathered	predate
 crates/physics/src/geotherm.rs	halfspace_geotherm	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/geotherm.rs	steady_conductive_geotherm	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/graph.rs	check_law	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/graph.rs	check_law_with_contract	predicate	validates one law binding against an explicitly supplied kernel contract and returns only acceptance or a structural error; it computes no world quantity
 crates/physics/src/graph.rs	check_output_dimension	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/graph.rs	classset	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/graph.rs	cur	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/graph.rs	derive_tiers	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/graph.rs	dim_pow	grandfathered	predates the derives-coverage gate; unclassified
@@ -572,7 +602,6 @@ crates/physics/src/laws.rs	aero_force	grandfathered	predates the derives-coverag
 crates/physics/src/laws.rs	aerodynamic_lift	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	arrhenius_rate	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	axial_stress	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/laws.rs	basal_metabolic_rate	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	battery_emf	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	bend_stress	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	buoyant_force	grandfathered	predates the derives-coverage gate; unclassified
@@ -592,11 +621,9 @@ crates/physics/src/laws.rs	coulomb_force	grandfathered	predates the derives-cove
 crates/physics/src/laws.rs	cut_penetrate	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	derive	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	dipole_torque	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/laws.rs	discriminate	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	dissolution	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	drag_force	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	dynamic_pressure	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/laws.rs	edibility	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	elapsed_age	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	elastic_recoil_energy	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	euler_buckle	grandfathered	predates the derives-coverage gate; unclassified
@@ -606,10 +633,8 @@ crates/physics/src/laws.rs	faraday_emf	grandfathered	predates the derives-covera
 crates/physics/src/laws.rs	flux_linkage	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	fracture_onset	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	free_convection_a_still	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/laws.rs	friction	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/laws.rs	coulomb_friction_response	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	geometric_spread	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/laws.rs	harm_class	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/laws.rs	harmony_tilt	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	heat_advection	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	hydrostatic_pressure	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	ideal_gas_density	grandfathered	predates the derives-coverage gate; unclassified
@@ -630,23 +655,17 @@ crates/physics/src/laws.rs	ln_rayleigh_number	grandfathered	predates the derives
 crates/physics/src/laws.rs	lorentz_force	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	mantle_convective_heat_flux	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	membrane_gas_flux	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/laws.rs	metabolic_drain_fraction	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	motor_force	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	nernst_emf	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/laws.rs	net_harm	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/laws.rs	net_nutrition	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	neufeld_collision_integral	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	ohm_voltage	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	optical_depth	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/laws.rs	parse_cost	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	phase_change_energy	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	pi_squared	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	poiseuille_flow	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/laws.rs	pow_int	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	power	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	power_dissipation	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	power_watts	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/laws.rs	r_sat	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	radiant_emission	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	radiant_emission_tier2	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	radiative_equilibrium	grandfathered	predates the derives-coverage gate; unclassified
@@ -659,19 +678,16 @@ crates/physics/src/laws.rs	reaction	grandfathered	predates the derives-coverage 
 crates/physics/src/laws.rs	reduced_barrier	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	refractive_contrast	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	resistance	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/laws.rs	resting_heat_loss	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/laws.rs	reversible_uptake_flux	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	reynolds_number	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	sat_abs	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	sat_sub	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/laws.rs	satisfaction	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	saturation_pressure	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	saturation_slope_from_latent_heat	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	saturation_vapor_pressure	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	saturation_vapor_pressure_rk	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	sensible_energy	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	sensible_rise	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/laws.rs	shear	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/laws.rs	shear_stress	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	solenoid_field	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	speed_of_sound	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	standard_potential_at_temperature	grandfathered	predates the derives-coverage gate; unclassified
@@ -684,14 +700,13 @@ crates/physics/src/laws.rs	thermal_density_anomaly	grandfathered	predates the de
 crates/physics/src/laws.rs	thermal_diffusivity	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	thermal_stress	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	threshold_latch	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/laws.rs	transduce	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	tube_resonance	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	virtual_density_buoyancy	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	von_mises	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	watson_latent_heat	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	wear	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	wear_energy	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/laws.rs	weight	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/laws.rs	weight_force	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/laws.rs	wien_peak	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/lib.rs	axes	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/lib.rs	axis	grandfathered	predates the derives-coverage gate; unclassified
@@ -702,7 +717,9 @@ crates/physics/src/lib.rs	derived_tier	grandfathered	predates the derives-covera
 crates/physics/src/lib.rs	derived_tiers	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/lib.rs	div	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/lib.rs	extend	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/lib.rs	extend_file	loader	merges already parsed floor manifest records into the registry while rejecting duplicate ids; it computes no world quantity
 crates/physics/src/lib.rs	extend_from_toml_str	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/lib.rs	extend_from_toml_str_with_kernel_contracts	loader	parses and loads a compatibility-owned floor while accepting an additional structural contract resolver; it computes no world quantity
 crates/physics/src/lib.rs	fmt	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/lib.rs	from_file	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/lib.rs	from_toml_str	grandfathered	predates the derives-coverage gate; unclassified
@@ -728,6 +745,7 @@ crates/physics/src/lib.rs	substance	grandfathered	predates the derives-coverage 
 crates/physics/src/lib.rs	substance_count	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/lib.rs	substances	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/lib.rs	validate	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/lib.rs	validate_with_kernel_contracts	predicate	checks registry cross-references graph acyclicity and kernel bindings against root plus compatibility contracts; it returns only acceptance or a structural error
 crates/physics/src/lib.rs	write_provenance	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/materials_oracle.rs	aggregate_resolved	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/materials_oracle.rs	assemblage_bulk_shear_moduli	grandfathered	predates the derives-coverage gate; unclassified
@@ -747,6 +765,8 @@ crates/physics/src/melting.rs	binary_eutectic_at_pressure	grandfathered	predates
 crates/physics/src/melting.rs	binary_solid_solution_loop	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/melting.rs	clamp_unit	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/melting.rs	eutectic_liquid_composition	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/melting.rs	fmt	helper	Display formatter for PressureMeltingRefusal; renders a refusal and derives no world quantity
+crates/physics/src/melting.rs	label	helper	maps a PressureMeltingStage variant to its stable diagnostic label; derives no world quantity
 crates/physics/src/melting.rs	liquidus_mole_fraction	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/melting.rs	melting_point_at_pressure	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/melting.rs	molar_gas_constant	grandfathered	predates the derives-coverage gate; unclassified
@@ -834,6 +854,7 @@ crates/physics/src/moment_equivalence.rs	from_upward_deflection	grandfathered	pr
 crates/physics/src/moment_equivalence.rs	high	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/moment_equivalence.rs	high	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/moment_equivalence.rs	high_edge	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/moment_equivalence.rs	internal_rigidity_three_quarter_power	helper	D^(3/4) from an internal rigidity, without ever forming D
 crates/physics/src/moment_equivalence.rs	is_degenerate	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/moment_equivalence.rs	is_degenerate	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/moment_equivalence.rs	lid_referee	grandfathered	predates the derives-coverage gate; unclassified
@@ -854,6 +875,8 @@ crates/physics/src/moment_equivalence.rs	point_load_reported_curvature_at_first_
 crates/physics/src/moment_equivalence.rs	point_load_reported_curvature_coefficient	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/moment_equivalence.rs	referee_conductive_lid_base	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/moment_equivalence.rs	rigidity_band	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/moment_equivalence.rs	rigidity_band_internal	accessor	returns the two stored edge rigidities in the internal units they are held in; no conversion and no derivation
+crates/physics/src/moment_equivalence.rs	rigidity_gpa_km3	accessor	unit readout of the stored internal rigidity, fallible because `GPa km^3` cannot express a sluggish world's plate
 crates/physics/src/moment_equivalence.rs	sample	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/moment_equivalence.rs	solve_line_load	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/moment_equivalence.rs	solve_line_load_banded	grandfathered	predates the derives-coverage gate; unclassified
@@ -879,7 +902,6 @@ crates/physics/src/opacity.rs	fixed_to_wfixed	grandfathered	predates the derives
 crates/physics/src/opacity.rs	free_free_prefactor	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/opacity.rs	free_free_prefactor_ionized	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/opacity.rs	free_free_shape	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/opacity.rs	fundamental_bigrat	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/opacity.rs	grain_qabs	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/opacity.rs	grain_rosseland_opacity	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/opacity.rs	grain_rosseland_opacity_spectral	grandfathered	predates the derives-coverage gate; unclassified
@@ -903,6 +925,7 @@ crates/physics/src/opacity.rs	nonneg_fixed_to_bigrat	grandfathered	predates the 
 crates/physics/src/opacity.rs	norm_sq	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/opacity.rs	rayleigh_grain_opacity	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/opacity.rs	real	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/opacity.rs	representation_bigrat	accessor	reads one noncausal value from the sealed SI representation schema
 crates/physics/src/opacity.rs	rosseland_mean	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/opacity.rs	rosseland_weight	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/opacity.rs	rosseland_x_max	grandfathered	predates the derives-coverage gate; unclassified
@@ -953,6 +976,7 @@ crates/physics/src/perovskite_gibbs.rs	mineral	grandfathered	predates the derive
 crates/physics/src/perovskite_gibbs.rs	opt_fixed	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/perovskite_gibbs.rs	phase	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/perovskite_gibbs.rs	reference	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/perovskite_gibbs.rs	round_ratio_half_even	helper	integer rounding policy used to form a lookup key; it derives no physical quantity
 crates/physics/src/perovskite_gibbs.rs	row_at	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/perovskite_gibbs.rs	rows	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/perovskite_gibbs.rs	standard	grandfathered	predates the derives-coverage gate; unclassified
@@ -988,6 +1012,7 @@ crates/physics/src/phase_conductivity.rs	is_empty	predicate	whether the table ho
 crates/physics/src/phase_conductivity.rs	kappa_298	accessor	returns the cited measured anchor and its band for a phase, or None where no primary reports one
 crates/physics/src/phase_conductivity.rs	len	accessor	row count
 crates/physics/src/phase_conductivity.rs	row	accessor	returns a cited row by canonical phase key
+crates/physics/src/phase_conductivity.rs	rows	accessor	iterates every cited row in canonical key order, so a consumer needing a statistic across the column does not carry a hardcoded name list
 crates/physics/src/phase_conductivity.rs	standard	loader	loads the vendored cited phase_conductivity.toml column; no derivation, the reconstruction check lives in from_toml_str
 crates/physics/src/phonon.rs	anharmonic_fundamental_cm_inverse	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/phonon.rs	bend_to_stretch_ratio	grandfathered	predates the derives-coverage gate; unclassified
@@ -1045,11 +1070,11 @@ crates/physics/src/rose_eos.rs	wigner_seitz_radius_angstrom	grandfathered	predat
 crates/physics/src/saha.rs	electron_density_saha	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/saha.rs	ev_to_kelvin	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/saha.rs	ground_state_degeneracies	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/saha.rs	ln_fundamental	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/saha.rs	ln_fundamental	accessor	reads a named value only from an admitted physical execution capability
 crates/physics/src/saha.rs	ln_k_boltzmann_cgs	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/saha.rs	ln_of_decimal	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/saha.rs	ln_saha_factor	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/saha.rs	log_sum_exp	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/saha.rs	ln_si_representation	accessor	reads only noncausal exact SI definitions and representation-derived relations
 crates/physics/src/saha.rs	normalize_wide_plain	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/scaled.rs	at	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/scaled.rs	checked_div	grandfathered	predates the derives-coverage gate; unclassified
@@ -1089,10 +1114,18 @@ crates/physics/src/term_values.rs	len	grandfathered	predates the derives-coverag
 crates/physics/src/term_values.rs	sp3_hybrid_energy	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/term_values.rs	standard	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/term_values.rs	term_value	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/thermoelastic.rs	abs_diff	helper	absolute difference of two Fixed values; arithmetic, derives nothing
-crates/physics/src/thermoelastic.rs	fmt	helper	Display formatter for ThermoRefusal; renders a refusal
-crates/physics/src/thermoelastic.rs	key_of	helper	delegates to mineral_moduli::canonical_phase_key; a name lookup, not a derivation
-crates/physics/src/thermoelastic.rs	mie_gruneisen_debye_readiness	predicate	reports which rung-3 anchors are banked; answers a question about the DATA, derives no world quantity
+crates/physics/src/thermoelastic_anchors.rs	agrees	predicate	whether two source inversions agree; single-channel is NOT agreement, it is unchecked
+crates/physics/src/thermoelastic_anchors.rs	all_cells_fit	predicate	whether every cell a row needs was fit rather than estimated from systematics
+crates/physics/src/thermoelastic_anchors.rs	fmt	accessor	Display for the effective Debye temperature, naming which average it is
+crates/physics/src/thermoelastic_anchors.rs	fmt	accessor	Display for the parse-failure enum
+crates/physics/src/thermoelastic_anchors.rs	from_toml_str	loader	parses the [[anchor]] blocks; line-anchored split so header prose naming the marker cannot manufacture a row
+crates/physics/src/thermoelastic_anchors.rs	kelvin	accessor	the effective Debye temperature's kelvin value; one-way by design, no Fixed goes back in
+crates/physics/src/thermoelastic_anchors.rs	pairs_with_banked_gamma	predicate	whether the row's own fit reproduces the banked gamma_0, so the MGD set comes from one inversion
+crates/physics/src/thermoelastic_anchors.rs	parse	helper	vocabulary parse for the cell-grade / channel-agreement / gamma-pairing enums; fatal on an unrecognised member rather than defaulting
+crates/physics/src/thermoelastic_anchors.rs	phases	accessor	iterates the loaded phase keys in deterministic order
+crates/physics/src/thermoelastic_anchors.rs	row	accessor	one phase's loaded anchor row, or None; no default is ever supplied
+crates/physics/src/thermoelastic_anchors.rs	standard	loader	loads the vendored thermoelastic_anchors.toml column
+crates/physics/src/thermoelastic_anchors.rs	usable_as_anchor	predicate	whether a cell's grade permits reading it as an anchor (fit yes, systematics no)
 crates/physics/src/tm_oxide_lattice_energy.rs	composition_key	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/tm_oxide_lattice_energy.rs	fmt	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/tm_oxide_lattice_energy.rs	from_toml_str	grandfathered	predates the derives-coverage gate; unclassified
@@ -1119,3 +1152,261 @@ crates/physics/src/young_thermal.rs	peak_temperature_at	grandfathered	predates t
 crates/physics/src/young_thermal.rs	slr_family_temperature_rise	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/young_thermal.rs	solar_system_slr_family	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/young_thermal.rs	young_thermal_verdict	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/convection_scaling.rs	stagnant_lid_convention	accessor	reads one cited (alpha, gamma, beta) row from the vendored column; the derivation is laws::ln_stagnant_lid_nusselt, which carries the @derives marker
+crates/physics/src/convection_scaling.rs	rayleigh_projection	constructor	builds a Rayleigh number tagged with a definition the column itself declares; refuses a key no banked row uses, which is the guard rather than a quantity
+crates/physics/src/convection_scaling.rs	theta_projection	constructor	the sibling constructor on the Frank-Kamenetskii axis
+crates/physics/src/convection_scaling.rs	definition	accessor	reads the definition key a projection was built with
+crates/physics/src/convection_scaling.rs	ln_rayleigh	accessor	reads the log-domain Rayleigh number a projection carries
+crates/physics/src/convection_scaling.rs	theta	accessor	reads the Frank-Kamenetskii parameter a projection carries
+crates/physics/src/convection_scaling.rs	ln_nusselt_hull	accessor	reports the envelope over determinations already computed by the marked stagnant_lid_determinations; a reporting hull, never a distribution
+crates/physics/src/convection_scaling.rs	permits_sensitivity_evaluation	predicate	answers whether a convicted row could still be evaluated at all
+crates/physics/src/convection_scaling.rs	is_stagnant_lid	predicate	answers whether a row carries both exponents, so is readable as a suppression law
+crates/physics/src/convection_scaling.rs	parse	loader	parses a family's declared selection rule string into the implemented rule, refusing an unimplemented one
+crates/physics/src/convection_scaling.rs	stagnant_lid_families	helper	groups the stagnant-lid rows into the families their data declares, in file order
+crates/physics/src/convection_scaling.rs	preflight_row	helper	runs one row's scope tests and its own evaluation; the derivation is the marked stagnant_lid_determinations above it
+crates/physics/src/convection_scaling.rs	evaluate_family	helper	checks one family's declaration and applies its rule to the preflighted members; part of the marked stagnant_lid_determinations
+crates/physics/src/convection_scaling.rs	combine	helper	applies the family's own selection rule to members already evaluated; part of the marked stagnant_lid_determinations
+crates/physics/src/convection_scaling.rs	ln_nusselt_at	helper	one row at one coefficient through laws::ln_stagnant_lid_nusselt, which carries the @derives marker for the law itself
+crates/physics/src/convection_scaling.rs	citation	accessor	reads one row's cited provenance string, the human-readable half a determination's selected row points at
+crates/physics/src/convection_scaling.rs	one_of	helper	returns the single element of an iterator or the reason there is not exactly one; the guard against a silent first-match
+crates/physics/src/thermoelastic_anchors.rs	caveats	accessor	returns the riders a scope verdict already carries, either way; a caveat never blocks and nothing is computed here
+crates/physics/src/thermoelastic_anchors.rs	in_scope	predicate	answers whether a scope verdict convicted the row; a question about the DATA's own declared reach, deriving no world quantity
+crates/planet-substrate/src/absolute_floor.rs	ln_gravitational_constant	accessor	reads the logarithm of G through the sealed execution capability
+crates/planet-substrate/src/astro.rs	accretion_clock_hindcasts	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	activity_luminosity_fraction	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	alexander_2006	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	banded_slope	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	barnes_2007	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	blackbody_ionizing_fraction	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	blackbody_ionizing_spectrum	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	bstar2006_svo	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	central	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	contains	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	convective_turnover_time_days	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	departure_log10_at	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	derive_disk_gas_mean_molecular_weight	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	derive_disk_lifetime_myr	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	derive_formation_epoch_myr	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	derive_viscous_time_myr	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	disk_effective_temperature	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	disk_era_xray_disk_lifetime_myr	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	disk_midplane_temperature	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	disk_surface_density	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	earth_to_sun_mass_ratio	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	evolutionary_phase	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	exp_guarded	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	feeding_zone_mass	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	feeding_zone_mass_earth	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	font_2004_hydrodynamic	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	formation_midplane_temperature	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	formation_midplane_temperature_constant_opacity	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	formation_rate_consistency	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	goldsmith_2001	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	gravitational_radius_au	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	hi	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	hi_msun_myr	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	hill_radius_au	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	hollenbach_1994	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	irradiated_disk_temperature	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	is_independent	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	isolation_mass_earth	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	kepler_orbital_period_seconds	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	kepler_orbital_period_years	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	kraft_band_dispatch	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	larson_penston	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	linear_hi	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	linear_lo	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	lo	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	lo_msun_myr	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	lower_edge_k	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	lower_edge_shift	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	mamajek_hillenbrand_2008	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	matches	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	mean_ionizing_photon_energy_over_edge	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	metallicity_domain	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	metallicity_rate_factor	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	nlte_departed_ionizing_spectrum	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	nonneg_fixed_to_bigrat	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	owen_appendix_b	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	owen_equation_9	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	photoevaporative_wind_rate_msun_myr	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	pichardo_2005	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	pichardo_truncation_evaluation	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	planet_radius_m	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	pre_main_sequence_convective_turnover_days	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	pre_main_sequence_luminosity_lsun	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	radiation_field_chi_estimate_from_extinction	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	radiative_euv_photoevaporation_wind_rate_msun_myr	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	reach_at	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	reference_orbital_period_seconds	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	resonant_truncation_fraction	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	roche_lobe_radius_au	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	sellek_2024	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	sellek_2024_controlled_80au	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	shu_1977	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	skumanich_1972	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	spherical_reprocessing_factor	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	stellar_effective_temperature	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	stellar_envelope_structure	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	stellar_flux	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	stellar_flux_from_luminosity_lsun	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	stellar_rossby_number	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	stellar_rotation_period_days	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	stellar_structural_state	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	stellar_xray_luminosity_log10_erg_s	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	structure_derived	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	tidally_capped_scale_radius_au	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	upper_edge_k	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	upper_edge_shift	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	viscous_disk_temperature	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	viscous_dissipation_flux	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	viscous_similarity_accretion_rate	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	viscous_similarity_surface_density	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	width_dex	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	windless_herbig_departed_spectrum	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/astro.rs	zucconi_2001	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/deeptime.rs	areal_mass_mg_per_m2	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/deeptime.rs	bombard_tick	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/deeptime.rs	crust_growth	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/deeptime.rs	current_luminosity_ratio	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/deeptime.rs	derived_crust_yield_pa	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/deeptime.rs	impact_kinetic_energy_j	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/deeptime.rs	main_sequence_lifetime_myr	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/deeptime.rs	prepared_basin_raster	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/deeptime.rs	provinces_across	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/deeptime.rs	realization_digest	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/deeptime.rs	relax_to_support_bound	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/deeptime.rs	star_age_myr	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/deeptime.rs	stellar_luminosity_ratio	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/deeptime.rs	step_deep_time	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/deeptime.rs	thickness_km_from_areal_mass	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/deeptime.rs	with_star_start_age	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/deeptime.rs	young	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/geodynamics.rs	column_readout	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/geodynamics.rs	conductive_loss_coefficient	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/geodynamics.rs	convecting_mantle_depth_m	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/geodynamics.rs	convection_solve	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/geodynamics.rs	derive_assemblage_expansivity_ppm_per_k	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/geodynamics.rs	derive_column_viscosity	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/geodynamics.rs	derive_mantle_density	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/geodynamics.rs	dominant_phase	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/geodynamics.rs	fmt	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/geodynamics.rs	from_scaled_depth	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/geodynamics.rs	generate_derived_tiles	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/geodynamics.rs	ladder_pass_over_census	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/geodynamics.rs	olivine_creep_candidates	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/geodynamics.rs	populate_interior_column	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/geodynamics.rs	secular_history	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/geodynamics.rs	step_interior_field	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/geodynamics.rs	surface_elevation_from_composition	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/geodynamics_surface.rs	relax_toward_isostasy	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	alpha_disk_reynolds_number	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	core_accretion_rate_earth_per_yr	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	crida_2006	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	critical_core_mass_earth	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	derived_birth_accretion_for	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	derived_birth_accretion_msun_myr	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	deuterium_burning_limit_m_jup	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	disk_aspect_ratio_at_orbit	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	disk_gas_content	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	feeding_zone_gas_mass_earth	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	from_metallicity	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	gas_surface_density_kg_m2	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	giant_formation	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	giant_formation_banded	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	giant_formation_field	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	giant_formation_on_derived_clock	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	giant_formation_on_derived_clock_banded	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	giant_mass_class	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	ln_kh_time_years	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	runaway_terminated_giant_mass_earth	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	spiegel_chabrier	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	spiegel_cooltlusty	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	tag	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/giants.rs	terminate_and_type_giant	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/moons.rs	cited	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/moons.rs	fluid_roche_coefficient	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/moons.rs	hill_radius	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/moons.rs	prograde_circular_fraction	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/moons.rs	prograde_e_planet_coeff	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/moons.rs	prograde_e_sat_coeff	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/moons.rs	retrograde_circular_fraction	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/moons.rs	retrograde_e_planet_coeff	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/moons.rs	retrograde_e_sat_coeff	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/moons.rs	roche_limit	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/moons.rs	roche_limit_fluid	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/moons.rs	stable_orbit_fraction	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/moons.rs	stable_orbit_fraction_ecc	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/moons.rs	stable_semimajor_axis	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/moons.rs	tidal_heating_power_log10	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/moons.rs	tidal_recession_rate	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/moons.rs	tidal_survival	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/planet.rs	derive_planet	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/planet.rs	surface_gravity	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/planetary_assembly.rs	assemble_system	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/planetary_assembly.rs	assemble_system_recording	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/planetary_assembly.rs	assemble_system_with_giants	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/planetary_assembly.rs	assemble_system_with_history	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/planetary_assembly.rs	drain_envelopes	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/planetary_assembly.rs	drain_to_envelope	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/planetary_assembly.rs	from_disk_profile	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/planetary_assembly.rs	from_snapshot	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/planetary_assembly.rs	log10_age_over_inner_period	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/planetary_assembly.rs	orbital_angular_momentum	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/planetary_assembly.rs	pair_instability_time_log10	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/planetary_assembly.rs	pair_is_stable	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/planetary_assembly.rs	pair_survival_log10	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/planetary_assembly.rs	post_edge	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/planetary_assembly.rs	system_is_stable	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/planetary_system.rs	derive	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/planetary_system.rs	ice_line_au	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/planetary_system.rs	oligarchic_embryo_field	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/planetary_system.rs	solid_surface_density_kg_m2	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/secular.rs	arcsec_per_rad	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/secular.rs	build_matrices	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/secular.rs	circular	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/secular.rs	earth_to_sun_mass_ratio	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/secular.rs	fixed_from_bigrat	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/secular.rs	gr_precession	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/secular.rs	jacobi_eigenvalues	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/secular.rs	laplace_coefficient	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/secular.rs	mean_motion_rad_per_yr	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/secular.rs	modes_from_eigenvalues	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/secular.rs	nearest_commensurability	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/secular.rs	off_diagonal_norm	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/secular.rs	secular_spectrum	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/secular.rs	speed_of_light_au_per_yr	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/secular.rs	symmetrize	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/smallbody.rs	derive_small_body	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/smallbody.rs	derive_small_body_masked	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/smallbody.rs	disk_temperature_at_orbit	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/smallbody.rs	ice_condenses	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/smallbody.rs	in_feeding_zone	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/smallbody.rs	ln_ice_saturation_pressure	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/smallbody.rs	orbit_is_swept	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/smallbody.rs	residual_body_count_log10	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/smallbody.rs	residual_body_count_log10_masked	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/smallbody.rs	residual_diameter_ratio	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/smallbody.rs	residual_disk_mass	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/smallbody.rs	residual_disk_mass_masked	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/smallbody.rs	residual_ring_density	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/smallbody.rs	residual_semi_major_axis	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/smallbody.rs	residual_semi_major_axis_masked	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/smallbody.rs	sample_belt	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/smallbody.rs	snow_line_orbit_au	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/smallbody.rs	stirred_eccentricity	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/smallbody.rs	volatile_class_at_orbit	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/stellar.rs	effective_temperature	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/stellar.rs	effective_temperature_from_ratios	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/stellar.rs	luminosity_ratio	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/stellar.rs	main_sequence_star	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/stellar.rs	radius_ratio	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/stellar_evolution.rs	core_growth_rate_msun_per_myr	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/stellar_evolution.rs	default_hydrogen_energy_yield_1e14	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/stellar_evolution.rs	fixed_to_bigrat	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/stellar_evolution.rs	giant_branch_point	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/stellar_evolution.rs	hayashi_effective_temperature	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/stellar_evolution.rs	leaves_main_sequence	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/stellar_evolution.rs	schonberg_chandrasekhar_limit	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/stellar_evolution.rs	shell_burning_luminosity	grandfathered	predates the derives-coverage gate; unclassified
+crates/planet-substrate/src/stellar_evolution.rs	stellar_radius_rsun	grandfathered	predates the derives-coverage gate; unclassified

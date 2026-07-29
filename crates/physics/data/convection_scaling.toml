@@ -44,9 +44,76 @@
 # & Olson 2001), and a consumer keying a planetary mantle off a free surface over a ~rigid base uses the
 # rigid-free 1100.65 row, which is why it is carried alongside the two the task named.
 #
+# THE STAGNANT-LID FAMILY (added 2026-07-19) is a SECOND scaling form, and the rows below carry it in their own
+# fields so it can never be read through the isoviscous slots above. Everything above this paragraph is the
+# MOBILE-LID instance: a surface that participates in the overturn, one viscosity, `Nu = a (Ra/Ra_crit)^beta`.
+# Most modelled bodies are not that. A stagnant-lid body (Mars-class, Venus-class, one-plate worlds) has a
+# temperature-dependent viscosity that LOCKS a cold lid, and only a thin warm sublayer beneath the lid convects.
+# The temperature difference that drives the flow is therefore not the layer's full `delta_T` but the RHEOLOGICAL
+# TEMPERATURE SCALE, the drop over which the viscosity changes by about `e`, and the ratio of the two is the
+# Frank-Kamenetskii parameter `theta`. Heat loss is suppressed by a power of it.
+#
+# THE FORM IS `Nu = alpha * theta^gamma * Ra^beta`, and its three numbers travel TOGETHER as one convention:
+# `alpha` alone is meaningless without the `gamma` and `beta` it was fitted with, and without the Rayleigh number
+# and `theta` definitions it was fitted against. So each stagnant-lid row carries `theta_exponent` and
+# `rayleigh_exponent` beside its value, and the reader refuses to hand back a convention that is missing either
+# (which is what stops the mobile-lid `nu_ra_prefactor_a` above, whose `beta` field is documentation, from being
+# read as one).
+#
+# THE COEFFICIENTS DISAGREE, AND THE DISAGREEMENT IS THE ROW SET rather than a defect in it. Two independent
+# axes move them. FIRST, whether the convection is STEADY or TIME-DEPENDENT: Batra & Foley 2021 state the
+# family as `Nu = C* theta^-(1+beta) Ra_i^beta` (their eq. 8) and fit both branches on their own models,
+# `beta = 1/5` with `C2 = 2.95` when the pattern is steady (eq. 9) and `beta = 1/3` with `C1 = 0.48` when it is
+# time-dependent (eq. 10), taking the LARGER of the two (eq. 11) because the transition falls where they cross.
+# SECOND, whether the viscosity is the Frank-Kamenetskii LINEARIZATION or a full Arrhenius law WITH PRESSURE:
+# Schulz et al. 2020 ran the Arrhenius form with an activation volume and got a visibly shallower `theta`
+# exponent, `gamma = -0.4` against the -1 to -4/3 of the linearized studies, and say so in as many words
+# ("likely due to the fact that, in contrast to previous studies, we also took into account the pressure
+# dependence of the viscosity"). Both are banked. Neither is promoted to the default, because which one applies
+# is a property of the world's own state and its own rheology, not a preference.
+#
+# WHAT NO ROW HERE SUPPLIES, stated because its absence is the honest result of the fetch rather than an
+# oversight. NO SOURCED COEFFICIENT EXISTS FOR A NON-NEWTONIAN STAGNANT LID at this engine's admitted stress
+# exponent. Batra & Foley's models are Newtonian by construction (their eq. 5 has no stress dependence at all).
+# Schulz et al. RAN a dislocation-creep model at `n = 3.5` on the engine's own creep row, but fitted eqs. (34)
+# and (35) over their diffusion-creep and reduced-enthalpy runs, and warn in their own words that "care should
+# be taken upon using these relations for dislocation creep". The non-Newtonian primaries that would settle it
+# (Reese, Solomatov & Moresi 1998, J. geophys. Res. 103, 13643, and 1999, Icarus 139, 67) are paywalled: both
+# returned HTTP 403 on 19 July 2026 with no free legitimate copy found, so nothing is transcribed from them and
+# no row stands in for them. A coefficient for this engine's exact rheology is RESERVED, with its basis recorded
+# at the kernel in laws.rs. An absent row is the correct outcome; an invented one would not be.
+#
+# THE MACHINE-READABLE SCOPE (added 2026-07-19). Everything the paragraphs above state in prose about what a
+# stagnant-lid row was fitted against is ALSO carried in fields a reader can test, because a scope stated only in
+# prose cannot stop a consumer. `family` and `family_selection` say which rows are BRANCHES OF ONE PRESCRIPTION
+# and how that prescription picks between them: the two Batra rows are one family whose selection is
+# `larger_branch`, their own eq. (11), and each Schulz row is a `sole_determination` family of one.
+# `rayleigh_definition_key` and `theta_definition_key` are SYMBOLS for the prose definitions beside them, so a
+# consumer has to declare which Rayleigh number and which theta it formed, and a row can only be evaluated against
+# its own; two rows share a key only where the prose beside them says they are the same quantity.
+# `fitted_stress_exponent` is the stress exponent the FIT was performed at, 1.0 on all four rows because all four
+# fitting sets are Newtonian. `fitted_theta_ranges` is the theta the fit was MEASURED over, carried as the
+# intervals the source states rather than as one hull across them, because the space between two fitting sets is
+# not a fitting set. `witness` names the held receipt in convection_scaling/manifest.toml, so a consumer can see
+# when two rows lean on ONE study rather than on two independent ones.
+#
+# AN ABSENT SCOPE FIELD IS NOT A PASS. A row that does not transcribe its family, its definitions, its rheology or
+# its fitted span cannot be scope-checked, so the reader refuses it rather than selecting it. An EMPTY
+# `fitted_theta_ranges` is the one exception and means the source states no fitted span at all (an analytic law
+# rather than a fit), which the row's own prose must justify.
+#
+# NO ROW CARRIES A FITTED RAYLEIGH RANGE, and the absence is deliberate rather than an omission. Batra state their
+# models were run over REFERENCE Rayleigh numbers 1e6 to 1e8, and the reference Rayleigh number is formed on the
+# reference viscosity while the fits are stated in Ra_i, formed on the viscosity at the interior temperature. The
+# two differ by the viscosity contrast, which in those runs is 1e6 to 1e7. Transcribing the reference range as a
+# bound on Ra_i would be the same normalization error the bare coefficient C guards against above, so nothing is
+# transcribed and no Rayleigh-range test runs.
+#
 # FINGERPRINTS (owner spot-check, re-asserted in the provenance test): a = 1.0 (band 0.397 to 1.0);
 # C = 0.294; Ra_crit free-free = 657.511 (= 27*pi^4/4), k = 2.2214 (= pi/sqrt(2)); Ra_crit rigid-rigid = 1707.762,
-# k = 3.117; Ra_crit rigid-free = 1100.65, k = 2.682; beta = 1/3 (theory), beta_fit = 0.30.
+# k = 3.117; Ra_crit rigid-free = 1100.65, k = 2.682; beta = 1/3 (theory), beta_fit = 0.30. Stagnant lid:
+# C1 = 0.48 with (gamma, beta) = (-4/3, 1/3), band 0.48 to 0.55; C2 = 2.95 with (-6/5, 1/5); Arrhenius internal
+# 0.278 with (-0.4, 0.203); Arrhenius harmonic 0.219 with (-0.581, 0.262).
 
 scaling_form = "Nu = a * (Ra / Ra_crit)^beta"
 grade = "theory"
@@ -110,3 +177,138 @@ boundary_condition = "rigid-free (one no-slip, one stress-free)"
 value = "1100.65"
 critical_wavenumber = "2.682"
 citation = "Chandrasekhar 1961, Hydrodynamic and Hydromagnetic Stability, Oxford, Chapter II (the rigid-free case; Ra=1100.65, a=2.682); high-precision recomputation Glomski & Johnson 2012, Appl. Math. Sci. 6, 5097-5108 (Rc=1100.6496068877..., kc=2.6823217577...). Held witness: the Glomski & Johnson PDF."
+
+# ---------------------------------------------------------------------------------------------------------
+# DERIVE-FIRST WAS TESTED ON `alpha` AND IT FAILED, recorded so the next reader does not re-run it.
+#
+# The idea is tempting and nearly right: Batra and Foley's eq. (10) reads `Nu ~ (Ra_i/Ra_c)^beta`, and with
+# Solomatov's stagnant-lid `Ra_c = 20.9 theta^4` that expands to `Nu = 20.9^-beta theta^(-4 beta) Ra_i^beta`.
+# So `alpha` looks like it should DERIVE from a critical Rayleigh number, which is a quantity this very file
+# already banks three of. At `beta = 1/3` the derivation gives `alpha = 20.9^(-1/3) = 0.363`.
+#
+# Their own fit at the same exponents is `C1 = 0.48`, twenty-four percent away. The gap is not an error in
+# either: `Ra_c` is a MARGINAL-STABILITY criterion, the point at which the sublayer starts convecting, while
+# `C1` is fitted to the heat transported once it is convecting. Onset and transport are different
+# questions, and the ratio between them is exactly what a fit measures and a stability analysis does not.
+#
+# The second reason is the one this file already states above and it is the stronger one: the three numbers
+# travel together as one convention. An `alpha` computed from `Ra_c` and then paired with a fitted `gamma` and
+# `beta` would be a value from one determination wearing another's exponents, which is the joint-fit defect
+# this repository spent a day on in the Debye/Grueneisen column. So the reserved coefficient stays reserved,
+# and it is reserved as a TESTED conclusion rather than an assumption.
+#
+# THE STAGNANT-LID CONVENTIONS. A DIFFERENT SCALING FORM from every row above: Nu = alpha theta^gamma Ra^beta,
+# where theta is the Frank-Kamenetskii parameter. Each row's three numbers are ONE convention and are read
+# together; the theta_exponent and rayleigh_exponent fields are what make a row readable as one.
+# ---------------------------------------------------------------------------------------------------------
+
+# TIME-DEPENDENT stagnant-lid convection, the branch that applies to a purely internally heated interior
+# because such an interior rarely settles into a steady pattern. This is the (theta^-4/3, Ra^1/3) form.
+[[constant]]
+name = "nu_stag_time_dependent_C1"
+symbol = "C1"
+value = "0.48"
+band_lo = "0.48"
+band_hi = "0.55"
+theta_exponent = "-1.333333333333"
+rayleigh_exponent = "0.333333333333"
+scaling_form = "Nu = C1 * theta^(-4/3) * Ra_i^(1/3)"
+regime = "stagnant lid, TIME-DEPENDENT convection, Frank-Kamenetskii (linearized, temperature-only) viscosity, Newtonian, 2-D Cartesian, bottom-heated"
+family = "batra_foley_2021_linearized"
+family_selection = "larger_branch"
+family_selection_citation = "Batra & Foley 2021 eq. (11) takes Nu = max(eq. 9, eq. 10), the steady-to-time-dependent transition falling where the two branches cross. So the branch is an OUTCOME of the evaluated state and never a caller's declaration."
+witness = "batra_foley_2021"
+rayleigh_definition_key = "ra_i_sublid_viscosity_at_t_i"
+theta_definition_key = "theta_fk_linearized_pressure_free"
+fitted_stress_exponent = "1.0"
+fitted_stress_exponent_provenance = "Their eq. (5) is the Frank-Kamenetskii viscosity mu = exp(theta (1 - T)), which carries no stress dependence at all, so the models are Newtonian by construction."
+fitted_theta_ranges = [["13.82", "13.82"], ["16.12", "16.12"]]
+fitted_theta_provenance = "Their models sample theta at TWO VALUES ONLY, 13.82 and 16.12 (viscosity contrasts 1e6 and 1e7), so the fitted span is carried as those two points rather than as a filled interval between them."
+rayleigh_definition = "INTERNAL Rayleigh number Ra_i, formed on the mantle viscosity just beneath the stagnant lid. Batra & Foley section 5 give the internally heated instance explicitly: Ra_i = rho g alpha (T_i - T_s) d^3 / (kappa mu(T_i)) with the temperature drop taken from the interior to the surface."
+theta_definition = "theta = E_v delta_T / (R (T_s + delta_T)^2) in the bottom-heated models (their eq. 6), and theta = E_v (T_i - T_s) / (R T_i^2) in the internally heated application (their section 5). NO activation volume and NO pressure term: the models are pressure-independent."
+band_provenance = "The value 0.48 is the authors' OWN fit to their own isochemical models and is read at this primary. The band's high edge 0.55 is the same paper REPORTING that 'Solomatov & Moresi (2000) and Korenaga (2009) find C1 ~ 0.5 - 0.55 for their purely internally heated models'; that is a statement inside the held witness and NOT a reading at either of those primaries, neither of which was retrieved. The band is therefore bottom-heated-fitted to internally-heated-reported, and it is labelled rather than smoothed."
+family_relation = "Batra & Foley eq. (8) states the family as Nu = C* theta^-(1+beta) Ra_i^beta, so gamma = -(1 + beta) is not independent of beta. This row satisfies it: beta = 1/3 gives gamma = -4/3."
+citation = "Batra, K. & Foley, B.J. 2021, Geophys. J. Int. 228(1), 631-663, doi 10.1093/gji/ggab366, eq. (10) with C1 = 0.48 fitted in section 4.2, restated in the Table 2 variable list and drawn on the Figure 10 fit line; band high edge from their section 5 report of Solomatov & Moresi 2000 and Korenaga 2009. Witness receipted in convection_scaling/manifest.toml as batra_foley_2021 (author accepted manuscript, NSF Public Access Repository)."
+
+# STEADY stagnant-lid convection, the low-Rayleigh branch. Its coefficient is six times the time-dependent one
+# and its exponents are shallower, so reading it into the wrong branch is a large error in both directions at
+# once. The two cross at Ra_i = (C2/C1)^(15/2) * theta, and the transition is at that crossing (their eq. 11).
+[[constant]]
+name = "nu_stag_steady_C2"
+symbol = "C2"
+value = "2.95"
+theta_exponent = "-1.2"
+rayleigh_exponent = "0.2"
+scaling_form = "Nu = C2 * theta^(-6/5) * Ra_i^(1/5)"
+regime = "stagnant lid, STEADY convection pattern, Frank-Kamenetskii (linearized, temperature-only) viscosity, Newtonian, 2-D Cartesian, bottom-heated"
+family = "batra_foley_2021_linearized"
+family_selection = "larger_branch"
+family_selection_citation = "The same eq. (11) as the sibling branch above: the family is evaluated on both branches and the larger one stands."
+witness = "batra_foley_2021"
+rayleigh_definition_key = "ra_i_sublid_viscosity_at_t_i"
+theta_definition_key = "theta_fk_linearized_pressure_free"
+fitted_stress_exponent = "1.0"
+fitted_stress_exponent_provenance = "The same Frank-Kamenetskii eq. (5) viscosity as the sibling row: Newtonian by construction."
+fitted_theta_ranges = [["13.82", "13.82"], ["16.12", "16.12"]]
+fitted_theta_provenance = "The same two sampled theta values as the sibling row, 13.82 and 16.12."
+rayleigh_definition = "The same internal Rayleigh number Ra_i as the sibling row above."
+theta_definition = "The same Frank-Kamenetskii theta as the sibling row above. NO pressure term."
+family_relation = "Satisfies Batra & Foley eq. (8): beta = 1/5 gives gamma = -6/5."
+citation = "Batra, K. & Foley, B.J. 2021, Geophys. J. Int. 228(1), 631-663, doi 10.1093/gji/ggab366, eq. (9) with C2 = 2.95 fitted in section 4.2, restated in the Table 2 variable list and drawn on the Figure 10 fit line; the authors note both coefficients are 'nearly identical to the scaling laws from Dumoulin et al. (1999)'. Witness: batra_foley_2021."
+
+# The ARRHENIUS-WITH-PRESSURE convention, fitted on the internal Rayleigh number. This is the row whose
+# rheology bank is the engine's own (Hirth & Kohlstedt 2003 dry olivine), and whose theta carries the SAME
+# E* + P V* the engine's viscosity carries. Its theta exponent is much shallower than the linearized studies',
+# which the authors attribute to that pressure dependence.
+[[constant]]
+name = "nu_stag_arrhenius_internal_ra"
+symbol = "alpha"
+value = "0.278"
+theta_exponent = "-0.4"
+rayleigh_exponent = "0.203"
+scaling_form = "Nu = alpha * theta^(-0.4) * Ra_i^(0.203)"
+regime = "stagnant lid, full Arrhenius viscosity WITH activation volume, Hirth & Kohlstedt 2003 dry olivine, Mars-like, 2-D Cartesian aspect ratio one, bottom-heated, one-convection-cell regime"
+family = "schulz_2020_internal_ra"
+family_selection = "sole_determination"
+family_selection_citation = "The source states ONE fit against this Rayleigh definition (their eq. 34), so the family is this row. It is banked apart from the harmonic sibling because the two are fitted against different Rayleigh numbers, never as two branches of one prescription."
+witness = "schulz_tosi_plesa_breuer_2020"
+rayleigh_definition_key = "ra_i_min_viscosity_midcell"
+theta_definition_key = "theta_arrhenius_pressure_carrying"
+fitted_stress_exponent = "1.0"
+fitted_stress_exponent_provenance = "eqs. (34) and (35) are fitted over the diffusion-creep and reduced-activation-enthalpy runs, both Newtonian. The study RAN dislocation creep at n = 3.5, and those runs are excluded from the fit, with the authors warning against applying the relations to them."
+fitted_theta_ranges = [["6.89", "11.07"], ["24.2", "27.6"]]
+fitted_theta_provenance = "Their section 4.5.1 reported ranges: 24.2 to 27.6 for the diffusion-creep runs and 6.89 to 11.07 for the reduced-activation-enthalpy runs. The two are carried as SEPARATE intervals because the dislocation runs, 11.4 to 12.8, sit in the space between them and are no part of the fitting set."
+rayleigh_definition = "INTERNAL Rayleigh number Ra_i, formed on the minimum viscosity of the system, which the authors locate at the internal temperature T_i and pressure P_i determined in the middle of the convecting cell rather than from a laterally averaged profile."
+theta_definition = "Their eq. (29): theta = |delta_T d(ln eta)/dT| = delta_T (E + P_i V) / (R T_i^2) - P_i V / (R T_i), with P_i the pressure at the base of the top thermal boundary layer. This is the PRESSURE-CARRYING form, and it is the one the engine's kernel implements."
+fit_quality = "Maximal deviation 6.7 per cent against the measured Nusselt numbers, standard deviation 0.093 (their own statement)."
+scope_limit = "FITTED OVER NEWTONIAN RUNS. The fit spans the diffusion-creep simulations (theta 24.2 to 27.6) and the reduced-activation-enthalpy simulations (theta 6.89 to 11.07), both Newtonian. The authors warn that 'care should be taken upon using these relations for dislocation creep', and that the fit 'is only valid for the specific parameters given in Table 1'."
+citation = "Schulz, F., Tosi, N., Plesa, A.-C. & Breuer, D. 2020, Geophys. J. Int. 220(1), 18-36, doi 10.1093/gji/ggz417, eq. (34). Witness receipted in convection_scaling/manifest.toml as schulz_tosi_plesa_breuer_2020 (publisher's version of record; the Wayback capture is byte-identical to the fetch receipt)."
+
+# The same study's fit against a HARMONICALLY averaged sub-lid viscosity. Carried as its own row because its
+# Rayleigh number is a different quantity: reading it against an internal Ra would be a normalization error of
+# the same kind the bare coefficient C guards against above. It is also the row the source's own dislocation
+# worked example runs through, which is why the kernel's referee test uses it.
+[[constant]]
+name = "nu_stag_arrhenius_harmonic_ra"
+symbol = "alpha"
+value = "0.219"
+theta_exponent = "-0.581"
+rayleigh_exponent = "0.262"
+scaling_form = "Nu = alpha * theta^(-0.581) * Ra_har^(0.262)"
+regime = "stagnant lid, full Arrhenius viscosity WITH activation volume, Hirth & Kohlstedt 2003 dry olivine, Mars-like, 2-D Cartesian aspect ratio one, bottom-heated, one-convection-cell regime"
+family = "schulz_2020_harmonic_ra"
+family_selection = "sole_determination"
+family_selection_citation = "The source states ONE fit against this Rayleigh definition (their eq. 35). Its Rayleigh key differs from the internal sibling's, which is what keeps a consumer that has only one of the two averages from reading the other row."
+witness = "schulz_tosi_plesa_breuer_2020"
+rayleigh_definition_key = "ra_har_sublid_harmonic_mean"
+theta_definition_key = "theta_arrhenius_pressure_carrying"
+fitted_stress_exponent = "1.0"
+fitted_stress_exponent_provenance = "The same Newtonian fitting set as the sibling row, and the same authors' warning against dislocation creep."
+fitted_theta_ranges = [["6.89", "11.07"], ["24.2", "27.6"]]
+fitted_theta_provenance = "The same two reported ranges as the sibling row, carried separately for the same reason: the dislocation runs at 11.4 to 12.8 lie between them and were not fitted."
+rayleigh_definition = "Ra_har, formed on the HARMONIC mean of the viscosity beneath the stagnant lid (the stagnant lid itself excluded from the average). NOT the internal Rayleigh number of the sibling row, and not any average this engine currently forms."
+theta_definition = "The same eq. (29) pressure-carrying theta as the sibling row above."
+fit_quality = "Maximal deviation 4.2 per cent, standard deviation 0.06 (their own statement)."
+worked_example = "Section 4.5.2: for the pure dislocation-creep simulation with Ra_har,dis = 2.89e6 and theta_dis = 12.73, this row predicts Nu = 2.499 against a measured 2.507. Evaluating the printed formula at the printed inputs gives 2.462, about 1.5 per cent below the printed prediction, a spread inside the source itself and wider than rounding on the printed inputs explains. Recorded rather than smoothed, and it sets the tolerance of the kernel's referee test."
+scope_limit = "The same Newtonian fitting set and the same authors' warning as the sibling row."
+citation = "Schulz, F., Tosi, N., Plesa, A.-C. & Breuer, D. 2020, Geophys. J. Int. 220(1), 18-36, doi 10.1093/gji/ggz417, eq. (35) and the section 4.5.2 worked example. Witness: schulz_tosi_plesa_breuer_2020."

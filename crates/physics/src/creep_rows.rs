@@ -371,20 +371,15 @@ pub enum VolumeEnd {
 /// slice position. The bracket answers that: it reports the span and picks no point inside it, and a min and a
 /// max over a SET cannot read the order the set was listed in (Principle 3).
 ///
-/// # THE GAP CASE IS THE SAME SHAPE, AND IT IS WHY THE SPAN REACHES OUTSIDE THE CHORDS
+/// # OUTSIDE SOURCE SUPPORT IS A DIAGNOSTIC, NOT ADMISSION
 ///
-/// The banked chords start at 0.3 GPa, about nine kilometres on Earth, so a lid sampled FROM THE SURFACE sits
-/// outside every interval through its whole brittle top. Refusing there blocks the full-column solve over a
-/// quantity that cannot move the answer; reaching for the nearest determination authors one. So outside every
-/// chord the bracket is the TABLE'S OWN EXTREMES, tagged [`VolumeConstraint::UnconstrainedBySource`]: it does
-/// not invent and it does not refuse, it reports what the table supports and leaves the consumer to prove the
-/// width cannot reach its answer.
-///
-/// THAT PROOF IS THE CONSUMER'S, AND IT IS ASSERTED RATHER THAN ASSUMED. `P V*` tops out near 8 kJ/mol at
-/// 0.3 GPa against `E*`'s 530, so in the shallow column the span cannot change WHICH BRANCH of the yield
-/// envelope wins, and the envelope's minimum is identical at both ends
-/// ([`crate::moment_equivalence::LithosphereEnvelope`], whose `yield_in_sense` evaluates both ends and reports
-/// no single number where they disagree).
+/// The complete retained table includes recovery chords down to `1e-4 GPa`; the older claim that all chords
+/// begin at `0.3 GPa` described one fixture, not the source. At exactly zero pressure the `P V*` term cancels
+/// algebraically, so the result is independent of the missing value. At any nonzero pressure outside every
+/// chord, this raw evidence helper returns the table extremes tagged
+/// [`VolumeConstraint::UnconstrainedBySource`] only so an audit consumer can see the gap. That span is not an
+/// admitted physical bound. A canonical adapter must derive the value, complete the Gap Law, Buckingham-Pi,
+/// Residual Law, and unique-slot receipt, or refuse.
 #[derive(Clone, Copy, Debug)]
 pub struct ActivationVolumeBracket {
     /// The smallest `V*` the bracketed set reports (cubic centimetres per mole).
@@ -868,11 +863,11 @@ pub enum CreepRefusal {
 /// It also runs the gate the ROW itself states, which is a different thing and is the source's rather than
 /// ours: every quantity entering the Arrhenius exponent must be graded for it ([`CreepRow::exponent_admits`]).
 ///
-/// THE CHORD-COVERAGE GATE IS GONE FROM HERE, and its absence is the ruling rather than an omission. It used to
-/// refuse a caller whose pressure sat outside every banked interval, which blocked a lid from being sampled at
-/// its own surface: the banked chords start at 0.3 GPa, about nine kilometres down. Coverage is now REPORTED on
-/// the bracket ([`VolumeConstraint`]) instead of being a refusal, so the consumer learns what the source
-/// constrains and proves for itself whether the span can reach its answer.
+/// CHORD COVERAGE IS REPORTED HERE because this is a raw candidate-evidence helper. The full retained table
+/// reaches down to `1e-4 GPa`; exact zero is outside every chord but cancels `P V*` identically. At a nonzero
+/// pressure outside source support, [`VolumeConstraint::UnconstrainedBySource`] is a gap report, not permission
+/// to select a world magnitude. The canonical planet boundary must refuse unless a complete admission receipt
+/// closes that gap.
 ///
 /// Returns the bracketed activation volume, which is what an admitted row needs to be evaluated at either end.
 pub fn admit_candidate(
@@ -1053,39 +1048,12 @@ fn ln_row_stress_mpa(
 /// change no bit. The count therefore cannot move a result: it is chosen past the point where it can.
 const COMPOSITE_BISECTION_STEPS: u32 = 52;
 
-/// `ln(sum of exp(x_i))` over the admitted rows' log-space rates: the parallel sum, in the only representable
-/// domain. It CONSUMES the banked pairwise primitive [`crate::saha::log_sum_exp`] rather than computing the
-/// shift itself.
-///
-/// # A CENSUS FOUND A DIAMOND HERE, WHICH IS WHY THIS FOLDS INSTEAD OF COMPUTING
-///
-/// This workspace already carries TWO implementations of `ln(sum exp(x_i))`, under two names, in two crates:
-/// [`crate::saha::log_sum_exp`] (PAIRWISE, `hi + ln(1 + exp(lo - hi))`, public, this crate) and
-/// `civsim_materials::creep::logsumexp_canonical` (N-ARY, terms sorted ascending, private, and in a crate that
-/// depends on this one so it cannot be called from here at all). They compute ONE quantity by different
-/// constructions and cannot agree bit for bit: a pairwise fold rounds at every step where a sorted n-ary sum
-/// rounds once. Both docs invoke the project's determinism discipline BY NAME, one as "the canonical-logsumexp
-/// determinism rule" and the other as "rider 1c, the fixed-topology-reduction discipline": one named rule, two
-/// doors. Writing a third here would have been the worst available outcome, so this consumes the one it can
-/// reach. The unification is a lane-crossing refactor with a real byte risk (moving Saha from a fold to a sorted
-/// n-ary reduction could move the pins) and is sequenced elsewhere.
-///
-/// # THE ORDER IS A PROPERTY OF THIS CODE, NEVER OF THE CALLER'S SLICE
-///
-/// A pairwise fold is not exactly associative in fixed point, so the terms are SORTED ASCENDING before folding.
-/// That normalizes every permutation of the same multiset onto one sequence, which makes the result independent
-/// of the order a caller happened to list its candidates in (Principle 3) rather than merely deterministic given
-/// one, and it folds the smallest terms first, where a fold loses the least. The sort is total and on the values
-/// themselves, so ties are indistinguishable by construction.
-///
-/// A lid's strain rate is 1e-15 per second and Q32.32's smallest positive value is about 2.3e-10, so THE RATES
-/// CANNOT BE ADDED DIRECTLY: every term is zero in this type and their sum is zero. A mechanism more than about
-/// 22 in log below the fastest underflows to zero inside the primitive and contributes nothing, which is the
-/// type's floor rather than a modelling choice: a mechanism running 1e9 times slower than its neighbour cannot
-/// move the sum at this resolution anyway.
+/// `ln(sum of exp(x_i))` over the admitted rows' log-space rates. The rows consume the sole shared numerical
+/// provider, [`Fixed::log_sum_exp`], so creep, Saha, and materials cannot drift behind separate reductions.
+/// Caller order cannot move the result. A mechanism more than the representable log window below the fastest
+/// contributes zero, which is the fixed-point floor rather than a model choice.
 fn ln_total_strain_rate(terms: &mut [Fixed]) -> Option<Fixed> {
-    terms.sort();
-    terms.iter().copied().reduce(crate::saha::log_sum_exp)
+    Fixed::log_sum_exp(terms)
 }
 
 /// THE DUCTILE BRANCH OF THE YIELD-STRENGTH ENVELOPE: the differential stress (MEGAPASCALS) a lid sustains at
@@ -1446,10 +1414,9 @@ mod tests {
         .is_ok());
 
         // OUTSIDE EVERY CHORD THE TABLE STILL SUPPORTS ITS OWN EXTREMES, tagged so the consumer knows the source
-        // said nothing here. This is the ruling rather than a loosening: refusing instead blocked a lid from
-        // being sampled at its own SURFACE, since the banked chords start at 0.3 GPa (about nine kilometres
-        // down), and the consumer proves for itself that the span cannot reach its answer there. The fixture's
-        // chord stops at 2 GPa, so 9 GPa is outside it.
+        // said nothing here. This fixture's chord starts at 0.3 GPa and stops at 2 GPa, so 9 GPa is outside it.
+        // The production table has broader coverage; this test exercises only the raw gap tag. A canonical
+        // consumer cannot turn that tag into a magnitude.
         let far = admit_candidate(
             &CreepCandidate {
                 row: hk_dry_dislocation(),

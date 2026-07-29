@@ -33,20 +33,17 @@ fn the_chem_optics_floor_loads_onto_the_mechanical_and_fluids_floors() {
     let mut reg = PhysicsRegistry::load(data_path("mechanical_floor.toml")).unwrap();
     reg.extend(data_path("fluids_floor.toml")).unwrap();
     reg.extend(data_path("chem_optics_floor.toml")).unwrap();
-    // 39 mech + 24 fluids + 17 chem/optics axes; 20 + 18 + 11 laws; 2 + 2 + 0 substances.
-    // (mech gained mech.stroke_length, the stroke-rate substrate axis; fluids gained fluid.moisture_content
-    // and the three critical-point axes chem.critical_{temperature,pressure} + chem.acentric_factor for the
-    // transport-property derivations, plus the four volatile primitives for the saturation curve; chem/optics gained opt.emissivity.band_0..2 for step 2b.)
+    // 38 mechanical + 20 fluids + 13 chemistry/optics axes; 21 + 15 + 11 laws;
+    // 1 + 2 + 0 substances.
     assert_eq!(
         reg.axis_count(),
-        84,
+        71,
         "the mechanical, fluids, and chem/optics axes"
     );
-    assert_eq!(reg.law_count(), 50, "the wave-1 and wave-2 laws");
-    assert_eq!(reg.substance_count(), 4, "iron, oak, air, water");
+    assert_eq!(reg.law_count(), 47, "the active wave-1 and wave-2 laws");
+    assert_eq!(reg.substance_count(), 3, "iron, air, water");
     assert!(reg.law("law.radiative_equilibrium").is_some());
     assert!(reg.axis("chem.formation_enthalpy").is_some());
-    assert!(reg.axis("opt.spectral_band").is_some());
 }
 
 #[test]
@@ -69,17 +66,7 @@ fn the_chem_optics_ranges_are_owner_set_and_read_back_exactly() {
         Fixed::from_int(5),
         "the high-index headroom above diamond"
     );
-    // The only range-reserved axes over the stack are the three acoustic channel-physics axes added
-    // 2026-07-03, surfaced reserved-with-basis (the owner's to set, never fabricated).
-    assert_eq!(
-        reg.reserved_axis_ids(),
-        vec![
-            "acoustic.absorption_reference",
-            "acoustic.formant_frequency",
-            "acoustic.resonator_length",
-        ],
-        "exactly the three new acoustic axes are reserved-with-basis"
-    );
+    assert!(reg.reserved_axis_ids().is_empty());
 }
 
 #[test]
@@ -212,7 +199,7 @@ fn radiant_emission_tier2_matches_the_exact_cancellation_oracle_and_reflects_sig
             BigUint::from_u64(2).pow(scale),
         )
     };
-    // Sigma at a fine scale (its full mantissa), the temperatures at Q32.32, a being shedding heat.
+    // Sigma at a fine scale (its full mantissa), the temperatures at Q32.32, a warm body shedding heat.
     let sigma_scale = 55u32;
     let sigma_fine = BigRat::from_decimal_str("0.00000005670374419")
         .unwrap()

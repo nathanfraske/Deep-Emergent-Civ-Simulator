@@ -1,0 +1,5 @@
+[mcp_servers.projectops]
+command = "bash"
+args = ["-lc", "root=$(git rev-parse --show-toplevel) && exec \"$root/.codex/run-mcp.sh\" tools/projectops_server.py"]
+startup_timeout_sec = 10
+tool_timeout_sec = 120

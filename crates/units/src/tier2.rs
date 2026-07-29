@@ -40,6 +40,11 @@
 use crate::idiv_round_half_even;
 use std::cmp::Ordering;
 
+/// Number of magnitude bits carried by [`I256`]. Scale accumulation and terminal right shifts are accepted
+/// only while they name one of these bits (`0..=255`). A wider scale needs a wider accumulator or a new
+/// scale plan, so the wide path returns `None` rather than treating an out-of-domain scale as underflow.
+const I256_BITS: u32 = 256;
+
 /// Round `value` to the nearest multiple of `2^shift` and divide it out, ties to even. For `shift == 0`
 /// this is the identity. `value` may be negative; the euclidean rounding in [`idiv_round_half_even`] carries
 /// the sign correctly. For `shift >= 127` the divisor `2^shift` is not a positive `i128` (`1i128 << 127` sets
@@ -85,21 +90,45 @@ fn fit_i64(value: i128) -> Option<i64> {
     }
 }
 
+fn exact_shl_i128(value: i128, shift: u32) -> Option<i128> {
+    if value == 0 {
+        return Some(0);
+    }
+    value
+        .checked_shl(shift)
+        .filter(|shifted| (*shifted >> shift) == value)
+}
+
+fn rescale_i128_to_i64(value: i128, from_scale: u32, to_scale: u32) -> Option<i64> {
+    let scaled = if to_scale >= from_scale {
+        exact_shl_i128(value, to_scale - from_scale)?
+    } else {
+        round_half_even_shr(value, from_scale - to_scale)
+    };
+    fit_i64(scaled)
+}
+
 /// Multiply two scaled mantissas to a target scale, rounded ONCE. `a` at scale `s_a` times `b` at scale
 /// `s_b`, delivered at scale `s_r`: `round_half_even(a*b / 2^(s_a + s_b - s_r))`. The product of two `i64`
 /// mantissas fits `i128`; a result that does not fit `i64` (or a negative net shift whose left shift would
 /// overflow `i128`) returns `None`, the signal to widen.
 pub fn mul(a: i64, s_a: u32, b: i64, s_b: u32, s_r: u32) -> Option<i64> {
+    if a == 0 || b == 0 {
+        return Some(0);
+    }
     let product = (a as i128) * (b as i128);
     let net = s_a as i64 + s_b as i64 - s_r as i64;
     let scaled = if net >= 0 {
-        round_half_even_shr(product, net as u32)
+        let Ok(shift) = u32::try_from(net) else {
+            // The product carries at most 126 magnitude bits. A right shift
+            // larger than u32::MAX therefore rounds exactly to zero.
+            return Some(0);
+        };
+        round_half_even_shr(product, shift)
     } else {
         // The result scale is finer than the inputs': an exact left shift, checked for i128 overflow.
-        product.checked_shl((-net) as u32).filter(|v| {
-            // checked_shl only guards the shift amount, not value overflow; verify the shift is exact.
-            (v >> (-net) as u32) == product
-        })?
+        let shift = u32::try_from(net.unsigned_abs()).ok()?;
+        exact_shl_i128(product, shift)?
     };
     fit_i64(scaled)
 }
@@ -111,18 +140,22 @@ pub fn div(a: i64, s_a: u32, b: i64, s_b: u32, s_r: u32) -> Option<i64> {
     if b == 0 {
         return None;
     }
+    if a == 0 {
+        return Some(0);
+    }
     let neg = (a < 0) ^ (b < 0);
     let mut num = (a as i128).unsigned_abs(); // fits u128, well within range for an i64 magnitude
     let mut den = (b as i128).unsigned_abs();
     let shift = s_b as i64 + s_r as i64 - s_a as i64;
     if shift >= 0 {
-        num = num
-            .checked_shl(shift as u32)
-            .filter(|v| (v >> shift as u32) == num)?;
+        let shift = u32::try_from(shift).ok()?;
+        num = num.checked_shl(shift).filter(|v| (v >> shift) == num)?;
     } else {
-        den = den
-            .checked_shl((-shift) as u32)
-            .filter(|v| (v >> (-shift) as u32) == den)?;
+        let shift = u32::try_from(shift.unsigned_abs()).ok()?;
+        if shift >= 64 {
+            return Some(0);
+        }
+        den = den.checked_shl(shift).filter(|v| (v >> shift) == den)?;
     }
     // round-half-to-even of num/den with both positive, then reapply the sign. The shift-aligned numerator or
     // denominator can land in [2^127, 2^128), fitting u128 but not signed i128; a raw `as i128` cast would wrap
@@ -174,10 +207,14 @@ fn floor_isqrt(n: u128) -> u128 {
 /// root over a shifted argument. The quarter-power consumer `(P/(c*K))^(1/4)` is two of these, avoiding a
 /// transcendental. Requires `bits >= 0`; returns `None` on a negative argument, a non-negative-shift the
 /// planner did not provide (result scale too coarse, widen `s_out`), or an argument that exceeds the
-/// intermediate (widen signal).
+/// intermediate (widen signal). Zero returns zero at every input/output scale pair because no shifted
+/// radicand needs to be represented.
 pub fn isqrt(bits: i64, s_in: u32, s_out: u32) -> Option<i64> {
     if bits < 0 {
         return None;
+    }
+    if bits == 0 {
+        return Some(0);
     }
     let shift = 2 * s_out as i64 - s_in as i64;
     if shift < 0 {
@@ -185,9 +222,10 @@ pub fn isqrt(bits: i64, s_in: u32, s_out: u32) -> Option<i64> {
         // s_out. Signalled rather than silently truncated.
         return None;
     }
+    let shift = u32::try_from(shift).ok()?;
     let arg = (bits as u128)
-        .checked_shl(shift as u32)
-        .filter(|v| (v >> shift as u32) == bits as u128)?;
+        .checked_shl(shift)
+        .filter(|v| (v >> shift) == bits as u128)?;
     let r = floor_isqrt(arg);
     // Round to nearest: step up when the argument is past the midpoint r^2 + r (no exact tie occurs for an
     // integer argument and a half-integer root).
@@ -196,21 +234,28 @@ pub fn isqrt(bits: i64, s_in: u32, s_out: u32) -> Option<i64> {
 }
 
 fn sum_signed(a: i64, s_a: u32, b: i64, s_b: u32, s_r: u32, subtract: bool) -> Option<i64> {
+    if a == 0 {
+        let b = if subtract { -(b as i128) } else { b as i128 };
+        return rescale_i128_to_i64(b, s_b, s_r);
+    }
+    if b == 0 {
+        return rescale_i128_to_i64(a as i128, s_a, s_r);
+    }
+
     let common = s_a.max(s_b);
     // Shift the coarser mantissa up to the common (finer) scale, exact; the finer one's shift is zero.
-    let a_common = (a as i128)
-        .checked_shl(common - s_a)
-        .filter(|v| (v >> (common - s_a)) == a as i128)?;
-    let b_raw = (b as i128)
-        .checked_shl(common - s_b)
-        .filter(|v| (v >> (common - s_b)) == b as i128)?;
-    let b_common = if subtract { -b_raw } else { b_raw };
+    let a_common = exact_shl_i128(a as i128, common - s_a)?;
+    let b_raw = exact_shl_i128(b as i128, common - s_b)?;
+    let b_common = if subtract {
+        b_raw.checked_neg()?
+    } else {
+        b_raw
+    };
     let sum = a_common.checked_add(b_common)?;
     let scaled = if common >= s_r {
         round_half_even_shr(sum, common - s_r)
     } else {
-        sum.checked_shl(s_r - common)
-            .filter(|v| (v >> (s_r - common)) == sum)?
+        exact_shl_i128(sum, s_r - common)?
     };
     fit_i64(scaled)
 }
@@ -359,6 +404,9 @@ impl I256 {
     /// Round the value right by `shift` bits, ties to even, and return the signed magnitude as an `i128`
     /// (the mantissa fits `i128`), or `None` if the rounded magnitude exceeds `i128`.
     fn round_shr(&self, shift: u32) -> Option<i128> {
+        if shift >= I256_BITS {
+            return None;
+        }
         let mut q = I256::shr_mag(&self.mag, shift);
         if shift > 0 {
             let round_bit = I256::test_bit(&self.mag, shift - 1);
@@ -406,6 +454,10 @@ pub struct WideAccum {
 }
 
 impl WideAccum {
+    fn scale_in_domain(scale: u32) -> bool {
+        scale < I256_BITS
+    }
+
     /// Start a chain from a scaled mantissa.
     pub fn new(bits: i64, scale: u32) -> Self {
         WideAccum {
@@ -414,31 +466,50 @@ impl WideAccum {
         }
     }
 
-    /// Multiply another scaled mantissa into the chain; the running scale accumulates. `None` on i256 overflow.
+    /// Multiply another scaled mantissa into the chain; the running scale accumulates. `None` on i256
+    /// overflow, scale-addition overflow, or a running scale outside the i256 domain.
     pub fn mul(&self, bits: i64, scale: u32) -> Option<WideAccum> {
+        let accumulated_scale = self.scale.checked_add(scale)?;
+        if !Self::scale_in_domain(self.scale)
+            || !Self::scale_in_domain(scale)
+            || !Self::scale_in_domain(accumulated_scale)
+        {
+            return None;
+        }
         Some(WideAccum {
             value: self.value.mul_i64(bits)?,
-            scale: self.scale + scale,
+            scale: accumulated_scale,
         })
     }
 
     /// The integer power of a single scaled mantissa: `bits^exp` at scale `exp*scale`, by repeated multiply in
-    /// the wide accumulator. `exp == 0` is the dimensionless one at scale zero.
+    /// the wide accumulator. `exp == 0` is the dimensionless one at scale zero. `None` is returned when the
+    /// input scale is outside the i256 domain, or when scale multiplication overflows or leaves that domain.
     pub fn power(bits: i64, scale: u32, exp: u32) -> Option<WideAccum> {
+        let accumulated_scale = scale.checked_mul(exp)?;
+        if !Self::scale_in_domain(scale) || !Self::scale_in_domain(accumulated_scale) {
+            return None;
+        }
         if exp == 0 {
             return Some(WideAccum::new(1, 0));
         }
-        let mut acc = WideAccum::new(bits, scale);
+        let mut value = I256::from_i64(bits);
         for _ in 1..exp {
-            acc = acc.mul(bits, scale)?;
+            value = value.mul_i64(bits)?;
         }
-        Some(acc)
+        Some(WideAccum {
+            value,
+            scale: accumulated_scale,
+        })
     }
 
     /// Subtract another chain AT THE SAME running scale (the difference-of-quartics case). `None` if the scales
     /// differ (the planner keeps the two sub-chains at one scale) or on overflow.
     pub fn sub(&self, other: &WideAccum) -> Option<WideAccum> {
-        if self.scale != other.scale {
+        if !Self::scale_in_domain(self.scale)
+            || !Self::scale_in_domain(other.scale)
+            || self.scale != other.scale
+        {
             return None;
         }
         Some(WideAccum {
@@ -449,7 +520,10 @@ impl WideAccum {
 
     /// Add another chain at the same running scale. `None` if the scales differ or on overflow.
     pub fn add(&self, other: &WideAccum) -> Option<WideAccum> {
-        if self.scale != other.scale {
+        if !Self::scale_in_domain(self.scale)
+            || !Self::scale_in_domain(other.scale)
+            || self.scale != other.scale
+        {
             return None;
         }
         Some(WideAccum {
@@ -462,7 +536,10 @@ impl WideAccum {
     /// output scale must not exceed the running scale (the chain is finer than its result); `None` otherwise,
     /// or if the rounded mantissa does not fit `i64`.
     pub fn round_to_scale(&self, target: u32) -> Option<i64> {
-        if target > self.scale {
+        if !Self::scale_in_domain(self.scale)
+            || !Self::scale_in_domain(target)
+            || target > self.scale
+        {
             return None;
         }
         fit_i64(self.value.round_shr(self.scale - target)?)
@@ -572,6 +649,17 @@ mod tests {
         // add/sub share the helper: a coarse target scale with a 128+ net shift rounds, does not panic.
         assert_eq!(add(1, 130, 1, 130, 0), Some(0));
         assert_eq!(sub(1, 130, 1, 130, 0), Some(0));
+        assert_eq!(mul(1, u32::MAX, 1, u32::MAX, 0), Some(0));
+        assert_eq!(mul(0, 0, 1, 0, u32::MAX), Some(0));
+        assert_eq!(add(0, 0, 1, u32::MAX, u32::MAX), Some(1));
+        assert_eq!(sub(0, 0, 1, u32::MAX, u32::MAX), Some(-1));
+        assert_eq!(add(1, u32::MAX, 0, 0, 0), Some(0));
+        assert_eq!(add(0, 0, 0, 0, u32::MAX), Some(0));
+        assert_eq!(add(1, 0, 0, u32::MAX, 0), Some(1));
+        assert_eq!(sub(1, 0, 0, u32::MAX, 0), Some(1));
+        assert_eq!(add(0, u32::MAX, 1, 0, 0), Some(1));
+        assert_eq!(sub(0, u32::MAX, 1, 0, 0), Some(-1));
+        assert_eq!(sub(1, 64, i64::MIN, 0, 0), None);
     }
 
     #[test]
@@ -583,6 +671,9 @@ mod tests {
             div(4403335111641285598, 27, 6005818356516761817, 61, 32),
             None
         );
+        assert_eq!(div(1, 0, 1, u32::MAX, u32::MAX), None);
+        assert_eq!(div(0, 0, 1, u32::MAX, u32::MAX), Some(0));
+        assert_eq!(div(1, u32::MAX, 1, 0, 0), Some(0));
     }
 
     #[test]
@@ -665,6 +756,9 @@ mod tests {
         // A negative argument or a too-coarse result scale is a widen signal, not a wrong value.
         assert_eq!(isqrt(-1, 0, 0), None);
         assert_eq!(isqrt(4, 40, 0), None); // 2*0 - 40 < 0
+        assert_eq!(isqrt(0, 0, u32::MAX), Some(0));
+        assert_eq!(isqrt(0, u32::MAX, 0), Some(0));
+        assert_eq!(isqrt(1, 0, u32::MAX), None);
     }
 
     #[test]
@@ -768,6 +862,36 @@ mod tests {
         // t^2 keeping the full product at scale 2*s_t exceeds i64, so the single-op i128 mul returns the
         // widen signal there (it cannot carry the un-rounded quartic that the wide accumulator holds).
         assert_eq!(mul(t, s_t, t, s_t, 2 * s_t), None);
+    }
+
+    #[test]
+    fn wide_scale_domain_refuses_invalid_scales_without_panicking() {
+        // The audit canary: the old terminal shift indexed beyond the four-limb magnitude and panicked.
+        assert_eq!(WideAccum::new(1, 300).round_to_scale(0), None);
+        assert_eq!(I256::from_i64(1).round_shr(300), None);
+
+        // Scale 255 is the last valid terminal shift. Scale 256 and an out-of-domain target fail closed.
+        assert_eq!(WideAccum::new(1, 255).round_to_scale(0), Some(0));
+        assert_eq!(WideAccum::new(1, 256).round_to_scale(0), None);
+        assert_eq!(WideAccum::new(1, 0).round_to_scale(256), None);
+        assert_eq!(WideAccum::new(1, 300).round_to_scale(300), None);
+
+        // Both machine-word overflow and a representable sum outside the i256 scale domain are refusals.
+        assert!(WideAccum::new(1, u32::MAX).mul(1, 1).is_none());
+        assert!(WideAccum::new(1, 200).mul(1, 56).is_none());
+        assert!(WideAccum::new(1, 0).mul(1, 300).is_none());
+        assert!(WideAccum::new(1, 300)
+            .add(&WideAccum::new(1, 300))
+            .is_none());
+        assert!(WideAccum::new(1, 300)
+            .sub(&WideAccum::new(1, 300))
+            .is_none());
+
+        // Exercise checked scale multiplication separately from the bounded-domain check.
+        let overflow_exp = u32::MAX / 255 + 1;
+        assert!(WideAccum::power(1, 255, overflow_exp).is_none());
+        assert!(WideAccum::power(1, 128, 2).is_none());
+        assert!(WideAccum::power(1, 300, 0).is_none());
     }
 
     // Guard the oracle helper itself against a stale comparison path.

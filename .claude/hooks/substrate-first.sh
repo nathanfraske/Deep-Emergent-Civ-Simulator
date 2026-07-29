@@ -24,7 +24,7 @@ fi
 
 # Value-authoring intent: force the derive-first challenge against the WHOLE substrate map.
 if printf '%s' "$lc" | grep -qiE "set (this|the|a|that) value|what value|need a (number|value|constant)|hardcode|author (a|the|this|that) (value|number|constant)|reserved value|can'?t derive|cannot derive|pick a (number|value)|1 ?y ?= ?365|365 ?days?|just set|owner (decision|call) on (a|the) value|we have to set"; then
-  remind="${remind}[derive-first] This reads as value-authoring. Before authoring OR flagging ANY value owner-set, READ docs/working/PHYSICS_FLOOR_REGISTRY.md (the whole physics-substrate map: the authored floor AND the deriving substrates, orbital mechanics / hydrology / metabolism / matter cycle / time-space) and prove IN WRITING that no substrate derives it. Authoring a derivable value is a defect under the value-authoring line; the honest output when a substrate is truly missing is \"build the substrate\", not \"set the value\".
+  remind="${remind}[derive-first] This reads as value-authoring. READ docs/working/PHYSICS_FLOOR_REGISTRY.md and docs/working/CANONICAL_LEDGER_INVENTORY.txt, then prove in writing whether the value derives from the admitted absolute floor. If derive-first fails, require the complete Buckingham-Pi, derivation-exhaustion, Gap Law, and Residual Law admission receipt. Otherwise refuse. Never route a missing value to an owner-set number, profile, scenario, or citation.
 "
 fi
 

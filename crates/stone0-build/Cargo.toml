@@ -1,0 +1,23 @@
+# Copyright 2026 Nathan M. Fraske
+# Licensed under the Apache License, Version 2.0; see LICENSE.
+
+[package]
+name = "civsim-stone0-build"
+description = "One build-graph owner for the repository-wide Stone 0 provenance guard."
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+[build-dependencies]
+civsim-stone0 = { path = "../stone0" }
+
+[lib]
+name = "civsim_stone0_build"
+path = "src/lib.rs"
+
+[lints.clippy]
+disallowed_types = "allow"

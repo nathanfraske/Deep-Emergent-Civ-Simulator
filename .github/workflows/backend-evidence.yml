@@ -1,0 +1,58 @@
+# Copyright 2026 Nathan M. Fraske
+# Licensed under the Apache License, Version 2.0; see LICENSE.
+
+name: sparse backend evidence
+
+on:
+  schedule:
+    - cron: "17 6 * * 6"
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Independent backend suite"
+        required: true
+        default: "all-software"
+        type: choice
+        options:
+          - all-software
+          - active-cpu
+          - parked-cpu
+
+jobs:
+  active-cpu:
+    name: active CubeCL CPU diversity
+    if: github.event_name == 'schedule' || inputs.suite == 'all-software' || inputs.suite == 'active-cpu'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned Rust toolchain
+        run: rustup show
+      - name: Install Just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: Cache sparse CPU artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: sparse-cubecl-cpu
+          cache-directories: ~/.cache/tracel
+      - name: Cross-check Q32.32 through the CPU code generator
+        run: just test-gpu-cpu-sparse
+
+  parked-cpu:
+    name: parked CubeCL CPU diagnostics
+    if: github.event_name == 'schedule' || inputs.suite == 'all-software' || inputs.suite == 'parked-cpu'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned Rust toolchain
+        run: rustup show
+      - name: Cache parked sparse CPU artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: sparse-parked-cubecl-cpu
+          workspaces: ". -> target/parked-gpu"
+          cache-directories: ~/.cache/tracel
+      - name: Run the parked CPU globe diagnostic
+        run: cargo test --manifest-path parked/Cargo.toml --target-dir target/parked-gpu -p civsim-gpu-legacy --test globe_gate

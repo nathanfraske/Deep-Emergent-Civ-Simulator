@@ -1,0 +1,451 @@
+# From the absolute floor to a derived periodic table
+
+Status: architecture and implementation frontier for draft PR #215. `CURRENT`
+marks implemented behavior. `NEXT` marks the first bounded physical work.
+`FUTURE` remains blocked on the named authority. This page is explanatory and
+cannot admit a law, value, species, or world state.
+
+## Current truth
+
+Four physical species members have now emerged, but only inside three narrow
+member-producing profiles. A fourth claim-local profile contributes a
+confining interaction grammar and zero members. The canonical floor still
+contains three Universal `[M]`
+invariants, `alpha`, `G`, and `m_e`. Exact SI definitions remain engine
+coordinates with no provenance mark or physical freedom. None of those values
+selects a field ontology, a gauge group, a particle name, or a desired Solar
+outcome.
+
+The first primitive attempt failed its hostile audit because it hashed
+assertions about derive-first exhaustion and symmetry exclusion. That attempt
+remains rejected. The replacement production route executes the missing work:
+
+1. Two independent registered-catalog scans find no admitted seed or rule for
+   the exact categorical profile target.
+2. Both classify Buckingham Pi as semantically inapplicable to that
+   nondimensional categorical request.
+3. Both execute Gap Law, classify the Chaos Protocol as nondynamical, execute
+   Residual Law, scan every occupied residual slot, and agree that one
+   owner-reviewed slot is collision-free.
+4. Separate quadratic-basis, affine-action, and action-bound scope pairs prove
+   the exact consequences used by the profile.
+5. Independent outer producer and watchdog implementations reconstruct the
+   complete artifact set and must agree before any production capability is
+   minted.
+
+The first resulting census is one Residue `[A]` irreducible profile claim and
+28 Residue `[D]` consequences. The physical registry closes one generic,
+source-free, unbroken rank-one abelian null excitation. Within its exact
+validity domain it has zero rest mass, a minus-one and plus-one helicity pair,
+integer-spin Bose statistics, zero self-charge under the unbroken symmetry, a
+conserved-current coupling, stability, and no lower-profile transition.
+These are structural identities. A familiar particle label does not enter the
+causal path.
+
+A second independent profile pair now admits one local complex-spinor matter
+profile under the already admitted rank-one abelian sector. Its census is one
+Residue `[A]` profile claim plus 38 Residue `[D]` consequences. The pair binds
+the sealed `m_e` coordinate through an explicit uncertainty-transport proof,
+uses `alpha` only as a dimensionless coupling coordinate, and closes exactly
+two equal-mass mobile Fermi members with relative charge weights minus one and
+plus one. Charge orientation may swap the members but cannot change the set.
+No familiar particle name enters the packet, either checker, or registry.
+
+The third pair consumes that charged orbit and the admitted abelian carrier
+sector. Its variational producer derives the dimensionless Rayleigh quotient
+`epsilon(s) = s^2 / 2 - s`, whose unique stationary point is `s = 1` and whose
+lowest coefficient is `-1/2`. Its independent watchdog completes the square
+instead of replaying that solve. Both derive the equal-mass reduced-mass factor
+`1/2`, the binding-mass factor `alpha^2 / 4`, exact radial normalization one,
+zero radial residual, and the neutral charge sum. The candidate mass interval
+is the exact floor interval for `m_e * (2 - alpha^2 / 4)`. It lies strictly
+below the free-pair interval after propagating both `m_e` and `alpha`
+uncertainties.
+
+That result is one neutral two-body member, not a stability claim. A distinct
+neutral massless-carrier decay family has zero threshold and remains
+energetically open. No decay rate, lifetime, conditioned support, familiar
+atom, or global stability follows.
+
+The fourth pair admits one compact noncommutative local interaction sector
+with a connection-carrier family, nonlinear curvature, covariant
+conservation, and an asymptotic boundary that excludes isolated noninvariant
+carriers. Its census is one Residue `[A]` profile claim plus 19 Residue `[D]`
+consequences. Confinement is an explicit scoped premise, not a claimed
+four-dimensional theorem. The profile fixes no group, rank, representation
+size, coupling, transition scale, constituent mass, spectrum, or member.
+
+The next structural seam is now executable. A paired forward inventory and
+reverse obligation reconstruction consume only the admitted confining-profile
+receipt. They preserve its carrier content as one opaque internal seed while
+constructing zero constituent candidates. The current decision is
+`blocked_open_proofs`, with eight typed missing authorities. Adding unfamiliar
+or thaumic internal identities cannot relabel or displace the carrier-content
+seed. No placeholder input can remove a gap. A future gap may close only when
+its claim-scoped upstream authority pair supplies a sealed receipt.
+
+The live vocabulary now partitions 125 admitted artifacts into 107 descriptor
+roles, 125 relation targets, and five constraint laws. This is complete only
+for the current input. Global physical-vocabulary coverage, global membership
+authority, conditioned support, and global stability remain false. There is
+still no composite core, nucleus, atom, element, periodic table, star, planet,
+or snapshot.
+
+The generic law router remains available for every later premise. Its
+synchronous producer and dependency-indexed watchdog accept only grounded
+capability ancestry, keep incomplete searches open, and require independent
+target-bound rule-universe coverage before an unfamiliar irreducible branch
+may begin. The four local profiles do not turn this generic router into a
+closed ontology.
+
+`crates/physics/data/periodic_table.toml` is a terrestrial reference cache used
+by active-candidate material kernels. It contains authored membership,
+terrestrial isotope-weighted standard atomic weights, valence rows, and other
+measured columns. It is validation and migration evidence. It is not the
+canonical periodicity route, cannot enter `civsim-planet`, and cannot select an
+alien or Terran realization.
+
+## The dependency chain
+
+```mermaid
+flowchart TB
+    FLOOR["CURRENT sealed absolute floor<br/>alpha, G, m_e<br/>plus exact SI representation"]
+    EPS0["CURRENT first derived premise<br/>sealed eps_0 relation and local scale<br/>dual result and canary evidence<br/>no field or species authority"]
+    SELECT["CURRENT premise selector<br/>exact role plus content matching<br/>proof-bearing exact zero<br/>no cardinality fallback<br/>authority_effect = none"]
+    ROUTE["CURRENT paired generic derive-first route<br/>grounded ancestry only<br/>separate search completeness<br/>before irreducibility"]
+    LAW["CURRENT local profile admission<br/>paired catalog and protocol scan<br/>complete scoped quadratic basis<br/>exact symmetry exclusion and scope"]
+    PRIMITIVE["CURRENT one local primitive excitation<br/>exact zero mass and helicity pair<br/>Bose statistics, zero self-charge,<br/>conserved current and scoped stability"]
+    CHARGED["CURRENT charged-matter profile<br/>two-member conjugation orbit<br/>transported mass uncertainty<br/>Fermi statistics and scoped laws"]
+    COMPOSITE["CURRENT neutral two-body profile<br/>exact lowest-level coefficient<br/>complete free-pair threshold<br/>open decay remains visible"]
+    THRESHOLD["CURRENT claim-scoped threshold pair<br/>strictly below the covered threshold<br/>overlap stays unresolved<br/>coverage receipts remain distinct"]
+    STRONG["CURRENT confining interaction profile<br/>nonlinear carrier grammar<br/>invariant-only asymptotic boundary<br/>zero species members"]
+    CONSTITUENT_FRONTIER["CURRENT confining constituent frontier<br/>one opaque internal carrier-content seed<br/>eight typed missing authorities<br/>zero constituent candidates"]
+    CONSTITUENT["NEXT constituent authority pairs<br/>exact representation closure and scale<br/>excitation, mass, state, statistics,<br/>validity, conservation, and channels"]
+    NUCLEAR["FUTURE multi-constituent cores<br/>binding spectra, decay channels<br/>charge and neutral conserved content"]
+    ELEMENT["FUTURE element identity projection<br/>same derived core-charge vector<br/>isotopes differ by neutral content or state"]
+    ATOM["FUTURE atomic many-body solve<br/>mobile opposite-charge carriers<br/>statistics, relativistic corrections<br/>ground and excited spectra"]
+    PERIODICITY["FUTURE periodicity cache<br/>shell closures and occupancy<br/>recurring valence response<br/>periods and groups as projections"]
+    NUCLEOSYNTHESIS["FUTURE nucleosynthesis and decay<br/>primordial, stellar, explosive<br/>mixing and transport history"]
+    ABUNDANCE["FUTURE local isotope support<br/>conditioned [W] and [X]<br/>world and material specific"]
+    WEIGHT["FUTURE local atomic weights<br/>derived isotope masses<br/>weighted by local abundances"]
+    CHEMISTRY["FUTURE chemistry and materials<br/>candidate generation<br/>free-energy disposition<br/>kinetic persistence and phases"]
+    STARS["FUTURE opacity, EOS, thermal balance<br/>collapse, stars, disks, enrichment"]
+    PLANETS["FUTURE solids, planets, interiors<br/>crust, mantle, impacts<br/>volcanism and recycling"]
+    VIEW["FUTURE observer-only labels<br/>familiar symbols and names<br/>never causal inputs"]
+    REFUSE["Typed refusal<br/>No familiar default or table fill"]
+
+    FLOOR --> EPS0
+    EPS0 --> SELECT
+    EPS0 --> ROUTE
+    SELECT -. "Exact capability contract" .-> ROUTE
+    ROUTE -. "Same path for each proved premise" .-> LAW
+    LAW --> PRIMITIVE
+    PRIMITIVE --> CHARGED
+    CHARGED --> COMPOSITE
+    THRESHOLD -. "Reusable arithmetic after authority closes" .-> COMPOSITE
+    COMPOSITE --> STRONG
+    STRONG --> CONSTITUENT_FRONTIER
+    CONSTITUENT_FRONTIER --> CONSTITUENT
+    CONSTITUENT --> NUCLEAR
+    NUCLEAR --> ELEMENT
+    ELEMENT --> ATOM
+    CHARGED --> ATOM
+    ATOM --> PERIODICITY
+    NUCLEAR --> NUCLEOSYNTHESIS
+    NUCLEOSYNTHESIS --> ABUNDANCE
+    NUCLEAR --> WEIGHT
+    ABUNDANCE --> WEIGHT
+    PERIODICITY --> CHEMISTRY
+    WEIGHT --> CHEMISTRY
+    CHEMISTRY --> STARS
+    STARS --> NUCLEOSYNTHESIS
+    CHEMISTRY --> PLANETS
+    PLANETS --> VIEW
+    PERIODICITY --> VIEW
+
+    LAW -. "Unfamiliar incomplete premise" .-> REFUSE
+    CHARGED -. "Incomplete registry" .-> REFUSE
+    COMPOSITE -. "Incomplete channels or overlapping bands" .-> REFUSE
+    CONSTITUENT -. "Missing content, scale, or representation" .-> REFUSE
+    NUCLEAR -. "Unresolved strong or weak sector" .-> REFUSE
+    ATOM -. "Unconverged many-body solve" .-> REFUSE
+```
+
+## What each rung must prove
+
+### 1. Law premises
+
+The first live addition is the narrow derived `eps_0` execution relation. It
+proves that a non-root value can inherit the sealed floor, derive its own
+representation coordinate, survive independent mutation checking, and mint a
+claim-scoped capability without broadening the floor or registry.
+
+The first claim-scoped species-forming authority is now active for one exact
+profile. It admits the required field content, operator, interaction sector,
+state, applicability, validity regime, conservation fact, and semantic roles
+only inside the source-free unbroken rank-one abelian scope. A value shape,
+familiar name, catalog cardinality, citation, or hardcoded Standard Model
+graph supplied none of those premises.
+
+The generic router now makes the order enforceable. It finds only grounded
+consequences of admitted seeds and admitted rules. It does not enumerate
+equations or optimize toward a familiar result. A cycle has no base case and
+cannot mint a fact. An incomplete or unsuccessful catalog returns an open
+derivation frontier. Irreducibility is unreachable until an independent
+coverage capability binds the exact target, seed set, rule catalog, and both
+coverage checkers.
+
+The rejected first attempt made the acceptance test concrete. The replacement
+route executes the registered-catalog protocol and independently admits the
+profile packet before the conditional calculations can contribute evidence.
+The basis pair constructs all `n(n+1)/2` unordered degree-two monomials from
+four opaque field identities. The algebra pair evaluates every derived
+operator. The action-bound scope pair proves that the exact applicability and
+validity conclusions disappear when the evaluated action is removed. The
+outer producer and watchdog then independently reconstruct the complete
+29-artifact profile and one registry member.
+
+That success is local, not a proof that homogeneous commutative quadratic
+polynomials exhaust every operator family. An unfamiliar theory that needs
+noncommutative, derivative, tensor, higher-order, negative, uncertain,
+time-dependent, or nonmonotonic forms must receive a typed extension or
+refusal. It cannot be coerced into the admitted profile.
+
+The selector enforces exact role and content matching through two
+different algorithms. Adding an unrelated unfamiliar candidate cannot relabel
+or displace an existing match. A candidate under the wrong role or content
+still fails when it is the only candidate. The `eps_0` mint establishes one
+derived scientific admission and selection route, not electromagnetic
+ontology. Every next premise must mint its own opaque upstream capability from
+complete physical evidence and bind its live canary transcripts through the
+watchdog.
+
+The familiar electromagnetic, strong, and weak sectors are one possible
+admitted profile. An unfamiliar or thaumic sector follows the same schema and
+proof path. No Rust enum of familiar particles or gauge groups defines the
+complete physical vocabulary.
+
+Each derived premise carries exact ancestry and independent semantic evidence.
+Each irreducible survivor requires derive-first exhaustion, its Buckingham-Pi
+budget, Gap Law including the typed Chaos Protocol, Residual Law, one unique
+residual slot, owner review, and an independent watchdog. The four tiers and
+seven marks, `[D]`, `[M]`, `[E]`, `[C]`, `[A]`, `[W]`, and `[X]`, account for
+the result but never authorize it.
+
+### 2. Primitive excitations
+
+The first local member now supplies content identity, replayable exact
+masslessness, helicity, statistics, current structure, sector, state,
+validity, stability, transition disposition, and complete dependency
+ancestry. It does not prove a complete primitive registry.
+
+The second local profile now supplies two opposite-charge mobile carriers as
+one charge-orientation-invariant orbit. The `m_e` floor coordinate enters only
+through an explicit mass and uncertainty ancestry proof. The profile separately
+binds its degree of freedom, mass relation, charge, spin, statistics, current,
+mobility, scoped stability, validity, and transition roles. It does not prove
+complete primitive membership, global stability, or conditioned support.
+
+### 3. Composite and nuclear states
+
+A bound-state solver produces closed level bands and every physically allowed
+separation or decay threshold under the admitted laws. Conservation rules
+eliminate forbidden channels. The complete candidate band must lie strictly
+below every covered separation threshold before the exact threshold kernel can
+report a bound disposition. A touching or overlapping band remains
+near-degenerate under the Gap Law. A band above a threshold exposes an open
+channel.
+
+PR #215 now binds the independent exact threshold algorithms to one
+claim-scoped coverage capability from the neutral-profile authority pair. They
+canonicalize channel identity, reject missing or duplicate coverage, preserve
+overlap, and emit `authority_effect=none`. The live neutral candidate lies
+strictly below its covered free-constituent channel. A separate neutral
+massless-carrier family remains energetically open. The pair proves neither a
+complete channel census nor global stability, so it mints no conditioned
+support.
+
+For a Terran validation profile, the nuclear rung needs a strong-like
+confining sector, constituent masses and couplings, composite binding spectra,
+and a weak-like transition sector for beta stability and decay. These are
+physical dependencies, not a license to import an isotope list.
+
+### 4. Elements and isotopes
+
+Element identity derives from the conserved core-charge vector relative to the
+quantized charge carried by mobile opposite-charge excitations. A symbol,
+name, or authored atomic number is presentation metadata. Isotopes share the
+derived core-charge identity and differ in neutral conserved content or
+internal bound state.
+
+This definition admits alien chemistry. It does not assume a single electric
+charge axis, one neutral-content axis, a familiar nucleus, or a maximum element
+count. If the admitted physics produces no analogous core-charge partition,
+the periodic-table projection is inapplicable and the system exposes its own
+derived species organization.
+
+### 5. Atomic spectra and periodicity
+
+Atoms combine a derived core state with light opposite-charge carriers. A
+relativistic many-body solver applies the admitted interactions and statistics,
+then emits converged ground and excited energy bands with residual,
+uncertainty, and validity receipts. Antisymmetrization, screening,
+near-degeneracy, and level crossings stay inside the solve rather than an
+exception table.
+
+Periods and groups are read-only projections over recurring shell closures,
+occupancy, and valence response in those spectra. Familiar symbols and names
+belong only in the viewer. Ambiguous level orderings remain explicit branches
+or refusals. They are never repaired with an authored exception list.
+
+### 6. Abundances and atomic weights
+
+The periodic structure does not contain isotope abundances. Primordial
+nucleosynthesis, stellar burning, explosive channels, decay, ejection,
+transport, mixing, and planet formation generate local isotope support as
+`[W]` and `[X]`.
+
+An atomic weight is therefore a material-local reduction over derived isotope
+masses and local isotope number fractions. A terrestrial standard atomic
+weight is validation evidence for a Terran hindcast, not a universal floor
+value. The same derived element can have different atomic weights in different
+reservoirs without changing the laws or element identity.
+
+### 7. Chemistry, stars, and planets
+
+The derived element and species caches feed a candidate generator, exact or
+certified free-energy disposition, kinetic persistence, phase structure,
+opacity, equation of state, and material properties. Those outputs unlock the
+existing stellar and planetary candidate kernels in dependency order:
+thermal balance, collapse, stars, disks, nucleosynthesis, solid inventories,
+assembly, differentiation, crust, mantle, impacts, volcanism, atmosphere, and
+recycling.
+
+The viewer receives only immutable outputs. Asking for a Terran system is a
+search or conditioning request over completed lawful results. It cannot alter
+the floor, species roster, abundance history, or physical solve.
+
+## Unfamiliar material acceptance canary
+
+The end-to-end path carries a standing falsifier: an unfamiliar matter sector
+must be able to produce a stable or metastable many-body phase with derived
+bulk response even when it has no terrestrial element, isotope, mineral,
+crystal, or material-table identity. The canary advances through the same
+sequence as every other material:
+
+```text
+admitted unfamiliar law premises
+  -> primitive excitations
+  -> bound composite species
+  -> many-body phase and transition solve
+  -> derived transport, elastic, optical, and thermal response
+  -> stellar or planetary material inventory
+  -> neutral viewer label
+```
+
+The new selector test supplies arbitrary role and content identities for a
+material precursor, including one proof-bearing exact-zero premise, and both
+algorithms select the same seven capabilities. This is a structural
+generality canary. It does not admit those synthetic capabilities into
+production. The production canary passes only when every arrow above carries
+its real derivation and authority receipts. If admitted physics does not
+support such a phase, refusal is valid; no desired fantasy property may feed
+back into the law, species, or material solve.
+
+## Deterministic execution on consumer hardware
+
+The universe does not run a full lattice, nuclear, and atomic many-body solve
+for every viewer request. Expensive solvers run as deterministic offline or
+amortized builders. They emit content-addressed, floor-bound cache artifacts
+with convergence, interval, conservation, residual, validity, provenance, and
+independent-checker receipts.
+
+Runtime loads only the cache slice whose exact law, floor, and state bindings
+match the local region. It verifies the receipt, evolves local abundances and
+chemistry, and refuses a cache produced under another physical profile.
+Scalable causal kernels use deterministic integer or fixed-point arithmetic.
+Wide exact rational or integer arithmetic certifies cache construction.
+Floating point remains confirmation-only.
+
+## Ordered implementation slices
+
+1. **Law-premise selection.** DONE AS A DORMANT NON-AUTHORIZING PAIR: exact
+   claim, role, content, applicability, validity, and semantic-evidence
+   bindings select one premise without a familiar name, value-shape, ordinal,
+   or cardinality fallback. Exact zero carries a symmetry and exclusion proof
+   object. An unfamiliar material precursor passes the same structural path.
+2. **Derived premise capability mint.** DONE FOR ONE NON-SPECIES RELATION:
+   `eps_0` proves a narrow derived capability route without admitting an
+   electromagnetic ontology or member.
+3. **Generic derive-first route.** DONE AS A BLOCKED NON-AUTHORIZING PAIR:
+   independent minimal-level and dependency-priority algorithms agree on
+   grounded ancestry, open incomplete searches, refuse cyclic minting, and
+   require separate target-bound rule-universe coverage before the typed
+   irreducible protocol. Production replays one admitted relation and stops at
+   the missing semantic target role.
+4. **Executable theory seam and exact-zero authority.** DONE FOR ONE LOCAL
+   PROFILE: the registered-catalog protocol pair, complete quadratic basis,
+   exact affine-action pair, action-bound scope pair, outer profile pair, live
+   canaries, and claim-scoped capability mint agree. The global theory and
+   operator-family authorities remain blocked.
+5. **First primitive excitation.** DONE FOR ONE LOCAL MEMBER: the registry
+   closes one massless unbroken abelian excitation without claiming global
+   registry coverage or conditioned support.
+6. **Charged-matter profile.** DONE FOR ONE LOCAL TWO-MEMBER ORBIT: the
+   registered-catalog and irreducible protocol admits one categorical complex
+   spinor profile. Independent profile checkers prove equal mass, opposite
+   relative charge, conjugation closure, explicit `m_e` uncertainty transport,
+   Fermi statistics, current, mobility, scoped stability, and transitions.
+   Global vocabulary, stability, support, and familiar identity remain open.
+7. **Bound-state evidence integration.** DONE FOR ONE NEUTRAL TWO-BODY
+   PROFILE: independent variational and factorization paths agree on the exact
+   lowest-level coefficient, reduced mass, normalization, zero residual,
+   conservation, two-coordinate uncertainty interval, and strict separation
+   below the free-constituent threshold. The open neutral-carrier decay family
+   prevents a lifetime, support, or global-stability claim.
+8. **Confining-interaction profile.** DONE FOR ONE CLAIM-LOCAL ZERO-MEMBER
+   PROFILE: independent forward-entailment and reverse-obligation paths bind
+   nonlinear carrier self-interaction, conservation, applicability, validity,
+   and an invariant-only asymptotic boundary. One Residue `[A]` premise and 19
+   Residue `[D]` consequences enter the current-input vocabulary. Confinement
+   remains a scoped premise, not a theorem, and the profile grants no member,
+   group, rank, representation size, coupling, scale, or spectrum.
+9a. **Confining-sector constituent frontier.** DONE: independent forward and
+   reverse algorithms bind the strong-profile receipt, preserve one opaque
+   carrier-content seed, and expose eight typed prerequisites. They are
+   permutation-neutral, bounded, extension-monotone under unfamiliar and
+   thaumic seeds, and non-authorizing. They mint no artifact, constituent
+   candidate, member, or spectrum capability.
+9b. **Confining-sector constituent authorities.** NEXT: derive or fully admit
+   representation-family membership closure, a running or alternative
+   dynamics-scale relation, excitation profiles, exact masses or massless
+   proofs, charge-state-statistics dispositions, applicability and validity,
+   conservation, and complete transition and separation-channel coverage.
+   Familiar constituent and core names may appear only in validation or view
+   projections.
+10. **Composite core profile.** Add the confining and transition sectors needed
+   to enumerate stable and metastable cores for one admitted profile, while
+   leaving unfamiliar sectors open.
+11. **Complete registry and conditioned support.** Prove membership coverage,
+   conditioned support, explicit zeros, normalization, resource bounds, and
+   exact mean particle mass after the relevant primitive and composite
+   channels close.
+12. **Atomic solver cache.** Produce certified spectra and shell projections
+   without an exception list.
+13. **Nucleosynthesis and abundance history.** Generate local isotope support,
+   atomic weights, opacity, and chemistry from the stellar and disk history.
+14. **Candidate-substrate migration.** Replace each consumer of the terrestrial
+   reference table with a typed derived cache adapter, one invariant at a time.
+   The reference table remains validation-only until no canonical consumer
+   needs it.
+
+The next code target is slice 9b, the first authority pair consumed by the
+typed confining frontier. Representation-family membership closure comes
+first because it can lawfully close to a pure-gauge sector or expand to any
+variable-cardinality unfamiliar content. A separate dynamics-scale authority
+then determines whether masses and spectra can be asked for at all. The later
+multi-constituent spectrum must expose every separation and decay channel,
+converge under independent solvers, transport all floor uncertainties, and
+preserve unfamiliar interaction sectors. Independent serialization, owner
+review, citations, and nonzero digests do not substitute for executable
+physical evidence.

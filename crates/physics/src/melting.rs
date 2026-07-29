@@ -32,16 +32,15 @@
 //! The GRADE is ideal-solution, declared and self-checked, never hidden. Run on petrology's founding system,
 //! diopside-anorthite, the ideal eutectic lands near 1608 K at `x_An` about 0.30 against Bowen's measured
 //! 1547 K and about 0.36: roughly 60 K and 20 percent off, exactly the ideal-solution band, plainly
-//! labelled (the calibrated non-ideality, the Margules excess terms, is the next rung). The `(T_m, dH_fus)`
-//! per endmember are the whole information content of this rung, banked columns (`T_m` by the Lindemann
-//! criterion or measured, `dH_fus` by Richard's rule or measured), so the law here consumes them and derives
-//! the phase diagram above them.
+//! labelled. A future excess-energy model must derive or admit its own terms. The `(T_m, dH_fus)`
+//! per endmember are the whole information content of this rung. The law consumes an admitted signature and
+//! derives the phase diagram above it. The separate data registry holds candidate evidence and does not grant
+//! admission by loading a cited row.
 //!
 //! The PRESSURE extension adds one more number, `dV_fus` (the molar volume change on fusion), from which the
 //! Clapeyron slope `dT_m/dP = dV_fus / (dH_fus/T_m)` DERIVES as a thermodynamic identity (not a fit), so the
-//! solidus moves with depth and the surface machinery runs unchanged on the shifted melting points: the
-//! diopside slope lands near 63 K/GPa (measured 60 to 75), the Di-An eutectic climbs to about 1668 K at 1 GPa,
-//! and the decompression-melting productivity the eruption column reads is `dF/dP` off this. A NEGATIVE
+//! solidus moves with depth and the surface machinery runs unchanged on the shifted melting points. The
+//! decompression-melting productivity the eruption column reads is `dF/dP` off this. A NEGATIVE
 //! `dV_fus` (water ice, the denser-melt anomaly) lowers the melting point with pressure instead, the derived
 //! root of the cryovolcanism buoyancy problem, on the same law.
 //!
@@ -81,23 +80,124 @@ fn molar_gas_constant() -> Fixed {
     })
 }
 
-/// An endmember's melting signature. The surface rung reads the two-number `(T_m, dH_fus)`; the pressure
-/// extension adds the third, `dV_fus`, the molar volume change on fusion (a measured `[M]` material property,
-/// the same character as `dH_fus`), from which the Clapeyron slope `dT_m/dP = dV_fus / (dH_fus/T_m)` DERIVES
+/// An endmember's melting signature. This type describes the law input and does not grant value admission. The
+/// surface rung reads the two-number `(T_m, dH_fus)`; the pressure extension adds the third, `dV_fus`, the molar
+/// volume change on fusion, from which the Clapeyron slope `dT_m/dP = dV_fus / (dH_fus/T_m)` DERIVES
 /// (a thermodynamic identity, not a fit), so the solidus moves with depth. A positive `dV_fus` (the melt is
 /// less dense, the silicate case) raises the melting point with pressure; a NEGATIVE one (the melt is denser,
 /// the water-ice anomaly) lowers it, the derived root of the cryovolcanism buoyancy problem.
 #[derive(Clone, Copy, Debug)]
 pub struct Endmember {
-    /// The pure-endmember melting point `T_m` (kelvin), a banked column (Lindemann or measured).
+    /// The pure-endmember melting point `T_m` (kelvin), admitted or derived before canonical use.
     pub melting_point_k: Fixed,
-    /// The molar enthalpy of fusion `dH_fus` (joules per mole), a banked column (Richard's rule or measured).
+    /// The molar enthalpy of fusion `dH_fus` (joules per mole), admitted or derived before canonical use.
     pub fusion_enthalpy_j_per_mol: Fixed,
     /// The molar volume change on fusion `dV_fus` (cubic centimetres per mole, the petrology convention), a
-    /// measured `[M]` column. Positive for a less-dense melt (raises `T_m` with pressure), negative for a
-    /// denser melt (lowers it). Zero leaves the endmember pressure-insensitive (the surface-only rung).
-    pub fusion_volume_cm3_per_mol: Fixed,
+    /// value-bearing input. Positive for a less-dense melt (raises `T_m` with pressure), negative for a
+    /// denser melt (lowers it), and `Some(0)` records an explicit pressure-insensitive value. `None` means the
+    /// evidence is absent. Surface evaluation may ignore that absence, but a nonzero-pressure evaluation must
+    /// refuse rather than substitute zero.
+    pub fusion_volume_cm3_per_mol: Option<Fixed>,
 }
+
+/// The pressure-aware melting operation that could not produce a result.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PressureMeltingStage {
+    /// Shift one pure-endmember melting point through the linear Clapeyron relation.
+    EndmemberShift,
+    /// Solve a binary pressure-shifted eutectic.
+    BinaryEutectic,
+    /// Evaluate a binary pressure-shifted melt fraction.
+    BinaryMeltFraction,
+    /// Solve an N-component pressure-shifted solidus.
+    MulticomponentSolidus,
+    /// Project the first-liquid composition at the pressure-shifted solidus.
+    FirstMeltComposition,
+}
+
+impl PressureMeltingStage {
+    fn label(self) -> &'static str {
+        match self {
+            Self::EndmemberShift => "endmember pressure shift",
+            Self::BinaryEutectic => "binary eutectic",
+            Self::BinaryMeltFraction => "binary melt fraction",
+            Self::MulticomponentSolidus => "multicomponent solidus",
+            Self::FirstMeltComposition => "first-melt composition",
+        }
+    }
+}
+
+/// A structured refusal from a pressure-aware melting evaluation.
+///
+/// The endmember signature is carried as a deterministic low-level diagnostic because [`Endmember`]
+/// intentionally has no authored name or planet identity. Duplicate signatures are possible, so the signature
+/// is not a stable evidence identity. A future canonical typed adapter owns the machine-resolvable binding to an
+/// admitted ledger entry or candidate-evidence row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PressureMeltingRefusal {
+    /// A nonzero pressure needs `dV_fus`, but no fusion-volume evidence is carried.
+    MissingFusionVolume {
+        /// The refusing endmember's melting point.
+        melting_point_k: Fixed,
+        /// The refusing endmember's fusion enthalpy.
+        fusion_enthalpy_j_per_mol: Fixed,
+    },
+    /// The endmember cannot support a Clapeyron shift.
+    NonPhysicalEndmember {
+        /// The refusing endmember's melting point.
+        melting_point_k: Fixed,
+        /// The refusing endmember's fusion enthalpy.
+        fusion_enthalpy_j_per_mol: Fixed,
+    },
+    /// The caller supplied no endmembers to an assemblage solve.
+    EmptyAssemblage,
+    /// Checked fixed-point arithmetic could not represent the requested evaluation.
+    Unrepresentable {
+        /// The operation that exceeded the fixed-point domain.
+        stage: PressureMeltingStage,
+    },
+    /// The surface equilibrium solver could not close after all required pressure shifts succeeded.
+    EquilibriumUnavailable {
+        /// The operation whose equilibrium did not close.
+        stage: PressureMeltingStage,
+    },
+}
+
+impl std::fmt::Display for PressureMeltingRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingFusionVolume {
+                melting_point_k,
+                fusion_enthalpy_j_per_mol,
+            } => write!(
+                f,
+                "pressure-dependent melting refused: fusion volume is absent for endmember T_m={melting_point_k} K, dH_fus={fusion_enthalpy_j_per_mol} J/mol"
+            ),
+            Self::NonPhysicalEndmember {
+                melting_point_k,
+                fusion_enthalpy_j_per_mol,
+            } => write!(
+                f,
+                "pressure-dependent melting refused: non-physical endmember T_m={melting_point_k} K, dH_fus={fusion_enthalpy_j_per_mol} J/mol"
+            ),
+            Self::EmptyAssemblage => {
+                write!(f, "pressure-dependent melting refused: empty assemblage")
+            }
+            Self::Unrepresentable { stage } => write!(
+                f,
+                "pressure-dependent melting refused: {} is outside the fixed-point domain",
+                stage.label()
+            ),
+            Self::EquilibriumUnavailable { stage } => write!(
+                f,
+                "pressure-dependent melting refused: {} equilibrium is unavailable",
+                stage.label()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for PressureMeltingRefusal {}
 
 /// The mole fraction `x_i` of endmember `i` in an ideal liquid saturated with the pure solid `i` at a
 /// temperature, the Schroeder-van Laar liquidus `x_i = exp[-(dH_fus/R)(1/T - 1/T_m)]`. At or above the
@@ -328,67 +428,108 @@ pub fn solution_melt_fraction(
 /// CLAPEYRON law with `dS_fus = dH_fus/T_m` (the rung-0 grade: `dV_fus` and `dS_fus` taken constant). The
 /// pressure is in bar (the petrology convention), the volume in cubic centimetres per mole, and the unit
 /// bridge `1 cm^3.bar = 0.1 J` matches the petrology Gibbs pressure-work term. A positive `dV_fus` raises the
-/// melting point with pressure; a negative one lowers it (the ice anomaly). `None` on a non-physical
-/// endmember (a non-positive melting point or fusion enthalpy, so the entropy of fusion is undefined).
-pub fn melting_point_at_pressure(endmember: Endmember, pressure_bar: Fixed) -> Option<Fixed> {
+/// melting point with pressure; a negative one lowers it (the ice anomaly). At exactly zero pressure the
+/// pressure-work term is identically zero, so missing `dV_fus` is irrelevant and the unshifted melting point is
+/// returned. At any nonzero pressure a missing `dV_fus` returns
+/// [`PressureMeltingRefusal::MissingFusionVolume`]. Other invalid or unrepresentable inputs also return a named
+/// refusal.
+pub fn melting_point_at_pressure(
+    endmember: Endmember,
+    pressure_bar: Fixed,
+) -> Result<Fixed, PressureMeltingRefusal> {
     if endmember.melting_point_k <= Fixed::ZERO
         || endmember.fusion_enthalpy_j_per_mol <= Fixed::ZERO
     {
-        return None;
+        return Err(PressureMeltingRefusal::NonPhysicalEndmember {
+            melting_point_k: endmember.melting_point_k,
+            fusion_enthalpy_j_per_mol: endmember.fusion_enthalpy_j_per_mol,
+        });
     }
+    if pressure_bar == Fixed::ZERO {
+        return Ok(endmember.melting_point_k);
+    }
+    let fusion_volume_cm3_per_mol =
+        endmember
+            .fusion_volume_cm3_per_mol
+            .ok_or(PressureMeltingRefusal::MissingFusionVolume {
+                melting_point_k: endmember.melting_point_k,
+                fusion_enthalpy_j_per_mol: endmember.fusion_enthalpy_j_per_mol,
+            })?;
+    let arithmetic_refusal = || PressureMeltingRefusal::Unrepresentable {
+        stage: PressureMeltingStage::EndmemberShift,
+    };
     // dS_fus = dH_fus / T_m (joules per mole per kelvin).
     let ds = endmember
         .fusion_enthalpy_j_per_mol
-        .checked_div(endmember.melting_point_k)?;
+        .checked_div(endmember.melting_point_k)
+        .ok_or_else(arithmetic_refusal)?;
     if ds == Fixed::ZERO {
-        return None;
+        return Err(PressureMeltingRefusal::NonPhysicalEndmember {
+            melting_point_k: endmember.melting_point_k,
+            fusion_enthalpy_j_per_mol: endmember.fusion_enthalpy_j_per_mol,
+        });
     }
     // dT_m = (dV[cm^3] * P[bar] * 0.1 J/cm^3.bar) / dS.
-    let work = endmember
-        .fusion_volume_cm3_per_mol
-        .checked_mul(pressure_bar)?
-        .checked_mul(Fixed::from_ratio(1, 10))?;
-    let shift = work.checked_div(ds)?;
-    endmember.melting_point_k.checked_add(shift)
+    let work = fusion_volume_cm3_per_mol
+        .checked_mul(pressure_bar)
+        .and_then(|value| value.checked_mul(Fixed::from_ratio(1, 10)))
+        .ok_or_else(arithmetic_refusal)?;
+    let shift = work.checked_div(ds).ok_or_else(arithmetic_refusal)?;
+    endmember
+        .melting_point_k
+        .checked_add(shift)
+        .ok_or_else(arithmetic_refusal)
 }
 
 /// An endmember with its melting point shifted to the Clapeyron value at a pressure, so the surface machinery
 /// (liquidus, eutectic, melt fraction) runs unchanged at depth: the pressure enters ONLY through the moved
-/// melting point, which reuses every surface derivation rather than duplicating it. `None` if the shift is
-/// non-physical.
-fn at_pressure(endmember: Endmember, pressure_bar: Fixed) -> Option<Endmember> {
-    Some(Endmember {
+/// melting point, which reuses every surface derivation rather than duplicating it. Missing pressure evidence
+/// and invalid shifts return a structured refusal.
+fn at_pressure(
+    endmember: Endmember,
+    pressure_bar: Fixed,
+) -> Result<Endmember, PressureMeltingRefusal> {
+    Ok(Endmember {
         melting_point_k: melting_point_at_pressure(endmember, pressure_bar)?,
         ..endmember
     })
 }
 
 /// The binary EUTECTIC at a pressure: [`binary_eutectic`] on the two Clapeyron-shifted endmembers, so the
-/// eutectic temperature rises with depth as the pure melting points do. `None` on a non-physical input.
+/// eutectic temperature rises with depth as the pure melting points do. Missing fusion-volume evidence at a
+/// nonzero pressure and failed equilibria return structured refusals.
 pub fn binary_eutectic_at_pressure(
     a: Endmember,
     b: Endmember,
     pressure_bar: Fixed,
-) -> Option<(Fixed, Fixed)> {
-    binary_eutectic(at_pressure(a, pressure_bar)?, at_pressure(b, pressure_bar)?)
+) -> Result<(Fixed, Fixed), PressureMeltingRefusal> {
+    binary_eutectic(at_pressure(a, pressure_bar)?, at_pressure(b, pressure_bar)?).ok_or(
+        PressureMeltingRefusal::EquilibriumUnavailable {
+            stage: PressureMeltingStage::BinaryEutectic,
+        },
+    )
 }
 
 /// The batch MELT FRACTION at a pressure: [`batch_melt_fraction`] on the two Clapeyron-shifted endmembers. At
 /// a fixed temperature a positive-`dV` system melts LESS at depth (the solidus has risen past it), the
-/// productivity term the decompression-melting column reads. `None` on a non-physical input.
+/// productivity term the decompression-melting column reads. Missing fusion-volume evidence at a nonzero
+/// pressure and failed equilibria return structured refusals.
 pub fn batch_melt_fraction_at_pressure(
     a: Endmember,
     b: Endmember,
     bulk_fraction_b: Fixed,
     temperature_k: Fixed,
     pressure_bar: Fixed,
-) -> Option<Fixed> {
+) -> Result<Fixed, PressureMeltingRefusal> {
     batch_melt_fraction(
         at_pressure(a, pressure_bar)?,
         at_pressure(b, pressure_bar)?,
         bulk_fraction_b,
         temperature_k,
     )
+    .ok_or(PressureMeltingRefusal::EquilibriumUnavailable {
+        stage: PressureMeltingStage::BinaryMeltFraction,
+    })
 }
 
 /// The number of bisection steps the multi-component solidus solve takes, the same fixed-point-floor
@@ -403,25 +544,36 @@ const SOLIDUS_BISECTION_STEPS: u32 = 52;
 /// data that grows with the world (Principle 11): a new phase is a new row, not a code change, and an alien
 /// assemblage is the same call. Each added component deepens the eutectic depression, so the solidus falls
 /// below every pure melting point. The pressure enters through the Clapeyron shift, so the solidus rises with
-/// depth. `None` on an empty assemblage or a non-physical endmember. The grade is ideal-solution: on the four-
+/// depth. An empty assemblage, missing fusion-volume evidence at nonzero pressure, invalid endmember, or failed
+/// equilibrium returns a structured refusal. The grade is ideal-solution: on the four-
 /// mineral lherzolite assemblage the solidus lands near 1520 K against the measured ~1373 K (about 150 K high,
-/// the ideal-solution band, the rung-1 calibration target), plainly labelled.
-pub fn multicomponent_solidus(endmembers: &[Endmember], pressure_bar: Fixed) -> Option<Fixed> {
+/// the ideal-solution residual), plainly labelled.
+pub fn multicomponent_solidus(
+    endmembers: &[Endmember],
+    pressure_bar: Fixed,
+) -> Result<Fixed, PressureMeltingRefusal> {
     if endmembers.is_empty() {
-        return None;
+        return Err(PressureMeltingRefusal::EmptyAssemblage);
     }
+    let arithmetic_refusal = || PressureMeltingRefusal::Unrepresentable {
+        stage: PressureMeltingStage::MulticomponentSolidus,
+    };
+    let equilibrium_refusal = || PressureMeltingRefusal::EquilibriumUnavailable {
+        stage: PressureMeltingStage::MulticomponentSolidus,
+    };
     // Shift every endmember to the pressure so the surface saturation curves run on the moved melting points.
     let mut shifted: Vec<Endmember> = Vec::with_capacity(endmembers.len());
     for em in endmembers {
         shifted.push(at_pressure(*em, pressure_bar)?);
     }
     // The saturation sum over the shifted endmembers; it rises monotonically with temperature.
-    let sat = |t: Fixed| -> Option<Fixed> {
+    let sat = |t: Fixed| -> Result<Fixed, PressureMeltingRefusal> {
         let mut s = Fixed::ZERO;
         for em in &shifted {
-            s = s.checked_add(liquidus_mole_fraction(*em, t)?)?;
+            let fraction = liquidus_mole_fraction(*em, t).ok_or_else(equilibrium_refusal)?;
+            s = s.checked_add(fraction).ok_or_else(arithmetic_refusal)?;
         }
-        Some(s)
+        Ok(s)
     };
     // The upper bracket is the lowest shifted melting point: there the lowest phase saturates fully, so the
     // sum is at least one. The solidus lies at or below it.
@@ -432,7 +584,7 @@ pub fn multicomponent_solidus(endmembers: &[Endmember], pressure_bar: Fixed) -> 
         }
     }
     if hi <= Fixed::ZERO {
-        return None;
+        return Err(equilibrium_refusal());
     }
     let two = Fixed::from_int(2);
     // Find a lower bracket where the sum drops below one, halving down from the upper bound (more components
@@ -440,25 +592,30 @@ pub fn multicomponent_solidus(endmembers: &[Endmember], pressure_bar: Fixed) -> 
     let mut lo = hi;
     let mut bracketed = false;
     for _ in 0..16 {
-        lo = lo.checked_div(two)?;
+        lo = lo.checked_div(two).ok_or_else(arithmetic_refusal)?;
         if sat(lo)? < Fixed::ONE {
             bracketed = true;
             break;
         }
     }
     if !bracketed {
-        return None;
+        return Err(equilibrium_refusal());
     }
     let mut hi_b = hi;
     for _ in 0..SOLIDUS_BISECTION_STEPS {
-        let mid = lo.checked_add(hi_b)?.checked_div(two)?;
+        let mid = lo
+            .checked_add(hi_b)
+            .and_then(|value| value.checked_div(two))
+            .ok_or_else(arithmetic_refusal)?;
         if sat(mid)? > Fixed::ONE {
             hi_b = mid;
         } else {
             lo = mid;
         }
     }
-    lo.checked_add(hi_b)?.checked_div(two)
+    lo.checked_add(hi_b)
+        .and_then(|value| value.checked_div(two))
+        .ok_or_else(arithmetic_refusal)
 }
 
 /// The FIRST-MELT (eutectic) LIQUID COMPOSITION of an assemblage: the mole fraction of each endmember in the
@@ -468,28 +625,35 @@ pub fn multicomponent_solidus(endmembers: &[Endmember], pressure_bar: Fixed) -> 
 /// dominate it and the high-melting ones are left in the residue. This is how the crust DERIVES from the
 /// mantle rather than being authored: a peridotite's first melt comes out enriched in the fusible minerals
 /// (clinopyroxene, plagioclase: a basalt) and depleted in olivine, so the melt is the crust and the residue is
-/// the refractory mantle, both emergent from the same signatures. `None` on an empty or non-physical
-/// assemblage. Returns the composition paired with the solidus temperature it was taken at.
+/// the refractory mantle, both emergent from the same signatures. Missing pressure evidence and failed
+/// equilibria return structured refusals. Returns the composition paired with the solidus temperature it was
+/// taken at.
 pub fn eutectic_liquid_composition(
     endmembers: &[Endmember],
     pressure_bar: Fixed,
-) -> Option<(Fixed, Vec<Fixed>)> {
+) -> Result<(Fixed, Vec<Fixed>), PressureMeltingRefusal> {
     let t_sol = multicomponent_solidus(endmembers, pressure_bar)?;
+    let arithmetic_refusal = || PressureMeltingRefusal::Unrepresentable {
+        stage: PressureMeltingStage::FirstMeltComposition,
+    };
+    let equilibrium_refusal = || PressureMeltingRefusal::EquilibriumUnavailable {
+        stage: PressureMeltingStage::FirstMeltComposition,
+    };
     let mut xs: Vec<Fixed> = Vec::with_capacity(endmembers.len());
     let mut total = Fixed::ZERO;
     for em in endmembers {
         let shifted = at_pressure(*em, pressure_bar)?;
-        let x = liquidus_mole_fraction(shifted, t_sol)?;
-        total = total.checked_add(x)?;
+        let x = liquidus_mole_fraction(shifted, t_sol).ok_or_else(equilibrium_refusal)?;
+        total = total.checked_add(x).ok_or_else(arithmetic_refusal)?;
         xs.push(x);
     }
     if total <= Fixed::ZERO {
-        return None;
+        return Err(equilibrium_refusal());
     }
     for x in &mut xs {
-        *x = x.checked_div(total)?; // normalize the tiny fixed-point residual to an exact unit sum
+        *x = x.checked_div(total).ok_or_else(arithmetic_refusal)?; // normalize the tiny fixed-point residual to an exact unit sum
     }
-    Some((t_sol, xs))
+    Ok((t_sol, xs))
 }
 
 /// The result of an adiabatic decompression melting column: the crustal thickness it produces, the melt
@@ -508,20 +672,21 @@ pub struct MeltColumn {
 /// that turns the melt machinery into crust. Mantle at potential temperature `T_p` rises on the adiabat
 /// `T(P) = T_p + m_ad * P` and begins to melt where it crosses the solidus `T_sol(P) = T_sol0 + m_sol * P`;
 /// above that depth the melt fraction climbs at the productivity `dF/dP`, and the pooled melt forms a crust of
-/// thickness `crust = (dF/dP) * P0^2 / (2 * rho * g)`. Every physical input is a PARAMETER the caller supplies
-/// (the potential temperature from the interior thermostat, the solidus from [`multicomponent_solidus`], the
-/// productivity and adiabat gradient and densities from the mantle floor), so nothing is authored in the
-/// kernel: the law is fixed Rust, the numbers are the world's. Pressures are gigapascals, slopes kelvin per
+/// thickness `crust = (dF/dP) * P0^2 / (2 * rho * g)`. This is a low-level law kernel. Its parameters must come
+/// from generated state or admitted and derived quantities before canonical use: potential temperature from
+/// thermal history, the solidus from [`multicomponent_solidus`], productivity and the adiabat from assemblage
+/// thermodynamics, density from the source assemblage, and gravity from the generated body. A caller-authored
+/// bundle is inadmissible. Pressures are gigapascals, slopes kelvin per
 /// gigapascal, the productivity per gigapascal, the density kilograms per cubic metre, gravity metres per
 /// second squared. `None` if the solidus does not rise faster than the adiabat (no melting column forms) or an
 /// input is non-physical; a mantle colder than the surface solidus melts nothing (a zero column). The grade is
 /// the linear-productivity first pass, valid while the peak melt fraction stays well below one.
 ///
-/// Validated against McKenzie-Bickle: a normal potential temperature (about 1588 K) on the measured peridotite
+/// Noncausal validation against McKenzie-Bickle: a normal potential temperature (about 1588 K) on the measured peridotite
 /// solidus (1373 K, 130 K/GPa) makes about 6.5 km of crust at a peak melt fraction near 0.23, and a hotter
 /// mantle thickens it steeply (the Archean komatiite regime, derived rather than tagged). Fed the rung-0
 /// ideal solidus instead (about 1520 K, 150 K high), the same temperature makes far less crust, the honest
-/// signature of the ideal-solution offset the rung-1 calibration closes.
+/// signature of the ideal-solution residual that a later derived or admitted mechanism must explain.
 pub fn adiabatic_melt_column(
     potential_temperature_k: Fixed,
     solidus_surface_k: Fixed,
@@ -583,14 +748,14 @@ mod tests {
         Endmember {
             melting_point_k: Fixed::from_int(1665),
             fusion_enthalpy_j_per_mol: Fixed::from_int(138_000),
-            fusion_volume_cm3_per_mol: Fixed::from_ratio(52, 10), // ~5.2, less-dense melt
+            fusion_volume_cm3_per_mol: Some(Fixed::from_ratio(132, 10)),
         }
     }
     fn anorthite() -> Endmember {
         Endmember {
             melting_point_k: Fixed::from_int(1830),
             fusion_enthalpy_j_per_mol: Fixed::from_int(133_000),
-            fusion_volume_cm3_per_mol: Fixed::from_int(6),
+            fusion_volume_cm3_per_mol: None,
         }
     }
     // Forsterite and fayalite, the olivine endmembers the second gate's complete solid solution runs on.
@@ -598,14 +763,14 @@ mod tests {
         Endmember {
             melting_point_k: Fixed::from_int(2163),
             fusion_enthalpy_j_per_mol: Fixed::from_int(114_000),
-            fusion_volume_cm3_per_mol: Fixed::from_ratio(39, 10), // ~3.9
+            fusion_volume_cm3_per_mol: Some(Fixed::from_ratio(384, 100)),
         }
     }
     fn fayalite() -> Endmember {
         Endmember {
             melting_point_k: Fixed::from_int(1490),
             fusion_enthalpy_j_per_mol: Fixed::from_int(89_000),
-            fusion_volume_cm3_per_mol: Fixed::from_int(4), // estimate, not pressure-gated here
+            fusion_volume_cm3_per_mol: None,
         }
     }
     // Enstatite (MgSiO3), the pyroxene of the peridotite assemblage; incongruent, treated as a pseudo-endmember
@@ -614,7 +779,7 @@ mod tests {
         Endmember {
             melting_point_k: Fixed::from_int(1830),
             fusion_enthalpy_j_per_mol: Fixed::from_int(73_000),
-            fusion_volume_cm3_per_mol: Fixed::from_int(5), // estimate, not pressure-gated here
+            fusion_volume_cm3_per_mol: Some(Fixed::from_ratio(481, 100)),
         }
     }
 
@@ -828,12 +993,12 @@ mod tests {
         let water = Endmember {
             melting_point_k: Fixed::from_ratio(27315, 100),
             fusion_enthalpy_j_per_mol: Fixed::from_int(6010),
-            fusion_volume_cm3_per_mol: Fixed::from_ratio(-16, 10), // ice is DENSER-melt anomaly: dV < 0
+            fusion_volume_cm3_per_mol: None,
         };
         let ammonia = Endmember {
             melting_point_k: Fixed::from_ratio(1954, 10),
             fusion_enthalpy_j_per_mol: Fixed::from_int(5660),
-            fusion_volume_cm3_per_mol: Fixed::from_ratio(25, 10), // ~2.5, estimate, not pressure-gated here
+            fusion_volume_cm3_per_mol: None,
         };
         let (t_e, x_nh3) = binary_eutectic(water, ammonia).expect("the cryogenic curves cross");
         assert!(
@@ -849,8 +1014,8 @@ mod tests {
     #[test]
     fn the_clapeyron_slope_derives_from_the_volume_change() {
         // The pressure term: dT_m/dP = dV_fus/dS_fus is a thermodynamic identity, so the derived diopside
-        // slope is a self-check against the measured melting curve, not a fit. 10000 bar is 1 GPa; the
-        // diopside slope lands ~63 K/GPa, inside the measured ~60-75 K/GPa band.
+        // slope is a self-check on the carried T_m/dH/dV triple, not a fitted slope. 10000 bar is 1 GPa; the
+        // candidate-evidence row's 13.2 cm3/mol produces about 159 K/GPa.
         let di = diopside();
         let t0 = melting_point_at_pressure(di, Fixed::ZERO).unwrap();
         let t1 = melting_point_at_pressure(di, Fixed::from_int(10_000)).unwrap();
@@ -860,52 +1025,74 @@ mod tests {
         );
         let slope = t1.to_f64_lossy() - t0.to_f64_lossy();
         assert!(
-            close(Fixed::from_int(0), slope - 62.7, 3.0),
-            "diopside dT/dP ~ 63 K/GPa, got {slope}"
+            close(Fixed::from_int(0), slope - 159.0, 4.0),
+            "the carried diopside triple gives dT/dP ~ 159 K/GPa, got {slope}"
         );
     }
 
     #[test]
-    fn the_eutectic_rises_with_pressure() {
-        // The eutectic reuses the surface solver on the Clapeyron-shifted endmembers, so it rises with depth:
-        // the Di-An eutectic climbs from ~1608 K at the surface to ~1668 K at 1 GPa. At zero pressure it is
-        // byte-identical to the surface eutectic (nothing is duplicated).
-        let (di, an) = (diopside(), anorthite());
+    fn missing_volume_is_irrelevant_at_zero_pressure_and_refuses_at_depth() {
+        let an = anorthite();
         assert_eq!(
-            binary_eutectic_at_pressure(di, an, Fixed::ZERO),
-            binary_eutectic(di, an),
+            melting_point_at_pressure(an, Fixed::ZERO),
+            Ok(an.melting_point_k),
+            "the pressure-work term is exactly zero at zero pressure"
+        );
+        assert!(matches!(
+            melting_point_at_pressure(an, Fixed::ONE),
+            Err(PressureMeltingRefusal::MissingFusionVolume { .. })
+        ));
+    }
+
+    #[test]
+    fn an_explicit_zero_volume_is_pressure_insensitive() {
+        let endmember = Endmember {
+            melting_point_k: Fixed::from_int(2000),
+            fusion_enthalpy_j_per_mol: Fixed::from_int(100_000),
+            fusion_volume_cm3_per_mol: Some(Fixed::ZERO),
+        };
+        assert_eq!(
+            melting_point_at_pressure(endmember, Fixed::from_int(10_000)),
+            Ok(endmember.melting_point_k),
+            "an explicit zero dV_fus makes the Clapeyron pressure term zero"
+        );
+    }
+
+    #[test]
+    fn a_fully_evidenced_eutectic_rises_with_pressure() {
+        // The eutectic reuses the surface solver on the Clapeyron-shifted endmembers, so it rises with depth:
+        // both diopside and forsterite carry fusion-volume evidence. At zero pressure the pressure-aware solve
+        // is byte-identical to the surface eutectic.
+        let (di, fo) = (diopside(), forsterite());
+        assert_eq!(
+            binary_eutectic_at_pressure(di, fo, Fixed::ZERO).unwrap(),
+            binary_eutectic(di, fo).unwrap(),
             "at surface pressure the pressure-aware eutectic is the surface eutectic"
         );
-        let (t_e1, _) = binary_eutectic_at_pressure(di, an, Fixed::from_int(10_000)).unwrap();
-        assert!(
-            close(t_e1, 1667.6, 6.0),
-            "the Di-An eutectic rises to ~1668 K at 1 GPa, got {}",
-            t_e1.to_f64_lossy()
-        );
-        let (t_e0, _) = binary_eutectic(di, an).unwrap();
+        let (t_e1, _) = binary_eutectic_at_pressure(di, fo, Fixed::from_int(10_000)).unwrap();
+        let (t_e0, _) = binary_eutectic(di, fo).unwrap();
         assert!(t_e1 > t_e0, "the eutectic rises with pressure");
     }
 
     #[test]
     fn pressure_suppresses_melting_at_a_fixed_temperature() {
         // The decompression-melting productivity term: at a fixed temperature above the surface solidus, a
-        // positive-dV system melts LESS as pressure rises (the solidus has climbed past it). An Fo-poor bulk
-        // partly molten at 1625 K and the surface is frozen once the eutectic has risen above it at 0.5 GPa.
-        let (di, an) = (diopside(), anorthite());
-        let x = Fixed::from_ratio(15, 100);
+        // positive-dV system melts LESS as pressure rises (the solidus has climbed past it). The test derives
+        // its checkpoint from the two fully evidenced eutectics rather than inserting a target temperature.
+        let (di, fo) = (diopside(), forsterite());
+        let (t_surface, x) = binary_eutectic(di, fo).unwrap();
+        let (t_deep, _) = binary_eutectic_at_pressure(di, fo, Fixed::from_int(5000)).unwrap();
+        let checkpoint = t_surface
+            .checked_add(t_deep)
+            .and_then(|sum| sum.checked_div(Fixed::from_int(2)))
+            .unwrap();
         let f_surface =
-            batch_melt_fraction_at_pressure(di, an, x, Fixed::from_int(1625), Fixed::ZERO).unwrap();
-        let f_deep = batch_melt_fraction_at_pressure(
-            di,
-            an,
-            x,
-            Fixed::from_int(1625),
-            Fixed::from_int(5000),
-        )
-        .unwrap();
+            batch_melt_fraction_at_pressure(di, fo, x, checkpoint, Fixed::ZERO).unwrap();
+        let f_deep =
+            batch_melt_fraction_at_pressure(di, fo, x, checkpoint, Fixed::from_int(5000)).unwrap();
         assert!(
             f_surface.to_f64_lossy() > 0.0,
-            "partly molten at 1625 K at the surface"
+            "partly molten at the derived checkpoint at the surface"
         );
         assert!(
             f_surface > f_deep,
@@ -924,7 +1111,7 @@ mod tests {
         let water = Endmember {
             melting_point_k: Fixed::from_ratio(27315, 100),
             fusion_enthalpy_j_per_mol: Fixed::from_int(6010),
-            fusion_volume_cm3_per_mol: Fixed::from_ratio(-16, 10),
+            fusion_volume_cm3_per_mol: Some(Fixed::from_ratio(-16, 10)),
         };
         let t0 = melting_point_at_pressure(water, Fixed::ZERO).unwrap();
         let t1 = melting_point_at_pressure(water, Fixed::from_int(1000)).unwrap();
@@ -971,11 +1158,17 @@ mod tests {
             t_sol.to_f64_lossy(),
             t_binary.to_f64_lossy()
         );
-        // The solidus rises with depth through the Clapeyron shift.
-        let t_deep = multicomponent_solidus(&assemblage, Fixed::from_int(10_000)).unwrap();
-        assert!(t_deep > t_sol, "the solidus rises with pressure");
+        // Anorthite has no fusion-volume evidence, so the same assemblage refuses rather than assigning its
+        // missing pressure contribution a zero.
+        assert!(matches!(
+            multicomponent_solidus(&assemblage, Fixed::from_int(10_000)),
+            Err(PressureMeltingRefusal::MissingFusionVolume { .. })
+        ));
         // Guards: an empty assemblage has no solidus; a single phase melts at its own point.
-        assert_eq!(multicomponent_solidus(&[], Fixed::ZERO), None);
+        assert_eq!(
+            multicomponent_solidus(&[], Fixed::ZERO),
+            Err(PressureMeltingRefusal::EmptyAssemblage)
+        );
         let single = multicomponent_solidus(&[diopside()], Fixed::ZERO).unwrap();
         assert!(
             close(single, 1665.0, 1.0),
@@ -1050,40 +1243,21 @@ mod tests {
     }
 
     #[test]
-    fn the_derived_solidus_feeds_the_column_end_to_end() {
-        // The full derived chain: mineral signatures -> multi-saturation solidus -> crust, no authored
-        // solidus. The derived solidus (about 1520 K) is 150 K high but its ideal slope (~60 K/GPa) is
-        // shallower than the measured 130, and the two errors partly cancel, so the fully-derived chain still
-        // makes a sane ~4 km of oceanic crust at a normal potential temperature (within about 1.5x of McKenzie-
-        // Bickle's 6.5 km), rising with temperature. Closing the residual to the measured value is the rung-1
-        // calibration, plainly labelled.
+    fn the_pressure_derived_solidus_slope_refuses_incomplete_evidence() {
+        // The surface solidus is valid without pressure work. The one-gigapascal solidus, and therefore the
+        // decompression-column slope, cannot be derived until every endmember carries fusion-volume evidence.
         let assemblage = [forsterite(), enstatite(), diopside(), anorthite()];
         let t_sol0 = multicomponent_solidus(&assemblage, Fixed::ZERO).unwrap();
-        let t_sol1 = multicomponent_solidus(&assemblage, Fixed::from_int(10_000)).unwrap();
-        let slope = t_sol1.checked_sub(t_sol0).unwrap(); // per GPa, since 10000 bar = 1 GPa
-        let col = |tp: i32| {
-            adiabatic_melt_column(
-                Fixed::from_int(tp),
-                t_sol0,
-                slope,
-                Fixed::from_ratio(155, 10),
-                Fixed::from_ratio(12, 100),
-                Fixed::from_int(3300),
-                Fixed::from_ratio(98, 10),
-            )
-            .unwrap()
-        };
-        let normal = col(1588);
         assert!(
-            normal.crust_thickness_km.to_f64_lossy() > 2.0
-                && normal.crust_thickness_km.to_f64_lossy() < 8.0,
-            "the fully-derived chain makes sane oceanic crust (~4 km), got {}",
-            normal.crust_thickness_km.to_f64_lossy()
+            t_sol0 > Fixed::ZERO,
+            "the pressure-insensitive surface solidus still resolves"
         );
-        let hot = col(1700);
         assert!(
-            hot.crust_thickness_km > normal.crust_thickness_km,
-            "the derived chain thickens with temperature"
+            matches!(
+                multicomponent_solidus(&assemblage, Fixed::from_int(10_000)),
+                Err(PressureMeltingRefusal::MissingFusionVolume { .. })
+            ),
+            "the missing anorthite fusion volume blocks the pressure-derived slope"
         );
     }
 

@@ -1,11 +1,10 @@
 # The fluids floor (wave 2 of the physics substrate, R-PHYS-W2; design Part 41, Part 58,
-# record 62.21). Extends the registry with the fluid.*, acoustic.*, and the therm.temperature
+# record 62.21). Extends the registry with the fluid.* and therm.temperature
 # state axes, and the closed-form fixed-point laws over them (kernels in crates/physics/src/laws.rs).
 # The axis ranges below are SET to the owner's confirmed values (2026-07-02), ratified from the cited
 # physical bound in each axis's real field; every value a tunable lever revisable on the owner's
 # signoff. Ranges are held inside the Q32.32 representable window (epsilon ~2.3e-10 to ceiling
-# ~2.1e9); a few axes keep a per-quantity scale reserved (R-UNITS-PIN) for their full physical
-# envelope, noted in the scale field, the set range being the representable working subset.
+# ~2.1e9).
 
 # --- The temperature state axis, owned by the energy sub-domain, read cross-domain (unification 2.2) ---
 
@@ -233,15 +232,15 @@ range_hi = "0.01"
 real = "psychrometric saturation tables (saturation ~7.4 kPa at 40C); a resident moisture state sibling to therm.temperature"
 
 [[axis]]
-# Arc 5 T4: the floor identity for the terrain WETNESS field the worldgen carries and the biosphere niche and
-# decomposition read (crates/world worldgen `moisture`, previously unmoored fractal noise with NO floor axis).
+# The floor identity for the terrain wetness field used by surface hydrology and transport
+# (crates/world worldgen `moisture`, previously unmoored fractal noise with no floor axis).
 # NOT a reuse of fluid.vapor_pressure above: that is a partial PRESSURE in MPa (the vapour phase the water
 # cycle transports), a physically distinct quantity from this DIMENSIONLESS volumetric water-content fraction
 # (how wet the ground is). The two coexist as the water cycle's transport state (vapor_pressure) and its
 # stored state (moisture_content). range_hi is a physics-FLOOR authored bound (Principle 9), set with basis,
 # owner may refine: the saturation volumetric water content of soil.
 id = "fluid.moisture_content"
-measures = "volumetric water content of the ground, the dimensionless wetness fraction terrain and biosphere read"
+measures = "volumetric water content of the ground, the dimensionless wetness fraction terrain hydrology reads"
 unit = "m^3/m^3"
 dimension = "0,0,0,0"
 scale = "1"
@@ -250,99 +249,7 @@ range_lo = "0"
 range_hi = "0.5"
 real = "Hillel, Environmental Soil Physics: field capacity ~0.3 and saturation ~0.5 volumetric water content for a loam; a bone-dry soil reads 0, a saturated soil ~0.5; a world with a different solvent or no water declares its own wetness axis as data"
 
-# --- Respirable-medium axes (R-MEDIUM: the gas a body exchanges with the medium it sits in) ---
-
-[[axis]]
-id = "fluid.respirable_content"
-measures = "mass concentration of the respirable species dissolved or present in a medium (the gas a respiratory surface exchanges across a membrane)"
-unit = "kg/m^3"
-dimension = "-3,1,0,0"
-scale = "kg/m^3"
-tier = 0
-range_lo = "0"
-range_hi = "1.5"
-real = "Battino, IUPAC Solubility Data Series, Oxygen and Ozone; an anoxic medium reads 0, air-borne oxygen mass concentration ~0.27, dissolved-oxygen saturation of water ~0.008 to 0.014 (single-digit mg/L), pure oxygen at one atmosphere ~1.31; a magical or lava medium sets its own respirable content as data"
-
-[[axis]]
-id = "fluid.gas_transfer_coefficient"
-measures = "mass-transfer coefficient of a respiratory surface-medium interface (the lumped membrane permeance and boundary-layer conductance)"
-unit = "m/s"
-dimension = "1,0,-1,0"
-scale = "m/s"
-tier = 0
-range_lo = "0"
-range_hi = "0.1"
-real = "Piiper and Scheid, Respiration Physiology gas-exchange models; respiratory-membrane gas-transfer (diffusing-capacity-per-area) velocities span roughly 1e-5 to 1e-2 m/s across gill and alveolar surfaces; a reduced-order lumped coefficient, the organism-side specific surface and membrane permeance are the sim-side R-MEDIUM organ extension"
-
-# --- Acoustic axes (a mechanical wave in a fluid medium) ---
-
-[[axis]]
-id = "acoustic.frequency"
-measures = "sound frequency f, the physical carrier the emergent phoneme and tone space cluster over"
-unit = "Hz"
-dimension = "0,0,-1,0"
-scale = "Hz"
-tier = 0
-range_lo = "1"
-range_hi = "200000"
-real = "acoustics/audition ranges (infrasound to ultrasound; human ~20-20000)"
-
-[[axis]]
-id = "acoustic.source_power"
-measures = "acoustic source power, how far a call, shout, or song carries"
-unit = "W"
-dimension = "2,1,-3,0"
-scale = "W"
-tier = 0
-range_lo = "0.000001"
-range_hi = "1000000"
-real = "Beranek, Acoustics; Kinsler, Frey, Coppens and Sanders, Fundamentals of Acoustics. Anchor magnitudes over [1e-6, 1e6] W: conversational speech ~1e-5 W, a shout ~1e-3 W, an orchestra ~1 to 10 W, a jet engine ~1e4 W, a large siren ~1e6 W. The sub-microwatt to megawatt span derives a fine per-quantity scale from the declared decimal envelope (R-UNITS-PIN)"
-
-[[axis]]
-id = "acoustic.absorption_coefficient"
-measures = "medium absorption of sound per unit path (air absorbing high frequencies over distance)"
-unit = "1/m"
-dimension = "-1,0,0,0"
-scale = "1/m"
-tier = 0
-range_lo = "0"
-range_hi = "10"
-real = "atmospheric and material acoustic absorption tables (Kinsler et al.)"
-
-# --- Acoustic channel-physics axes (the perceptual-geometry read-out reads these, added 2026-07-03;
-#     ranges RESERVED with basis, the owner's to set on signoff, never fabricated) ---
-
-[[axis]]
-id = "acoustic.absorption_reference"
-measures = "thermoviscous (Stokes) absorption reference beta, the per-square-frequency coefficient of alpha = beta*f^2 a medium carries"
-unit = "1/(m*Hz^2)"
-dimension = "-1,0,2,0"
-scale = "1/(m*Hz^2) (per-quantity scale reserved, R-UNITS-PIN)"
-tier = 0
-range_reserved = "the classical (thermoviscous) absorption coefficient beta = alpha/f^2 the medium's viscosity and thermal data already imply (Stokes); the cited acoustics tables bound air's beta near 1.6e-11 and water's near 2.2e-14 s^2/m, an envelope whose sub-epsilon low end underflows Q32.32 and reserves a per-quantity windowed scale (R-UNITS-PIN)"
-real = "Kinsler, Frey, Coppens and Sanders, Fundamentals of Acoustics (classical absorption); Beranek, Acoustics"
-
-[[axis]]
-id = "acoustic.resonator_length"
-measures = "acoustic resonator length L, the vocal-tract or stopped-pipe length the source-filter formant law reads"
-unit = "m"
-dimension = "length"
-scale = "m"
-tier = 0
-range_reserved = "the resonator-length envelope of the producible-sound apparatus, from a small stridulation chamber (~1e-3 m) to a large horn or vocal tract (a few m); a neutral human vocal tract sits near 0.17 m (the schwa reference)"
-real = "Fant, Acoustic Theory of Speech Production; Titze, Principles of Voice Production"
-
-[[axis]]
-id = "acoustic.formant_frequency"
-measures = "resonant (formant) frequency the quarter-wave tube law writes, the characteristic-frequency the phoneme space clusters over"
-unit = "Hz"
-dimension = "0,0,-1,0"
-scale = "Hz"
-tier = 0
-range_reserved = "the formant band the tube-resonance law produces across the resonator-length envelope, a subset of acoustic.frequency; the vocal formant range spans roughly 50 Hz (a large resonator) to 20 kHz (a small one), human F1 to F3 near 250 to 3500 Hz"
-real = "Fant, Acoustic Theory of Speech Production; Stevens, Acoustic Phonetics"
-
-# --- Fluid and acoustic laws (metadata; kernels in laws.rs) ---
+# --- Fluid laws (metadata; kernels in laws.rs) ---
 
 [[law]]
 id = "law.hydrostatic_pressure"
@@ -463,20 +370,6 @@ interval_bound = "[0, FLUX_MAX]"
 tier = 0
 
 [[law]]
-id = "law.membrane_gas_flux"
-kernel = "membrane_gas_flux"
-ports = [
-  { role = "coefficient", axis = "fluid.gas_transfer_coefficient" },
-  { role = "area", axis = "mech.contact_area" },
-  { role = "medium", axis = "fluid.respirable_content" },
-  { role = "internal", axis = "fluid.respirable_content" },
-]
-output_measure = "signed respiratory gas mass flux (Fick membrane exchange: uptake positive, loss negative)"
-dimension = "0,1,-1,0"
-interval_bound = "[-J_MAX, J_MAX]"
-tier = 0
-
-[[law]]
 id = "law.poiseuille_flow"
 kernel = "poiseuille_flow"
 ports = [
@@ -551,36 +444,11 @@ dimension = "-2,1,-1,0"
 interval_bound = "[0, E_MAX]"
 tier = 0
 
-[[law]]
-id = "law.acoustic_absorption"
-kernel = "acoustic_absorption"
-ports = [
-  { role = "reference", axis = "acoustic.absorption_reference" },
-  { role = "frequency", axis = "acoustic.frequency" },
-]
-produces = ["acoustic.absorption_coefficient"]
-output_measure = "medium sound absorption coefficient per unit path (the alpha that feeds law.optical_depth)"
-dimension = "-1,0,0,0"
-interval_bound = "[0, ALPHA_ABS_MAX]"
-tier = 0
-
-[[law]]
-id = "law.tube_resonance"
-kernel = "tube_resonance"
-ports = [
-  { role = "speed_of_sound", axis = "mech.velocity" },
-  { role = "resonator_length", axis = "acoustic.resonator_length" },
-]
-produces = ["acoustic.formant_frequency"]
-output_measure = "resonant (formant) frequency of a quarter-wave closed-open tube (source-filter model)"
-dimension = "0,0,-1,0"
-interval_bound = "[0, FORMANT_FREQ_MAX]"
-tier = 0
 # --- Substances (fluids as vectors over the axes) ---
 
 [[substance]]
 id = "air"
-participates_in = ["law.dynamic_pressure", "law.drag_force", "law.aerodynamic_lift", "law.ideal_gas_density", "law.speed_of_sound", "law.convective_flux", "law.acoustic_absorption", "law.tube_resonance"]
+participates_in = ["law.dynamic_pressure", "law.drag_force", "law.aerodynamic_lift", "law.ideal_gas_density", "law.speed_of_sound", "law.convective_flux"]
 real = "CRC (dry air at 15C, 1 atm)"
 values = [
   { axis = "mat.density", value = "1.225" },
@@ -600,7 +468,7 @@ id = "water"
 # (water is H2O). The rotational class for the gas heat capacity is held pending the derivation hunt (likely VSEPR
 # from the formula plus the periodic-table valence counts).
 formula = "H2O"
-participates_in = ["law.hydrostatic_pressure", "law.buoyant_force", "law.poiseuille_flow", "law.speed_of_sound", "law.laplace_pressure", "law.acoustic_absorption", "law.tube_resonance"]
+participates_in = ["law.hydrostatic_pressure", "law.buoyant_force", "law.poiseuille_flow", "law.speed_of_sound", "law.laplace_pressure"]
 real = "CRC (liquid water at 20C)"
 values = [
   { axis = "mat.density", value = "998" },

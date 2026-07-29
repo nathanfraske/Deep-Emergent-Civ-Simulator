@@ -1,0 +1,203 @@
+# Copyright 2026 Nathan M. Fraske
+# Licensed under the Apache License, Version 2.0; see LICENSE.
+#
+# Retired candidate rows for parked compatibility only. The legacy physics facade loads this file
+# after the active abiotic ground registry and before its biology floors. None of these rows belongs
+# to the canonical absolute floor. Citations and evidence tags establish custody but do not admit a
+# magnitude. The reusable physical kernels remain active in the root physics crate; this file keeps
+# only the old organism, language, tool-demo, and display-instance catalog bindings.
+
+[[axis]]
+id = "mech.stroke_length"
+measures = "the distance an actuating force acts over in one stroke, the reach of a power stroke, grown independently of the segment length so the acting-distance-to-length ratio is per-body data rather than a fixed one"
+unit = "m"
+dimension = "length"
+scale = "m"
+tier = 0
+range_lo = "0.001"
+range_hi = "100"
+real = "the work-energy relation, work equals force times distance (Meriam and Kraige, Engineering Mechanics: Dynamics)"
+
+[[axis]]
+id = "fluid.respirable_content"
+measures = "mass concentration of the respirable species dissolved or present in a medium (the gas a respiratory surface exchanges across a membrane)"
+unit = "kg/m^3"
+dimension = "-3,1,0,0"
+scale = "kg/m^3"
+tier = 0
+range_lo = "0"
+range_hi = "1.5"
+real = "Battino, IUPAC Solubility Data Series, Oxygen and Ozone; an anoxic medium reads 0, air-borne oxygen mass concentration ~0.27, dissolved-oxygen saturation of water ~0.008 to 0.014 (single-digit mg/L), pure oxygen at one atmosphere ~1.31; a magical or lava medium sets its own respirable content as data"
+
+[[axis]]
+id = "fluid.gas_transfer_coefficient"
+measures = "mass-transfer coefficient of a respiratory surface-medium interface (the lumped membrane permeance and boundary-layer conductance)"
+unit = "m/s"
+dimension = "1,0,-1,0"
+scale = "m/s"
+tier = 0
+range_lo = "0"
+range_hi = "0.1"
+real = "Piiper and Scheid, Respiration Physiology gas-exchange models; respiratory-membrane gas-transfer (diffusing-capacity-per-area) velocities span roughly 1e-5 to 1e-2 m/s across gill and alveolar surfaces; a reduced-order lumped coefficient, the organism-side specific surface and membrane permeance are the sim-side R-MEDIUM organ extension"
+
+[[axis]]
+id = "acoustic.frequency"
+measures = "sound frequency f, the physical carrier the emergent phoneme and tone space cluster over"
+unit = "Hz"
+dimension = "0,0,-1,0"
+scale = "Hz"
+tier = 0
+range_lo = "1"
+range_hi = "200000"
+real = "acoustics/audition ranges (infrasound to ultrasound; human ~20-20000)"
+
+[[axis]]
+id = "acoustic.source_power"
+measures = "acoustic source power, how far a call, shout, or song carries"
+unit = "W"
+dimension = "2,1,-3,0"
+scale = "W"
+tier = 0
+range_lo = "0.000001"
+range_hi = "1000000"
+real = "Beranek, Acoustics; Kinsler, Frey, Coppens and Sanders, Fundamentals of Acoustics. Anchor magnitudes over [1e-6, 1e6] W: conversational speech ~1e-5 W, a shout ~1e-3 W, an orchestra ~1 to 10 W, a jet engine ~1e4 W, a large siren ~1e6 W. The sub-microwatt to megawatt span derives a fine per-quantity scale from the declared decimal envelope (R-UNITS-PIN)"
+
+[[axis]]
+id = "acoustic.absorption_coefficient"
+measures = "medium absorption of sound per unit path (air absorbing high frequencies over distance)"
+unit = "1/m"
+dimension = "-1,0,0,0"
+scale = "1/m"
+tier = 0
+range_lo = "0"
+range_hi = "10"
+real = "atmospheric and material acoustic absorption tables (Kinsler et al.)"
+
+[[axis]]
+id = "acoustic.absorption_reference"
+measures = "thermoviscous (Stokes) absorption reference beta, the per-square-frequency coefficient of alpha = beta*f^2 a medium carries"
+unit = "1/(m*Hz^2)"
+dimension = "-1,0,2,0"
+scale = "1/(m*Hz^2) (per-quantity scale reserved, R-UNITS-PIN)"
+tier = 0
+range_reserved = "the classical (thermoviscous) absorption coefficient beta = alpha/f^2 the medium's viscosity and thermal data already imply (Stokes); the cited acoustics tables bound air's beta near 1.6e-11 and water's near 2.2e-14 s^2/m, an envelope whose sub-epsilon low end underflows Q32.32 and reserves a per-quantity windowed scale (R-UNITS-PIN)"
+real = "Kinsler, Frey, Coppens and Sanders, Fundamentals of Acoustics (classical absorption); Beranek, Acoustics"
+
+[[axis]]
+id = "acoustic.resonator_length"
+measures = "acoustic resonator length L, the vocal-tract or stopped-pipe length the source-filter formant law reads"
+unit = "m"
+dimension = "length"
+scale = "m"
+tier = 0
+range_reserved = "the resonator-length envelope of the producible-sound apparatus, from a small stridulation chamber (~1e-3 m) to a large horn or vocal tract (a few m); a neutral human vocal tract sits near 0.17 m (the schwa reference)"
+real = "Fant, Acoustic Theory of Speech Production; Titze, Principles of Voice Production"
+
+[[axis]]
+id = "acoustic.formant_frequency"
+measures = "resonant (formant) frequency the quarter-wave tube law writes, the characteristic-frequency the phoneme space clusters over"
+unit = "Hz"
+dimension = "0,0,-1,0"
+scale = "Hz"
+tier = 0
+range_reserved = "the formant band the tube-resonance law produces across the resonator-length envelope, a subset of acoustic.frequency; the vocal formant range spans roughly 50 Hz (a large resonator) to 20 kHz (a small one), human F1 to F3 near 250 to 3500 Hz"
+real = "Fant, Acoustic Theory of Speech Production; Stevens, Acoustic Phonetics"
+
+[[axis]]
+id = "opt.emissivity.band_0"
+measures = "spectral surface emissivity in band 0 (short-wave thermal IR), the per-band radiant-exchange fraction"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "ratio"
+tier = 0
+range_lo = "0"
+range_hi = "1"
+real = "CRC/Incropera spectral emissivity tables (per-band, Table A.11 wavelength dependence)"
+
+[[axis]]
+id = "opt.emissivity.band_1"
+measures = "spectral surface emissivity in band 1 (mid-wave thermal IR), the per-band radiant-exchange fraction"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "ratio"
+tier = 0
+range_lo = "0"
+range_hi = "1"
+real = "CRC/Incropera spectral emissivity tables (per-band, Table A.11 wavelength dependence)"
+
+[[axis]]
+id = "opt.emissivity.band_2"
+measures = "spectral surface emissivity in band 2 (long-wave thermal IR), the per-band radiant-exchange fraction"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "ratio"
+tier = 0
+range_lo = "0"
+range_hi = "1"
+real = "CRC/Incropera spectral emissivity tables (per-band, Table A.11 wavelength dependence)"
+
+[[axis]]
+id = "opt.spectral_band"
+measures = "per-band reflectance or emitted power over a data-defined band basis (colour, not a hardcoded RGB triple)"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "ratio (per band)"
+tier = 0
+range_lo = "0"
+range_hi = "1"
+real = "CIE tristimulus partition and reflectance spectra (Wyszecki and Stiles; Hecht Ch 4); the band edges and per-race receptor sensitivities are reserved data"
+
+[[law]]
+id = "law.membrane_gas_flux"
+kernel = "membrane_gas_flux"
+ports = [
+  { role = "coefficient", axis = "fluid.gas_transfer_coefficient" },
+  { role = "area", axis = "mech.contact_area" },
+  { role = "medium", axis = "fluid.respirable_content" },
+  { role = "internal", axis = "fluid.respirable_content" },
+]
+output_measure = "signed respiratory gas mass flux (Fick membrane exchange: uptake positive, loss negative)"
+dimension = "0,1,-1,0"
+interval_bound = "[-J_MAX, J_MAX]"
+tier = 0
+
+[[law]]
+id = "law.acoustic_absorption"
+kernel = "acoustic_absorption"
+ports = [
+  { role = "reference", axis = "acoustic.absorption_reference" },
+  { role = "frequency", axis = "acoustic.frequency" },
+]
+produces = ["acoustic.absorption_coefficient"]
+output_measure = "medium sound absorption coefficient per unit path (the alpha that feeds law.optical_depth)"
+dimension = "-1,0,0,0"
+interval_bound = "[0, ALPHA_ABS_MAX]"
+tier = 0
+
+[[law]]
+id = "law.tube_resonance"
+kernel = "tube_resonance"
+ports = [
+  { role = "speed_of_sound", axis = "mech.velocity" },
+  { role = "resonator_length", axis = "acoustic.resonator_length" },
+]
+produces = ["acoustic.formant_frequency"]
+output_measure = "resonant (formant) frequency of a quarter-wave closed-open tube (source-filter model)"
+dimension = "0,0,-1,0"
+interval_bound = "[0, FORMANT_FREQ_MAX]"
+tier = 0
+
+[[substance]]
+id = "oak"
+participates_in = ["law.cut_penetrate", "law.bend_stress", "law.shear", "law.combustion"]
+real = "Wood Handbook FPL-GTR-190; wood-energy literature; CRC Handbook specific-heat tables (oven-dry wood ~1700); Incropera and DeWitt / CRC thermal-conductivity tables (oven-dry wood across the grain ~0.15 to 0.17); Turns, An Introduction to Combustion, stoichiometry (wood oxidiser-to-fuel mass ratio ~1.2)"
+values = [
+  { axis = "mat.density", value = "700" },
+  { axis = "mat.ultimate_tensile_strength", value = "90" },
+  { axis = "mat.shear_strength", value = "12" },
+  { axis = "therm.fuel_value", value = "15000" },
+  { axis = "therm.ignition_temperature", value = "570" },
+  { axis = "therm.specific_heat", value = "1700" },
+  { axis = "therm.conductivity", value = "0.17" },
+  { axis = "therm.oxidiser_demand", value = "1.2" },
+]

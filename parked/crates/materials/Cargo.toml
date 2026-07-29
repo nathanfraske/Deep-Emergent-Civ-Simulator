@@ -1,0 +1,17 @@
+[package]
+name = "civsim-materials-legacy"
+description = "Parked compatibility facade for the retired caller-supplied disk composition path."
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+civsim-core = { path = "../../../crates/core", features = ["legacy-domains"] }
+civsim-materials-abiotic = { package = "civsim-materials", path = "../../../crates/materials" }
+civsim-physics = { path = "../../../crates/physics" }
+
+[lints.clippy]
+disallowed_types = "allow"

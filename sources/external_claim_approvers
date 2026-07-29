@@ -1,0 +1,4 @@
+# OpenSSH allowed-signers file for external-claim release approval.
+#
+# Intentionally empty. No external contact or adverse publication can be
+# authorized until the owner installs a reviewed public key here.

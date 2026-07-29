@@ -14,17 +14,16 @@
 
 //! # civsim-physics: the authored physics-and-materials substrate
 //!
-//! This crate is the one authored layer of the project (design Principle 9), the
-//! reach-bounding artifact whose completeness sets the expressiveness ceiling of
-//! technology, value, meaning, and biology. It carries the locked representation of
+//! This crate is the active abiotic substrate for the planetary and solar-system path.
+//! It carries the locked representation of
 //! the substrate guide Section 4 and design Part 58: a physics primitive is either a
 //! [`QuantityAxis`] (a named, unit-bearing, range-bounded, fixed-point scalar at a
 //! tier) or an [`InteractionLaw`] (a closed-form integer kernel over the quantity
 //! vectors of the participating entities, reporting an interval-bounded fixed-point
-//! consequence); a [`Substance`] (a material, a tissue, a structural member) is a
+//! consequence); a [`Substance`] (a material or structural member) is a
 //! vector of values over the axes plus the laws it participates in plus a provenance
-//! tag. The wave-0 biology floor (R-PHYS-BIO) and the wave-1 mechanical-and-materials
-//! floor (R-PHYS-MECH) are data loaded into this registry.
+//! tag. The mechanical, fluid, chemical, optical, electromagnetic, geological, and
+//! nonliving-ground floors are data loaded into this registry.
 //!
 //! This module is phase 1 of the build: the representation and the [`PhysicsRegistry`]
 //! that loads it from data, with three disciplines enforced structurally. Every value
@@ -47,6 +46,7 @@ pub mod crystal_field;
 pub mod d_state_radius;
 pub mod elastic_thickness_rows;
 pub mod ewald;
+pub mod flexural_relief;
 pub mod flexure;
 pub mod floor_provenance;
 pub mod force_constant;
@@ -89,7 +89,7 @@ pub mod scaled;
 pub mod solar_abundances;
 pub mod stoner;
 pub mod term_values;
-pub mod thermoelastic;
+pub mod thermoelastic_anchors;
 pub mod tm_oxide_lattice_energy;
 pub mod yield_envelope;
 pub mod young_thermal;
@@ -335,7 +335,7 @@ pub enum DepletionCharacter {
         /// The ground for the eventual character.
         basis: String,
     },
-    /// A located stock a draw draws DOWN (matter composition: mass is conserved, so eating removes it).
+    /// A located stock a draw draws down (matter composition: mass is conserved, so extraction removes it).
     DepletableStock,
     /// A renewable flux no draw exhausts (a light, thermal-gradient, or gravity-gradient feeder's source).
     NonRivalrousFlux,
@@ -350,7 +350,7 @@ pub enum DepletionCharacter {
 /// of its physical quantity, so it is DERIVED (the fundamental constants times the substance's own floor
 /// physics: a redox axis through its couple's EMF times carrier charge, the `nFE` bridge; a thermal-
 /// gradient axis through the heat capacity and the temperature difference; a mass-flux axis through
-/// `bio.energy_density`), never declared. Until a feeder is armed and its reduction is derived, the axis
+/// a material's energy density), never declared. Until a feeder is armed and its reduction is derived, the axis
 /// carries the [`ReductionCoefficient::Derive`] sentinel and reading it fails loud, never a fabricated
 /// number.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -392,7 +392,7 @@ pub struct QuantityAxis {
     /// the derivation source of truth. `None` for a reserved range.
     pub range_decimal: Option<(String, String)>,
     /// A per-class scale breakdown, empty for a single-scale axis. When the physics of an axis
-    /// reserves its scale per class (a per-toxin-class tolerance whose pg/kg-to-g/kg envelope exceeds
+    /// reserves its scale per class (a classified material property whose envelope exceeds
     /// one Q32.32 scale, R-UNITS-PIN), the class is the quantity granularity: each entry is a distinct
     /// quantity with its own envelope, and the catalogue registers one `QuantityDef` per entry. The
     /// membership is data that grows with the world (Principle 11), so a new class is a new entry
@@ -456,11 +456,11 @@ fn parse_scale_factor(s: &str) -> Option<Fixed> {
 
 /// One class's envelope in a per-class-scale axis: the class id and its declared decimal bounds. The
 /// catalogue registers one quantity per entry so each class carries its own per-quantity scale
-/// (R-UNITS-PIN, the `bio.consumer.reference_tolerance` case), keyed off the same declared decimal
+/// (R-UNITS-PIN), keyed off the same declared decimal
 /// envelope the single-scale axes use so a sub-epsilon per-class bound keeps its magnitude.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PerClassRange {
-    /// The class id (a toxin class, say) this per-class quantity is keyed to.
+    /// The class id (a material class, say) this per-class quantity is keyed to.
     pub class: String,
     /// The declared decimal bounds `(lo, hi)` of this class's envelope.
     pub bounds: (String, String),
@@ -482,15 +482,14 @@ pub enum Temporal {
 }
 
 /// The open-arity aggregation a class-set port folds its members by. The mechanism is fixed
-/// Rust; the class membership is data (Principle 11), so a new nutrient or toxin class is a new
-/// axis added to a port's member set, never a code change. The set is deliberately small: these
-/// are the folds the substrate's kernels actually perform (the Liebig minimum and the saturating
-/// sum), and it grows only when a kernel introduces a new order-independent reduction.
+/// Rust; the class membership is data (Principle 11), so a new material or spectral class is a new
+/// axis added to a port's member set, never a code change. This representation stays generic so an
+/// explicit owning package can bind an order-independent class-set kernel without changing the loader.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fold {
-    /// The limiting-member minimum (the Liebig nutrition fold).
+    /// The minimum across the member set.
     Min,
-    /// The saturating sum (the additive harm fold).
+    /// The sum across the member set.
     Sum,
 }
 
@@ -498,7 +497,7 @@ pub enum Fold {
 /// not a closed enum), the axis (or axes) it reads, and when it reads it. A single port names one
 /// axis; a class-set port (a non-empty `members` with a `fold`) names an open-arity set of same-
 /// dimension axes the kernel folds, the variadic case the fixed-arity list could not express (the
-/// nutrient classes of the Liebig minimum, the toxin classes of the harm sum). The port's
+/// members of a homogeneous material or spectral group). The port's
 /// dimensional exponent is a property of the kernel and lives in the fixed-Rust contract
 /// ([`graph::kernel_contract`]); the data only wires a role to its axis or class set.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -555,7 +554,7 @@ pub struct InteractionLaw {
 /// machine, the deduplication and determinism discipline of the composition node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Substance {
-    /// The human-readable handle, for example `iron` or `oak`.
+    /// The human-readable handle, for example `iron` or `granite`.
     pub id: String,
     /// The value on each axis, keyed by axis id (sorted, for a deterministic walk).
     pub vector: BTreeMap<String, Fixed>,
@@ -760,46 +759,53 @@ impl PhysicsRegistry {
         Self::from_toml_str(&text)
     }
 
-    /// The world material registry: the mechanical floor plus the ground-material substances a world's
-    /// z-column is made of (`ground_floor.toml`), built from the crate's EMBEDDED floor data so a caller
-    /// (the sim's world-build) needs no filesystem path. The material substrate reads a cell's substance
-    /// mixture against this to derive its bulk density and, where a contest reads them, its mechanical
-    /// properties (the material-substrate arc, cascade item 1). The ground floor EXTENDS the mechanical
-    /// floor rather than editing it, so the mechanical floor's identity and its tests are untouched.
+    /// The abiotic world material registry: the mechanical floor plus the nonliving ground substances
+    /// a world's z-column is made of (`ground_floor.toml`), built from embedded floor data so a caller
+    /// needs no filesystem path. Organism-facing axes, laws, and substances are owned by the explicit
+    /// parked compatibility package and cannot enter through this constructor.
     pub fn ground() -> Result<Self, PhysicsError> {
         let mut reg =
             PhysicsRegistry::from_toml_str(include_str!("../data/mechanical_floor.toml"))?;
-        // The reactive floors (material-substrate arc, cascade item 8, the matter cycle): the fluids,
-        // chemistry, and biology floors carry the transform physics a cell's matter reads to decompose,
-        // corrode, or burn (the corrosion electrode potentials and susceptibility, the combustion products'
-        // ash fraction, the ambient fluids). Loaded in the wave order (each extends the prior), so a
-        // substance can carry its own reaction, corrosion, and decomposition data and the matter cycle
-        // reads it straight from the floor (the north-star "dissolve into the floor"). Additive: the
-        // material-substrate derivations read specific axes by id, so a fuller registry leaves them
-        // unchanged, and worldgen fills the z-column from the ground floor's strata alone.
+        // The abiotic reactive floors carry fluids, chemistry, optics, and electromagnetism. Loaded in
+        // dependency order so later substances may reference axes and laws owned by earlier floors.
         reg.extend_from_toml_str(include_str!("../data/fluids_floor.toml"))?;
         reg.extend_from_toml_str(include_str!("../data/chem_optics_floor.toml"))?;
         reg.extend_from_toml_str(include_str!("../data/em_floor.toml"))?;
-        reg.extend_from_toml_str(include_str!("../data/biology_floor.toml"))?;
         // The geology floor (genesis-forward Layer 1): the geo.* axes the deep-time genesis and the interior
         // engine read (the internal-heat-production source term first). Additive and self-contained, so the
         // existing derivations are unchanged; a genesis pass reads it, but no current scenario does.
         reg.extend_from_toml_str(include_str!("../data/geology_floor.toml"))?;
-        // The ground floor loads LAST, so its z-column substances can carry cross-domain axes the reactive
-        // floors define (the matter cycle's decomposable "carrion" carries `bio.mineral_ash_fraction`). Its
-        // substances and axes are order-independent for the material derivations (a registry lookup by id).
+        // The nonliving ground floor loads last. Its substances and axes are order-independent for material
+        // derivations because every consumer resolves them by id.
         reg.extend_from_toml_str(include_str!("../data/ground_floor.toml"))?;
         Ok(reg)
     }
 
-    /// Extend this registry with another floor file's axes, laws, and substances, then revalidate the
-    /// whole. A wave loads onto the previous floor rather than duplicating the shared axes it reads:
-    /// the wave-2 fluids, chemistry, and optics floor references the wave-1 mechanical and material
-    /// axes, so it is merged onto the mechanical floor rather than standing alone. A duplicate id is
-    /// an error, never a silent overwrite.
+    /// Extend this registry with another abiotic floor file's axes, laws, and substances, then
+    /// revalidate the whole. A wave loads onto the previous floor rather than duplicating the shared
+    /// axes it reads. A duplicate id is an error, never a silent overwrite.
     pub fn extend_from_toml_str(&mut self, s: &str) -> Result<(), PhysicsError> {
         let file: RegistryFile =
             toml::from_str(s).map_err(|e| PhysicsError::Parse(e.to_string()))?;
+        self.extend_file(file)?;
+        self.validate()
+    }
+
+    /// Extend this registry with a floor owned by an explicit compatibility package. Root contracts
+    /// are tried first; `extra_contract` resolves only kernels owned by that package. This keeps a
+    /// retired domain buildable without restoring its contracts to the canonical abiotic registry.
+    pub fn extend_from_toml_str_with_kernel_contracts(
+        &mut self,
+        s: &str,
+        extra_contract: fn(&str) -> Option<graph::KernelContract>,
+    ) -> Result<(), PhysicsError> {
+        let file: RegistryFile =
+            toml::from_str(s).map_err(|e| PhysicsError::Parse(e.to_string()))?;
+        self.extend_file(file)?;
+        self.validate_with_kernel_contracts(extra_contract)
+    }
+
+    fn extend_file(&mut self, file: RegistryFile) -> Result<(), PhysicsError> {
         for a in file.axis {
             let axis = a.into_axis()?;
             if self.axes.contains_key(&axis.id) {
@@ -821,7 +827,7 @@ impl PhysicsRegistry {
             }
             self.substances.insert(sub.id.clone(), sub);
         }
-        self.validate()
+        Ok(())
     }
 
     /// Extend this registry from another floor file path.
@@ -861,6 +867,13 @@ impl PhysicsRegistry {
     /// substance carries values only on existing axes and participates only in existing
     /// laws. A dangling reference is a load-time error, never a silent skip.
     fn validate(&self) -> Result<(), PhysicsError> {
+        self.validate_with_kernel_contracts(|_| None)
+    }
+
+    fn validate_with_kernel_contracts(
+        &self,
+        extra_contract: fn(&str) -> Option<graph::KernelContract>,
+    ) -> Result<(), PhysicsError> {
         for law in self.laws.values() {
             for axis in &law.inputs {
                 if !self.axes.contains_key(axis) {
@@ -879,9 +892,8 @@ impl PhysicsRegistry {
                     });
                 }
             }
-            // A class-set port's members must all exist and share one dimension, so a fold folds
-            // over a homogeneous quantity (the Liebig minimum over nutrient fractions, the harm
-            // sum over toxin concentrations) rather than a dimensional mixture.
+            // A class-set port's members must all exist and share one dimension, so a fold combines
+            // a homogeneous quantity rather than a dimensional mixture.
             for port in &law.ports {
                 if port.members.is_empty() {
                     continue;
@@ -909,7 +921,9 @@ impl PhysicsRegistry {
             }
             // A migrated law is checked against its kernel contract: the binding, the temporal
             // agreement, and the dimensional reachability of its output.
-            graph::check_law(law, &self.axes)?;
+            let contract =
+                graph::kernel_contract(&law.kernel).or_else(|| extra_contract(&law.kernel));
+            graph::check_law_with_contract(law, &self.axes, contract)?;
         }
         for sub in self.substances.values() {
             for axis in sub.vector.keys() {
@@ -1713,7 +1727,7 @@ depletion_character = "non_rivalrous_flux"
         // A matter axis declaring depletable_stock carries it, so the matter draw depletes as today.
         let matter = r#"
 [[axis]]
-id = "bio.test_energy"
+id = "test.energy_stock"
 measures = "a test matter composition axis"
 unit = "kJ/g"
 dimension = "2,0,-2,0"
@@ -1726,7 +1740,7 @@ depletion_character = "depletable_stock"
 "#;
         let reg = PhysicsRegistry::from_toml_str(matter).unwrap();
         assert_eq!(
-            reg.axis("bio.test_energy").unwrap().depletion_character,
+            reg.axis("test.energy_stock").unwrap().depletion_character,
             DepletionCharacter::DepletableStock
         );
     }
@@ -1736,7 +1750,7 @@ depletion_character = "depletable_stock"
         // A malformed character is a config error rejected at load, not a silent fallback.
         let bad = r#"
 [[axis]]
-id = "bio.test_bad"
+id = "test.bad_depletion_character"
 measures = "a test axis with a bad character"
 unit = "fraction"
 dimension = "dimensionless"

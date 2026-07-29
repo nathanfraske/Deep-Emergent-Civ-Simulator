@@ -30,8 +30,8 @@
 //! needed to know existed: `ZeroBoundary::RequiresFloor` corresponds to a [`ZeroGuard::Floor`] whose value is
 //! the quantity's declared `physical_floor` (per-world data), and `ZeroBoundary::PhysicalLimitAtZero`
 //! corresponds to a [`ZeroGuard::LimitAtZero`] whose value is the limit the law node takes at zero (the
-//! point-load pressure cap, a Nernst depleted-activity zero). The floor and limit VALUES are per-world data
-//! (reserved-with-basis); the mechanism is fixed Rust.
+//! point-load pressure cap, a Nernst depleted-activity zero). A canonical producer must derive and receipt
+//! every floor or limit from upstream state; this generic mechanism only enforces the supplied typed bound.
 //!
 //! Byte-neutral: this is new machinery, called by no law yet. Each hand-threaded law's LIFT to the guarded
 //! ops is its own later slice with its stated re-pin (the same staging as the `LawExpr` lifts).

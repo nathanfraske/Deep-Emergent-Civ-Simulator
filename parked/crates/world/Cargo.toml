@@ -1,0 +1,19 @@
+[package]
+name = "civsim-world-legacy"
+description = "Parked compatibility facade for retired authored world generation, views, fixtures, and orbital elements."
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "civsim_world"
+
+[dependencies]
+civsim-core = { path = "../../../crates/core", features = ["legacy-domains"] }
+civsim-world-abiotic = { package = "civsim-world", path = "../../../crates/world" }
+
+[lints.clippy]
+disallowed_types = "allow"

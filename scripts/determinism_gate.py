@@ -13,40 +13,45 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Q1 Stone 1, item 0: the determinism grep gate.
+"""Ratchet nondeterminism vectors at the canonical and parked boundaries.
 
-Fail if a NEW nondeterminism vector appears in the determinism-critical crates (core, physics, sim,
-world): a wall-clock read (Instant::now, SystemTime), a thread-identity read (thread::current,
-ThreadId), or an unordered-container type (HashMap, HashSet) whose iteration order is process-random
-and would leak into canonical state if the container were iterated.
+The default mode scans only the active deterministic substrate: core, ledger, materials, physics,
+planet, units, and world. It fails if a new wall-clock read, thread-identity read, unordered-container
+type, or dependency on the observer crate appears. Every accepted occurrence has an inspected reason
+in ``scripts/determinism_baseline.tsv``.
 
-The current tree is provably deterministic (the five canonical pins reproduce bit-exact across
-separate runs, which a state-feeding wall-clock or hash-order iteration would break), yet it carries
-a small baseline of these patterns that are determinism-safe for a documented reason: timing
-instrumentation whose elapsed time is reported and never stored, and lookup-only maps never iterated
-into state. That baseline lives in scripts/determinism_baseline.tsv with the reason per site. This
-gate ratchets INTRODUCTION: it fails on any count above the baseline (a new vector to review) and on
-any count below it (update the baseline, with a reason, when a site is legitimately removed).
+``--parked`` scans the retired biology, compose, foundation, and sim packages against
+``parked/scripts/determinism_baseline.tsv``. That mode preserves diagnostic coverage after the move;
+it is not canonical evidence or runpath admission. The legacy viewer is intentionally outside this
+state-determinism scan because its wall-clock reads drive rendering and playback. The import pattern
+still prevents any scanned state crate from depending on a viewer.
 
-Rayon / par_iter is deliberately not scanned: the engine's parallel reductions are order-independent
-by design (the sanctioned parallelism, proven by the width-invariant pins), not a hazard. The gate
-ratchets the introduction of a vector; it does not prove a grandfathered map stays lookup-only, which
-stays the reviewer's job at the site. Run `--self-test` to prove the gate fails on a synthetic new
-occurrence.
+Both baselines are exact ratchets. A count above baseline is a new site to inspect, and a count below
+baseline is a stale exemption to remove. Rayon and ``par_iter`` remain outside this grep gate because
+parallel reduction order requires semantic review rather than a substring rule. Use ``--self-test``
+in either mode to prove a synthetic occurrence is caught by that mode's live scan.
 """
 
 import pathlib
-import re
 import sys
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-CRATES = [
+CANONICAL_CRATES = [
     "crates/core/src",
+    "crates/ledger/src",
+    "crates/materials/src",
     "crates/physics/src",
-    "crates/bio/src",
-    "crates/foundation/src",
-    "crates/sim/src",
+    "crates/planet/src",
+    "crates/planet-substrate/src",
+    "crates/units/src",
     "crates/world/src",
+]
+PARKED_CRATES = [
+    "parked/crates/bio/src",
+    "parked/crates/compose/src",
+    "parked/crates/foundation/src",
+    "parked/crates/sim/src",
 ]
 # The scanned vectors. Each is a plain substring; the baseline captures the exact occurrence count
 # per file (imports included), so the gate is a pure introduction ratchet.
@@ -62,13 +67,14 @@ PATTERNS = [
     "HashSet",
     "civsim_viewer",
 ]
-BASELINE = ROOT / "scripts" / "determinism_baseline.tsv"
+CANONICAL_BASELINE = ROOT / "scripts" / "determinism_baseline.tsv"
+PARKED_BASELINE = ROOT / "parked" / "scripts" / "determinism_baseline.tsv"
 
 
-def scan(root: pathlib.Path) -> dict:
+def scan(root: pathlib.Path, crates: list[str]) -> dict:
     """Count each pattern per file across the determinism crates. Returns {(pattern, relpath): count}."""
     counts = {}
-    for crate in CRATES:
+    for crate in crates:
         for path in sorted((root / crate).rglob("*.rs")):
             text = path.read_text(encoding="utf-8")
             rel = path.relative_to(root).as_posix()
@@ -86,18 +92,32 @@ def load_baseline(path: pathlib.Path) -> dict:
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         fields = line.split("\t")
-        if len(fields) < 3:
+        if len(fields) < 4 or not fields[3].strip():
             raise SystemExit(f"malformed baseline row (need pattern<TAB>path<TAB>count<TAB>reason): {line!r}")
         pat, rel, count = fields[0], fields[1], int(fields[2])
+        if pat not in PATTERNS:
+            raise SystemExit(f"unknown determinism pattern in baseline: {pat!r}")
+        if count <= 0:
+            raise SystemExit(f"baseline count must be positive: {line!r}")
+        if (pat, rel) in base:
+            raise SystemExit(f"duplicate determinism baseline row: {pat!r} in {rel}")
         base[(pat, rel)] = count
     return base
 
 
-def check(root: pathlib.Path) -> list:
+def check(root: pathlib.Path, crates: list[str], baseline_path: pathlib.Path) -> list:
     """Return a list of human-readable violations (empty when the tree matches the baseline)."""
-    observed = scan(root)
-    baseline = load_baseline(BASELINE)
     violations = []
+    missing = [crate for crate in crates if not (root / crate).is_dir()]
+    for crate in missing:
+        violations.append(f"missing determinism scan root: {crate}")
+    if not baseline_path.is_file():
+        violations.append(f"missing determinism baseline: {baseline_path.relative_to(root).as_posix()}")
+        return violations
+
+    observed = scan(root, crates)
+    baseline = load_baseline(baseline_path)
+    baseline_rel = baseline_path.relative_to(root).as_posix()
     for key in sorted(observed.keys() | baseline.keys()):
         pat, rel = key
         got = observed.get(key, 0)
@@ -105,44 +125,68 @@ def check(root: pathlib.Path) -> list:
         if got > want:
             violations.append(
                 f"NEW nondeterminism vector: '{pat}' in {rel} ({got} occurrence(s), baseline {want}). "
-                f"If it is determinism-safe (timing reported not stored, a lookup-only map never "
-                f"iterated into state), add it to scripts/determinism_baseline.tsv with the reason; "
+                f"If inspection proves it deterministic, add it to {baseline_rel} with the reason; "
                 f"otherwise remove it (use a counter-based source or a BTree* for anything iterated)."
             )
         elif got < want:
             violations.append(
                 f"stale baseline: '{pat}' in {rel} ({got} occurrence(s), baseline {want}). "
-                f"A site was removed; lower or delete its row in scripts/determinism_baseline.tsv."
+                f"A site was removed; lower or delete its row in {baseline_rel}."
             )
     return violations
 
 
-def self_test(root: pathlib.Path) -> int:
-    """Prove the gate is live: a synthetic new `Instant::now` in a determinism crate must fail."""
-    probe = root / "crates" / "core" / "src" / "__determinism_gate_probe.rs"
-    probe.write_text("let _ = std::time::Instant::now();\n", encoding="utf-8")
-    try:
-        violations = check(root)
-    finally:
-        probe.unlink()
+def self_test(
+    root: pathlib.Path,
+    crates: list[str],
+    baseline_path: pathlib.Path,
+    mode: str,
+) -> int:
+    """Prove this mode is live in an isolated fixture, never by mutating the repository worktree."""
+    baseline_relative = baseline_path.relative_to(root)
+    with tempfile.TemporaryDirectory(prefix=f"determinism-{mode}-") as tmp:
+        fixture_root = pathlib.Path(tmp)
+        for crate in crates:
+            (fixture_root / crate).mkdir(parents=True, exist_ok=True)
+        fixture_baseline = fixture_root / baseline_relative
+        fixture_baseline.parent.mkdir(parents=True, exist_ok=True)
+        fixture_baseline.write_text("", encoding="utf-8")
+        probe = fixture_root / crates[0] / "__determinism_gate_probe.rs"
+        probe.write_text(
+            "let _ = std::time::Instant::now();\n",
+            encoding="utf-8",
+        )
+        violations = check(fixture_root, crates, fixture_baseline)
     hit = any("__determinism_gate_probe.rs" in v for v in violations)
     if hit:
-        print("determinism gate self-test: PASS (a synthetic new Instant::now is caught)")
+        print(f"determinism gate {mode} self-test: PASS (a synthetic new Instant::now is caught)")
         return 0
-    print("determinism gate self-test: FAIL (the gate did not catch a synthetic new vector)")
+    print(f"determinism gate {mode} self-test: FAIL (the gate did not catch a synthetic new vector)")
     return 1
 
 
 def main() -> int:
-    if "--self-test" in sys.argv[1:]:
-        return self_test(ROOT)
-    violations = check(ROOT)
+    args = set(sys.argv[1:])
+    unknown = args - {"--parked", "--self-test"}
+    if unknown:
+        print(f"determinism gate: unknown argument(s): {', '.join(sorted(unknown))}")
+        return 2
+
+    parked = "--parked" in args
+    mode = "parked" if parked else "canonical"
+    crates = PARKED_CRATES if parked else CANONICAL_CRATES
+    baseline_path = PARKED_BASELINE if parked else CANONICAL_BASELINE
+    if "--self-test" in args:
+        return self_test(ROOT, crates, baseline_path, mode)
+
+    violations = check(ROOT, crates, baseline_path)
     if violations:
-        print("determinism gate: FAIL")
+        print(f"determinism gate ({mode}): FAIL")
         for v in violations:
             print(f"  - {v}")
         return 1
-    print("determinism gate: clean (the determinism crates match the proven-safe baseline)")
+    qualifier = "active canonical" if not parked else "retired parked"
+    print(f"determinism gate ({mode}): clean ({qualifier} crates match their inspected baseline)")
     return 0
 
 

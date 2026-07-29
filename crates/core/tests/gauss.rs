@@ -21,7 +21,8 @@ use civsim_core::{gaussian, gaussian_unit, DrawKey, Fixed, GaussApprox, Phase, R
 const K12: GaussApprox = GaussApprox::SumOfUniforms { k: 12 };
 
 fn stream(seed: u64, locus: u64) -> Rng {
-    DrawKey::entity(locus, 0, Phase::PROMOTE).rng(seed)
+    const TEST_PHASE: Phase = Phase(0xA11C_E001);
+    DrawKey::entity(locus, 0, TEST_PHASE).rng(seed)
 }
 
 #[test]
@@ -132,8 +133,8 @@ fn the_unset_sentinel_panics_rather_than_choosing() {
 }
 
 #[test]
-#[should_panic(expected = "reserved")]
-fn the_inverse_cdf_table_is_reserved_and_panics() {
+#[should_panic(expected = "unavailable")]
+fn the_unavailable_inverse_cdf_table_panics() {
     let r = stream(1, 1);
     let _ = gaussian_unit(&r, 0, GaussApprox::InvCdfTable { bits: 16 });
 }

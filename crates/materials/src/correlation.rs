@@ -351,7 +351,11 @@ mod tests {
         (
             PeriodicTable::standard().expect("periodic table"),
             IonizationLadder::standard().expect("ionization ladder"),
-            DStateRadii::standard().expect("d-state radii"),
+            DStateRadii::standard(
+                &civsim_units::constants::canonical_si_execution_magnitudes()
+                    .expect("the sealed physical floor projects"),
+            )
+            .expect("d-state radii"),
             IonicRadii::standard().expect("ionic radii"),
             MitReference::standard().expect("MIT reference set"),
         )

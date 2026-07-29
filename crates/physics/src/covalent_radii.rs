@@ -23,6 +23,8 @@ use std::collections::BTreeMap;
 pub enum CovalentRadiiError {
     /// The data could not be parsed as TOML.
     Parse(String),
+    /// A decimal value could not be parsed or represented in fixed point.
+    BadValue(String),
     /// A symbol appears twice.
     Duplicate(String),
     /// A radius is non-positive (a covalent radius must be a positive length).
@@ -93,7 +95,17 @@ struct RawRadius {
     #[serde(default)]
     triple_pm: Option<i32>,
     #[serde(default)]
-    tetrahedral_pm: Option<f64>,
+    tetrahedral_pm: Option<String>,
+}
+
+/// Parse a source decimal exactly, then round once to Q32.32 with the project's round-half-to-even rule.
+fn fixed_from_decimal(s: &str) -> Result<Fixed, CovalentRadiiError> {
+    let value = BigRat::from_decimal_str(s).map_err(CovalentRadiiError::BadValue)?;
+    let bits = value
+        .round_to_scale(Fixed::FRAC_BITS)
+        .ok_or_else(|| CovalentRadiiError::BadValue(format!("{s} out of range")))?;
+    Fixed::from_bits_i128(bits)
+        .ok_or_else(|| CovalentRadiiError::BadValue(format!("{s} out of range")))
 }
 
 impl CovalentRadii {
@@ -104,15 +116,18 @@ impl CovalentRadii {
             toml::from_str(s).map_err(|e| CovalentRadiiError::Parse(e.to_string()))?;
         let mut radii = BTreeMap::new();
         for raw in file.radius {
+            let tetrahedral_pm = raw
+                .tetrahedral_pm
+                .as_deref()
+                .map(fixed_from_decimal)
+                .transpose()?;
             if raw.single_pm <= 0
                 || raw.double_pm.is_some_and(|d| d <= 0)
                 || raw.triple_pm.is_some_and(|t| t <= 0)
+                || tetrahedral_pm.is_some_and(|t| t <= Fixed::ZERO)
             {
                 return Err(CovalentRadiiError::NotPhysical(raw.symbol));
             }
-            let tetrahedral_pm = raw
-                .tetrahedral_pm
-                .map(|v| Fixed::from_ratio((v * 10.0).round() as i64, 10));
             let entry = CovalentRadius {
                 single_pm: raw.single_pm,
                 double_pm: raw.double_pm,
@@ -303,6 +318,34 @@ mod tests {
             "Na forms no tetrahedral crystal"
         );
         assert!(c.tetrahedral_bond_length_pm("Na", "Cl").is_none());
+    }
+
+    #[test]
+    fn tetrahedral_decimals_cross_into_fixed_without_floating_point() {
+        let source = r#"
+[[radius]]
+symbol = "Xx"
+single_pm = 1
+tetrahedral_pm = "117.6"
+"#;
+        let got = CovalentRadii::from_toml_str(source)
+            .unwrap()
+            .radius("Xx")
+            .unwrap()
+            .tetrahedral_pm
+            .unwrap();
+        let expected_bits = BigRat::from_decimal_str("117.6")
+            .unwrap()
+            .round_to_scale(Fixed::FRAC_BITS)
+            .unwrap();
+        assert_eq!(i128::from(got.to_bits()), expected_bits);
+
+        let production = include_str!("covalent_radii.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        assert!(!production.contains("f64"));
+        assert!(!production.contains("to_f64_lossy"));
     }
 
     #[test]

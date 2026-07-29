@@ -533,9 +533,10 @@ def gather(read_toml_fn=read_toml, read_lines=None):
     markers = scan_source_markers(read_lines)
     row_refs = scan_row_references(read_toml_fn, manifest_paths)
 
-    # Collection coverage: per vendored data directory, how many data files are tracked by git against how
-    # many `[[source]]` records the manifest declares. Uses the checked-in file list rather than the
-    # working tree, so a stray local download cannot make a directory look covered or uncovered.
+    # Collection coverage: per vendored data directory, compare every present data
+    # file with the number of `[[source]]` records. The working tree is deliberate:
+    # a stray local download in a custody directory must be registered or removed
+    # before the gate calls that directory covered.
     collections = {}
     for path in manifest_paths:
         if path.parent.name in ("disk_arc_literature",):

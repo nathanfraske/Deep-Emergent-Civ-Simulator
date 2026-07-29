@@ -1,6 +1,6 @@
 [package]
 name = "civsim-physics"
-description = "The authored physics-and-materials substrate (design Principle 9, Parts 41 and 58): the QuantityAxis / InteractionLaw / Substance registry the biology floor (R-PHYS-BIO) and the mechanical-and-materials floor (R-PHYS-MECH) load into, with closed-form fixed-point law kernels. The one bounded place the designer's hand may enter; every axis range and law constant is data, reserved-with-basis until the owner sets it."
+description = "The active abiotic physics-and-materials substrate: a data-driven quantity, interaction-law, and substance registry with deterministic fixed-point kernels for planetary and solar-system simulation."
 authors.workspace = true
 license.workspace = true
 edition.workspace = true

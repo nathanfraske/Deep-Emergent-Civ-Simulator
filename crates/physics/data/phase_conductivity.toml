@@ -48,7 +48,7 @@
 # fayalite 28 are the three it did not name. Periclase at n = 2 is the ladder's simple class and its
 # permanent OVERLAP SENTINEL, which is the row that makes the two-rung comparison run at all.
 #
-# ===== COLUMN 2: kappa_298 (six of eight phases, and the two absences are deliberate) =====
+# ===== COLUMN 2: kappa_298 (seven of eight phases, and the one absence is deliberate) =====
 #
 # The measured thermal conductivity at 300 K of the pure phase, W/(m*K). Present only where a citable
 # primary reports a pure-phase value in the ambient frame. A phase with no value here is NOT defaulted:
@@ -79,16 +79,28 @@
 # Where a row is anisotropic the band is widened to the orientational Voigt-Reuss bracket if that is the
 # larger of the two, so an aggregate never reads a narrower width than the anisotropy it averaged away.
 #
-# WHY HEMATITE AND SPINEL CARRY NO ANCHOR, recorded rather than left to inference. HEMATITE is a real
-# and unresolved dispute rather than a missing fetch: the values retrieved for it span 10.5 to 24.4
-# W/(m*K), a factor of 2.3, across a porous natural aggregate (Diment and Pratt 1988, whose sample's
-# measured density is 22 percent below theoretical), a 1911 determination, a laser-flash fit on a 99.9
-# percent specimen, and an EXTRAPOLATED single-crystal pair. Choosing a centre inside a 2.3x spread is
-# authoring, so no anchor is written and the manifest records every retrieved value for the next fetch.
-# SPINEL has no pure-phase determination in any source retrieved openly; the one value found is on an
-# artificial specimen at 35 C reported at third hand (Clark 1966 after McCarthy and Ballard 1951).
-# Slack (1962), Physical Review 126, 427, measures MgO, Al2O3 and MgAl2O4 to 300 K and is the named
-# follow-up for spinel; it is behind the APS paywall and was not retrieved.
+# HEMATITE WAS CLOSED ON 2026-07-20 and the row above now carries an anchor. It was closed against the
+# criterion the earlier fetch wrote for it, a dense-polycrystal or single-crystal determination at 300 K
+# that is not an extrapolation: Akiyama et al. 1992, ISIJ International 32(7), 829, measured HIP-densified
+# 99.9 percent hematite of stated porosity below 0.1 percent by laser flash from room temperature, and
+# printed the least-squares fit 'k = 1/(1.844e-4 T)' over '298 < T < 912'. The three values that made the
+# old 2.3x spread are not scatter in one quantity and are no longer read as though they were: the low end
+# is porous and natural samples, the high end is an EXTRAPOLATED single crystal, and this row is a dense
+# polycrystal sitting between them, which is where a dense polycrystal belongs.
+#
+# WHY SPINEL STILL CARRIES NO ANCHOR, and the reason changed on 2026-07-20 from a missing fetch to a
+# CORRECTION. This file used to record Slack (1962), Physical Review 126, 427, as the named follow-up that
+# would close spinel once retrieved. It would not. TPRC Volume 2 (Touloukian, Powell, Ho and Klemens 1970)
+# transcribes Slack's own specimens with their compositions, and all three of his spinels are
+# off-composition: Data Table 58 is headed 'MAGNESIUM ALUMINATE MgO . 3.5 Al2O3', an alumina-rich Verneuil
+# crystal of lattice constant 7.979 A against the stoichiometric 8.084 A, reading 13.3 W/(m*K) at 300.67 K;
+# and Data Table 282's two Slack curves are IRON-BEARING natural pleonastes, (Ti,Mg0.75,Fe0.41,Al1.85)O4
+# and (Ti,Mg,Fe0.33,Al1.93)O4, reading 5.9 and 6.4 W/(m*K) at 300 K. The other five curves under that table
+# are powder beds and a pressed-and-fired compact of bulk density 0.92 to 1.79 g cm^-3, plus one 1949 curve
+# recorded as 'No details reported.' The spread from 5.9 to 13.3 across those specimens is composition and
+# porosity doing what they do to a phonon conductor, so none of them stands for the pure phase, and taking
+# any of them would be reading a related composition rather than this one. Closing spinel needs a
+# determination on STOICHIOMETRIC MgAl2O4. The manifest records every route already exhausted.
 #
 # THE TWO CANONICAL COMPILATIONS REMAIN UNRETRIEVED, stated plainly rather than paraphrased from memory.
 # Horai 1971 (JGR 76, 1278-1308) returns HTTP 403 at the DOI and at the ADS scan, carries no Wayback
@@ -120,7 +132,7 @@
 # and every held one is public domain; the attribution-conditioned records are cited and not held.
 
 frame = "300 K, 1 bar, pure end-member composition; atoms_per_primitive_cell is a crystallographic count and is frame-free"
-grade = "atoms_per_primitive_cell: crystallographic (derived from space group, Z, formula content and lattice centring); kappa_298: measured (NBS recommended values for quartz, corundum and periclase; Horai and Simmons 1969 needle-probe via Henke et al. 2016 for forsterite, fayalite and enstatite)"
+grade = "atoms_per_primitive_cell: crystallographic (derived from space group, Z, formula content and lattice centring); kappa_298: measured (NBS recommended values for quartz, corundum and periclase; Horai and Simmons 1969 needle-probe via Henke et al. 2016 for forsterite, fayalite and enstatite; Akiyama et al. 1992 laser flash on a HIP-densified compact for hematite, taken from that paper's own least-squares fit at the 298 K lower bound of its stated range)"
 primitive_cell_relation = "atoms_per_primitive_cell = Z * atoms_per_formula_unit / lattice_points_per_conventional_cell"
 
 [[conductivity]]
@@ -186,7 +198,11 @@ lattice_centring = "R (hexagonal setting)"
 lattice_points_per_conventional_cell = "3"
 formula_units_per_conventional_cell = "6"
 atoms_per_formula_unit = "5"
+kappa_298_w_per_m_k = "18.20"
+kappa_298_temperature_k = "298"
+kappa_specimen_form = "hot-isostatically-pressed polycrystalline compact, 99.9 percent pure, the source stating porosity below 0.1 percent"
 crystallography_citation = "alpha-Fe2O3, isostructural with corundum, space group R-3c (No. 167), Z = 6 in the HEXAGONAL setting. Primary: Blake, R.L., Hessevick, R.E., Zoltai, T. & Finger, L.W., 1966, Refinement of the hematite structure, American Mineralogist 51, 123-129; the text records that 'the space group R3c of Pauling and Hendricks was confirmed', and Table I states for the hexagonal unit cell 'Space Group: R3c' with 'Z = 6'. Database record HELD in cod/: COD 1011267 (Zachariasen, W.H., 1928), which states the same structure in the RHOMBOHEDRAL setting, 'R -3 c :R' with Z = 2, and the rhombohedral cell IS the primitive cell, so 2 x 5 = 10 atoms directly, matching 6 x 5 / 3 = 10 from the hexagonal setting. Corroborating record, CITED AND NOT HELD because its COD entry carries an IUCr attribution condition rather than the public-domain dedication: COD 2101167 (Maslen, E.N., Streltsov, V.A., Streltsova, N.R. & Ishizawa, N., 1994, Acta Crystallographica B 50, 435), 'R -3 c :H', Z = 6, a = 5.0355(5), c = 13.7471(7) A. Density check: V = 301.80 A^3 (hex), M = 159.688, rho = 5.271 gives Z = 6.00."
+kappa_citation = "kappa_298 = 18.20 W/(m*K) at 298 K: Akiyama, T., Ohta, H., Takahashi, R., Waseda, Y. & Yagi, J., 1992, Measurement and Modeling of Thermal Conductivity for Dense Iron Oxide and Porous Iron Ore Agglomerates in Stepwise Reduction, ISIJ International 32(7), 829-837, equation (2), printed page 831, read from a 300 dpi render. The source states its own measurements as a least-squares fit to thermal RESISTIVITY, and the row headed 'Fe2O3;' reads 'k = 1/(1.844 * 10^-4 T)' over the stated range '298 < T < 912', which at the lower bound of that range gives 1 / (1.844e-4 * 298) = 18.198 W/(m*K). THE VALUE IS THE SOURCE'S OWN FIT EVALUATED AT ITS OWN STATED ENDPOINT, not an extrapolation past it and not a digitised figure point, and that is the same pattern the forsterite and enstatite rows already use on Henke's equations (8) and (9) at their end-member compositions. THE ADJACENT BRANCH IS THE TRAP AND THE HEADINGS ARE WHAT AVOID IT: the next block, 'Fe3O4;', reads 'k = 1/(1.693 * 10^-4 T)' over '298 < T < 906', which differs in the third digit and would give 19.82; each branch was read under its printed compound heading rather than by position. SPECIMEN FORM, Table 1 printed page 830: density 5.20 x 10^3 kg/m^3, purity 99.9 percent, impurities Al 200, Co 20, Cr 40, Mn 400, Ni 100, Si 100 ppm, formed by Hot Isostatic Pressing from 1 micrometre powder at 1173 K and 150 MPa, with the paper stating 'The porosity of samples was found to be less than 0.1 %'. This is a dense POLYCRYSTAL rather than a single crystal, the same class of specimen as the corundum and periclase rows. NO BAND IS CARRIED, and the absence is the honest reading rather than an oversight: the paper states no measurement accuracy anywhere, and no independent determination of DENSE hematite at 300 K was retrieved to set a gap against. The two other determinations this project has read are both outside the frame and are recorded as context rather than used: Touloukian 1966 Table I-26 gives a Brazil single crystal at 300 K, but BOTH its entries are asterisked as extrapolated with the nearest measured points at 350 and 400 K; and Diment and Pratt 1988 gives 10.46, 12.09 and 14.69 W/(m*K) on natural samples, the first of them 22 percent porous, which are sample properties rather than the phase. DUAL CHANNEL on the value: the printed equation evaluated at 298 K gives 18.198, and the same paper's Fig. 3 plots dense pure hematite as open circles at about 0.055 m*K/W at 300 K, whose reciprocal is about 18. A DISCREPANCY INSIDE THE SOURCE, recorded rather than smoothed: the stated porosity below 0.1 percent does not sit with the same paper's tabulated density of 5.20 against the crystallographic 5.271 this row derives above, a 1.3 percent gap, so either that column is the material's true density rather than the compact's apparent density or the two statements disagree, and the paper does not say which. THIS ROW CLOSES THE CRITERION THE PREVIOUS FETCH WROTE FOR IT, which asked for a modern single-crystal or dense-polycrystal measurement at 300 K that is not an extrapolation."
 
 [[conductivity]]
 name = "forsterite"

@@ -38,16 +38,18 @@ fn full_registry() -> PhysicsRegistry {
 #[test]
 fn the_em_floor_loads_onto_the_earlier_floors() {
     let reg = full_registry();
-    // 39 mech + 28 fluids + 17 chem/optics + 14 em axes; 21 + 18 + 11 + 15 laws; 2 + 2 + 0 + 2 subs.
-    // (fluids gained fluid.moisture_content, Arc 5 T4, the terrain-wetness floor identity, plus the three
-    // critical-point axes chem.critical_{temperature,pressure} + chem.acentric_factor plus the four volatile primitives (chem.boiling_point / vaporization_enthalpy / fusion_enthalpy / triple_point_temperature) for the transport-property
-    // derivations; chem/optics gained opt.emissivity.band_0..2, the per-band spectral emissivity axes for 2b.)
-    assert_eq!(reg.axis_count(), 98, "the four floors' axes together");
-    assert_eq!(reg.law_count(), 65, "the four floors' laws together");
+    // 38 mechanical + 20 fluids + 13 chemistry/optics + 14 electromagnetic axes;
+    // 21 + 15 + 11 + 15 laws; 1 + 2 + 0 + 2 substances.
+    assert_eq!(
+        reg.axis_count(),
+        85,
+        "the four active floors' axes together"
+    );
+    assert_eq!(reg.law_count(), 62, "the four active floors' laws together");
     assert_eq!(
         reg.substance_count(),
-        6,
-        "iron, oak, air, water, copper, lodestone"
+        5,
+        "iron, air, water, copper, lodestone"
     );
     assert!(reg.law("law.faraday_emf").is_some());
     assert!(reg.axis("mag.flux").is_some());

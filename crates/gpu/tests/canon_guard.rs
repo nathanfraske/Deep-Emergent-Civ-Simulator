@@ -43,7 +43,15 @@ fn assert_no_float(rel: &str) {
 
 #[test]
 fn the_canonical_kernels_carry_no_floating_point() {
-    // The two files that hold `#[cube]` kernels compiled onto the canonical path.
-    assert_no_float("src/stage0.rs");
-    assert_no_float("src/field.rs");
+    // Every file that holds or directly supplies arithmetic to `#[cube]`
+    // kernels compiled onto the canonical path. Keep this list explicit so a
+    // new numerical module must make its representation policy reviewable.
+    for source in [
+        "src/stage0.rs",
+        "src/prim.rs",
+        "src/field.rs",
+        "src/transcendental.rs",
+    ] {
+        assert_no_float(source);
+    }
 }

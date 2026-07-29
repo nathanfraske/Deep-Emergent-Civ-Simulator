@@ -5,8 +5,8 @@
 #
 # PreToolUse customs guard (AGENTIC_ADDENDUM.md section 2b). The hard guard that an
 # em dash or a banned adverb cannot be written into a maintained document in the
-# first place. It inspects tool_input on stdin: if the target is docs/design.md or
-# docs/audit.md and the incoming content carries a violation, it exits 2 with the
+# first place. It inspects tool_input on stdin: if the target is
+# parked/docs/design.md or parked/docs/audit.md and the incoming content carries a violation, it exits 2 with the
 # reason, which the harness feeds back to the agent. It leaves the archived research
 # papers and every other file alone. A PreToolUse deny blocks even under bypass
 # mode, so this holds regardless of permission settings.
@@ -38,18 +38,41 @@ except Exception:
     sys.exit(0)
 
 ti = data.get("tool_input", {}) or {}
-fp = ti.get("file_path", "") or ""
+def maintained(path):
+    normalized = str(path).replace("\\", "/")
+    return normalized.endswith(("parked/docs/design.md", "parked/docs/audit.md"))
 
-# Only the two maintained documents are guarded.
-if not (fp.endswith("docs/design.md") or fp.endswith("docs/audit.md")):
+parts = []
+fp = ti.get("file_path", "") or ""
+if maintained(fp):
+    for key in ("content", "new_string", "new_str"):
+        v = ti.get(key)
+        if isinstance(v, str):
+            parts.append(v)
+
+# Codex apply_patch carries a multi-file patch in tool_input.command. Inspect
+# only added lines while the active patch file is one of the maintained docs.
+command = ti.get("command")
+if isinstance(command, str):
+    current = ""
+    for line in command.splitlines():
+        m = re.match(r"^\*\*\* (?:Add|Update|Delete) File:\s*(.+?)\s*$", line)
+        if m:
+            current = m.group(1)
+            continue
+        m = re.match(r"^\*\*\* Move to:\s*(.+?)\s*$", line)
+        if m:
+            current = m.group(1)
+            continue
+        if line == "*** End Patch":
+            current = ""
+            continue
+        if maintained(current) and line.startswith("+") and not line.startswith("+++"):
+            parts.append(line[1:])
+
+if not parts:
     sys.exit(0)
 
-# Gather the candidate new content across the file-writing tools.
-parts = []
-for key in ("content", "new_string", "new_str"):
-    v = ti.get(key)
-    if isinstance(v, str):
-        parts.append(v)
 blob = "\n".join(parts)
 
 violations = []

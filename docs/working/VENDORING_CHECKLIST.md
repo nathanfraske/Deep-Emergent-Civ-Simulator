@@ -2,6 +2,8 @@
 
 > **THE STANDING RULE, READ FIRST (a session-start requirement for every fetch sub-agent, AGENTIC_ADDENDUM.md section 12).** If you produce a load-bearing number, VENDOR ITS SOURCE at fetch time: download the actual document or data file, SHA256 it, and hold it here behind the manifest. A URL citation is NOT provenance, because a link rots and the number is then a claim with no held witness. Read the primary's figures and tables rather than the abstract, and carry each value's anchor (page, figure, table), a dual-channel agreement where the standard needs it, and its SCOPE (the regime it applies to). A number whose provenance is a hyperlink has not been fetched.
 
+> **THE EXTERNAL-CLAIM RULE.** A fetch may surface a discrepancy but may not turn it into an adverse claim or author contact. Record exact quotations and parallel values neutrally. Release requires `EXTERNAL_ADVERSE_CLAIM_RULE.md`: five independent lineages beyond the subject artifact, exact text and destination digests, an owner signature, and independent checker agreement. Fewer than five lineages means the project may refuse the value while the external question stays open.
+
 Every measured or externally-sourced data column ([M], and the compute-once cited tier) enters the repo as a vendored artifact behind a manifest. The manifest is the artifact's contract; a CI gate is the classifier of last resort, and the point of this checklist is that classification happens at FETCH TIME, by the agent who knows what the artifact is, not later by a gate that only knows what it is not. The κ_R arc's covalent-radius column shipped for two commits with the floor-provenance gate red because its block kind was never declared at fetch time; that failure class closes here.
 
 For each vendored artifact, the manifest (or the data file's header) declares:
@@ -30,6 +32,40 @@ The `*_provenance_test.py` battery then checks each artifact offline, with no ne
 **The honest summary: these are CUSTODY, TRANSCRIPTION and ANALYTIC-VERIFICATION checks.** Custody proves the bytes we hold are the bytes we fetched. Transcription proves the number in our column matches the number in the held source. Analytic verification proves a closed form is computed correctly. All three are worth having and all three catch real drift. None of them establishes that the source is RIGHT, and a transcription check that reads its expectation from the file under test does not even establish independence.
 
 Three are worth rebuilding as genuine validation, and are recorded rather than quietly left: the ice correlation against IAPWS R14-08(2011) over 130 to 220 K; the Slater applicability classification against held-out thermodynamic gamma measurements instead of the row's own flag; and the non-analytic Rayleigh eigenvalues against an independent neutral-stability solver.
+
+### Restricted measured-floor witness: CODATA 2018
+
+The NIST CODATA 2018 ASCII table is a citation-plus-witness source because
+redistribution permission for Standard Reference Database 121 was not
+established. The repository therefore holds the source identity, exact byte
+count and SHA-256, public archive, row spans, row-span hashes, normalized
+values, uncertainties, units, and dimensions without committing the table
+bytes. The factual rows live in
+`crates/units/data/codata_2018_floor_facts.tsv`; the independently checked pair
+receipt lives beside it as `codata_2018_floor_evidence_receipt.json`.
+
+`scripts/codata_floor_evidence_gate.py` parses the source by fixed columns.
+`scripts/codata_floor_evidence_watchdog.py` scans records by whitespace
+boundaries and carries a separately reviewed row profile. The routine offline
+gate verifies the checked facts and receipt, then executes 13 producer
+mutations and 14 watchdog mutations. Every observation binds its canary
+identity, exact concrete mutated bytes through a domain-separated SHA-256, and
+one detector-specific refusal code. Each candidate must differ from its
+baseline before the detector runs. Equal error messages therefore cannot hide
+a copied or substituted mutation. The checked pair uses
+`civsim.units.codata-2018-floor-evidence-pair.v2`; its current receipt is 1,800
+bytes at SHA-256
+`08c67f6d6e4543e7cb35be383f08aa1bbe7361878ff78bbc8567d08104f97983`
+and binds pair SHA-256
+`7aef3108ee63e017d739be0fd9b229a7d1fac675f35e81fbdfaa7a7844696ee0`.
+
+`just floor-source-evidence-audit` or
+`make floor-source-evidence-audit` explicitly fetches both the live NIST table
+and its pinned archive and requires byte equality before replaying both
+parsers. The routine build intentionally remains offline under the
+citation-plus-witness licence carveout. These checks establish custody and
+transcription. They do not prove that the source is scientifically correct,
+grant floor admission, or authorize an update to a later CODATA adjustment.
 
 ---
 

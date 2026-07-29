@@ -136,9 +136,26 @@ fn opt_fixed(s: &Option<String>) -> Result<Option<Fixed>, PerovskiteError> {
     }
 }
 
+/// Divide an integer ratio with deterministic round-half-to-even behavior.
+fn round_ratio_half_even(numerator: i128, denominator: i128) -> i128 {
+    debug_assert!(denominator > 0);
+    let quotient = numerator.div_euclid(denominator);
+    let remainder = numerator.rem_euclid(denominator);
+    match (remainder * 2).cmp(&denominator) {
+        std::cmp::Ordering::Less => quotient,
+        std::cmp::Ordering::Greater => quotient + 1,
+        std::cmp::Ordering::Equal if quotient % 2 == 0 => quotient,
+        std::cmp::Ordering::Equal => quotient + 1,
+    }
+}
+
 /// The integer-milliKelvin key of a temperature, so `298.15 K` and the round hundreds each key uniquely and exactly.
 fn temp_key(t_k: Fixed) -> i64 {
-    (t_k.to_f64_lossy() * 1000.0).round() as i64
+    let milli_kelvin = round_ratio_half_even(
+        i128::from(t_k.to_bits()) * 1_000,
+        1_i128 << Fixed::FRAC_BITS,
+    );
+    i64::try_from(milli_kelvin).expect("a Q32.32 temperature scaled to milliKelvin fits i64")
 }
 
 impl PerovskiteGibbs {
@@ -225,6 +242,23 @@ mod tests {
 
     fn at(k: i64) -> Fixed {
         Fixed::from_int(k as i32)
+    }
+
+    #[test]
+    fn temperature_keys_stay_in_integer_fixed_arithmetic() {
+        assert_eq!(temp_key(Fixed::from_ratio(29_815, 100)), 298_150);
+        assert_eq!(temp_key(Fixed::from_ratio(-29_815, 100)), -298_150);
+        assert_eq!(round_ratio_half_even(5, 2), 2);
+        assert_eq!(round_ratio_half_even(7, 2), 4);
+        assert_eq!(round_ratio_half_even(-5, 2), -2);
+        assert_eq!(round_ratio_half_even(-7, 2), -4);
+
+        let production = include_str!("perovskite_gibbs.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        assert!(!production.contains("f64"));
+        assert!(!production.contains("to_f64_lossy"));
     }
 
     #[test]

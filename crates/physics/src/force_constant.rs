@@ -14,6 +14,7 @@
 use crate::covalent_radii::CovalentRadii;
 use crate::periodic::PeriodicTable;
 use civsim_core::Fixed;
+use civsim_units::bignum::BigRat;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
@@ -22,6 +23,8 @@ use std::collections::BTreeMap;
 pub enum ForceConstantError {
     /// The data could not be parsed as TOML.
     Parse(String),
+    /// A decimal value could not be parsed or represented in fixed point.
+    BadValue(String),
     /// A row-pair appears twice.
     Duplicate(String),
 }
@@ -36,10 +39,20 @@ struct RawFile {
 struct RawPair {
     row_i: u8,
     row_j: u8,
-    a2: f64,
-    b2: f64,
+    a2: String,
+    b2: String,
     #[serde(default)]
     tm: bool,
+}
+
+/// Parse a source decimal exactly, then round once to Q32.32 with the project's round-half-to-even rule.
+fn fixed_from_decimal(s: &str) -> Result<Fixed, ForceConstantError> {
+    let value = BigRat::from_decimal_str(s).map_err(ForceConstantError::BadValue)?;
+    let bits = value
+        .round_to_scale(Fixed::FRAC_BITS)
+        .ok_or_else(|| ForceConstantError::BadValue(format!("{s} out of range")))?;
+    Fixed::from_bits_i128(bits)
+        .ok_or_else(|| ForceConstantError::BadValue(format!("{s} out of range")))
 }
 
 /// The Herschbach-Laurie force-constant column, keyed by the row-pair `(row_lo, row_hi, transition_metal)`.
@@ -79,8 +92,8 @@ impl ForceConstants {
             let lo = raw.row_i.min(raw.row_j);
             let hi = raw.row_i.max(raw.row_j);
             let key = (lo, hi, raw.tm);
-            let a2 = Fixed::from_ratio((raw.a2 * 1_000_000.0).round() as i64, 1_000_000);
-            let b2 = Fixed::from_ratio((raw.b2 * 1_000_000.0).round() as i64, 1_000_000);
+            let a2 = fixed_from_decimal(&raw.a2)?;
+            let b2 = fixed_from_decimal(&raw.b2)?;
             if params.insert(key, (a2, b2)).is_some() {
                 return Err(ForceConstantError::Duplicate(format!(
                     "{lo}-{hi} tm={}",
@@ -159,6 +172,33 @@ mod tests {
 
     fn close(a: f64, b: f64, tol: f64) -> bool {
         (a - b).abs() < tol
+    }
+
+    #[test]
+    fn parameter_decimals_cross_into_fixed_without_floating_point() {
+        let source = r#"
+[[pair]]
+row_i = 1
+row_j = 1
+a2 = "1.54"
+b2 = "0.64"
+"#;
+        let column = ForceConstants::from_toml_str(source).unwrap();
+        let (a2, b2) = column.parameters(6, 8).unwrap();
+        for (got, decimal) in [(a2, "1.54"), (b2, "0.64")] {
+            let expected_bits = BigRat::from_decimal_str(decimal)
+                .unwrap()
+                .round_to_scale(Fixed::FRAC_BITS)
+                .unwrap();
+            assert_eq!(i128::from(got.to_bits()), expected_bits);
+        }
+
+        let production = include_str!("force_constant.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        assert!(!production.contains("f64"));
+        assert!(!production.contains("to_f64_lossy"));
     }
 
     #[test]

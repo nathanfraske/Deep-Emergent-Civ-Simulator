@@ -7,25 +7,20 @@
 # that turns the verification suite and the project's structured data into callable
 # tools, so the hooks and panels consume structured results rather than re-deriving
 # them from raw greps. It speaks newline-delimited JSON-RPC 2.0 over stdin and
-# stdout and depends only on the Python standard library (tomllib is built in on
-# Python 3.11+), so it runs with no install step.
+# stdout and depends only on the Python standard library, so it runs with no
+# install step.
 #
 # Tools:
-#   verify              run scripts/verify.sh and return structured JSON.
-#   backlog             parse TODOS.md and audit Section 3 into the open-items list.
-#   reserved            parse calibration/reserved.toml into the review queue.
-#   consolidation_check given an item id, confirm a resolution is complete.
+#   verify              verify the parked legacy design archive.
+#   backlog             parse the bounded canonical planetary queue in TODOS.md.
+#   floor_admission     read the generated accounting inventory and admission policy.
+#   consolidation_check inspect a parked legacy research resolution.
 
 import json
 import os
 import re
 import subprocess
 import sys
-
-try:
-    import tomllib  # Python 3.11+
-except ModuleNotFoundError:  # pragma: no cover
-    tomllib = None
 
 ROOT = os.environ.get("REPO_ROOT") or os.path.dirname(
     os.path.dirname(os.path.abspath(__file__))
@@ -41,11 +36,11 @@ def _read(path):
 
 
 def design_text():
-    return _read(os.path.join(ROOT, "docs", "design.md"))
+    return _read(os.path.join(ROOT, "parked", "docs", "design.md"))
 
 
 def audit_text():
-    return _read(os.path.join(ROOT, "docs", "audit.md"))
+    return _read(os.path.join(ROOT, "parked", "docs", "audit.md"))
 
 
 def _section(text, start_pat, end_pat):
@@ -75,50 +70,47 @@ def tool_verify(_args):
 
 def tool_backlog(_args):
     items = []
-    for line in _read(os.path.join(ROOT, "TODOS.md")).splitlines():
-        m = re.match(r"^- \*\*(R-[A-Z0-9-]+)\.\*\*\s*(.*)$", line)
+    todos = _read(os.path.join(ROOT, "TODOS.md"))
+    canonical = _section(todos, r"^## Canonical abiotic queue$", r"^## ")
+    for line in canonical.splitlines():
+        m = re.match(r"^- \*\*(P-[A-Z0-9-]+)\.\*\*\s*(.*)$", line)
         if m:
             items.append({"id": m.group(1), "summary": m.group(2).strip()})
-    open_count = len(
-        re.findall(r"^- \*\*R-", audit_text(), re.M)
-    )
+    todo_ids = [item["id"] for item in items]
+    duplicates = sorted({item for item in todo_ids if todo_ids.count(item) > 1})
     return {
-        "open_count_audit": open_count,
-        "todos_open_items": len(items),
+        "consistent": bool(canonical) and not duplicates,
+        "canonical_open_items": len(items),
+        "duplicate_todo_ids": duplicates,
         "items": items,
     }
 
 
-def tool_reserved(_args):
-    path = os.path.join(ROOT, "calibration", "reserved.toml")
-    if tomllib is None:
-        return {"error": "tomllib unavailable; Python 3.11+ required"}
-    try:
-        with open(path, "rb") as fh:
-            data = tomllib.load(fh)
-    except (OSError, ValueError) as exc:
-        return {"error": str(exc)}
-    queue = []
-    for e in data.get("reserved", []):
-        is_set = e.get("status") == "set" and str(e.get("value", "")).strip() != ""
-        queue.append(
-            {
-                "id": e.get("id"),
-                "basis": e.get("basis"),
-                "status": e.get("status"),
-                "value": e.get("value", ""),
-                "unit": e.get("unit", ""),
-                "source": e.get("source"),
-                "is_set": is_set,
-            }
-        )
-    reserved_ids = [q["id"] for q in queue if not q["is_set"]]
+def tool_floor_admission(_args):
+    path = os.path.join(
+        ROOT, "docs", "working", "CANONICAL_LEDGER_INVENTORY.txt"
+    )
+    lines = _read(path).splitlines()
+    if not lines:
+        return {"error": f"missing or empty canonical inventory: {path}"}
+    inventory = {}
+    for line in lines:
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key.endswith(".entry"):
+            inventory.setdefault(key, []).append(value)
+        else:
+            inventory[key] = value
     return {
-        "total": len(queue),
-        "reserved_count": len(reserved_ids),
-        "set_count": len(queue) - len(reserved_ids),
-        "reserved_ids": reserved_ids,
-        "queue": queue,
+        "accounting_only": True,
+        "editable_values": False,
+        "policy": (
+            "derive from the sealed absolute floor; an irreducible Reference "
+            "or Residue requires exhaustion, Buckingham-Pi, Gap Law, and "
+            "Residual Law receipts; otherwise refuse"
+        ),
+        "inventory": inventory,
     }
 
 
@@ -157,7 +149,13 @@ def tool_consolidation_check(args):
     part63 = _section(design, r"^## Part 63:", r"^## Part \d+:")
     bibliography_present = item in part63
 
-    complete = resolved_marker and (not flag_present) and (not open_bullet)
+    complete = (
+        resolved_marker
+        and record_pointer
+        and bibliography_present
+        and (not flag_present)
+        and (not open_bullet)
+    )
     return {
         "item_id": item,
         "flag_replaced": not flag_present,
@@ -172,27 +170,26 @@ def tool_consolidation_check(args):
 TOOLS = {
     "verify": (
         tool_verify,
-        "Run the verification suite over the maintained documents and return "
-        "structured pass-or-fail results.",
+        "Run the verification suite over the parked legacy design archive and "
+        "return structured pass-or-fail results.",
         {"type": "object", "properties": {}},
     ),
     "backlog": (
         tool_backlog,
-        "Parse TODOS.md and the audit backlog into the open research items with "
-        "their summaries and the running open count.",
+        "Parse the bounded canonical abiotic queue in TODOS.md.",
         {"type": "object", "properties": {}},
     ),
-    "reserved": (
-        tool_reserved,
-        "Parse calibration/reserved.toml into the reserved-values review queue: "
-        "each value with its id, basis, status, value, and source.",
+    "floor_admission": (
+        tool_floor_admission,
+        "Read the generated four-tier by seven-mark accounting inventory and "
+        "the fail-closed admission policy; exposes no editable magnitude.",
         {"type": "object", "properties": {}},
     ),
     "consolidation_check": (
         tool_consolidation_check,
-        "Given a research item id, confirm its resolution is complete: flag "
-        "replaced, record in Part 62, bibliography in Part 63, backlog bullet "
-        "rewritten to resolved.",
+        "Given a parked legacy research item id, inspect whether its resolution "
+        "is complete: flag replaced, record in Part 62, bibliography in Part 63, "
+        "backlog bullet rewritten to resolved. This grants no canonical admission.",
         {
             "type": "object",
             "properties": {

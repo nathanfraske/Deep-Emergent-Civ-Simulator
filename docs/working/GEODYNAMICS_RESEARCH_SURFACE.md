@@ -1,6 +1,8 @@
 # Geodynamics substrate: the points needing build-out (research surface)
 
-Consolidated surfacing (owner request, 2026-07-11) of every geodynamics point where a mechanism wants to derive from solid-planet physics but the substrate is not built. Two layers: the DEEP INTERIOR, surfaced this session by the planetary and stellar physics map and largely NOT covered by the existing surface-geology arc, and the SURFACE GEOLOGY, already scoped in `GEODYNAMICS_ARC_PROPOSAL.md` and `GEOLOGY_ARC_PACKET.md` (R-TECTONICS). Plus the couplings and a consolidated per-world-data research list at the end. Everything here is a research target; nothing is fabricated.
+Status: planetary derivation backlog, not an admission list. Every magnitude below must derive from the sealed floor and typed upstream receipts, complete the admission process in `docs/working/ABIOTIC_EVIDENCE_DEBT.md`, or cause a structured refusal. The old phrase "per-world data" is historical and grants no caller input.
+
+Consolidated surfacing (owner request, 2026-07-11) of the geodynamics points where a mechanism wants to derive from solid-planet physics but the substrate is not built. Two layers are retained: the deep interior and surface geology, plus their couplings. Candidate values and cited ranges remain research targets only.
 
 ## Layer A: the deep interior (new this session, not in the surface arc)
 
@@ -32,7 +34,7 @@ Pointer: `GEODYNAMICS_ARC_PROPOSAL.md` scopes this in five dependency-ordered ar
 
 **C2. The carbonate-silicate (silicate-weathering) thermostat.** The deep-time climate stabiliser (temperature-dependent carbon-dioxide drawdown by weathering, returned by volcanism), needing continents, tectonics, and the weathering law. The long-term habitability feedback.
 
-**C3. Lithology-derived fertility to the biosphere.** The mineral-weathering law over the MaterialField gives soil nutrients and hence productivity (a non-limiting interim today). Flagged in MORNING_REVIEW.
+**C3. Lithology-derived chemical export.** The mineral-weathering law over the material field produces an abiotic solute and nutrient inventory. Biology consumers are outside the canonical planet arc. The unresolved derivation is tracked in `docs/working/ABIOTIC_EVIDENCE_DEBT.md`.
 
 **C4. Named seams from the arc.** Ores by province (Part 12, keyed to boundary type), tidal heating on a moon (`celestial.rs`), volcanic winter (Part 18), and the R-CATASTROPHE remainder (GreatFlood, Meteor).
 

@@ -18,7 +18,7 @@
 THE CONSOLIDATION THIS IMPLEMENTS (docs/working/FETCH_PIPELINE_PLAN.md). Vendored sources live in five
 places: 27 `[[source]]` blocks across 18 per-directory manifests, one prose entry in
 docs/working/VENDORING_CHECKLIST.md, 31 entries on PR #201's disk_arc_literature manifest, the prose
-bibliography in docs/design.md Part 63, and 28 MB of bytes outside the repo in ~/.claude/vendored-sources/.
+bibliography in parked/docs/design.md Part 63, and 28 MB of bytes outside the repo in ~/.claude/vendored-sources/.
 A reader asking "what do we hold, and is it checksummed and archived?" had five places to look and no
 single answer.
 
@@ -115,7 +115,9 @@ def collect(read_toml, manifest_paths):
             problems.append(f"{path}: does not parse ({exc})")
             continue
         blocks = data.get("source", [])
-        rel = str(path.relative_to(ROOT))
+        # Registry paths are repository identifiers, not host paths. Keep the
+        # generated TOML byte-identical on Windows and Unix.
+        rel = path.relative_to(ROOT).as_posix()
         for block in blocks:
             sid = derive_id(dirname, block, len(blocks))
             if sid is None:
@@ -154,13 +156,13 @@ def render_mirrored(collected):
         lines.append(f'id = "{sid}"')
         lines.append(f'mirrors = "{rel}"')
         if "file" in block:
-            holding = str(pathlib.Path(rel).parent / block["file"])
+            holding = (pathlib.PurePosixPath(rel).parent / block["file"]).as_posix()
             # A `dir` field means the bytes live under a sibling directory (the gruneisen cross-reference
             # idiom), so the holding path is resolved there rather than beside this manifest.
             if "dir" in block:
-                holding = str(
-                    pathlib.Path(rel).parent.parent / block["dir"] / block["file"]
-                )
+                holding = (
+                    pathlib.PurePosixPath(rel).parent.parent / block["dir"] / block["file"]
+                ).as_posix()
             # `holding` asserts THE BYTES ARE HERE, and the gate checksums them on that assertion. Emit it
             # only when they are, so converting an entry to citation-plus-witness form (deleting bytes the
             # licence forbids holding) cannot leave a false holding claim pointing at a deleted file. The
@@ -362,6 +364,17 @@ def self_test():
 
 def main():
     args = sys.argv[1:]
+    if "-h" in args or "--help" in args:
+        print("usage: python3 scripts/gen_sources.py [--check | --self-test]")
+        return 0
+    allowed = {"--check", "--self-test"}
+    unknown = [arg for arg in args if arg not in allowed]
+    selected = [arg for arg in args if arg in allowed]
+    if unknown or len(selected) > 1:
+        detail = "unknown argument(s): " + ", ".join(unknown) if unknown else "choose one mode"
+        print(f"gen_sources: {detail}", file=sys.stderr)
+        print("usage: python3 scripts/gen_sources.py [--check | --self-test]", file=sys.stderr)
+        return 2
     if "--self-test" in args:
         return self_test()
 
@@ -391,11 +404,11 @@ def main():
         if not MIRRORED.exists() or _digest(MIRRORED.read_text(encoding="utf-8")) != _digest(
             mirrored_text
         ):
-            stale.append(str(MIRRORED.relative_to(ROOT)))
+            stale.append(MIRRORED.relative_to(ROOT).as_posix())
         if not BIBLIOGRAPHY.exists() or _digest(
             BIBLIOGRAPHY.read_text(encoding="utf-8")
         ) != _digest(biblio_text):
-            stale.append(str(BIBLIOGRAPHY.relative_to(ROOT)))
+            stale.append(BIBLIOGRAPHY.relative_to(ROOT).as_posix())
         if stale:
             print(
                 "gen_sources: STALE generated file(s): " + ", ".join(stale) + "\n"
@@ -411,8 +424,8 @@ def main():
     MIRRORED.write_text(mirrored_text, encoding="utf-8")
     BIBLIOGRAPHY.write_text(biblio_text, encoding="utf-8")
     print(
-        f"gen_sources: wrote {MIRRORED.relative_to(ROOT)} ({len(collected)} sources) "
-        f"and {BIBLIOGRAPHY.relative_to(ROOT)}"
+        f"gen_sources: wrote {MIRRORED.relative_to(ROOT).as_posix()} ({len(collected)} sources) "
+        f"and {BIBLIOGRAPHY.relative_to(ROOT).as_posix()}"
     )
     return 1 if problems else 0
 

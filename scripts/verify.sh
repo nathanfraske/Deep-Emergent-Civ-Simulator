@@ -14,9 +14,10 @@
 # limitations under the License.
 #
 # The verification suite as one callable script (CLAUDE.md section 8, runbook
-# section 1c). It checks the two maintained documents (docs/design.md and
-# docs/audit.md) against the prose customs and document invariants. The archived
-# research papers under docs/research/ are deliberately not checked: they predate
+# section 1c). It checks the two maintained legacy documents
+# (parked/docs/design.md and parked/docs/audit.md) against the prose customs and
+# document invariants. The archived
+# research papers under parked/docs/research/ are deliberately not checked: they predate
 # the customs and keep their em dashes verbatim.
 #
 # Usage:
@@ -29,8 +30,8 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-F="$ROOT/docs/design.md"
-A="$ROOT/docs/audit.md"
+F="$ROOT/parked/docs/design.md"
+A="$ROOT/parked/docs/audit.md"
 EMDASH=$'\xe2\x80\x94'
 
 MODE="human"
@@ -65,9 +66,21 @@ for pair in "design:$F" "audit:$A"; do
   record "banned_adverbs_$label" "$p" "$n line(s) with a banned adverb"
 done
 
-# 5: parts gapless 0..63 in the design document.
-parts=$(grep "^## Part" "$F" | grep -oP "Part \K[0-9]+" \
-  | awk 'NR!=$1+1{print "GAP at index "NR" got "$1; bad=1} END{if(!bad) print "parts OK "NR}')
+# 5: parts gapless 0..63 in the design document. Use one POSIX awk pass rather
+# than grep -P: Git for Windows ships a grep build whose PCRE mode rejects its
+# own UTF-8 locale, which made the real document read as "parts OK 0".
+parts=$(awk '
+  /^## Part [0-9]+:/ {
+    part = $3
+    sub(/:$/, "", part)
+    count++
+    if (count != part + 1) {
+      print "GAP at index " count " got " part
+      bad = 1
+    }
+  }
+  END { if (!bad) print "parts OK " count }
+' "$F")
 if [ "$parts" = "parts OK 64" ]; then p=1; else p=0; fi
 record "parts_gapless" "$p" "$parts"
 
@@ -103,7 +116,7 @@ if [ "$MODE" = "json" ]; then
   done
   printf '  ]\n}\n'
 else
-  echo "verification suite over docs/design.md and docs/audit.md"
+  echo "legacy archive verification over parked/docs/design.md and parked/docs/audit.md"
   echo "------------------------------------------------------------"
   for i in "${!names[@]}"; do
     if [ "${passes[$i]}" -eq 1 ]; then tag="PASS"; else tag="FAIL"; fi

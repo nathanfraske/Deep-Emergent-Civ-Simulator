@@ -18,13 +18,18 @@
 //! lookup order this engine already runs for every other quantity: measured before estimator, dispatched per
 //! material on ANCHOR AVAILABILITY. Nobody at a call site ever picks a physical model.
 //!
-//! - TOP RUNG, [`hofmeister_lattice_conductivity`]: a MEASURED `kappa_298` anchor carrying derived temperature
-//!   and pressure dependence off banked Grueneisen, bulk modulus, and expansivity. Highest accuracy, available
-//!   only where a mineral HAS a measured anchor.
+//! - TOP RUNG, [`hofmeister_lattice_conductivity`]: a MEASURED `kappa_298` anchor carrying derived TEMPERATURE
+//!   dependence off the banked Grueneisen parameter and the caller's expansivity integral. NO PRESSURE TERM
+//!   AND NO BULK MODULUS ENTER IT, stated here because this line once claimed both: the form is a temperature
+//!   form, valid in the AMBIENT frame its anchors were measured in, and [`assemblage_conductivity_at`] refuses
+//!   outside that frame rather than extrapolating. Highest accuracy, available only where a mineral HAS a
+//!   measured anchor.
 //! - ESTIMATOR RUNG, [`crate::properties::lattice_thermal_conductivity_w_per_m_k`] (Slack): no anchor needed,
 //!   evaluable for anything with banked columns, carrying the band its own docstring declares (roughly 3x
 //!   symmetric on simple cells, ONE-SIDED on complex cells, where it is an intrinsic UPPER BOUND that can sit
-//!   several-fold above truth; rutile is its own convicting exhibit at ~43 against a measured ~9).
+//!   several-fold above truth; rutile is its own convicting exhibit at ~43 against a measured ~9). That band
+//!   is a TYPED quantity here ([`EstimatorBand`]), because "no band supplied" and "no uncertainty exists" are
+//!   different claims and an `Option` spelled them the same way.
 //!
 //! WHERE NO MEASUREMENT EXISTS, Slack's magnitude serves as the `[E]`-grade anchor with its one-sided
 //! upper-bound band declared, and Hofmeister's class-keyed exponent governs the temperature shape ON BOTH RUNGS,
@@ -72,6 +77,53 @@ pub fn hofmeister_reference_temperature_k() -> Fixed {
     Fixed::from_int(298)
 }
 
+/// The PRESSURE the lattice form is anchored at: 1 bar, the frame every cited `kappa_298` row in
+/// `crates/physics/data/phase_conductivity.toml` was measured in, and the frame the banked Grueneisen rows
+/// declare for themselves (`pressure_bar = "1"`). It is the SOURCES' own reference rather than a chosen datum.
+///
+/// This exists because the lattice form has no pressure term at all. A quantity with no pressure dependence is
+/// valid at exactly one pressure, and naming which one is what lets [`assemblage_conductivity_at`] refuse
+/// outside it instead of a comment declaring the limit while the code answers anyway.
+pub fn hofmeister_reference_pressure_bar() -> Fixed {
+    Fixed::ONE
+}
+
+/// How far from [`hofmeister_reference_pressure_bar`] the ambient ladder may be read before it refuses.
+///
+/// ZERO, and zero is the absence of a claim rather than a chosen tolerance. The form carries no pressure
+/// dependence, so any nonzero slack would be an assertion about how far the neglected term stays tolerable, and
+/// this module has no basis for such an assertion: the term Hofmeister's fuller form carries is
+/// `(1 + (K_0'/K_0) P)`, and neither `K_0'` nor `K_0` is an input to the lattice function.
+///
+/// RESERVED, with its basis, as `conductivity.ambient_frame_pressure_slack_bar` in `calibration/reserved.toml`:
+/// the owner sets it at the pressure where the omitted pressure term moves the aggregate by more than the
+/// aggregate's own reported band ([`AssemblageConductivity::band_up`] and `band_down`), which is a DERIVABLE
+/// criterion once `K_0'` is banked beside `K_0` for the census phases and stops being an owner decision at all.
+pub fn ambient_frame_pressure_slack_bar() -> Fixed {
+    ZERO
+}
+
+/// WHERE THE CITED CALIBRATION PLACES A CELL COUNT, and with what number, so the two DIFFERENT reasons this
+/// classifier can decline to hand back an exponent stay distinguishable at the call site. A gap in the cited
+/// set and a value the owner has not set yet are both refusals and they need different fetches to close.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExponentClass {
+    /// The COMPLEX-CELL class, `n >= 6`, carrying Hofmeister's cited silicate exponent `a = 0.33`.
+    Complex(Fixed),
+    /// The SIMPLE-LATTICE class, `n <= 2`, carrying NO number. The cited set brackets this class with two
+    /// determinations that disagree (ice at `612/T`, so `a ~ 1`, and MgO at `a = 0.9`) and pins no single
+    /// value between them, so the class exponent is RESERVED for the owner
+    /// (`conductivity.simple_class_temperature_exponent` in `calibration/reserved.toml`) rather than
+    /// interpolated here. A phase in this class evaluates on its OWN cited exponent
+    /// ([`PhaseConductivity::measured_exponent_a`]) or it refuses.
+    SimpleReserved,
+    /// `2 < n < 6`: the cited set places nothing here at all. A DATA gap, closed by a determination in that
+    /// range, never by a number chosen inside it.
+    Unplaced,
+    /// `n < 1`: a cell with no atoms is not a lattice.
+    NotALattice,
+}
+
 /// The class-keyed temperature exponent `a` in Hofmeister's lattice form `kappa ~ (298/T)^a`, keyed on
 /// ATOMS PER PRIMITIVE CELL, the class variable already banked and already in Slack's own signature.
 ///
@@ -81,30 +133,54 @@ pub fn hofmeister_reference_temperature_k() -> Fixed {
 /// single-scattering form is built for the simple case, which is why it lands within its band on simple cells
 /// and OVERSTATES complex ones.
 ///
-/// THE CALIBRATION SET, and its honest limit. The exponents are pinned by three independent measurements: ice at
-/// `612/T` (`a ~ 1`), MgO at `a = 0.9`, and complex silicates at `a = 0.33` (Hofmeister). The CELL-COUNT
-/// boundary is calibrated on the cited set Slack's own docstring convicts itself with: diamond, NaCl, and MgO
-/// (all `n = 2`) land inside its band, while rutile (`n = 6`) is overstated ~5x.
+/// THE CALIBRATION SET, and its honest limit. Three determinations are cited: ice at `612/T` (`a ~ 1`), MgO at
+/// `a = 0.9`, and complex silicates at `a = 0.33` (Hofmeister). The CELL-COUNT boundary is calibrated on the
+/// cited set Slack's own docstring convicts itself with: diamond, NaCl, and MgO (all `n = 2`) land inside its
+/// band, while rutile (`n = 6`) is overstated ~5x.
 ///
-/// SO THE BOUNDARY IS UNDERDETERMINED IN `2 < n < 6`, AND THIS FUNCTION REFUSES THERE rather than picking a
-/// number the cited set does not support. `None` is the honest answer for a cell the calibration cannot place,
-/// and a caller that gets `None` must supply a measured exponent or escalate. Picking a boundary inside that gap
-/// would be authoring the very scalar the shape-first method exists to avoid, and it would author it invisibly,
-/// inside a classifier, which is the silent-parameter class exactly.
-pub fn lattice_exponent_for_cell(atoms_per_primitive_cell: i32) -> Option<Fixed> {
+/// SO THE COMPLEX CLASS CARRIES A CITED NUMBER AND THE SIMPLE CLASS DOES NOT, and this classifier now says so.
+/// One determination pins `a = 0.33` for `n >= 6`. TWO determinations bracket `n <= 2` and disagree, at `1` and
+/// `0.9`, and the class value between them is nobody's measurement. This branch returned `0.95`, the arithmetic
+/// midpoint of the two, which was an unattributed interpolation sitting inside a classifier: the silent-scalar
+/// class the adjacent `2 < n < 6` refusal exists to forbid, authored at the same site that refuses its
+/// neighbour. The width it hid is real rather than cosmetic: across the bracketing pair the conductivity at
+/// 1600 K moves by roughly 18 percent, reported as a point value with no band.
+///
+/// SO `n <= 2` REFUSES TOO, until the owner sets `conductivity.simple_class_temperature_exponent`. A phase in
+/// that class can still evaluate by carrying its own cited exponent
+/// ([`PhaseConductivity::measured_exponent_a`]), which is the per-phase route the refusal text has always told
+/// callers to take and which nothing implemented until now. MgO is the live case: its `a = 0.9` is a cited
+/// per-phase determination, so a fetched per-phase exponent column restores the SIMPLE class's only overlap
+/// point without anyone choosing a class number. That is what the unset class exponent blocks, and it is not
+/// the ladder's only overlap point: four complex-class phases carry both rungs and evaluate today, which is
+/// the sample [`derived_estimator_bands`] measures the estimator's band from.
+pub fn lattice_exponent_class(atoms_per_primitive_cell: i32) -> ExponentClass {
     if atoms_per_primitive_cell < 1 {
-        return None;
+        return ExponentClass::NotALattice;
     }
     if atoms_per_primitive_cell <= 2 {
-        // The simple-lattice limit: the Umklapp `1/T`. Ice (612/T) and MgO (0.9) both sit here.
-        return Some(Fixed::from_ratio(95, 100));
+        // The simple-lattice limit, where the Umklapp `1/T` sits. Ice (612/T) and MgO (0.9) both land here
+        // and they do not agree, so the class carries no number of its own.
+        return ExponentClass::SimpleReserved;
     }
     if atoms_per_primitive_cell >= 6 {
-        // The complex-cell class: Hofmeister's silicate exponent.
-        return Some(Fixed::from_ratio(33, 100));
+        // The complex-cell class: Hofmeister's cited silicate exponent, the one number the set does pin.
+        return ExponentClass::Complex(Fixed::from_ratio(33, 100));
     }
     // 2 < n < 6: the cited set places nothing here. Refuse rather than author a boundary.
-    None
+    ExponentClass::Unplaced
+}
+
+/// The class exponent where the cited set pins one, and `None` everywhere it does not. A thin read of
+/// [`lattice_exponent_class`], kept because a caller that only needs the number should not have to match the
+/// class; a caller that needs to know WHY it got nothing matches the class instead.
+pub fn lattice_exponent_for_cell(atoms_per_primitive_cell: i32) -> Option<Fixed> {
+    match lattice_exponent_class(atoms_per_primitive_cell) {
+        ExponentClass::Complex(a) => Some(a),
+        ExponentClass::SimpleReserved | ExponentClass::Unplaced | ExponentClass::NotALattice => {
+            None
+        }
+    }
 }
 
 /// HOFMEISTER'S LATTICE CONDUCTIVITY at a temperature (W/(m*K)), the TOP RUNG:
@@ -122,8 +198,16 @@ pub fn lattice_exponent_for_cell(atoms_per_primitive_cell: i32) -> Option<Fixed>
 /// which is the common case for a lid-temperature span; a caller with a temperature-dependent `alpha` integrates
 /// its own and passes the result. Passing a bare `alpha` here would author the constancy assumption invisibly.
 ///
+/// THE FRAME IS AMBIENT AND THE SIGNATURE IS WHERE THAT IS VISIBLE: no pressure enters this function and no
+/// bulk modulus does either. The form is `kappa(T)` at the pressure its `kappa_298` anchor was measured at,
+/// which for every row in the cited column is 1 bar. Two comments in this module used to describe it as
+/// `k(T,P)` deriving off a banked bulk modulus, and the word `bulk` appeared in the module exactly twice, both
+/// times in a comment and neither time in a code path. The pressure frame is now carried on the aggregate
+/// ([`AssemblageConductivity::frame_pressure_bar`]) and checked by [`assemblage_conductivity_at`], so a caller
+/// at depth is refused rather than described as in-frame by a docstring.
+///
 /// `None` on a non-positive temperature or anchor, or a fixed-point overflow. Deterministic fixed-point.
-// @derives: lattice thermal conductivity k(T,P) <- a measured kappa_298 anchor + banked Grueneisen, bulk modulus and expansivity (measured rung)
+// @derives: lattice thermal conductivity k(T) at the anchor's own ambient pressure frame <- a measured kappa_298 anchor + the banked Grueneisen parameter + the caller's expansivity integral (measured rung)
 pub fn hofmeister_lattice_conductivity(
     kappa_298: Fixed,
     exponent_a: Fixed,
@@ -148,6 +232,26 @@ pub fn hofmeister_lattice_conductivity(
     kappa_298.checked_mul(decline)?.checked_mul(correction)
 }
 
+/// THE DECLARED SCOPE of the radiative polynomial, carried on the aggregate so a consumer reads what the fit
+/// was fitted TO rather than inferring a universal law from a boolean gate.
+///
+/// WHY THIS TYPE EXISTS (Principle 7, admit the alien). The gate on the radiative term is
+/// [`PhaseConductivity::bears_ferrous_iron`], which is DERIVED cleanly by charge balance over the phase's own
+/// composition, so the gate itself keys on per-phase data and admits any chemistry. The POLYNOMIAL behind the
+/// gate does not: its coefficients are a fit to TERRAN SILICATES, and a clean gate in front of a parochial fit
+/// applies that fit to every Fe2+-bearing phase in every world, including phases with no silicate analogue at
+/// all. The exposure is REPORTED rather than removed, because removing it would leave the hot end with no
+/// radiative channel and reporting it lets a consumer weigh it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RadiativeFitScope {
+    /// No phase in the census took the radiative term, so no scoped fit entered the answer.
+    NotApplied,
+    /// At least one phase took it. The coefficients are Hofmeister's fit to Fe2+-bearing TERRAN SILICATES and
+    /// they carry the type-II dispute declared on [`radiative_conductivity_w_per_m_k`]. Read
+    /// [`AssemblageConductivity::radiative_weight_fraction`] for how much of the census inherited it.
+    TerranFerrousSilicateFit,
+}
+
 /// THE RADIATIVE conductivity (W/(m*K)) of an Fe2+-bearing phase, Hofmeister's polynomial:
 ///
 /// `kappa_rad(T) = 0.0175 - 1.037e-4 T + 2.245e-7 T^2 - 3.407e-11 T^3`
@@ -155,6 +259,14 @@ pub fn hofmeister_lattice_conductivity(
 /// Photons carry heat through a semi-transparent solid, and the Fe2+ absorption bands set how far they travel.
 /// It matters only at the HOT end: the term is small and rises steeply with temperature, so it is a deep-mantle
 /// quantity, and a caller adds it to the lattice term only for a phase that carries Fe2+.
+///
+/// THE FIT IS SCOPED, NOT UNIVERSAL, and the scope travels with the answer as [`RadiativeFitScope`]. These
+/// coefficients were fitted to Fe2+-bearing TERRAN SILICATES. The `bears_ferrous_iron` gate that admits a phase
+/// to this term is derived by charge balance and so is chemistry-blind by construction, which means the gate
+/// will hand this silicate fit an alien Fe2+ carbide, sulfide or oxide the fit never saw. That is recorded as a
+/// declared scope rather than corrected here, because correcting it needs an absorption-coefficient route keyed
+/// on the phase's own optical data (the `optical_constants` column is the substrate that would carry it), which
+/// is a fetch rather than a rewrite.
 ///
 /// THE DECLARED DISPUTE (type-II, and it ships with the row): modern high-pressure experiments find radiative
 /// transport contributing around 40 percent of olivine's conductivity at depth, against this small,
@@ -167,7 +279,7 @@ pub fn hofmeister_lattice_conductivity(
 /// Returns zero below the temperature where the polynomial goes non-positive (its fit does not extend to the
 /// cold end, where the physical answer is that radiative transport is negligible anyway), so a cold caller reads
 /// the honest zero rather than a negative conductivity.
-// @derives: the radiative conductivity silicates gain at high T <- temperature
+// @derives: the radiative conductivity an Fe2+-bearing phase gains at high T, on a fit SCOPED to Terran silicates <- temperature
 pub fn radiative_conductivity_w_per_m_k(temperature: Fixed) -> Fixed {
     if temperature <= ZERO {
         return ZERO;
@@ -240,7 +352,8 @@ pub fn rung_disagreement_ratio(measured_rung: Fixed, estimator_rung: Fixed) -> O
 /// THE BAND IS ONE-SIDED AND IT RIDES ALONG: on a complex cell this anchor is an INTRINSIC UPPER BOUND that can
 /// sit several-fold above truth (rutile, ~43 against a measured ~9). A consumer of this rung inherits that
 /// one-sidedness and must not report it as a symmetric uncertainty. On a simple cell the band is Slack's
-/// declared ~3x, roughly symmetric.
+/// declared ~3x, roughly symmetric. [`EstimatorBand`] is the type that carries which of those two shapes a
+/// caller is declaring, and the aggregate refuses a rung that declares neither.
 ///
 /// `None` when Slack cannot evaluate. Deterministic fixed-point.
 pub fn estimator_anchor_298(
@@ -327,7 +440,12 @@ pub fn estimator_anchor_298(
 //   - GRAIN-BOUNDARY RESISTANCE. The numerical benchmark mixes voxels in perfect thermal contact; a real
 //     aggregate has interfacial resistance that lowers the effective value.
 //   - PRESSURE. The per-phase ladder above is a temperature form with no pressure dependence, so this aggregate
-//     is an ambient-pressure quantity, and a caller at depth is reading outside the frame.
+//     is an ambient-pressure quantity, and a caller at depth is reading outside the frame. THAT SENTENCE USED
+//     TO BE THE WHOLE DEFENCE, and it defended nothing: `assemblage_conductivity` took no pressure, so it could
+//     not tell a lid caller from a mantle one and answered both. The frame is now a checked argument
+//     ([`assemblage_conductivity_at`]) and a field on the result, so the limit is enforced rather than
+//     described. What is still DROPPED is the physics: closing it needs Hofmeister's `(1 + (K_0'/K_0) P)`
+//     factor, which needs `K_0` and `K_0'` per phase, neither of which the lattice form takes today.
 //   - RADIATIVE TRANSPORT'S GEOMETRY. Where a phase declares ferrous iron, its radiative term is added to that
 //     phase's conductivity BEFORE mixing, which is what the component-conductivity framework requires. But
 //     photons are not diffusing phonons and their mean free path can exceed the grain size, so a hot-end
@@ -346,6 +464,261 @@ pub enum ConductivityRung {
     SlackEstimator,
 }
 
+/// THE SHAPE OF SLACK'S BAND, typed, because the two shapes it comes in are different claims and an absent band
+/// is a third thing again.
+///
+/// WHY THIS IS NOT AN `Option<Fixed>`. It was one, and `None` meant two incompatible things at once: "this rung
+/// carries no uncertainty" and "nobody supplied the uncertainty this rung carries". The anchor walk read the
+/// second as the first, so a phase resolving through Slack contributed ZERO width to the aggregate band on a
+/// magnitude the module's own text calls a several-fold one-sided bound. That is uncertainty laundering at the
+/// one site the ladder exists to keep honest, and it fired in production: the only loader in the tree wrote
+/// `None` for every phase it built.
+///
+/// THE WIDTHS ARE FACTORS, not absolute half-widths, because that is how the estimator's error is declared:
+/// Slack's own docstring says roughly 3x on a simple cell, and the one complex-cell exhibit is rutile at ~43
+/// against a measured ~9. A factor is also the shape that survives a magnitude change, which a several-fold
+/// error needs and an additive half-width does not. Each factor must be at least one; a factor below one would
+/// invert the interval and is refused rather than silently reordered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EstimatorBand {
+    /// A SYMMETRIC multiplicative factor `f >= 1`: the truth lies in `[anchor / f, anchor * f]`. Slack's
+    /// declared shape on a simple cell, where the form is built for the physics it is being asked about.
+    SymmetricFactor(Fixed),
+    /// A ONE-SIDED upper bound with factor `f >= 1`: the anchor IS the ceiling and the truth lies in
+    /// `[anchor / f, anchor]`. Slack's shape on a complex cell, where its single-scattering form OVERSTATES
+    /// by construction. Carried separately so the aggregate can report an asymmetric band instead of reporting
+    /// an excursion above a ceiling the physics says cannot be exceeded.
+    UpperBoundFactor(Fixed),
+    /// NO band was supplied. Distinct from a zero width, and the distinction is the point: a phase that
+    /// resolves through Slack's rung carrying this is refused
+    /// ([`ConductivityRefusal::NoEstimatorBand`]) rather than aggregated at zero width.
+    ///
+    /// THIS USED TO BE WHAT THE BANKED LOADER WROTE for every phase it built, because the width was a
+    /// reserved value nobody had set. It is now what the loader writes only where the ladder's own overlap
+    /// cannot measure a band for the phase's class ([`derived_estimator_bands`]): no phase in the class
+    /// carries both rungs, or the moduli table the estimator's Debye temperature derives from was not
+    /// supplied. Fabricating a width here would understate an estimator's error at exactly the site that
+    /// exists to declare it, so the absence still refuses.
+    NotSupplied,
+}
+
+/// ONE EXPONENT CLASS'S ESTIMATOR BAND, MEASURED OFF THE LADDER'S OWN OVERLAP POINTS rather than declared.
+///
+/// WHY THIS EXISTS. The estimator rung's width used to be a reserved value
+/// (`conductivity.slack_estimator_band_factor`), and the basis recorded against it named the measurement
+/// that would retire it: [`rung_disagreement_ratio`] over every phase carrying BOTH rungs, distributed by
+/// cell class. That measurement is what this computes, so the width is an observation and no longer an
+/// owner decision. It carried one false premise while it stood, that periclase was the only such phase
+/// banked, and the count is FIVE.
+///
+/// THE SHAPE IS ONE-SIDED HIGH, and both the physics and the observation say so. Slack's single-scattering
+/// form overstates a cell with many optical branches by construction, and every ratio the banked columns
+/// produce is above one, so the estimate is a ceiling and the band reaches downward from it.
+/// [`EstimatorBand::UpperBoundFactor`] is the shape that says that.
+///
+/// THE FACTOR IS THE WIDEST RATIO OBSERVED IN THE CLASS, which is what an envelope means: a one-sided bound
+/// with factor `f` covers an observation of ratio `r` exactly when `f >= r`, so the maximum is the smallest
+/// factor that covers the class and any smaller one would exclude a phase the ladder has measured. Nothing
+/// is interpolated and no functional form in the cell count is fitted: two phases share a band exactly when
+/// [`lattice_exponent_class`] puts them in one class, and the class boundary is Hofmeister's, read from that
+/// classifier rather than restated here.
+///
+/// THE SAMPLE IS SMALL AND THE FIELDS SAY SO. [`Self::sample_size`], [`Self::observed_min_ratio`],
+/// [`Self::observed_max_ratio`] and [`Self::phases`] travel with the band so a reader can see how thin the
+/// evidence is rather than reading a bare factor. On the banked columns today the complex class rests on
+/// FOUR phases and the simple class on ONE.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DerivedEstimatorBand {
+    /// The class this envelope covers, as [`lattice_exponent_class`] returns it. Carried rather than a cell
+    /// count, because the class IS the grouping and a count would invite a reader to interpolate between
+    /// two of them.
+    pub class: ExponentClass,
+    /// The band itself, one-sided high at [`Self::observed_max_ratio`]. [`EstimatorBand::NotSupplied`] when
+    /// the class's observations do not support that shape, which is the case where the widest ratio sits
+    /// BELOW one: the estimator would then be under-predicting and a one-sided HIGH bound would be the
+    /// wrong claim, so the class hands back no band and a phase in it refuses by name. No class in the
+    /// banked columns reaches that branch today.
+    pub band: EstimatorBand,
+    /// How many phases in this class carried BOTH rungs. This is the number that says how much the band is
+    /// worth, and it is small.
+    pub sample_size: usize,
+    /// The NARROWEST estimator-over-measured ratio observed in the class. Reported beside the widest so the
+    /// spread the class covers is visible rather than collapsed into the bound.
+    pub observed_min_ratio: Fixed,
+    /// The WIDEST ratio observed, which IS the band's factor.
+    pub observed_max_ratio: Fixed,
+    /// The phases the envelope was measured on, in the banked column's canonical order, so the band names
+    /// the population that convicted it rather than arriving as a bare number.
+    pub phases: Vec<String>,
+}
+
+/// Slack's MEAN ATOMIC MASS for a phase (amu): the phase's molar mass over its atoms per formula unit.
+///
+/// Extracted rather than written twice, because the estimator anchor and the band derived from that anchor
+/// have to read ONE definition. Two copies of this arithmetic would be the same-rung duplicate defect this
+/// module's header forbids, one level down.
+///
+/// `None` when the molar mass does not resolve, when the composition names no atoms, or on a fixed-point
+/// intermediate leaving the window.
+// @derives: a phase's mean atomic mass (amu), Slack's M_bar <- the phase registry's own composition + the periodic table's atomic masses
+fn phase_mean_atomic_mass_amu(
+    phase: &civsim_physics::petrology_data::Phase,
+    periodic: &PeriodicTable,
+) -> Option<Fixed> {
+    let molar = civsim_physics::petrology::phase_molar_mass(phase, periodic)?;
+    let atoms: u32 = phase.composition.iter().map(|(_, c)| *c).sum();
+    if atoms == 0 {
+        return None;
+    }
+    molar.checked_div(Fixed::from_int(atoms as i32))
+}
+
+/// DERIVE the estimator rung's band, per exponent class, FROM THE LADDER'S OWN OVERLAP POINTS.
+///
+/// One pass over the banked conductivity column. A phase enters the measurement when BOTH rungs evaluate on
+/// it: a measured `kappa_298` anchor, and Slack's magnitude assembled from exactly the columns
+/// [`phase_conductivity_from_banked`] assembles it from (the banked Grueneisen gamma, the registry's molar
+/// mass and molar volume, and the elastic Debye temperature derived off the moduli table). The ratio of the
+/// two is [`rung_disagreement_ratio`], the diagnostic this module has always computed and never consumed.
+/// Phases are grouped by [`lattice_exponent_class`], and each class's envelope is the widest ratio in it.
+///
+/// WHAT THE BANKED COLUMNS SAY TODAY, stated as the measurement rather than as a claim about Slack in
+/// general. Five phases resolve both rungs. In the COMPLEX class (`n >= 6`): corundum at `1.74`, fayalite
+/// at `2.28`, forsterite at `2.70` and enstatite at `4.69`. In the SIMPLE class (`n <= 2`): periclase alone,
+/// at `2.07`. Every one is above one, so Slack over-predicts in every case the ladder can check, which is
+/// the one-sidedness the estimator's own docstring asserts on physical grounds.
+///
+/// THE HONEST LIMITS, and they are the reason the sample size travels with the band:
+///   - FOUR POINTS carry the complex class and ONE carries the simple class. An envelope over four
+///     observations is an envelope over four observations. The module's own cited complex-cell exhibit,
+///     rutile at roughly `43` against a measured `9` (a factor near `4.78`), sits just ABOVE the widest
+///     ratio the four reach, which is direct evidence that four points do not bound the class. Rutile is
+///     not widened into the envelope because it is not a banked row: folding a docstring figure into a
+///     measurement over the columns would be the fabrication the derivation exists to end.
+///   - THE MEASURED ANCHORS ARE NOT ONE SPECIMEN FORM. The banked column carries `kappa_specimen_form` per
+///     row, and the four complex-class anchors split two ways: corundum is a dense polycrystal, while
+///     forsterite, fayalite and enstatite are needle-probe determinations on finely ground samples. The
+///     dense-polycrystal point is the narrowest ratio of the four and the three ground-sample points are
+///     the three widest. This module cannot separate specimen form from model error inside a ratio, so the
+///     envelope carries both.
+///   - ENSTATITE, THE WIDEST POINT, RIDES A DIFFERENT GRUENEISEN RUNG. It is the one overlap phase whose
+///     banked row carries no thermodynamic gamma, so its gamma comes from the Gruneisen ladder's own
+///     ESTIMATOR rung (`gamma_eos_debye`, at `0.67`, the lowest in the set). Slack's magnitude FALLS with
+///     gamma across the whole banked range: the `1/gamma^2` denominator dominates the weak Morelli-Slack
+///     prefactor correction, and the net factor `correction(gamma)/gamma^2` runs `3.01` at `0.67` down to
+///     `0.55` at `1.54`. So a low gamma raises the estimate and widens the ratio, and the top of the
+///     envelope carries the Gruneisen estimator's error as well as Slack's. It is kept rather than dropped:
+///     the ladder reads whatever gamma rung a phase's row supplies, so this is a path the estimator really
+///     takes, and discarding an inconvenient observation would delete the tail of the distribution the
+///     measurement exists to report.
+///
+/// EVERY ONE OF THOSE THREE WIDENS THE BAND rather than narrowing it, and a one-sided upper bound that is
+/// too wide is a weaker claim than the evidence supports rather than a stronger one. What the sample cannot
+/// do is promise a phase outside it stays inside the envelope.
+///
+/// Returns one entry per class that produced at least one observation, in first-observation order over the
+/// column's canonical key walk, so the result is deterministic (Principle 3). An empty result means no phase
+/// in the banked columns carries both rungs, and every estimator-rung phase then refuses by name.
+// @derives: the estimator rung's per-class uncertainty band <- the estimator-over-measured ratios of every banked phase carrying BOTH rungs, grouped by the cited exponent class
+pub fn derived_estimator_bands(
+    conductivity: &PhaseConductivityTable,
+    gruneisen: &GruneisenTable,
+    moduli: &civsim_physics::mineral_moduli::MineralModuli,
+    registry: &PhaseRegistry,
+    periodic: &PeriodicTable,
+) -> Vec<DerivedEstimatorBand> {
+    // (class, narrowest, widest, phases), accumulated in first-observation order.
+    let mut groups: Vec<(ExponentClass, Fixed, Fixed, Vec<String>)> = Vec::new();
+    for row in conductivity.rows() {
+        let name = row.name.as_str();
+        // Both rungs, or no observation. Each `continue` below is a phase that carries one rung and not
+        // the other, which is the ordinary case rather than an error: it is why the sample is five.
+        let Some(measured) = row.kappa_298 else {
+            continue;
+        };
+        let Some((gamma, _rung)) = gruneisen.gamma(name) else {
+            continue;
+        };
+        let Some(phase) = registry.phase(name) else {
+            continue;
+        };
+        let Some(mass) = phase_mean_atomic_mass_amu(phase, periodic) else {
+            continue;
+        };
+        let Some(volume) = crate::thermoelastic::atomic_volume_angstrom3(name, registry) else {
+            continue;
+        };
+        let Some(debye) = crate::thermoelastic::derived_elastic_debye_temperature(
+            name, registry, moduli, periodic,
+        ) else {
+            continue;
+        };
+        let Some(estimator) = estimator_anchor_298(
+            gamma,
+            mass,
+            debye.kelvin(),
+            volume,
+            row.atoms_per_primitive_cell,
+        ) else {
+            continue;
+        };
+        let Some(ratio) = rung_disagreement_ratio(measured, estimator) else {
+            continue;
+        };
+        let class = lattice_exponent_class(row.atoms_per_primitive_cell);
+        match groups.iter_mut().find(|(c, _, _, _)| *c == class) {
+            Some((_, min, max, phases)) => {
+                if ratio < *min {
+                    *min = ratio;
+                }
+                if ratio > *max {
+                    *max = ratio;
+                }
+                phases.push(row.name.clone());
+            }
+            None => groups.push((class, ratio, ratio, vec![row.name.clone()])),
+        }
+    }
+    groups
+        .into_iter()
+        .map(|(class, min, max, phases)| DerivedEstimatorBand {
+            class,
+            // The envelope, and the guard on its shape. A widest ratio below one would mean the estimator
+            // sits under the measured rung across the whole class, which a one-sided HIGH bound cannot
+            // express and which `EstimatorBand`'s own factor rule (at least one) forbids. The class then
+            // hands back no band and its phases refuse by name, rather than being handed a factor that
+            // inverts the interval or one clamped up to one to keep the aggregate answering.
+            band: if max >= Fixed::ONE {
+                EstimatorBand::UpperBoundFactor(max)
+            } else {
+                EstimatorBand::NotSupplied
+            },
+            sample_size: phases.len(),
+            observed_min_ratio: min,
+            observed_max_ratio: max,
+            phases,
+        })
+        .collect()
+}
+
+/// The derived envelope covering a cell count, or `None` when no class in the measurement covers it.
+///
+/// It takes a computed list rather than the tables, so a caller holding one can query it repeatedly at no
+/// cost. That is an affordance of this signature and not a claim about
+/// [`phase_conductivity_from_banked`], which derives the list on every call: the measurement is a walk of
+/// the banked column, and on the eight rows banked today that walk is small enough that the loader pays it
+/// per phase rather than threading a cache through a public signature.
+///
+/// The match is on the CLASS [`lattice_exponent_class`] assigns the count, never on the count itself, so
+/// this adds no second boundary beside the cited one.
+pub fn derived_estimator_band_for_cell(
+    bands: &[DerivedEstimatorBand],
+    atoms_per_primitive_cell: i32,
+) -> Option<&DerivedEstimatorBand> {
+    let class = lattice_exponent_class(atoms_per_primitive_cell);
+    bands.iter().find(|b| b.class == class)
+}
+
 /// One phase's conductivity inputs: everything the per-phase ladder needs, plus the phase's name so a refusal can
 /// name it. The two rungs each carry their own band, mirroring the Gruneisen floor's row shape, so the band that
 /// travels with a value is the band of the rung that supplied it.
@@ -355,12 +728,29 @@ pub struct PhaseConductivity {
     pub name: String,
     /// The MEASURED `kappa_298` anchor (W/(m*K)) when the phase has one. `None` sends the phase to Slack's rung.
     pub kappa_298: Option<Fixed>,
-    /// The measured anchor's symmetric half-width band.
+    /// The measured anchor's symmetric half-width band, in W/(m*K), ADDITIVE (unlike the estimator rung's
+    /// multiplicative factor, because a measured row reports an absolute uncertainty).
     pub kappa_298_band: Option<Fixed>,
-    /// The band on Slack's estimator rung, supplied by the caller because its magnitude is class-dependent and
-    /// ONE-SIDED on a complex cell (see [`estimator_anchor_298`]). Never defaulted here: a fabricated band would
-    /// understate an estimator's error exactly where the aggregate most needs to declare it.
-    pub estimator_band: Option<Fixed>,
+    /// The band on Slack's estimator rung, class-dependent and ONE-SIDED on a complex cell (see
+    /// [`estimator_anchor_298`]). Never defaulted to a width: a fabricated band would understate an estimator's
+    /// error exactly where the aggregate most needs to declare it, so the absent case is
+    /// [`EstimatorBand::NotSupplied`] and it REFUSES.
+    ///
+    /// [`phase_conductivity_from_banked`] DERIVES this from the ladder's own overlap points
+    /// ([`derived_estimator_bands`]); a caller hand-building a row supplies it, and a caller with no basis for
+    /// one supplies [`EstimatorBand::NotSupplied`] rather than a guess.
+    pub estimator_band: EstimatorBand,
+    /// This phase's OWN cited temperature exponent `a`, when a source determines one for it, bypassing the
+    /// class-keyed classifier entirely.
+    ///
+    /// THE ROUTE THE REFUSAL TEXT ALREADY PROMISED. Both refusal paths out of the classifier tell a caller to
+    /// "supply a measured exponent for this phase", and until this field existed there was no way to. It is the
+    /// closure for both: a phase in the uncalibrated `2 < n < 6` gap, and a phase in the simple class whose
+    /// class exponent is reserved and unset. MgO is the live case, with a cited `a = 0.9`.
+    ///
+    /// `None` when no cited column supplies one, which is every phase today: no per-phase exponent column is
+    /// banked in this repo. Held as `Option` rather than defaulted for the same reason Slack's three inputs are.
+    pub measured_exponent_a: Option<Fixed>,
     /// The banked Gruneisen parameter, feeding both Slack's magnitude and Hofmeister's expansion correction.
     pub gruneisen: Fixed,
     /// Slack's mean atomic mass (amu). `None` when no cited column supplies it for this phase.
@@ -370,7 +760,9 @@ pub struct PhaseConductivity {
     /// Slack's atomic volume (cubic angstrom). `None` when no cited column supplies it for this phase.
     pub atomic_volume_angstrom3: Option<Fixed>,
     /// Atoms per primitive cell: the class variable that keys BOTH Slack's magnitude and Hofmeister's temperature
-    /// exponent. A count the cited calibration cannot place (`2 < n < 6`) refuses the phase.
+    /// exponent. A count the cited calibration cannot place (`2 < n < 6`), or one in the simple class whose
+    /// exponent is reserved and unset (`n <= 2`), refuses the phase unless [`Self::measured_exponent_a`]
+    /// supplies the exponent directly.
     pub atoms_per_primitive_cell: i32,
     /// The expansivity integral from 298 K to the evaluation temperature, the caller's own, because only the
     /// caller knows whether its expansivity is constant over the range.
@@ -385,22 +777,62 @@ impl PhaseConductivity {
     /// with the radiative term added where the phase declares ferrous iron. Reports WHICH rung it used.
     ///
     /// `anchor_shift` displaces the anchor by the rung's own band, so the caller can walk the outer edges of the
-    /// uncertainty interval: zero for the central value, `+1` for the stiff edge, `-1` for the soft edge.
+    /// uncertainty interval: zero for the central value, `+1` for the stiff edge, `-1` for the soft edge. The
+    /// two rungs walk it DIFFERENTLY, because their bands are different quantities: the measured rung's is an
+    /// additive half-width in W/(m*K), the estimator rung's a multiplicative factor, and the estimator's may be
+    /// one-sided, in which case the stiff edge does not move because the anchor IS the ceiling.
+    ///
+    /// Reports which rung it used AND whether the scoped radiative fit entered, so the aggregate can carry both.
     // @derives: a phase's conductivity at a temperature <- its ladder rung's anchor, band and exponent
     fn conductivity_at(
         &self,
         temperature: Fixed,
         anchor_shift: i32,
-    ) -> Result<(Fixed, ConductivityRung), ConductivityRefusal> {
-        let exponent =
-            lattice_exponent_for_cell(self.atoms_per_primitive_cell).ok_or_else(|| {
-                ConductivityRefusal::NoExponentClass {
-                    phase: self.name.clone(),
-                    atoms_per_primitive_cell: self.atoms_per_primitive_cell,
+    ) -> Result<(Fixed, ConductivityRung, bool), ConductivityRefusal> {
+        // The phase's OWN cited exponent wins over the class, because a determination beats a classification.
+        // Only when it has none does the cell count decide, and then the two ways the cited set can fail to
+        // place a cell are reported as the two different fetches they are.
+        let exponent = match self.measured_exponent_a {
+            Some(a) => a,
+            None => match lattice_exponent_class(self.atoms_per_primitive_cell) {
+                ExponentClass::Complex(a) => a,
+                ExponentClass::SimpleReserved => {
+                    return Err(ConductivityRefusal::ReservedExponentUnset {
+                        phase: self.name.clone(),
+                        atoms_per_primitive_cell: self.atoms_per_primitive_cell,
+                    })
                 }
-            })?;
-        let (base, band, rung) = match self.kappa_298 {
-            Some(k) if k > ZERO => (k, self.kappa_298_band, ConductivityRung::MeasuredAnchor),
+                ExponentClass::Unplaced | ExponentClass::NotALattice => {
+                    return Err(ConductivityRefusal::NoExponentClass {
+                        phase: self.name.clone(),
+                        atoms_per_primitive_cell: self.atoms_per_primitive_cell,
+                    })
+                }
+            },
+        };
+        let (anchor, rung) = match self.kappa_298 {
+            Some(k) if k > ZERO => {
+                // The measured rung: an ADDITIVE half-width, walked by addition. A measured row with no stated
+                // band contributes no width, which is a weaker claim than the estimator case below and is left
+                // as it stands: an absent measured band means the source did not band that row.
+                //
+                // HEMATITE IS THE FIRST ROW TO REACH THIS BRANCH FROM THE CITED COLUMN, and the note here used
+                // to say the branch was reachable only from a hand-built row because every banked anchor
+                // carried a band. That stopped being true when hematite landed: Akiyama's laser-flash fit
+                // states no measurement accuracy anywhere, and with no independent in-frame determination to
+                // set a gap against there is no width to derive, so the row carries none rather than carrying
+                // an invented one. The behaviour is unchanged and correct, since a source that did not band
+                // its own number cannot have that number banded on its behalf here.
+                //
+                // The estimator case is different in kind, which is why it refuses instead: there the absence
+                // is of a band nobody has, on a magnitude known to be off by several fold.
+                let a = match (anchor_shift, self.kappa_298_band) {
+                    (0, _) | (_, None) => k,
+                    (s, Some(b)) if s > 0 => k.checked_add(b).unwrap_or(k),
+                    (_, Some(b)) => k.checked_sub(b).unwrap_or(k),
+                };
+                (a, ConductivityRung::MeasuredAnchor)
+            }
             _ => {
                 // Slack's three inputs are absent for every phase no cited column supplies, so their absence
                 // routes to the SAME refusal an unevaluable estimator already raises. Holding them as `Option`
@@ -429,15 +861,53 @@ impl PhaseConductivity {
                 .ok_or_else(|| ConductivityRefusal::NoRung {
                     phase: self.name.clone(),
                 })?;
-                (k, self.estimator_band, ConductivityRung::SlackEstimator)
+                // THE ESTIMATOR RUNG'S BAND IS A FACTOR, and an absent one REFUSES. This is the site the
+                // laundering happened at: an `Option` read `None` as zero width, so a several-fold one-sided
+                // bound entered the aggregate as an exact number.
+                let a = match self.estimator_band {
+                    EstimatorBand::NotSupplied => {
+                        return Err(ConductivityRefusal::NoEstimatorBand {
+                            phase: self.name.clone(),
+                            declared_factor: None,
+                        })
+                    }
+                    EstimatorBand::SymmetricFactor(f) | EstimatorBand::UpperBoundFactor(f)
+                        if f < Fixed::ONE =>
+                    {
+                        // A factor below one would put the soft edge above the stiff one. Refused rather
+                        // than reordered, because a silently inverted interval reports a band that is real
+                        // and backwards, which is worse than no band at all.
+                        return Err(ConductivityRefusal::NoEstimatorBand {
+                            phase: self.name.clone(),
+                            declared_factor: Some(f),
+                        });
+                    }
+                    EstimatorBand::SymmetricFactor(f) => match anchor_shift {
+                        0 => k,
+                        s if s > 0 => k.checked_mul(f).ok_or_else(|| {
+                            ConductivityRefusal::NonRepresentable {
+                                phase: self.name.clone(),
+                            }
+                        })?,
+                        _ => k.checked_div(f).ok_or_else(|| {
+                            ConductivityRefusal::NonRepresentable {
+                                phase: self.name.clone(),
+                            }
+                        })?,
+                    },
+                    // ONE-SIDED: the estimate is the ceiling, so the stiff edge stays put and only the soft
+                    // edge moves. Walking it up as well would report an excursion the physics forbids.
+                    EstimatorBand::UpperBoundFactor(f) => match anchor_shift {
+                        s if s >= 0 => k,
+                        _ => k.checked_div(f).ok_or_else(|| {
+                            ConductivityRefusal::NonRepresentable {
+                                phase: self.name.clone(),
+                            }
+                        })?,
+                    },
+                };
+                (a, ConductivityRung::SlackEstimator)
             }
-        };
-        // Walk the anchor to the requested edge. A phase declaring no band contributes no width, which is why the
-        // aggregate reports the rung mix: an unbanded estimator rung is a silent zero-width claim otherwise.
-        let anchor = match (anchor_shift, band) {
-            (0, _) | (_, None) => base,
-            (s, Some(b)) if s > 0 => base.checked_add(b).unwrap_or(base),
-            (_, Some(b)) => base.checked_sub(b).unwrap_or(base),
         };
         if anchor <= ZERO {
             return Err(ConductivityRefusal::NonRepresentable {
@@ -468,7 +938,7 @@ impl PhaseConductivity {
                 phase: self.name.clone(),
             });
         }
-        Ok((total, rung))
+        Ok((total, rung, self.bears_ferrous_iron))
     }
 }
 
@@ -477,16 +947,32 @@ impl PhaseConductivity {
 pub struct AssemblageConductivity {
     /// The Bruggeman effective conductivity (W/(m*K)).
     pub conductivity: Fixed,
-    /// The symmetric half-width covering the outer interval, the rule re-solved at the phases' soft and stiff
-    /// anchor edges. A phase declaring no band widens it by nothing, so this is a FLOOR on the true uncertainty
+    /// How far ABOVE [`Self::conductivity`] the interval reaches, the rule re-solved at the phases' stiff anchor
+    /// edges. Separate from [`Self::band_down`] because the estimator rung's band can be ONE-SIDED, and a
+    /// one-sided upper bound has an upward excursion of exactly zero. Collapsing the two into one symmetric
+    /// number reported an excursion the physics forbids.
+    pub band_up: Fixed,
+    /// How far BELOW [`Self::conductivity`] the interval reaches, the rule re-solved at the phases' soft anchor
+    /// edges. A phase declaring no band widens it by nothing, so this is a FLOOR on the true uncertainty
     /// wherever [`Self::measured_weight_fraction`] is below one.
-    pub band: Fixed,
+    pub band_down: Fixed,
     /// How much of the census weight resolved through a MEASURED anchor rather than Slack's estimator, as a
     /// fraction. A caller needing a measured-grade value reads this rather than assuming.
     pub measured_weight_fraction: Fixed,
+    /// How much of the census weight took the SCOPED radiative term, as a fraction: the exposure to the fit
+    /// [`RadiativeFitScope`] names, measurable rather than a boolean.
+    pub radiative_weight_fraction: Fixed,
+    /// Which radiative fit, if any, entered this answer. See [`RadiativeFitScope`].
+    pub radiative_scope: RadiativeFitScope,
     /// The temperature the aggregate was evaluated at, carried so a caller cannot silently reuse one temperature's
-    /// aggregate at another. The pressure frame is ambient: the ladder carries no pressure dependence.
+    /// aggregate at another.
     pub frame_temperature_k: Fixed,
+    /// The PRESSURE the aggregate is valid at, the sibling of [`Self::frame_temperature_k`] and carried for the
+    /// same reason. The ladder has no pressure term, so this is always the anchors' own measured frame
+    /// ([`hofmeister_reference_pressure_bar`]); [`assemblage_conductivity_at`] is what refuses a caller whose
+    /// state is outside it. Before this field existed the module declared the ambient frame in a comment and
+    /// let a caller at depth read the value anyway.
+    pub frame_pressure_bar: Fixed,
 }
 
 /// Why an aggregation refused, NAMING the phase so the error is the fetch list rather than a silent zero. A
@@ -500,12 +986,49 @@ pub enum ConductivityRefusal {
         phase: String,
     },
     /// The phase's atoms-per-primitive-cell count falls in `2 < n < 6`, where the cited calibration set places no
-    /// temperature exponent, so [`lattice_exponent_for_cell`] refuses. Supply a measured exponent for this phase.
+    /// temperature exponent, so [`lattice_exponent_class`] refuses. Supply a measured exponent for this phase
+    /// through [`PhaseConductivity::measured_exponent_a`]. A DATA gap: closing it needs a determination in that
+    /// range.
     NoExponentClass {
         /// The phase the census named.
         phase: String,
         /// The cell count that could not be placed.
         atoms_per_primitive_cell: i32,
+    },
+    /// The phase sits in the SIMPLE class (`n <= 2`), where the cited set brackets the exponent with two
+    /// disagreeing determinations (ice at `a ~ 1`, MgO at `a = 0.9`) and pins no value between them. The class
+    /// exponent is a RESERVED value the owner has not set, so it is refused rather than interpolated. Distinct
+    /// from [`Self::NoExponentClass`] because it closes differently: an owner decision on
+    /// `conductivity.simple_class_temperature_exponent`, or a per-phase cited exponent in
+    /// [`PhaseConductivity::measured_exponent_a`].
+    ReservedExponentUnset {
+        /// The phase the census named.
+        phase: String,
+        /// The cell count that put it in the simple class.
+        atoms_per_primitive_cell: i32,
+    },
+    /// The phase resolved through SLACK'S ESTIMATOR rung and no usable band came with it, so the aggregate
+    /// would have reported a several-fold one-sided uncertainty as a zero-width number. Refused rather than
+    /// widened by a fabricated factor. The width is DERIVED where the ladder's own overlap can measure it
+    /// ([`derived_estimator_bands`]), so reaching this refusal from the banked loader means the phase's class
+    /// has no overlap point at all.
+    NoEstimatorBand {
+        /// The phase the census named.
+        phase: String,
+        /// The factor supplied, when one was and it was unusable (below one, which would invert the interval),
+        /// and `None` when no band was supplied at all.
+        declared_factor: Option<Fixed>,
+    },
+    /// The aggregate was asked at a pressure outside the frame its anchors were measured in. The ladder carries
+    /// no pressure term, so its only valid pressure is the anchors' own, widened by whatever slack the owner
+    /// sets (`conductivity.ambient_frame_pressure_slack_bar`, zero until then).
+    OutsidePressureFrame {
+        /// The pressure asked for, in bar.
+        requested_bar: Fixed,
+        /// The pressure the anchors were measured at, in bar.
+        frame_bar: Fixed,
+        /// The tolerated offset from that frame, in bar.
+        slack_bar: Fixed,
     },
     /// A fixed-point intermediate left the representable window, or an edge anchor went non-positive.
     NonRepresentable {
@@ -543,6 +1066,55 @@ impl fmt::Display for ConductivityRefusal {
                 "census phase {phase} has {atoms_per_primitive_cell} atoms per primitive cell, inside the \
                  2 < n < 6 gap the cited calibration set does not place, so no temperature exponent exists for \
                  it. Supply a measured exponent; it is refused rather than defaulted (Principle 11)."
+            ),
+            ConductivityRefusal::ReservedExponentUnset {
+                phase,
+                atoms_per_primitive_cell,
+            } => write!(
+                f,
+                "census phase {phase} has {atoms_per_primitive_cell} atoms per primitive cell, the SIMPLE class, \
+                 whose temperature exponent the cited set brackets (ice at a ~ 1, MgO at a = 0.9) without \
+                 pinning a value between them. The class exponent is reserved for the owner \
+                 (conductivity.simple_class_temperature_exponent); until it is set, supply this phase's own \
+                 cited exponent. It previously read 0.95, the midpoint of the bracketing pair, which was an \
+                 unattributed interpolation authored inside a classifier."
+            ),
+            ConductivityRefusal::NoEstimatorBand {
+                phase,
+                declared_factor,
+            } => match declared_factor {
+                None => write!(
+                    f,
+                    "census phase {phase} resolved through Slack's ESTIMATOR rung and declared no band. That \
+                     rung carries a several-fold error, one-sided on a complex cell (rutile, ~43 against a \
+                     measured ~9), so aggregating it at zero width would report an estimate as a measurement. \
+                     The width DERIVES from the ladder's own overlap points where its exponent class has any \
+                     (derived_estimator_bands); this phase's class has none, so the fetch is a measured \
+                     kappa_298 anchor on a phase in that class whose Slack columns also resolve. Refused \
+                     rather than fabricated (Principle 11)."
+                ),
+                Some(factor) => write!(
+                    f,
+                    "census phase {phase} declared an estimator band factor of {}, which is below one and would \
+                     put the soft edge above the stiff one. A band factor is a multiplier of at least one; \
+                     refused rather than silently reordered.",
+                    factor.to_f64_lossy()
+                ),
+            },
+            ConductivityRefusal::OutsidePressureFrame {
+                requested_bar,
+                frame_bar,
+                slack_bar,
+            } => write!(
+                f,
+                "the conductivity ladder was asked at {} bar and its anchors are measured at {} bar, outside \
+                 the {} bar of tolerated offset. The lattice form carries NO pressure term, so its frame is a \
+                 point until the tolerated offset is set (conductivity.ambient_frame_pressure_slack_bar). \
+                 Reading an ambient conductivity at interior pressure is the same defect the thermoelastic \
+                 ladder refuses one layer over.",
+                requested_bar.to_f64_lossy(),
+                frame_bar.to_f64_lossy(),
+                slack_bar.to_f64_lossy()
             ),
             ConductivityRefusal::NonRepresentable { phase } => write!(
                 f,
@@ -660,12 +1232,28 @@ fn solve_bruggeman(components: &[(Fixed, Fixed)]) -> Option<Fixed> {
 /// oxidation state rather than a per-mineral tag. Mixed-valence phases count as ferrous-bearing, because
 /// magnetite's `Fe2+` is present and radiating whatever its average charge reads.
 ///
-/// SLACK'S THREE INPUTS ARE LEFT ABSENT, deliberately and not as an oversight: no data file in this repo
-/// carries a per-phase Debye temperature or atomic volume, so there is nothing to read. Passing `None` is what
-/// makes the estimator rung REFUSE by name for a phase with no measured anchor, instead of evaluating on
-/// invented columns. For the mantle census that matters (forsterite, fayalite, enstatite) every phase carries
-/// a measured anchor, so the estimator rung never fires and the absence costs nothing; a census naming
-/// hematite or spinel will refuse, which is the correct outcome until those columns are fetched.
+/// SLACK'S THREE INPUTS ARE DERIVED HERE, and the paragraph that used to sit at this spot is retired rather
+/// than edited, because it said the opposite and stayed after the code changed under it. It read that the three
+/// inputs "are left absent, deliberately", that "no data file in this repo carries a per-phase Debye
+/// temperature or atomic volume", and that "for the mantle census that matters every phase carries a measured
+/// anchor, so the estimator rung never fires and the absence costs nothing". All three clauses stopped being
+/// true when the fixture-cluster retirement derived the mean atomic mass, the atomic volume and the elastic
+/// Debye temperature from tables this function already holds (below). The estimator rung DOES fire from this
+/// loader now, for any phase with no measured anchor, which is the spinel and hematite case the census reaches.
+///
+/// AND THE ESTIMATOR BAND IS DERIVED HERE TOO, which retires the last absence on this rung. It was
+/// [`EstimatorBand::NotSupplied`] for the reason the three inputs above used to be `None`, that no cited width
+/// existed to read, and the width was reserved as `conductivity.slack_estimator_band_factor` while it stood.
+/// The measurement that retires it was already in this module and never consumed:
+/// [`rung_disagreement_ratio`] over the phases carrying BOTH rungs, grouped by cell class
+/// ([`derived_estimator_bands`]). Five phases resolve both, four of them in the complex class, and every ratio
+/// is above one, so the band is a one-sided upper bound measured off the ladder's own overlap rather than a
+/// factor chosen between two cited figures. The sample is small and the derived band carries its own size and
+/// range so a reader can see that; the honest limits are on [`derived_estimator_bands`].
+///
+/// WITHOUT THE MODULI TABLE there is no band and no estimator rung either, so the absence costs nothing: the
+/// elastic Debye temperature derives off `moduli`, so a `None` there leaves `debye_temperature_k` absent and
+/// a phase with no measured anchor refuses with [`ConductivityRefusal::NoRung`] before any band is read.
 ///
 /// `expansivity_integral` stays the caller's own, for the reason the field's own docstring gives: only the
 /// caller knows whether its expansivity is constant over the range it is integrating.
@@ -674,6 +1262,7 @@ pub fn phase_conductivity_from_banked(
     phase_name: &str,
     conductivity: &PhaseConductivityTable,
     gruneisen: &GruneisenTable,
+    moduli: Option<&civsim_physics::mineral_moduli::MineralModuli>,
     registry: &PhaseRegistry,
     periodic: &PeriodicTable,
     expansivity_integral: Fixed,
@@ -697,6 +1286,42 @@ pub fn phase_conductivity_from_banked(
     let phase = registry
         .phase(phase_name)
         .ok_or_else(|| missing("phase_registry"))?;
+
+    // THE ESTIMATOR RUNG'S INPUTS, DERIVED. These three were hardcoded `None`, which meant the Slack rung
+    // could never fire from this loader at all: a phase with no measured `kappa_298` resolved to NO rung and
+    // the whole assemblage refused. Every one of them derives from tables this function already holds. The
+    // docstring above records what that change made stale, because it went unrecorded for a commit.
+    //
+    // That gap was invisible until the fixture cluster was retired, because nothing before then ran a real
+    // derived mantle composition through here. The composition that exposed it minimizes to a SPINEL-bearing
+    // assemblage, and spinel has no measured `kappa_298`, so the province field refused outright.
+    //
+    // THE DEBYE TEMPERATURE HERE IS THE ELASTIC ONE, and this is the one place in the arc where that is the
+    // correct choice rather than the error. Slack's model reads `Theta_a`, the ACOUSTIC Debye temperature,
+    // and this module's own law documentation says so: "the built shear-aware `Theta_D`, which IS the
+    // acoustic average". The entropy-fit effective temperature in `thermoelastic_anchors` would be the wrong
+    // one, and the two are separate types precisely so that choice has to be made deliberately.
+    let mean_atomic_mass_amu = phase_mean_atomic_mass_amu(phase, periodic);
+    let atomic_volume_angstrom3 =
+        crate::thermoelastic::atomic_volume_angstrom3(phase_name, registry);
+    let debye_temperature_k = moduli.and_then(|m| {
+        crate::thermoelastic::derived_elastic_debye_temperature(phase_name, registry, m, periodic)
+            .map(|t| t.kelvin())
+    });
+    // THE BAND, MEASURED OFF THE SAME COLUMNS. The envelope is a property of the class rather than of this
+    // phase, so it is derived over the whole banked column and then read at this phase's class. It is set on
+    // every row, including a row that carries a measured anchor and will therefore never consult it, because
+    // the field states what band this phase's estimator rung WOULD carry and `NotSupplied` on a class the
+    // ladder can measure would be a false absence.
+    let estimator_band = match moduli {
+        Some(m) => {
+            let bands = derived_estimator_bands(conductivity, gruneisen, m, registry, periodic);
+            derived_estimator_band_for_cell(&bands, atoms_per_primitive_cell)
+                .map(|b| b.band)
+                .unwrap_or(EstimatorBand::NotSupplied)
+        }
+        None => EstimatorBand::NotSupplied,
+    };
     let bears_ferrous_iron = matches!(
         iron_valence_state(&phase.composition, periodic),
         IronValence::Ferrous | IronValence::Mixed
@@ -705,22 +1330,93 @@ pub fn phase_conductivity_from_banked(
         name: phase_name.to_string(),
         kappa_298,
         kappa_298_band,
-        estimator_band: None,
+        estimator_band,
+        // No per-phase exponent column is banked, so the classifier decides for every phase today. MgO's
+        // cited a = 0.9 is the first row a fetch would put here.
+        measured_exponent_a: None,
         gruneisen: gamma,
-        mean_atomic_mass_amu: None,
-        debye_temperature_k: None,
-        atomic_volume_angstrom3: None,
+        mean_atomic_mass_amu,
+        debye_temperature_k,
+        atomic_volume_angstrom3,
         atoms_per_primitive_cell,
         expansivity_integral,
         bears_ferrous_iron,
     })
 }
 
-// @derives: a rock's effective thermal conductivity <- the per-phase conductivity ladder + the world's own mineral census (Bruggeman self-consistent EMT)
+/// The aggregate IN ITS OWN AMBIENT FRAME, for a caller whose state is the anchors' state. Identical to
+/// [`assemblage_conductivity_at`] called at [`hofmeister_reference_pressure_bar`], and kept as the short name
+/// because the frame it assumes is now stated in the signature's absence of a pressure rather than in a comment.
+///
+/// A CALLER AT DEPTH WANTS THE OTHER ONE. This function cannot refuse an out-of-frame read, because it is never
+/// told the pressure to compare against; it declares the frame it answers in on the result
+/// ([`AssemblageConductivity::frame_pressure_bar`]) and leaves the comparison to a caller that knows its own
+/// state. A caller holding a pressure should pass it and be refused when it is outside.
+// @derives: a rock's effective thermal conductivity at the anchors' ambient pressure frame <- the per-phase conductivity ladder + the world's own mineral census (Bruggeman self-consistent EMT)
 pub fn assemblage_conductivity(
     census: &[(&PhaseConductivity, Fixed)],
     temperature: Fixed,
 ) -> Result<Option<AssemblageConductivity>, ConductivityRefusal> {
+    assemblage_conductivity_at(census, temperature, hofmeister_reference_pressure_bar())
+}
+
+/// DERIVE a rock's effective thermal conductivity at a temperature AND A PRESSURE from a world's own mineral
+/// census, by BRUGGEMAN self-consistent effective-medium theory (Henke, Gail and Trieloff 2016, A&A 589, A41,
+/// equation 17):
+///
+/// `sum_i f_i (K_i - K_eff) / (K_i + 2 K_eff) = 0`
+///
+/// Each phase's `K_i` is resolved at `temperature` through the per-phase ladder above (measured anchor first,
+/// Slack's estimator otherwise, Hofmeister's class-keyed exponent carrying either through temperature, radiative
+/// term added where the phase declares ferrous iron), so the aggregate consumes the ladder rather than
+/// duplicating any part of it. See the module comment above this function for what the rule was chosen over and
+/// the error it carries.
+///
+/// THE PRESSURE IS TAKEN AND CHECKED, NEVER USED. That reads like a contradiction and it is the honest shape:
+/// the ladder carries no pressure term anywhere, so `pressure_bar` cannot enter the arithmetic, and the only
+/// truthful thing to do with it is compare it to the frame the anchors were measured in and REFUSE outside.
+/// The module used to state the ambient limit in a dropped-terms comment ("a caller at depth is reading outside
+/// the frame") while `assemblage_conductivity` took no pressure and answered anyway, so the limit was declared
+/// to a reader and enforced against nobody. The tolerated offset is
+/// [`ambient_frame_pressure_slack_bar`], zero until the owner sets it, so today the frame is a point.
+///
+/// `census` is a list of (phase, fraction) pairs. The fractions are VOLUME fractions, which is the transport-
+/// correct weighting and the one Henke's benchmark uses; they need not sum to one, because the result is
+/// normalized by the supplied total, so a partial census aggregates what it names.
+///
+/// Returns `Ok(None)` when the census carries no positive weight. REFUSES rather than defaults: any phase that
+/// cannot resolve a conductivity returns a [`ConductivityRefusal`] naming that phase, because a rock's
+/// conductivity sets its heat transport and inventing one for a missing phase would author a world's interior.
+///
+/// Deterministic fixed-point throughout: the solve is a fixed bisection with an exact convergence exit, and no
+/// float and no logarithm enters (Bruggeman needs only the four arithmetic operations, unlike a geometric mean).
+// @derives: a rock's effective thermal conductivity in a checked pressure frame <- the per-phase conductivity ladder + the world's own mineral census + the anchors' measured frame (Bruggeman self-consistent EMT)
+pub fn assemblage_conductivity_at(
+    census: &[(&PhaseConductivity, Fixed)],
+    temperature: Fixed,
+    pressure_bar: Fixed,
+) -> Result<Option<AssemblageConductivity>, ConductivityRefusal> {
+    // THE FRAME GATE FIRST, before any phase resolves, so an out-of-frame caller is told about the frame rather
+    // than about whichever phase happens to be missing a column.
+    let frame_bar = hofmeister_reference_pressure_bar();
+    let slack_bar = ambient_frame_pressure_slack_bar();
+    let offset = if pressure_bar > frame_bar {
+        pressure_bar.checked_sub(frame_bar)
+    } else {
+        frame_bar.checked_sub(pressure_bar)
+    }
+    .ok_or(ConductivityRefusal::OutsidePressureFrame {
+        requested_bar: pressure_bar,
+        frame_bar,
+        slack_bar,
+    })?;
+    if offset > slack_bar {
+        return Err(ConductivityRefusal::OutsidePressureFrame {
+            requested_bar: pressure_bar,
+            frame_bar,
+            slack_bar,
+        });
+    }
     // Resolve every phase FIRST, so a phase that cannot supply a conductivity refuses HERE with its own name,
     // rather than as a silent drop deeper in the arithmetic that would bias the aggregate toward the remainder.
     let mut centre: Vec<(Fixed, Fixed)> = Vec::with_capacity(census.len());
@@ -728,18 +1424,26 @@ pub fn assemblage_conductivity(
     let mut stiff: Vec<(Fixed, Fixed)> = Vec::with_capacity(census.len());
     let mut total = ZERO;
     let mut measured = ZERO;
+    let mut radiative = ZERO;
     for (phase, fraction) in census {
         if *fraction <= ZERO {
             continue;
         }
-        let (k, rung) = phase.conductivity_at(temperature, 0)?;
-        let (k_lo, _) = phase.conductivity_at(temperature, -1)?;
-        let (k_hi, _) = phase.conductivity_at(temperature, 1)?;
+        let (k, rung, took_radiative) = phase.conductivity_at(temperature, 0)?;
+        let (k_lo, _, _) = phase.conductivity_at(temperature, -1)?;
+        let (k_hi, _, _) = phase.conductivity_at(temperature, 1)?;
         centre.push((*fraction, k));
         soft.push((*fraction, k_lo));
         stiff.push((*fraction, k_hi));
         if rung == ConductivityRung::MeasuredAnchor {
             measured = measured.checked_add(*fraction).ok_or_else(|| {
+                ConductivityRefusal::NonRepresentable {
+                    phase: phase.name.clone(),
+                }
+            })?;
+        }
+        if took_radiative {
+            radiative = radiative.checked_add(*fraction).ok_or_else(|| {
                 ConductivityRefusal::NonRepresentable {
                     phase: phase.name.clone(),
                 }
@@ -764,20 +1468,30 @@ pub fn assemblage_conductivity(
         }
     }
     let conductivity = solve_bruggeman(&centre).ok_or(ConductivityRefusal::NoSelfConsistentRoot)?;
-    // The band is the half-width covering the outer interval. Bruggeman is monotone increasing in every K_i (the
-    // residual rises with each K_i and falls with z), so re-solving at the soft and stiff edges brackets the
-    // central value and the wider gap is the covering half-width.
+    // The band is the rule RE-SOLVED at the edges, and it is reported as TWO numbers. Bruggeman is monotone
+    // increasing in every K_i (the residual rises with each K_i and falls with z), so re-solving at the soft
+    // and stiff edges brackets the central value. The two excursions are kept apart because they can differ:
+    // a one-sided estimator band moves the soft edge and leaves the stiff one where it is, and collapsing that
+    // to one symmetric number would report an upward excursion the rung's own physics rules out.
     let lo = solve_bruggeman(&soft).ok_or(ConductivityRefusal::NoSelfConsistentRoot)?;
     let hi = solve_bruggeman(&stiff).ok_or(ConductivityRefusal::NoSelfConsistentRoot)?;
     let up = hi.checked_sub(conductivity).unwrap_or(ZERO);
     let down = conductivity.checked_sub(lo).unwrap_or(ZERO);
-    let band = if up >= down { up } else { down };
     let measured_weight_fraction = measured.checked_div(total).unwrap_or(ZERO);
+    let radiative_weight_fraction = radiative.checked_div(total).unwrap_or(ZERO);
     Ok(Some(AssemblageConductivity {
         conductivity,
-        band: if band > ZERO { band } else { ZERO },
+        band_up: if up > ZERO { up } else { ZERO },
+        band_down: if down > ZERO { down } else { ZERO },
         measured_weight_fraction,
+        radiative_weight_fraction,
+        radiative_scope: if radiative > ZERO {
+            RadiativeFitScope::TerranFerrousSilicateFit
+        } else {
+            RadiativeFitScope::NotApplied
+        },
         frame_temperature_k: temperature,
+        frame_pressure_bar: frame_bar,
     }))
 }
 
@@ -787,35 +1501,95 @@ mod tests {
 
     #[test]
     fn the_exponent_refuses_the_boundary_the_cited_set_does_not_place() {
-        // The calibration set pins n <= 2 (diamond, NaCl, MgO all land inside Slack's band) and n = 6 (rutile,
-        // overstated ~5x). It says NOTHING about 2 < n < 6, so the classifier REFUSES there. Picking a boundary
-        // in that gap would author a scalar invisibly, inside a classifier, which is the silent-parameter class.
-        assert!(
-            lattice_exponent_for_cell(2).is_some(),
-            "n = 2 is the calibrated simple class"
-        );
-        assert!(
-            lattice_exponent_for_cell(6).is_some(),
-            "n = 6 is the calibrated complex class"
+        // The cited set pins ONE exponent, a = 0.33 for n >= 6 (rutile, overstated ~5x, is the cell-count
+        // anchor). It says NOTHING about 2 < n < 6, so the classifier REFUSES there. Picking a boundary in
+        // that gap would author a scalar invisibly, inside a classifier, which is the silent-parameter class.
+        assert_eq!(
+            lattice_exponent_class(6),
+            ExponentClass::Complex(Fixed::from_ratio(33, 100)),
+            "n = 6 is the calibrated complex class and its exponent is the cited 0.33"
         );
         for n in 3..=5 {
-            assert!(
-                lattice_exponent_for_cell(n).is_none(),
+            assert_eq!(
+                lattice_exponent_class(n),
+                ExponentClass::Unplaced,
                 "n = {n} sits in the gap the cited set does not place; the classifier must refuse, not guess"
             );
+            assert!(lattice_exponent_for_cell(n).is_none());
         }
-        assert!(
-            lattice_exponent_for_cell(0).is_none(),
+        assert_eq!(
+            lattice_exponent_class(0),
+            ExponentClass::NotALattice,
             "a cell with no atoms is not a lattice"
+        );
+        assert!(lattice_exponent_for_cell(0).is_none());
+    }
+
+    /// THE UNATTRIBUTED INTERPOLATION, convicted. `n <= 2` returned `Fixed::from_ratio(95, 100)`. The
+    /// docstring naming its own calibration set lists ice at `612/T` (`a ~ 1`) and MgO at `a = 0.9` for this
+    /// class, and 0.95 is neither: it is their arithmetic midpoint, an authored scalar sitting inside a
+    /// classifier that refuses the adjacent band for exactly that reason.
+    ///
+    /// This test fails against the old code twice over, and both assertions are the finding rather than a
+    /// preference. The first: the simple class must not hand back a number the cited set does not contain.
+    /// The second: the number it did hand back was the midpoint, computed HERE from the two cited
+    /// determinations rather than quoted, so the test states what the code was doing rather than what someone
+    /// remembers it doing.
+    #[test]
+    fn the_simple_class_refuses_rather_than_interpolating_between_its_two_cited_determinations() {
+        assert_eq!(
+            lattice_exponent_class(2),
+            ExponentClass::SimpleReserved,
+            "n = 2 is the simple class and its exponent is reserved, not interpolated"
+        );
+        assert_eq!(
+            lattice_exponent_class(1),
+            ExponentClass::SimpleReserved,
+            "a monatomic cell is the same class"
+        );
+        assert!(
+            lattice_exponent_for_cell(2).is_none(),
+            "the number read is refused while the class exponent is unset"
+        );
+
+        // The retired value, reconstructed from the two cited determinations it sat between, so the test
+        // names what was authored instead of asserting a remembered literal.
+        let ice = Fixed::ONE; // ice at 612/T, so a ~ 1
+        let mgo = Fixed::from_ratio(9, 10); // MgO at a = 0.9
+        let midpoint = ice
+            .checked_add(mgo)
+            .and_then(|s| s.checked_div(Fixed::from_int(2)))
+            .expect("the midpoint of two small exponents is representable");
+        assert_eq!(
+            midpoint,
+            Fixed::from_ratio(95, 100),
+            "the retired 0.95 was exactly the midpoint of the bracketing pair, which is what made it authored"
+        );
+
+        // AND THE WIDTH IT HID IS REAL. Across the bracketing pair the conductivity at 1600 K moves by well
+        // over a tenth, so collapsing the class to a point value reported a banded quantity as exact.
+        let hot = Fixed::from_int(1600);
+        let anchor = Fixed::from_int(5);
+        let at_ice = hofmeister_lattice_conductivity(anchor, ice, ZERO, ZERO, hot).unwrap();
+        let at_mgo = hofmeister_lattice_conductivity(anchor, mgo, ZERO, ZERO, hot).unwrap();
+        let spread = at_mgo
+            .checked_sub(at_ice)
+            .and_then(|d| d.checked_div(at_ice))
+            .unwrap();
+        assert!(
+            spread > Fixed::from_ratio(1, 10),
+            "the bracketing pair disagrees by more than a tenth at 1600 K, so the class carries a real width: {}",
+            spread.to_f64_lossy()
         );
     }
 
     #[test]
-    fn the_simple_class_declines_far_more_steeply_than_the_complex_one() {
+    fn a_steeper_exponent_declines_faster_than_the_shallow_silicate_one() {
         // The whole point of the class-keyed exponent: at the same temperature rise, a simple lattice (~1/T)
         // loses far more of its conductivity than a complex silicate (0.33). A single exponent for both, which
-        // is what "1/T for everything" would have shipped, gets one of these two badly wrong.
-        let simple = lattice_exponent_for_cell(2).unwrap();
+        // is what "1/T for everything" would have shipped, gets one of these two badly wrong. The steep side is
+        // read from a phase's OWN cited exponent now, because the class value is reserved.
+        let simple = Fixed::from_ratio(9, 10); // MgO's cited per-phase determination
         let complex = lattice_exponent_for_cell(6).unwrap();
         assert!(
             simple > complex,
@@ -933,7 +1707,8 @@ mod tests {
             name: name.to_string(),
             kappa_298: Some(kappa),
             kappa_298_band: band,
-            estimator_band: None,
+            estimator_band: EstimatorBand::NotSupplied,
+            measured_exponent_a: None,
             gruneisen: Fixed::from_ratio(15, 10),
             mean_atomic_mass_amu: Some(Fixed::from_int(20)),
             debye_temperature_k: Some(Fixed::from_int(700)),
@@ -1088,7 +1863,11 @@ mod tests {
             "a one-phase census IS that phase, got {}",
             agg.conductivity.to_f64_lossy()
         );
-        assert_eq!(agg.band, ZERO, "one unbanded phase carries no width");
+        assert_eq!(agg.band_up, ZERO, "one unbanded phase carries no width up");
+        assert_eq!(
+            agg.band_down, ZERO,
+            "one unbanded phase carries no width down"
+        );
 
         // A fraction that does not sum to one normalizes by the supplied total.
         let doubled = vec![(
@@ -1135,6 +1914,7 @@ mod tests {
                 name,
                 &conductivity,
                 &gruneisen,
+                None,
                 &registry,
                 &periodic,
                 ZERO,
@@ -1205,6 +1985,7 @@ mod tests {
             "quartz",
             &conductivity,
             &gruneisen,
+            None,
             &registry,
             &periodic,
             ZERO,
@@ -1301,6 +2082,9 @@ mod tests {
     fn the_rung_mix_reports_how_much_weight_was_measured() {
         let mut estimated = measured_phase("alien-carbide", dec("4.0"), None);
         estimated.kappa_298 = None; // falls to Slack, whose banked columns are populated above
+                                    // A declared band, because an estimator rung without one is refused now. The factor here is a TEST
+                                    // input rather than a claim about Slack: the reserved width is the owner's.
+        estimated.estimator_band = EstimatorBand::UpperBoundFactor(Fixed::from_int(3));
         let census = vec![
             (measured_phase("olivine", dec("4.349"), None), dec("0.75")),
             (estimated, dec("0.25")),
@@ -1349,11 +2133,13 @@ mod tests {
         let b = assemblage_conductivity(&borrow(&banded), t)
             .expect("resolves")
             .expect("positive");
-        assert_eq!(a.band, ZERO, "unbanded inputs carry no width");
+        assert_eq!(a.band_up, ZERO, "unbanded inputs carry no width up");
+        assert_eq!(a.band_down, ZERO, "unbanded inputs carry no width down");
         assert!(
-            b.band > ZERO,
-            "banded inputs widen the aggregate, got {:?}",
-            b.band
+            b.band_up > ZERO && b.band_down > ZERO,
+            "banded MEASURED inputs widen the aggregate on both sides, got up={:?} down={:?}",
+            b.band_up,
+            b.band_down
         );
         assert_eq!(
             a.conductivity, b.conductivity,
@@ -1361,9 +2147,10 @@ mod tests {
         );
         // The band stays inside the inputs' own spread: it cannot exceed the wider per-phase band.
         assert!(
-            b.band < dec("0.4"),
-            "the aggregate band is bounded by the inputs it was re-solved from, got {:?}",
-            b.band
+            b.band_up < dec("0.4") && b.band_down < dec("0.4"),
+            "the aggregate band is bounded by the inputs it was re-solved from, got up={:?} down={:?}",
+            b.band_up,
+            b.band_down
         );
     }
 
@@ -1385,6 +2172,508 @@ mod tests {
             cold.conductivity
         );
         assert_eq!(hot.frame_temperature_k, Fixed::from_int(1200));
+    }
+
+    /// THE ZERO-WIDTH CLAIM, convicted. A phase resolving through Slack's rung with no declared band used to
+    /// contribute NO width to the aggregate, so a several-fold one-sided estimate was reported with the same
+    /// band a measurement would carry: `None` meant "no uncertainty exists" and "no uncertainty was supplied"
+    /// at the same site. It must refuse instead, and it must name the phase, because the fix for it is a fetch
+    /// rather than a retry.
+    ///
+    /// Against the old code this passed silently with `band == 0`, which is precisely the defect.
+    #[test]
+    fn an_estimator_rung_with_no_declared_band_refuses_instead_of_claiming_zero_width() {
+        let mut estimated = measured_phase("alien-carbide", dec("4.0"), None);
+        estimated.kappa_298 = None; // no measured anchor, so Slack's rung is the only route
+        estimated.estimator_band = EstimatorBand::NotSupplied;
+        let census = vec![
+            (measured_phase("olivine", dec("4.349"), None), dec("0.75")),
+            (estimated, dec("0.25")),
+        ];
+        let refusal =
+            assemblage_conductivity(&borrow(&census), hofmeister_reference_temperature_k())
+                .expect_err("an undeclared estimator band must be refused");
+        assert_eq!(
+            refusal,
+            ConductivityRefusal::NoEstimatorBand {
+                phase: "alien-carbide".to_string(),
+                declared_factor: None,
+            }
+        );
+        // The refusal names the FETCH that closes it. It used to name the width as reserved, and that stopped
+        // being true when the band became a measurement over the banked overlap points: the way past this
+        // refusal is now a measured anchor on a phase in the class, never an owner decision.
+        assert!(
+            refusal.to_string().contains("kappa_298 anchor"),
+            "the refusal names the fetch that closes it rather than a value to set: {refusal}"
+        );
+
+        // A factor below one would invert the interval, so it is refused rather than reordered.
+        let mut inverted = measured_phase("alien-carbide", dec("4.0"), None);
+        inverted.kappa_298 = None;
+        inverted.estimator_band = EstimatorBand::SymmetricFactor(Fixed::from_ratio(1, 2));
+        let bad = vec![(inverted, Fixed::ONE)];
+        assert_eq!(
+            assemblage_conductivity(&borrow(&bad), hofmeister_reference_temperature_k())
+                .expect_err("a sub-unit factor must be refused"),
+            ConductivityRefusal::NoEstimatorBand {
+                phase: "alien-carbide".to_string(),
+                declared_factor: Some(Fixed::from_ratio(1, 2)),
+            }
+        );
+    }
+
+    /// A ONE-SIDED BAND IS REPORTED ONE-SIDED. Slack's complex-cell error is an intrinsic UPPER bound, so the
+    /// truth sits at or below the estimate and never above it. The aggregate must therefore report zero upward
+    /// excursion and a real downward one. Against the old code this could not even be expressed: there was a
+    /// single symmetric `band`, so a one-sided bound was reported as an interval reaching above a ceiling the
+    /// physics forbids.
+    ///
+    /// Every bound in this test is COMPUTED from the inputs rather than asserted from intuition: a one-phase
+    /// census IS that phase, so the soft edge is the anchor divided by the declared factor and the aggregate's
+    /// downward excursion is the difference, exactly.
+    #[test]
+    fn a_one_sided_estimator_band_reports_no_upward_excursion() {
+        let factor = Fixed::from_int(3);
+        let mut one_sided = measured_phase("alien-carbide", dec("4.0"), None);
+        one_sided.kappa_298 = None;
+        one_sided.estimator_band = EstimatorBand::UpperBoundFactor(factor);
+        let census = vec![(one_sided.clone(), Fixed::ONE)];
+        let agg = assemblage_conductivity(&borrow(&census), hofmeister_reference_temperature_k())
+            .expect("Slack evaluates on the populated columns")
+            .expect("positive");
+        assert_eq!(
+            agg.band_up, ZERO,
+            "the estimate IS the ceiling, so the interval reaches nothing above it"
+        );
+        // A one-phase census is that phase, so the soft edge is the centre divided by the factor and the
+        // downward excursion is exactly what that division removes.
+        let expected_down = agg
+            .conductivity
+            .checked_sub(agg.conductivity.checked_div(factor).unwrap())
+            .unwrap();
+        let err = agg.band_down.checked_sub(expected_down).unwrap().abs();
+        assert!(
+            err < dec("0.001"),
+            "the downward excursion is the anchor walked down by the declared factor: got {} expected {}",
+            agg.band_down.to_f64_lossy(),
+            expected_down.to_f64_lossy()
+        );
+
+        // The SYMMETRIC shape is a different claim and must read differently on the same anchor and factor.
+        let mut symmetric = one_sided;
+        symmetric.estimator_band = EstimatorBand::SymmetricFactor(factor);
+        let sym_census = vec![(symmetric, Fixed::ONE)];
+        let sym =
+            assemblage_conductivity(&borrow(&sym_census), hofmeister_reference_temperature_k())
+                .expect("resolves")
+                .expect("positive");
+        assert!(
+            sym.band_up > ZERO,
+            "a symmetric factor DOES reach above the centre, got {:?}",
+            sym.band_up
+        );
+        assert_eq!(
+            sym.band_down, agg.band_down,
+            "the two shapes agree on the downward excursion and differ only above"
+        );
+    }
+
+    /// The five overlap ratios, recomputed HERE from the public per-phase entry points rather than read back
+    /// out of [`derived_estimator_bands`], so the assertions below are an independent check of the grouping
+    /// and the envelope rather than a restatement of them.
+    fn overlap_ratios() -> Vec<(String, i32, Fixed)> {
+        let conductivity =
+            PhaseConductivityTable::standard().expect("the cited conductivity column loads");
+        let gruneisen = GruneisenTable::standard().expect("the Grueneisen table loads");
+        let registry = PhaseRegistry::standard().expect("the phase registry loads");
+        let periodic = PeriodicTable::standard().expect("the periodic table loads");
+        let moduli = civsim_physics::mineral_moduli::MineralModuli::standard()
+            .expect("the mineral-moduli table loads");
+        let mut out = Vec::new();
+        for row in conductivity.rows() {
+            let name = row.name.as_str();
+            let (Some(measured), Some((gamma, _))) = (row.kappa_298, gruneisen.gamma(name)) else {
+                continue;
+            };
+            let (Some(phase), Some(volume)) = (
+                registry.phase(name),
+                crate::thermoelastic::atomic_volume_angstrom3(name, &registry),
+            ) else {
+                continue;
+            };
+            let (Some(mass), Some(debye)) = (
+                super::phase_mean_atomic_mass_amu(phase, &periodic),
+                crate::thermoelastic::derived_elastic_debye_temperature(
+                    name, &registry, &moduli, &periodic,
+                ),
+            ) else {
+                continue;
+            };
+            let Some(estimator) = estimator_anchor_298(
+                gamma,
+                mass,
+                debye.kelvin(),
+                volume,
+                row.atoms_per_primitive_cell,
+            ) else {
+                continue;
+            };
+            if let Some(ratio) = rung_disagreement_ratio(measured, estimator) {
+                out.push((row.name.clone(), row.atoms_per_primitive_cell, ratio));
+            }
+        }
+        out
+    }
+
+    /// THE RESERVED WIDTH WAS DERIVABLE ALL ALONG, and this is the measurement that says so. The retired
+    /// entry's own basis named it: the estimator-over-measured ratio for every phase carrying BOTH rungs,
+    /// distributed by cell class. That basis also claimed periclase was the only such phase banked, and this
+    /// test convicts the claim: FIVE phases resolve both rungs.
+    ///
+    /// Every assertion here is structural or recomputed. The counts, the class membership and the coverage
+    /// come from [`overlap_ratios`], which walks the banked columns through the same public entry points and
+    /// never consults the object under test.
+    #[test]
+    fn the_estimator_band_is_the_ladders_own_overlap_envelope_grouped_by_the_cited_class() {
+        let conductivity =
+            PhaseConductivityTable::standard().expect("the cited conductivity column loads");
+        let gruneisen = GruneisenTable::standard().expect("the Grueneisen table loads");
+        let registry = PhaseRegistry::standard().expect("the phase registry loads");
+        let periodic = PeriodicTable::standard().expect("the periodic table loads");
+        let moduli = civsim_physics::mineral_moduli::MineralModuli::standard()
+            .expect("the mineral-moduli table loads");
+        let bands =
+            derived_estimator_bands(&conductivity, &gruneisen, &moduli, &registry, &periodic);
+
+        let observed = overlap_ratios();
+        assert_eq!(
+            observed.len(),
+            5,
+            "five banked phases carry BOTH rungs, against the retired entry's claim of one: {observed:?}"
+        );
+        // ONE-SIDED HIGH IS AN OBSERVATION rather than a physical argument alone: Slack over-predicts every phase
+        // the ladder can check. A ratio below one anywhere would make the shape wrong.
+        for (name, _, ratio) in &observed {
+            assert!(
+                *ratio > Fixed::ONE,
+                "{name}'s estimator sits above its measured rung, which is what makes the band one-sided \
+                 high, got {}",
+                ratio.to_f64_lossy()
+            );
+        }
+
+        // THE GROUPING IS THE CLASSIFIER'S, so the expected membership is computed from it rather than from
+        // a cell-count boundary restated here.
+        for band in &bands {
+            let mine: Vec<&(String, i32, Fixed)> = observed
+                .iter()
+                .filter(|(_, n, _)| lattice_exponent_class(*n) == band.class)
+                .collect();
+            assert_eq!(
+                band.sample_size,
+                mine.len(),
+                "the {:?} envelope counts exactly the observations the classifier puts in it",
+                band.class
+            );
+            assert_eq!(
+                band.phases.len(),
+                band.sample_size,
+                "the named population and the sample size are the same set"
+            );
+            for (name, _, _) in &mine {
+                assert!(
+                    band.phases.contains(name),
+                    "{name} is in the {:?} class, so the envelope must name it: {:?}",
+                    band.class,
+                    band.phases
+                );
+            }
+            // The envelope IS the extremes of its own class, computed here from the independent walk.
+            let widest = mine
+                .iter()
+                .map(|(_, _, r)| *r)
+                .fold(ZERO, |a, r| if r > a { r } else { a });
+            let narrowest =
+                mine.iter()
+                    .map(|(_, _, r)| *r)
+                    .fold(Fixed::MAX, |a, r| if r < a { r } else { a });
+            assert_eq!(band.observed_max_ratio, widest);
+            assert_eq!(band.observed_min_ratio, narrowest);
+            assert_eq!(
+                band.band,
+                EstimatorBand::UpperBoundFactor(widest),
+                "the band is one-sided high at the widest ratio the class produced"
+            );
+
+            // AND IT COVERS THE CLASS. A one-sided bound with factor f puts the truth in [anchor/f, anchor],
+            // so every measured anchor in the class must sit at or above its own estimate divided by f. This
+            // is the property the maximum is chosen FOR, checked rather than assumed.
+            for (name, n, ratio) in &mine {
+                assert!(
+                    *ratio <= band.observed_max_ratio,
+                    "{name} (n = {n}) must sit inside its class's envelope, {} against {}",
+                    ratio.to_f64_lossy(),
+                    band.observed_max_ratio.to_f64_lossy()
+                );
+            }
+        }
+
+        // NO CROSS-CLASS POOLING. The simple class's single point must not be inside the complex envelope and
+        // the two must be separate entries, because pooling them to fatten the sample would author a class
+        // boundary the cited calibration does not draw.
+        let complex = derived_estimator_band_for_cell(&bands, 14)
+            .expect("spinel's complex class carries an envelope");
+        let simple = derived_estimator_band_for_cell(&bands, 2)
+            .expect("periclase's simple class carries its own");
+        assert_eq!(
+            complex.class,
+            ExponentClass::Complex(Fixed::from_ratio(33, 100))
+        );
+        assert_eq!(simple.class, ExponentClass::SimpleReserved);
+        assert_eq!(
+            complex.sample_size, 4,
+            "four banked phases sit in the complex class: {:?}",
+            complex.phases
+        );
+        assert_eq!(
+            simple.sample_size, 1,
+            "periclase is the only simple-class phase banked, so its envelope rests on ONE point"
+        );
+        assert!(
+            !complex.phases.contains(&"periclase".to_string()),
+            "periclase's simple-class point must not be dropped into the complex class"
+        );
+
+        // A CELL COUNT THE CITED SET DOES NOT PLACE GETS NO BAND, because it gets no class either. The
+        // lookup reads the classifier, so the 2 < n < 6 gap has no envelope to find.
+        for n in 3..=5 {
+            assert!(
+                derived_estimator_band_for_cell(&bands, n).is_none(),
+                "n = {n} sits in the gap the cited set does not place, so no class envelope covers it"
+            );
+        }
+
+        // THE MAGNITUDE IS PHYSICAL rather than merely self-consistent: the class envelope must be a
+        // several-fold one-sided width, which is what Slack's own docstring describes, and not a factor near
+        // one (which would say the estimator needs no band) nor an absurd one.
+        let widest = complex.observed_max_ratio.to_f64_lossy();
+        assert!(
+            (1.5..10.0).contains(&widest),
+            "the complex class's envelope is a several-fold overstatement, got {widest}"
+        );
+    }
+
+    /// SPINEL IS THE PHASE THE RESERVED WIDTH WAS BLOCKING, and it is the end-to-end proof that the width
+    /// no longer has to be reserved. It is the one census phase with banked Slack columns and NO measured
+    /// anchor, so it is the only phase in the table that reaches the estimator rung from the banked loader,
+    /// and until the envelope was derived it refused by name with [`ConductivityRefusal::NoEstimatorBand`].
+    ///
+    /// Against the pre-derivation code every assertion below fails at the first one: the loader wrote
+    /// [`EstimatorBand::NotSupplied`] for every phase it built.
+    #[test]
+    fn the_banked_loader_hands_spinel_a_derived_band_instead_of_refusing() {
+        let conductivity =
+            PhaseConductivityTable::standard().expect("the cited conductivity column loads");
+        let gruneisen = GruneisenTable::standard().expect("the Grueneisen table loads");
+        let registry = PhaseRegistry::standard().expect("the phase registry loads");
+        let periodic = PeriodicTable::standard().expect("the periodic table loads");
+        let moduli = civsim_physics::mineral_moduli::MineralModuli::standard()
+            .expect("the mineral-moduli table loads");
+
+        let spinel = phase_conductivity_from_banked(
+            "spinel",
+            &conductivity,
+            &gruneisen,
+            Some(&moduli),
+            &registry,
+            &periodic,
+            ZERO,
+        )
+        .expect("spinel assembles from the banked columns");
+        assert!(
+            spinel.kappa_298.is_none(),
+            "spinel is the census phase with no measured anchor, which is why it reaches the estimator rung"
+        );
+        let factor = match spinel.estimator_band {
+            EstimatorBand::UpperBoundFactor(f) => f,
+            other => panic!(
+                "the estimator rung's band is DERIVED from the ladder's own overlap and is one-sided high, \
+                 got {other:?}"
+            ),
+        };
+        assert!(
+            factor >= Fixed::ONE,
+            "a band factor is a multiplier of at least one, got {}",
+            factor.to_f64_lossy()
+        );
+
+        // AND THE REFUSAL IS GONE. This is the behaviour the province field was blocked on.
+        let agg = assemblage_conductivity(
+            &borrow(&[(spinel, Fixed::ONE)]),
+            hofmeister_reference_temperature_k(),
+        )
+        .expect("a derived band resolves the estimator rung")
+        .expect("a census with positive weight returns a value");
+        assert_eq!(
+            agg.measured_weight_fraction, ZERO,
+            "none of this census resolved on a measured anchor, and the aggregate must say so"
+        );
+        assert_eq!(
+            agg.band_up, ZERO,
+            "the derived band is one-sided high, so the interval reaches nothing above the estimate"
+        );
+        assert!(
+            agg.band_down > ZERO,
+            "a one-sided high band still carries a real downward excursion, got {:?}",
+            agg.band_down
+        );
+    }
+
+    /// THE PRESSURE FRAME IS CHECKED, NOT DESCRIBED. The module declared "a caller at depth is reading outside
+    /// the frame" in a comment while the aggregate took no pressure and answered anyway. It must now refuse,
+    /// and it must carry the frame it answered in on the result.
+    ///
+    /// The mantle pressure used here is not an arbitrary large number: it is the pressure geodynamics evaluates
+    /// its columns at, on the order of 100 kbar, which is where an ambient conductivity would have been read.
+    #[test]
+    fn a_caller_outside_the_ambient_pressure_frame_is_refused_rather_than_answered() {
+        let census = h_chondrite();
+        let t = hofmeister_reference_temperature_k();
+
+        // In frame: the anchors' own pressure answers.
+        let inside =
+            assemblage_conductivity_at(&borrow(&census), t, hofmeister_reference_pressure_bar())
+                .expect("the anchors' own frame resolves")
+                .expect("positive");
+        assert_eq!(
+            inside.frame_pressure_bar,
+            hofmeister_reference_pressure_bar(),
+            "the result declares the frame it is valid in"
+        );
+
+        // Out of frame: a mid-mantle lithostatic pressure is refused by name.
+        let deep = Fixed::from_int(100_000); // 100 kbar, 10 GPa
+        let refusal = assemblage_conductivity_at(&borrow(&census), t, deep)
+            .expect_err("a caller at depth must be refused");
+        assert_eq!(
+            refusal,
+            ConductivityRefusal::OutsidePressureFrame {
+                requested_bar: deep,
+                frame_bar: hofmeister_reference_pressure_bar(),
+                slack_bar: ambient_frame_pressure_slack_bar(),
+            }
+        );
+
+        // The short entry point is the ambient one BY CONSTRUCTION, so the two agree where the frame allows.
+        let ambient = assemblage_conductivity(&borrow(&census), t)
+            .expect("resolves")
+            .expect("positive");
+        assert_eq!(ambient.conductivity, inside.conductivity);
+        assert_eq!(
+            ambient.frame_pressure_bar,
+            hofmeister_reference_pressure_bar()
+        );
+    }
+
+    /// THE RADIATIVE FIT'S SCOPE TRAVELS WITH THE ANSWER. The gate on the term is derived by charge balance and
+    /// so admits any Fe2+ chemistry, while the polynomial behind it is a fit to Terran silicates. The aggregate
+    /// must therefore say when that fit entered and how much of the census inherited it, rather than leaving a
+    /// consumer to infer a universal law from a clean gate.
+    #[test]
+    fn the_radiative_fit_declares_its_scope_and_its_share_of_the_census() {
+        let clean = h_chondrite();
+        let hot = Fixed::from_int(1600);
+        let no_iron = assemblage_conductivity(&borrow(&clean), hot)
+            .expect("resolves")
+            .expect("positive");
+        assert_eq!(
+            no_iron.radiative_scope,
+            RadiativeFitScope::NotApplied,
+            "no phase declares Fe2+, so no scoped fit entered"
+        );
+        assert_eq!(no_iron.radiative_weight_fraction, ZERO);
+
+        let mut ferrous = measured_phase("fayalite", dec("3.161"), None);
+        ferrous.bears_ferrous_iron = true;
+        let mixed = vec![
+            (measured_phase("forsterite", dec("5.158"), None), dec("0.7")),
+            (ferrous, dec("0.3")),
+        ];
+        let with_iron = assemblage_conductivity(&borrow(&mixed), hot)
+            .expect("resolves")
+            .expect("positive");
+        assert_eq!(
+            with_iron.radiative_scope,
+            RadiativeFitScope::TerranFerrousSilicateFit,
+            "a ferrous phase pulls in the scoped fit, and the result says so"
+        );
+        let err = with_iron
+            .radiative_weight_fraction
+            .checked_sub(dec("0.3"))
+            .unwrap()
+            .abs();
+        assert!(
+            err < dec("0.001"),
+            "three tenths of the census took the scoped fit, got {}",
+            with_iron.radiative_weight_fraction.to_f64_lossy()
+        );
+    }
+
+    /// A PHASE'S OWN CITED EXPONENT BEATS THE CLASSIFIER, which is the route both refusal messages have always
+    /// told callers to take and which nothing implemented. It is what keeps the SIMPLE class's only overlap
+    /// point reachable while that class's exponent is reserved: MgO carries a cited `a = 0.9`. The complex
+    /// class's four overlap points need no such route, because their class exponent is cited.
+    #[test]
+    fn a_phase_carrying_its_own_cited_exponent_evaluates_where_the_class_refuses() {
+        // A simple-class phase with no per-phase exponent refuses, naming the reserved value.
+        let mut periclase = measured_phase("periclase", dec("48.4"), None);
+        periclase.atoms_per_primitive_cell = 2;
+        let refusal = assemblage_conductivity(
+            &borrow(&[(periclase.clone(), Fixed::ONE)]),
+            Fixed::from_int(1000),
+        )
+        .expect_err("the simple class carries no exponent of its own");
+        assert_eq!(
+            refusal,
+            ConductivityRefusal::ReservedExponentUnset {
+                phase: "periclase".to_string(),
+                atoms_per_primitive_cell: 2,
+            }
+        );
+
+        // The same phase with its cited determination evaluates, and it evaluates AT that exponent: at 1000 K
+        // the answer must equal the anchor carried by 0.9 exactly, since no expansion is supplied here.
+        let mut cited = periclase;
+        cited.measured_exponent_a = Some(Fixed::from_ratio(9, 10));
+        let hot = Fixed::from_int(1000);
+        let agg = assemblage_conductivity(&borrow(&[(cited, Fixed::ONE)]), hot)
+            .expect("a cited per-phase exponent resolves")
+            .expect("positive");
+        let expected = hofmeister_lattice_conductivity(
+            dec("48.4"),
+            Fixed::from_ratio(9, 10),
+            Fixed::from_ratio(15, 10),
+            ZERO,
+            hot,
+        )
+        .unwrap();
+        let err = agg.conductivity.checked_sub(expected).unwrap().abs();
+        assert!(
+            err < dec("0.001"),
+            "a one-phase census IS that phase carried by ITS cited exponent: got {} expected {}",
+            agg.conductivity.to_f64_lossy(),
+            expected.to_f64_lossy()
+        );
+
+        // And the cell count that put it in the uncalibrated gap is bypassed the same way.
+        let mut gapped = measured_phase("mystery", dec("4.0"), None);
+        gapped.atoms_per_primitive_cell = 4;
+        gapped.measured_exponent_a = Some(Fixed::from_ratio(5, 10));
+        assert!(
+            assemblage_conductivity(&borrow(&[(gapped, Fixed::ONE)]), hot).is_ok(),
+            "a cited exponent closes the 2 < n < 6 gap for the phase that carries one"
+        );
     }
 
     /// An empty or zero-weight census is not an error and not a zero: it is the honest `None`, because there is

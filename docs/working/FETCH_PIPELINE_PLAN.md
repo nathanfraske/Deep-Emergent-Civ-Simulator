@@ -325,21 +325,20 @@ receipt.
 
 ## 5. The two hops: connecting a derived quantity to its held primary
 
-The DAG already exists and this plan consumes it rather than rebuilding it. `FloorGrade` in
-`crates/physics/src/floor_provenance.rs` carries `derived_from: Vec<String>`, enforced by the register's
-own test (`"{} is derived but names no inputs"`). `crates/sim/src/unified_provenance.rs` joins the
-calibration and floor registers into one node set with worst-case taint propagation. The viewer has a
-live tracer on `Key::P` that reads the register rather than a document.
+The candidate-evidence DAG already exists and this plan consumes it rather than rebuilding it.
+`FloorCandidateRecord` in `crates/physics/src/floor_provenance.rs` carries
+`derived_from: Vec<String>`, enforced by the registry's own test (`"{} is derived but names no inputs"`).
+It is an evidence-custody graph only. It is not joined to calibration, cannot admit an absolute-floor
+entry, and is not reachable from the observer-only viewer.
 
 The graph traces a derived quantity back to its input quantities and then stops. Two hops are missing.
 
-### Hop A: a floor leaf to the source that vendors it
+### Hop A: a candidate leaf to the source that vendors it
 
-`FloorGrade` has `id`, `grade`, `derived_from`, `derive_first_defect` and `unsettled`. It has no source
-field, so a `measured` leaf does not point at the manifest entry holding the paper it came from. The
-viewer shows this gap directly: `provenance_lines()` prints `[M Robie-Hemingway]` and `[M cited]` as
-hardcoded prose while `crates/physics/data/robie_hemingway_1995/manifest.toml` holds the actual bytes and
-checksum, with nothing connecting the string to the entry.
+`FloorCandidateRecord` has `id`, `status`, `derived_from`, `derive_first_defect`, `unsettled`, and
+`sources`. A candidate leaf can therefore point at the manifest entry holding the paper it came from.
+That final hop establishes evidence custody; it does not convert the candidate to `[M]` or authorize a
+runpath magnitude.
 
 **The hop is a `sources` key on the existing `[[grade]]` blocks in `crates/physics/data/floor_provenance.toml`:**
 
@@ -353,13 +352,9 @@ sources = ["robie_hemingway_1995"]
 Put in the file that already exists rather than a new sidecar keyed by the same id, because two files
 keyed by one id can disagree and this repo has a `diamond_gate.py` for exactly that failure.
 
-**This is verified byte-neutral and needs no Rust change.** `FloorGrade` does not carry
-`serde(deny_unknown_fields)`, so serde ignores the new key. `floor_provenance_gate.py` parses line by line
-with specific regexes (`^id = `, `^grade = `, `^derived_from = \[`) and ignores unknown lines. Confirmed by
-reading both. The data is therefore shaped for the Rust field before the Rust field exists, and adding
-`#[serde(default)] pub sources: Vec<String>` later is a pure additive read with no data migration. That
-addition is left as an owner decision (section 8, D2) because it touches Rust and the brief scopes this
-work to docs, scripts and data.
+**Implemented.** `FloorCandidateRecord::sources` is a default-empty list, and
+`floor_provenance_gate.py` keeps parsing the historical `[[grade]]` data spelling. Empty means the source
+link has not yet been migrated, never that the row is admitted or source-free.
 
 ### Hop B: a deriving function to its sources
 
@@ -475,12 +470,9 @@ the 1 to 2 MB region are precisely the two that were never slimmed (20.76 MB and
 of 45.4 MB against a 226 MB `.git`). The decision is where to draw it and whether the two outliers are
 slimmed now, converted to `witness`, or grandfathered indefinitely.
 
-**D2. Whether `FloorGrade` gains a `sources: Vec<String>` field.** The data hop lands without it and is
-byte-neutral as data. The Rust field would let the viewer's live tracer resolve `[M Robie-Hemingway]` to
-the actual held entry instead of printing a hardcoded string. `FloorProvenance` is constructed only in
-`crates/physics/tests/floors.rs`, the viewer, and the `unified_provenance` accounting query, so it is not
-on the `run_world` path and an additive `#[serde(default)]` field should not move a pin. It is left
-undone because it is a Rust change outside the stated scope and a re-pin is the owner's call.
+**D2 resolved.** `FloorCandidateRecord` now carries `sources: Vec<String>`. The candidate registry remains
+off the canonical planet runpath and the viewer remains observation-only. A source link is evidence custody,
+not admission.
 
 **D3. Remediation order for the 27 grandfathered sources.** The ratchet resolves them as they are touched.
 If the owner wants a deliberate sweep instead, the natural order is the 14 missing an archive URL first

@@ -28,9 +28,10 @@
 //! `kinetic_energy` floor law per unit mass) and a directional momentum bias `heading`. Each step it moves
 //! to the neighbour its momentum and gravity together favour, and pays the step's energy change
 //! `de = g * (drop - mu * cell)`: gravity returns `g * drop` going downhill (a cost going up), and Coulomb
-//! friction always dissipates `mu * g * cell` (the `friction` floor law's kinetic term `mu * normal` per
-//! unit mass over the step, the `cos(theta)` of the slope cancelling between the normal force and the
-//! along-slope distance). When the budget cannot cover the next step the parcel rests and deposits.
+//! friction always dissipates `mu * g * cell` (the `coulomb_friction_response` floor law's kinetic term
+//! `mu * normal` per unit mass over the step, the `cos(theta)` of the slope cancelling between the normal
+//! force and the along-slope distance). When the budget cannot cover the next step the parcel rests and
+//! deposits.
 //!
 //! The regimes fall out of the one law, none authored. The ANGLE OF REPOSE is the break-even slope
 //! `drop = mu * cell`: a static parcel (`e0 = 0`) on a slope steeper than `mu` gains energy and flows, on a

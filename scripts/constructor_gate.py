@@ -15,8 +15,9 @@
 
 """Q1 Stone 1, items 2 and 3: the sealed-Fixed-constructor ratchet.
 
-Machine-enforce derive-do-not-author: a value in the path of world content must be derived from the
-floor and the situation, or read as world data, never authored inline. The seal is a CI ratchet, not
+Machine-enforce derive-do-not-author: a value in the path of world content must derive from the
+absolute floor and the situation. An irreducible reference or residue may extend that floor only
+after the derivation-exhaustion protocol; it is never admitted as caller-supplied world data. The seal is a CI ratchet, not
 a compile seal, because the split between an authored world-content value and a legitimate
 engine-mechanics constant is SEMANTIC, not syntactic: both are `Fixed::from_ratio(...)`, and the
 determinism crates carry the constructors in the low thousands, dominated by the documented
@@ -47,21 +48,32 @@ import hashlib
 import pathlib
 import re
 import sys
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 # The crates whose source is on the path of world content. Out of scope: `core` (the `Fixed` type's
 # own home, where its raw-bit transcendental table legitimately lives) and `units` (the constants
 # quarantine, the one authored place, where the fundamentals and measured floor constants live).
 CRATES = [
-    "crates/bio/src",
-    "crates/foundation/src",
+    "crates/ledger/src",
+    "crates/materials/src",
+    "crates/planet/src",
+    "crates/planet-substrate/src",
     "crates/physics/src",
-    "crates/sim/src",
+    "crates/viewer/src",
     "crates/world/src",
 ]
 HARD = ["::from_bits(", "::from_decimal_str("]
 ADVISORY = ["::from_int(", "::from_ratio("]
 BASELINE = ROOT / "scripts" / "constructor_baseline.tsv"
+PARKED_CRATES = [
+    "parked/crates/bio/src",
+    "parked/crates/compose/src",
+    "parked/crates/foundation/src",
+    "parked/crates/sim/src",
+    "parked/crates/viewer/src",
+]
+PARKED_BASELINE = ROOT / "parked" / "scripts" / "constructor_baseline.tsv"
 
 # Modules exempt wholesale (no per-site reason): kernel modules that carry only argument-read
 # world-content and engine-mechanics constants, and the floor and manifest loaders that parse cited
@@ -71,6 +83,7 @@ EXEMPT_MODULES = {
     "crates/physics/src/lib.rs",        # the physics registry loader (parses cited axis/substance data)
     "crates/physics/src/periodic.rs",   # the periodic-table loader (parses cited atomic weights)
     "crates/physics/src/petrology_data.rs", # the phase-registry loader (parses cited phase thermodynamics)
+    "crates/physics/src/thermoelastic_anchors.rs", # the MGD-anchor loader (parses the cited theta_0/q column)
     "crates/physics/src/melting_data.rs", # the melting-endmember loader (parses cited [M] T_m/dH_fus/dV_fus signatures)
     "crates/physics/src/ionic_radii.rs", # the ionic-radii loader (parses cited Shannon 1976 crystal radii)
     "crates/physics/src/ionization_ladder.rs", # the ionization-ladder loader (parses cited NIST successive IEs)
@@ -83,8 +96,8 @@ EXEMPT_MODULES = {
     "crates/physics/src/crystal_field.rs", # the crystal-field loader (parses cited Jorgensen f/g, Racah B, oxide Delta_o)
     "crates/physics/src/stoner.rs",     # the Stoner loader (parses cited Janak 1977 I and nonmagnetic-band N)
     "crates/physics/src/quantities.rs", # quantity definitions and the wide-decimal doc reference
-    "crates/bio/src/calibration.rs",    # the calibration-manifest loader (parses the owner's reserved values)
-    "crates/sim/src/astro.rs",          # the stellar-flux derivation (parses cited astronomical anchors L_sun/AU)
+    "parked/crates/foundation/src/calibration.rs", # legacy calibration-manifest loader
+    "crates/planet-substrate/src/astro.rs", # the stellar-flux derivation (parses cited astronomical anchors L_sun/AU)
     "crates/physics/src/opacity.rs",    # the disk-opacity generator (parses cited fundamentals e/eps_0/m_e/c for the Thomson-scattering derivation)
     "crates/physics/src/optical_constants.rs", # the optical-constants loader (parses cited per-species n,k tables)
 }
@@ -192,10 +205,10 @@ def hard_check(root: pathlib.Path) -> tuple:
         if got > want:
             violations.append(
                 f"NEW inline `{pat}` in {rel} ({got}, baseline {want}). Classify it in "
-                f"scripts/constructor_baseline.tsv: legitimate-mechanics/bit-arithmetic/deser/test/"
+                f"{BASELINE.relative_to(root).as_posix()}: legitimate-mechanics/bit-arithmetic/deser/test/"
                 f"dev-fixture is grandfathered with a reason; an authored world-content value must "
-                f"instead read from the floor (the physics registry, the calibration manifest, the "
-                f"periodic table) or derive from it."
+                f"instead derive from the absolute floor or pass the full irreducible-floor "
+                f"admission protocol. A citation or provenance tag alone is not admission."
             )
         elif got < want:
             violations.append(f"stale baseline: `{pat}` in {rel} ({got}, baseline {want}). Lower or delete its row.")
@@ -232,7 +245,8 @@ def advisory(root: pathlib.Path) -> None:
     counts = scan(root, ADVISORY)
     per_crate = {}
     for (pat, rel), n in counts.items():
-        crate = rel.split("/")[1]
+        parts = rel.split("/")
+        crate = parts[2] if parts[:2] == ["parked", "crates"] else parts[1]
         per_crate.setdefault(crate, {}).setdefault(pat, 0)
         per_crate[crate][pat] += n
     print("advisory: the interleaved from_int / from_ratio distribution (the owner-scoped migration line):")
@@ -250,19 +264,37 @@ def generate(root: pathlib.Path) -> int:
 
 
 def self_test(root: pathlib.Path) -> int:
-    probe = root / "crates" / "sim" / "src" / "__constructor_gate_probe.rs"
-    probe.write_text("let _ = Fixed::from_bits(1);\n", encoding="utf-8")
-    try:
-        violations, _ = hard_check(root)
-    finally:
-        probe.unlink()
+    global BASELINE
+    probe_root = PARKED_CRATES[0] if CRATES == PARKED_CRATES else "crates/planet/src"
+    baseline_relative = (
+        pathlib.Path("parked/scripts/constructor_baseline.tsv")
+        if CRATES == PARKED_CRATES
+        else pathlib.Path("scripts/constructor_baseline.tsv")
+    )
+    previous_baseline = BASELINE
+    with tempfile.TemporaryDirectory(prefix="constructor-gate-") as tmp:
+        fixture_root = pathlib.Path(tmp)
+        probe = fixture_root / probe_root / "__constructor_gate_probe.rs"
+        probe.parent.mkdir(parents=True, exist_ok=True)
+        probe.write_text("let _ = Fixed::from_bits(1);\n", encoding="utf-8")
+        BASELINE = fixture_root / baseline_relative
+        BASELINE.parent.mkdir(parents=True, exist_ok=True)
+        BASELINE.write_text("", encoding="utf-8")
+        try:
+            violations, _ = hard_check(fixture_root)
+        finally:
+            BASELINE = previous_baseline
     hit = any("__constructor_gate_probe.rs" in v for v in violations)
     print("constructor gate self-test: " + ("PASS (a synthetic new from_bits is caught)" if hit else "FAIL"))
     return 0 if hit else 1
 
 
 def main() -> int:
+    global CRATES, BASELINE
     args = sys.argv[1:]
+    if "--parked" in args:
+        CRATES = PARKED_CRATES
+        BASELINE = PARKED_BASELINE
     if "--generate" in args:
         return generate(ROOT)
     if "--self-test" in args:
@@ -277,7 +309,8 @@ def main() -> int:
         for v in violations:
             print(f"  - {v}")
         return 1
-    print("constructor gate: clean (the hard-ratchet constructors match the audited baseline)")
+    scope = "parked" if CRATES == PARKED_CRATES else "canonical"
+    print(f"constructor gate: clean ({scope} hard-ratchet constructors match the audited baseline)")
     return 0
 
 

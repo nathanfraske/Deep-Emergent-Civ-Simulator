@@ -17,37 +17,41 @@
 //! This crate is the foundation the runbook lists as buildable now and the
 //! structure the R-UNITS-PIN flag calls for. It carries the *mechanism* only:
 //!
-//! - A base-dimension registry. The set of base dimensions is data the owner and
-//!   the physics fan-out provide (R-DEEPTECH-PHYSICS), not authored here, because
-//!   the physics catalogue is the one authored layer and is the owner's to populate
-//!   (Principle 9). A [`Dimension`] is a vector of integer exponents over those base
+//! - A base-dimension registry. A [`Dimension`] is a vector of integer exponents over supplied base
 //!   dimensions, kept in a canonical sorted form, so a derived dimension (force,
 //!   energy) is a computed composition rather than an authored entry, and every
 //!   quantity mechanically reduces to base dimensions, which is the descriptor
 //!   neutrality the steering audit wants.
 //! - A quantity registry. Each quantity carries its dimension, its per-quantity
-//!   fixed-point scale, and an explicit saturate-or-wrap overflow policy. The scales
-//!   are the owner's reserved numbers, provided in data; the crate ships none.
+//!   fixed-point scale, and an explicit saturate-or-wrap overflow policy. A canonical
+//!   producer derives scales from the execution type and the quantity envelope; this
+//!   generic registry merely records the resulting representation metadata.
 //! - Deterministic integer arithmetic and conversion. Magnitudes are `i64` at a
 //!   quantity's scale. No floating point appears anywhere, so nothing here can
 //!   perturb a canonical result, and overflow follows the quantity's declared
 //!   policy rather than an accident (the discipline Part 55 requires).
 //!
-//! What this crate deliberately does not contain: any base dimension, any quantity,
-//! or any scale. Those are the authored physics catalogue and the owner's reserved
-//! values; the tests use a small fixture catalogue, clearly marked as a fixture and
-//! not the authored set. The one exception is the [`fundamentals`] module: the closed
-//! table of CODATA fundamental constants, which ARE the one authored universal layer
-//! the value-authoring line permits (distinct from any owner or per-world value).
+//! What this crate deliberately does not contain: a caller-selected physical
+//! floor, per-world quantity, or causal scale. The [`fundamentals`] module keeps
+//! exact SI representation definitions separate from measured physical
+//! invariants, and `constants` derives the execution view. The canonical planet
+//! boundary alone admits physical invariants after derive-first exhaustion.
 
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 
+mod authority_watchdog;
 pub mod bignum;
+pub use authority_watchdog::AuthorityWatchdogError;
+mod certified_projection;
 pub mod compute;
-pub mod emic;
+pub mod constants;
+pub mod digest;
+pub mod dimensional_analysis;
+mod floor_admission_watchdog;
 pub mod fundamentals;
 pub mod guard;
+pub mod physics_floor;
 pub mod plan;
 pub mod tier2;
 
@@ -58,9 +62,28 @@ pub type DimExp = i8;
 /// A dimension as a canonical, sorted vector of `(base index, exponent)` terms with
 /// no zero exponents. Two dimensions are equal exactly when their canonical vectors
 /// are equal, so dimensional checks are exact and deterministic.
-#[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Default, Serialize)]
 pub struct Dimension {
     terms: Vec<(u16, DimExp)>,
+}
+
+impl<'de> Deserialize<'de> for Dimension {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct DimensionWire {
+            terms: Vec<(u16, DimExp)>,
+        }
+
+        let DimensionWire { terms } = DimensionWire::deserialize(deserializer)?;
+        let canonical = Dimension::from_terms(terms.iter().copied())
+            .ok_or_else(|| de::Error::custom("dimension exponent sum is out of range"))?;
+        if terms != canonical.terms {
+            return Err(de::Error::custom(
+                "dimension terms are not in canonical sorted nonzero form",
+            ));
+        }
+        Ok(canonical)
+    }
 }
 
 impl Dimension {
@@ -78,18 +101,25 @@ impl Dimension {
 
     /// Build a dimension from arbitrary terms, reducing to canonical form: like
     /// indices are combined, zero exponents dropped, and the result sorted by index.
-    pub fn from_terms(terms: impl IntoIterator<Item = (u16, DimExp)>) -> Self {
+    /// Returns `None` when a combined exponent does not fit [`DimExp`].
+    pub fn from_terms(terms: impl IntoIterator<Item = (u16, DimExp)>) -> Option<Self> {
         let mut acc: HashMap<u16, i32> = HashMap::new();
         for (idx, exp) in terms {
-            *acc.entry(idx).or_insert(0) += exp as i32;
+            let sum = acc
+                .get(&idx)
+                .copied()
+                .unwrap_or(0)
+                .checked_add(i32::from(exp))?;
+            acc.insert(idx, sum);
         }
-        let mut v: Vec<(u16, DimExp)> = acc
-            .into_iter()
-            .filter(|(_, e)| *e != 0)
-            .map(|(idx, e)| (idx, e as DimExp))
-            .collect();
+        let mut v = Vec::with_capacity(acc.len());
+        for (idx, exponent) in acc {
+            if exponent != 0 {
+                v.push((idx, DimExp::try_from(exponent).ok()?));
+            }
+        }
         v.sort_by_key(|(idx, _)| *idx);
-        Dimension { terms: v }
+        Some(Dimension { terms: v })
     }
 
     /// Whether this is the dimensionless quantity.
@@ -98,19 +128,26 @@ impl Dimension {
     }
 
     /// The product of two dimensions (exponents add): the dimension of a product of
-    /// two quantities.
-    pub fn mul(&self, other: &Dimension) -> Dimension {
+    /// two quantities. Returns `None` when an exponent sum is out of range.
+    pub fn mul(&self, other: &Dimension) -> Option<Dimension> {
         Dimension::from_terms(self.terms.iter().chain(other.terms.iter()).copied())
     }
 
-    /// The reciprocal dimension (exponents negate).
-    pub fn inv(&self) -> Dimension {
-        Dimension::from_terms(self.terms.iter().map(|(i, e)| (*i, -e)))
+    /// The reciprocal dimension (exponents negate), or `None` when negation is
+    /// not representable.
+    pub fn inv(&self) -> Option<Dimension> {
+        Dimension::from_terms(
+            self.terms
+                .iter()
+                .map(|(index, exponent)| Some((*index, exponent.checked_neg()?)))
+                .collect::<Option<Vec<_>>>()?,
+        )
     }
 
-    /// The quotient of two dimensions.
-    pub fn div(&self, other: &Dimension) -> Dimension {
-        self.mul(&other.inv())
+    /// The quotient of two dimensions, or `None` when an exponent is not
+    /// representable.
+    pub fn div(&self, other: &Dimension) -> Option<Dimension> {
+        self.mul(&other.inv()?)
     }
 
     /// The canonical terms, for inspection and hashing.
@@ -180,8 +217,10 @@ pub enum OverflowPolicy {
 }
 
 /// A quantity definition: its dimension, its per-quantity fixed-point scale (the
-/// number of fractional bits), and its overflow policy. The scale is the owner's
-/// reserved number, provided in data (R-UNITS-PIN); the crate authors none.
+/// number of fractional bits), and its overflow policy. The scale is representation
+/// metadata, not physical authority. Canonical producers derive it from the execution
+/// type and the quantity envelope; generic tools may supply it to model other integer
+/// formats.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct QuantityDef {
     /// Stable name within the catalogue.
@@ -369,12 +408,10 @@ pub(crate) fn idiv_round_half_even(num: i128, den: i128) -> i128 {
 /// A `scale_bits == to == from` rescale is the identity, so a quantity stored at the canonical
 /// thirty-two fractional bits bridges to and from `Fixed` with no change.
 pub fn rescale_bits(bits: i64, from_scale_bits: u32, to_scale_bits: u32) -> Option<i64> {
-    let s1 = from_scale_bits as i32;
-    let s2 = to_scale_bits as i32;
-    let out: i128 = if s2 >= s1 {
+    let out: i128 = if to_scale_bits >= from_scale_bits {
         // Up-scale by a left shift. A non-zero value shifted by 63 or more already exceeds the i64
         // range, so report it out of range rather than overflow the i128 intermediate.
-        let shift = (s2 - s1) as u32;
+        let shift = to_scale_bits - from_scale_bits;
         if bits == 0 {
             0
         } else if shift >= 63 {
@@ -385,11 +422,12 @@ pub fn rescale_bits(bits: i64, from_scale_bits: u32, to_scale_bits: u32) -> Opti
     } else {
         // Down-scale by a rounded division; bound the shift so the divisor stays a positive power of
         // two, past which the result rounds to zero anyway.
-        let shift = (s1 - s2) as u32;
-        if shift >= 127 {
-            return None;
+        let shift = from_scale_bits - to_scale_bits;
+        if shift >= 64 {
+            0
+        } else {
+            idiv_round_half_even(bits as i128, 1i128 << shift)
         }
-        idiv_round_half_even(bits as i128, 1i128 << shift)
     };
     if out < i64::MIN as i128 || out > i64::MAX as i128 {
         None
@@ -409,8 +447,8 @@ pub struct DerivedScale {
     pub windowed: bool,
 }
 
-/// Derive a quantity's fixed-point scale from its declared envelope. The mechanism is fixed; the
-/// envelope and the targets are the owner's reserved numbers (R-UNITS-PIN), provided by the caller:
+/// Derive a quantity's fixed-point scale from its declared envelope. The mechanism is fixed. Its
+/// arguments describe an integer representation policy, not a physical or per-world input:
 /// `hi_log2` is the floor-base-2 logarithm of the envelope's largest bound magnitude, `lo_log2` the
 /// floor-base-2 logarithm of its smallest non-zero bound magnitude (both negative for a value below
 /// one, and computed from the physical decimal envelope by the caller, since a bound like `1e-12`
@@ -421,8 +459,9 @@ pub struct DerivedScale {
 /// `canonical_scale` when the top fits its integer field and `canonical_scale` fractional bits
 /// already resolve the bottom to `sig_target` significant bits; otherwise a wide envelope derives a
 /// scale that holds the top and gives the bottom as much significance as the sixty-three-bit budget
-/// allows, reducing the significance target (`windowed`) when even that will not fit. The crate
-/// authors no scale; it computes one from the owner's envelope and targets.
+/// allows, reducing the significance target (`windowed`) when even that will not fit. Canonical
+/// callers obtain their targets from the independently checked type-derived representation policy;
+/// this generic function remains parameterized so noncanonical tools can analyze other formats.
 pub fn derive_scale_bits(
     hi_log2: i32,
     lo_log2: i32,
@@ -487,9 +526,9 @@ impl AbsoluteQuantity {
 mod tests {
     use super::*;
 
-    // A small FIXTURE catalogue, not the authored physics set. It exists only to
-    // exercise the mechanism; the real base dimensions, quantities, and scales are
-    // data the owner provides (R-UNITS-PIN, R-DEEPTECH-PHYSICS).
+    // A small FIXTURE catalogue, not the canonical physics set. It exists only to
+    // exercise the generic mechanism; canonical definitions and scales must come
+    // from their typed derivation producers and receipts.
     fn fixture() -> (BaseDimensionRegistry, QuantityRegistry, u32, u32, u32) {
         let mut base = BaseDimensionRegistry::new();
         let length = base.register("length");
@@ -504,7 +543,7 @@ mod tests {
             overflow: OverflowPolicy::Saturate,
         });
         // force = mass * length / time^2, a computed composition, never authored.
-        let force_dim = Dimension::from_terms([(mass, 1), (length, 1), (time, -2)]);
+        let force_dim = Dimension::from_terms([(mass, 1), (length, 1), (time, -2)]).unwrap();
         let force = q.register(QuantityDef {
             name: "force".to_string(),
             dimension: force_dim,
@@ -523,12 +562,12 @@ mod tests {
 
     #[test]
     fn dimension_is_canonical_regardless_of_term_order() {
-        let a = Dimension::from_terms([(2, -2), (0, 1), (1, 1)]);
-        let b = Dimension::from_terms([(1, 1), (0, 1), (2, -2)]);
+        let a = Dimension::from_terms([(2, -2), (0, 1), (1, 1)]).unwrap();
+        let b = Dimension::from_terms([(1, 1), (0, 1), (2, -2)]).unwrap();
         assert_eq!(a, b, "term order does not change the canonical dimension");
         // combining like terms and dropping zeros.
-        let c = Dimension::from_terms([(0, 1), (0, 1), (3, 2), (3, -2)]);
-        assert_eq!(c, Dimension::from_terms([(0, 2)]));
+        let c = Dimension::from_terms([(0, 1), (0, 1), (3, 2), (3, -2)]).unwrap();
+        assert_eq!(c, Dimension::from_terms([(0, 2)]).unwrap());
     }
 
     #[test]
@@ -536,12 +575,35 @@ mod tests {
         let (_b, _q, _d, _f, _m) = fixture();
         let length = 0u16;
         let time = 2u16;
-        let velocity = Dimension::base(length).div(&Dimension::base(time));
-        let accel = velocity.div(&Dimension::base(time));
-        assert_eq!(accel, Dimension::from_terms([(length, 1), (time, -2)]));
+        let velocity = Dimension::base(length).div(&Dimension::base(time)).unwrap();
+        let accel = velocity.div(&Dimension::base(time)).unwrap();
+        assert_eq!(
+            accel,
+            Dimension::from_terms([(length, 1), (time, -2)]).unwrap()
+        );
         assert!(Dimension::base(length)
             .div(&Dimension::base(length))
+            .unwrap()
             .is_dimensionless());
+    }
+
+    #[test]
+    fn dimension_exponent_overflow_is_a_typed_refusal() {
+        assert!(Dimension::from_terms([(0, DimExp::MAX), (0, 1)]).is_none());
+        assert!(Dimension::from_terms([(0, DimExp::MIN)])
+            .unwrap()
+            .inv()
+            .is_none());
+        assert!(Dimension::from_terms([(0, DimExp::MAX)])
+            .unwrap()
+            .mul(&Dimension::base(0))
+            .is_none());
+    }
+
+    #[test]
+    fn dimension_never_stores_a_zero_term_after_cancellation() {
+        let cancelled = Dimension::from_terms([(7, 1), (7, -1)]).unwrap();
+        assert!(cancelled.terms().is_empty());
     }
 
     #[test]
@@ -664,6 +726,9 @@ mod tests {
         );
         // A shift past the i64 range is reported, not wrapped.
         assert_eq!(rescale_bits(1, 0, 63), None);
+        assert_eq!(rescale_bits(i64::MAX, u32::MAX, 0), Some(0));
+        assert_eq!(rescale_bits(i64::MIN, u32::MAX, 0), Some(0));
+        assert_eq!(rescale_bits(0, 0, u32::MAX), Some(0));
     }
 
     #[test]

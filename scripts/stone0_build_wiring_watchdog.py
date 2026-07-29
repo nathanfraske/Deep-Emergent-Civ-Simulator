@@ -1,0 +1,445 @@
+#!/usr/bin/env python3
+"""Independently scan Stone 0's singleton Cargo build topology."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import pathlib
+import re
+import shutil
+import sys
+import tempfile
+
+
+REPOSITORY = pathlib.Path(__file__).resolve().parent.parent
+SCHEMA = "civsim.stone0.build-wiring-pair.v1"
+CLAIM = "governance.stone0-build-wiring"
+FIRST_IMPLEMENTATION = "civsim.stone0.toml-graph-producer.v1"
+SECOND_IMPLEMENTATION = "civsim.stone0.section-scan-watchdog.v1"
+ANCHOR_PATH = "crates/stone0-build"
+CLIENTS = ("crates/planet", "crates/planet-substrate")
+ENVIRONMENT_NAME = "CIVSIM_STONE0_GUARD_MARKER"
+TOKEN = "civsim.stone0.build-guard.v1"
+OBSERVED_PATHS = (
+    "Cargo.toml",
+    "justfile",
+    "crates/stone0-build/Cargo.toml",
+    "crates/stone0-build/build.rs",
+    "crates/stone0-build/src/lib.rs",
+    "crates/stone0/src/lib.rs",
+    "crates/planet/Cargo.toml",
+    "crates/planet/build.rs",
+    "crates/planet-substrate/Cargo.toml",
+    "crates/planet-substrate/build.rs",
+)
+
+
+class WatchdogError(ValueError):
+    """The independent build-wiring scan refused the topology."""
+
+
+def _bytes(root: pathlib.Path, name: str) -> bytes:
+    path = root.joinpath(*name.split("/"))
+    try:
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(root.resolve(strict=True))
+    except (FileNotFoundError, OSError, ValueError) as error:
+        raise WatchdogError(f"unavailable wiring member: {name}") from error
+    if path.is_symlink() or not resolved.is_file():
+        raise WatchdogError(f"linked or non-file wiring member: {name}")
+    return resolved.read_bytes()
+
+
+def _text(root: pathlib.Path, name: str) -> str:
+    try:
+        return _bytes(root, name).decode("utf-8", errors="strict")
+    except UnicodeDecodeError as error:
+        raise WatchdogError(f"non-UTF-8 wiring member: {name}") from error
+
+
+def _section(source: str, heading: str) -> str:
+    match = re.search(
+        rf"(?ms)^\[{re.escape(heading)}\]\s*$\n(.*?)(?=^\[|\Z)", source
+    )
+    if match is None:
+        raise WatchdogError(f"manifest omits [{heading}]")
+    return match.group(1)
+
+
+def _one(pattern: str, source: str, label: str) -> re.Match[str]:
+    matches = list(re.finditer(pattern, source, flags=re.MULTILINE))
+    if len(matches) != 1:
+        raise WatchdogError(f"{label} must occur exactly once")
+    return matches[0]
+
+
+def inspect(root: pathlib.Path) -> None:
+    workspace = _section(_text(root, "Cargo.toml"), "workspace")
+    members = _one(r'^members\s*=\s*\[(.*)\]\s*$', workspace, "workspace members").group(1)
+    defaults = _one(
+        r'^default-members\s*=\s*\[(.*)\]\s*$', workspace, "workspace defaults"
+    ).group(1)
+    if members.count(f'"{ANCHOR_PATH}"') != 1:
+        raise WatchdogError("workspace does not name one anchor")
+    if f'"{ANCHOR_PATH}"' in defaults:
+        raise WatchdogError("workspace defaults select the anchor")
+
+    anchor_manifest = _text(root, f"{ANCHOR_PATH}/Cargo.toml")
+    package = _section(anchor_manifest, "package")
+    _one(r'^name\s*=\s*"civsim-stone0-build"\s*$', package, "anchor name")
+    _one(r'^build\s*=\s*"build\.rs"\s*$', package, "anchor build path")
+    if re.search(r"(?m)^\[dependencies\]\s*$", anchor_manifest):
+        raise WatchdogError("anchor exposes runtime dependencies")
+    build_dependencies = _section(anchor_manifest, "build-dependencies")
+    assignments = [
+        line.strip()
+        for line in build_dependencies.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    if assignments != ['civsim-stone0 = { path = "../stone0" }']:
+        raise WatchdogError("anchor build dependency set changed")
+
+    for client in CLIENTS:
+        manifest = _text(root, f"{client}/Cargo.toml")
+        _one(
+            r'^build\s*=\s*"build\.rs"\s*$',
+            _section(manifest, "package"),
+            f"{client} build path",
+        )
+        dependency_lines = [
+            line.strip()
+            for line in _section(manifest, "build-dependencies").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        if dependency_lines != [
+            'civsim-stone0-build = { path = "../stone0-build" }'
+        ]:
+            raise WatchdogError(f"{client} does not have the one shared guard dependency")
+        build_source = _text(root, f"{client}/build.rs")
+        if build_source.count("civsim_stone0_build::assert_guard_linked();") != 1:
+            raise WatchdogError(f"{client} sentinel count changed")
+        if re.search(r"civsim_stone0::|Mode::|emit_cargo_rerun_inputs", build_source):
+            raise WatchdogError(f"{client} regained an independent gate runner")
+
+    build_source = _text(root, f"{ANCHOR_PATH}/build.rs")
+    _one(
+        r'^\s*let repo_root = Path::new\(env!\("CARGO_MANIFEST_DIR"\)\)'
+        r'\.join\("\.\./\.\."\);\s*$',
+        build_source,
+        "manifest-derived repository root",
+    )
+    _one(
+        r"civsim_stone0::run_at_repository_root"
+        r"\(civsim_stone0::Mode::Local, &repo_root\)",
+        build_source,
+        "explicit-root Stone 0 call",
+    )
+    sequence = [
+        build_source.find(
+            'let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");'
+        ),
+        build_source.find("civsim_stone0::emit_cargo_rerun_inputs(&repo_root);"),
+        build_source.find("std::fs::remove_file(&marker)"),
+        build_source.find(
+            "civsim_stone0::run_at_repository_root("
+            "civsim_stone0::Mode::Local, &repo_root)"
+        ),
+        build_source.find("if code != 0"),
+        build_source.find("std::fs::write(&marker, MARKER_SOURCE)"),
+        build_source.find("cargo:rustc-env=CIVSIM_STONE0_GUARD_MARKER"),
+    ]
+    if any(position < 0 for position in sequence) or sequence != sorted(sequence):
+        raise WatchdogError("anchor run and marker order changed")
+    if "civsim_stone0::run(civsim_stone0::Mode::Local)" in build_source:
+        raise WatchdogError("anchor retained the ambient repository-root runner")
+    if TOKEN not in build_source:
+        raise WatchdogError("anchor marker token changed")
+
+    stone0_source = _text(root, "crates/stone0/src/lib.rs")
+    explicit_route = _one(
+        r"(?ms)^pub fn run_at_repository_root\(.*?^\}\s*$",
+        stone0_source,
+        "explicit-root entry-point section",
+    ).group(0)
+    root_validator = _one(
+        r"(?ms)^fn canonicalize_and_validate_repository_root\(.*?^\}\s*$",
+        stone0_source,
+        "repository-root validator section",
+    ).group(0)
+    top_level_query = _one(
+        r"(?ms)^fn trusted_git_top_level\(.*?^\}\s*$",
+        stone0_source,
+        "trusted Git top-level section",
+    ).group(0)
+    command_builder = _one(
+        r"(?ms)^fn trusted_git_command\(.*?^\}\s*$",
+        stone0_source,
+        "trusted Git command section",
+    ).group(0)
+    platform_selector = _one(
+        r"(?ms)^fn trusted_git_executable\(\).*?^\}\s*$",
+        stone0_source,
+        "trusted Git platform selector",
+    ).group(0)
+    executable_selector = _one(
+        r"(?ms)^fn trusted_unix_git_executable\(\).*?^\}\s*$",
+        stone0_source,
+        "trusted Git executable selector",
+    ).group(0)
+    candidate_proof = _one(
+        r"(?ms)^fn trusted_git_executable_from\(.*?^\}\s*$",
+        stone0_source,
+        "trusted Git candidate proof",
+    ).group(0)
+    executable_predicate = _one(
+        r"(?ms)^fn root_executable_shape_is_trusted\(.*?^\}\s*$",
+        stone0_source,
+        "root executable metadata predicate",
+    ).group(0)
+    directory_predicate = _one(
+        r"(?ms)^fn root_directory_shape_is_trusted\(.*?^\}\s*$",
+        stone0_source,
+        "root directory metadata predicate",
+    ).group(0)
+
+    _one(
+        r"canonicalize_and_validate_repository_root\(repo_root\)",
+        explicit_route,
+        "explicit-root validator call",
+    )
+    trusted_call = _one(
+        r"let\s+git_root\s*=\s*trusted_git_top_level\(&canonical\)\?;",
+        root_validator,
+        "trusted Git top-level acquisition",
+    )
+    inequality = _one(
+        r"if\s+git_root\s*!=\s*canonical\s*\{",
+        root_validator,
+        "trusted Git root inequality",
+    )
+    refusal = root_validator.find("return Err(format!(", inequality.end())
+    success = root_validator.find("Ok(canonical)", inequality.end())
+    if (
+        refusal < 0
+        or success < 0
+        or not trusted_call.start() < inequality.start() < refusal < success
+    ):
+        raise WatchdogError("trusted Git root inequality no longer fails before acceptance")
+
+    _one(
+        r"let\s+mut\s+command\s*=\s*trusted_git_command\(root\)\?;",
+        top_level_query,
+        "trusted Git top-level command route",
+    )
+    command_fragments = (
+        r"let\s+git\s*=\s*trusted_git_executable\(\)\?;",
+        r"let\s+mut\s+command\s*=\s*Command::new\(git\);",
+        r"\.env_clear\(\)",
+        r'\.env\("PATH",\s*"/usr/bin:/bin"\)',
+    )
+    command_positions = [
+        _one(pattern, command_builder, f"trusted Git command step {index}").start()
+        for index, pattern in enumerate(command_fragments)
+    ]
+    if command_positions != sorted(command_positions):
+        raise WatchdogError("trusted Git command steps changed order")
+
+    selector_patterns = (
+        r"trusted_git_executable_from\(\s*&\[",
+        r'Path::new\("/usr/bin/git"\)',
+        r'Path::new\("/usr/lib/git-core/git"\)',
+        r'Path::new\("/bin/git"\)',
+    )
+    _one(
+        r"trusted_unix_git_executable\(\)",
+        platform_selector,
+        "Unix Git trust route",
+    )
+    selector_positions = [
+        _one(pattern, executable_selector, f"fixed Git selector step {index}").start()
+        for index, pattern in enumerate(selector_patterns)
+    ]
+    if (
+        selector_positions != sorted(selector_positions)
+        or len(re.findall(r"Path::new\(", executable_selector)) != 3
+    ):
+        raise WatchdogError("fixed Git candidate selector changed")
+
+    _one(
+        r"is_file\s*&&\s*uid\s*==\s*0\s*&&\s*mode\s*&\s*0o022\s*==\s*0"
+        r"\s*&&\s*mode\s*&\s*0o6000\s*==\s*0\s*&&\s*mode\s*&\s*0o111\s*!=\s*0",
+        executable_predicate,
+        "root executable trust conjunction",
+    )
+    _one(
+        r"is_dir\s*&&\s*uid\s*==\s*0\s*&&\s*mode\s*&\s*0o022\s*==\s*0",
+        directory_predicate,
+        "root directory trust conjunction",
+    )
+    if "||" in executable_predicate or "||" in directory_predicate:
+        raise WatchdogError("root metadata trust predicate gained a disjunction")
+
+    proof_patterns = (
+        r"let\s+mut\s+inspected\s*=\s*BTreeSet::new\(\);",
+        r"fs::canonicalize\(candidate\)",
+        r"if\s+!inspected\.insert\(canonical\.clone\(\)\)\s*\{",
+        r"fs::metadata\(&canonical\)",
+        r"let\s+executable_is_trusted\s*=\s*root_executable_shape_is_trusted\(",
+        r"let\s+mut\s+ancestry_is_trusted\s*=\s*true;",
+        r"canonical\.ancestors\(\)\.skip\(1\)",
+        r"ancestry_is_trusted\s*&=\s*root_directory_shape_is_trusted\(",
+        r"if\s+executable_is_trusted\s*&&\s*ancestry_is_trusted\s*\{",
+        r"return\s+Ok\(canonical\);",
+    )
+    proof_positions = [
+        _one(pattern, candidate_proof, f"trusted Git proof step {index}").start()
+        for index, pattern in enumerate(proof_patterns)
+    ]
+    if proof_positions != sorted(proof_positions) or "||" in candidate_proof:
+        raise WatchdogError(
+            "trusted Git proof lost canonical dedup, metadata checks, ancestry checks, or conjunctive acceptance"
+        )
+
+    library = _text(root, f"{ANCHOR_PATH}/src/lib.rs")
+    required_library_fragments = (
+        f'include!(env!("{ENVIRONMENT_NAME}"))',
+        TOKEN,
+        "pub fn assert_guard_linked()",
+        "generated::token()",
+    )
+    if any(library.count(fragment) != 1 for fragment in required_library_fragments):
+        raise WatchdogError("anchor generated-marker consumer changed")
+
+    canonical_line = _one(
+        r"^canonical_packages\s*:=.*$",
+        _text(root, "justfile"),
+        "canonical package aggregate",
+    ).group(0)
+    if "civsim-stone0-build" in canonical_line:
+        raise WatchdogError("canonical package aggregate selects the anchor")
+
+
+def issue_receipt(root: pathlib.Path) -> bytes:
+    inspect(root)
+    files = [
+        {
+            "path": name,
+            "sha256": hashlib.sha256(_bytes(root, name)).hexdigest(),
+        }
+        for name in sorted(OBSERVED_PATHS)
+    ]
+    document = {
+        "anchor": ANCHOR_PATH,
+        "claim_id": CLAIM,
+        "consumers": list(CLIENTS),
+        "files": files,
+        "marker_environment": ENVIRONMENT_NAME,
+        "marker_token": TOKEN,
+        "producer_implementation": FIRST_IMPLEMENTATION,
+        "schema": SCHEMA,
+        "watchdog_implementation": SECOND_IMPLEMENTATION,
+    }
+    return json.dumps(document, sort_keys=True, separators=(",", ":")).encode("ascii")
+
+
+def self_test() -> None:
+    with tempfile.TemporaryDirectory(prefix="stone0-wiring-watchdog-") as name:
+        root = pathlib.Path(name)
+        for relative in OBSERVED_PATHS:
+            destination = root.joinpath(*relative.split("/"))
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(REPOSITORY.joinpath(*relative.split("/")), destination)
+        issue_receipt(root)
+        mutations = (
+            ("Cargo.toml", ANCHOR_PATH, "crates/stone0-build-duplicate"),
+            (f"{ANCHOR_PATH}/Cargo.toml", "../stone0", "../replacement"),
+            (
+                f"{ANCHOR_PATH}/build.rs",
+                "Mode::Local, &repo_root)",
+                'Mode::Local, &Path::new("."))',
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                "trusted_git_top_level(&canonical)?",
+                "Ok(canonical.clone())?",
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                "git_root != canonical",
+                "git_root == canonical",
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                "let git = trusted_git_executable()?;",
+                'let git = PathBuf::from("git");',
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                'Path::new("/usr/lib/git-core/git"),',
+                'Path::new("/usr/local/bin/git"),',
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                "is_file && uid == 0 && mode & 0o022 == 0 && mode & 0o6000 == 0 && mode & 0o111 != 0",
+                "is_file && uid == 0 && mode & 0o022 == 0 && mode & 0o4000 == 0 && mode & 0o111 != 0",
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                "is_dir && uid == 0 && mode & 0o022 == 0",
+                "is_dir && uid <= 0 && mode & 0o022 == 0",
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                "ancestry_is_trusted &= root_directory_shape_is_trusted(",
+                "ancestry_is_trusted |= root_directory_shape_is_trusted(",
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                "if executable_is_trusted && ancestry_is_trusted {\n            return Ok(canonical);",
+                "if executable_is_trusted || ancestry_is_trusted {\n            return Ok(canonical);",
+            ),
+            (f"{ANCHOR_PATH}/build.rs", "if code != 0", "if false"),
+            (f"{ANCHOR_PATH}/src/lib.rs", TOKEN, "replacement-token"),
+            ("crates/planet-substrate/build.rs", "assert_guard_linked", "skip_guard"),
+        )
+        for relative, old, new in mutations:
+            path = root.joinpath(*relative.split("/"))
+            held = path.read_text(encoding="utf-8")
+            path.write_text(held.replace(old, new, 1), encoding="utf-8")
+            try:
+                inspect(root)
+            except WatchdogError:
+                pass
+            else:
+                raise AssertionError(
+                    f"watchdog wiring canary survived: {relative}: {old}"
+                )
+            path.write_text(held, encoding="utf-8")
+    print("Stone 0 build wiring watchdog self-test: PASS")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--receipt", action="store_true")
+    parser.add_argument("--self-test", action="store_true")
+    options = parser.parse_args()
+    try:
+        if options.self_test:
+            self_test()
+            return 0
+        output = issue_receipt(REPOSITORY)
+        if options.receipt:
+            sys.stdout.buffer.write(output + b"\n")
+        else:
+            print("Stone 0 build wiring watchdog: PASS")
+            print(output.decode("ascii"))
+    except (AssertionError, OSError, UnicodeError, WatchdogError) as error:
+        print(f"Stone 0 build wiring watchdog: FAIL: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

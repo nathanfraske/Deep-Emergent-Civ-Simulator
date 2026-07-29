@@ -16,10 +16,13 @@
 //!
 //! Stone 0 is the meta-gate that makes the no-fabricated-values discipline un-bypassable at the local
 //! inner loop (design `docs/working/Q1_STONE0_PROVENANCE_GATE_DESIGN.md`). This crate is the gate's
-//! library and its `stone0-gate` binary. INCREMENT 4 IS DONE and the gate fires at BUILD time:
-//! `crates/sim/build.rs` calls `run(Mode::Local)` and panics on a positive detection, so the scan runs on
-//! every `cargo build`, `check`, `test`, and `clippy` of `civsim-sim`, and a blocked build stops there
-//! with the gate's report. The binary remains the direct entry point for `--ci` and `--self-test`.
+//! library and its `stone0-gate` binary. INCREMENT 4 IS DONE and the gate fires at BUILD time.
+//! `crates/stone0-build` is the single shared build-graph owner for the canonical planet and
+//! planet-substrate consumers. It calls `run_at_repository_root(Mode::Local, root)` with the root
+//! derived from its own manifest directory and panics on a positive detection, so one scan guards each
+//! canonical Cargo graph instead of one scan per consumer. The parked compatibility runner retains the
+//! same guard in `parked/crates/sim/build.rs`. The binary remains the direct entry point for `--ci` and
+//! `--self-test`.
 //!
 //! Said plainly because the previous wording claimed the opposite ("NOT yet wired into any build script"),
 //! which would send a developer whose build is blocked here to rule this gate out as the cause when it is
@@ -27,14 +30,16 @@
 //!
 //! ## The checks
 //!
-//! 1. Provenance scan (the violation predicate): shells out to the existing python gates
-//!    (`constructor_gate.py`, `provenance_gate.py`, `floor_provenance_gate.py`, `determinism_gate.py`,
-//!    `quarantine_gate.py`) and collects any failure. The verdict is cached by a content hash of the
-//!    scanned files plus the scripts, so a repeated run with unchanged inputs is cheap.
+//! 1. Provenance scan (the violation predicate): invokes the declarative gate runner's canonical tier,
+//!    including every per-source receipt test, and collects any failure. An owner override may admit
+//!    only detections reported by that ordinary runner. Stone 0 also executes its mandatory authority
+//!    commands directly; their detections and operational failures are always hard failures.
+//!    Cargo decides when a guarded build script must rerun. Direct Stone 0 calls always rescan, so a
+//!    verdict can never outlive an input that a gate reads outside the repository.
 //! 2. Live-password laundering scan (local only): if the secrets file exists, reads the password and
-//!    scans every git-tracked file plus the git index for the literal password and its base64. A hit is
-//!    a hard fail. The password value is never printed, logged, written, or persisted; only the file
-//!    where a hit occurred is reported.
+//!    scans every tracked or nonignored untracked worktree file plus the git index for the literal
+//!    password and its base64. A hit is a hard fail. The password value is never printed, logged,
+//!    written, or persisted; only the file where a hit occurred is reported.
 //! 3. Tombstone scan: every retired (now-declassified) override phrase in `stone0_tombstones.txt` must
 //!    appear nowhere but the tombstone list itself. A hit is a laundered stale copy and fails.
 //! 4. Override-env-name scan: a committed file that assigns `STONE0_OVERRIDE` has baked the override in
@@ -44,53 +49,184 @@
 //!
 //! ## Robustness contract
 //!
-//! The gate fails OPEN on any operational error (python missing, secrets dir absent, git unavailable):
-//! it prints a warning and allows the build. It fails CLOSED only on a positive detection. A gate bug or
-//! a missing dependency must never brick a build.
+//! The authoritative provenance runner fails closed when its root-owned interpreter is unavailable,
+//! cannot enter isolated mode, or does not return the invocation-bound wrapper-completion receipt.
+//! Python import-control environment is removed before every authority subprocess. Native Windows
+//! execution remains closed until it has an independently verifiable interpreter trust root; the
+//! supported Windows development route executes Stone 0 inside WSL. A missing secrets file still
+//! disables only the optional owner override and live-secret canary checks, while native
+//! repository-service errors remain visible warnings. A gate that cannot execute the canonical
+//! provenance tier has not passed.
 
 #![forbid(unsafe_code)]
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsString;
+use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The default out-of-repo secrets file the owner keeps the override password in.
 pub const DEFAULT_SECRETS_PATH: &str = "/mnt/e/Secrets/stone0-override.pass";
 /// The committed tombstone list, one retired (declassified) override phrase per line.
-pub const TOMBSTONE_REL: &str = "calibration/stone0_tombstones.txt";
+pub const TOMBSTONE_REL: &str = "scripts/stone0_tombstones.txt";
 /// The environment variable an owner-authorized single-command override is supplied through.
 pub const OVERRIDE_ENV: &str = "STONE0_OVERRIDE";
+
+/// Emit Cargo rebuild inputs for a build script that invokes Stone 0.
+///
+/// Existing tracked files are listed one by one, and the Git index is watched
+/// so adding a tracked file refreshes that list. A small directory fallback
+/// keeps the guard live when Git is unavailable. External vendored custody and
+/// the secrets path are watched separately because the Python receipt tests may
+/// read them even though they cannot appear in `git ls-files`.
+pub fn emit_cargo_rerun_inputs(repo_root: &Path) {
+    for relative in [
+        "crates",
+        "sources",
+        "scripts",
+        "docs/SOURCES.md",
+        "docs/working/PHYSICS_FLOOR_REGISTRY.md",
+        "docs/working/CANONICAL_LEDGER_INVENTORY.txt",
+        "Cargo.toml",
+        "Cargo.lock",
+    ] {
+        println!(
+            "cargo:rerun-if-changed={}",
+            repo_root.join(relative).display()
+        );
+    }
+
+    if let Ok(mut command) = trusted_git_command(repo_root) {
+        if let Ok(output) = command.args(["ls-files", "-z"]).output() {
+            if output.status.success() {
+                for raw in output.stdout.split(|byte| *byte == 0) {
+                    if raw.is_empty() || raw.contains(&b'\n') || raw.contains(&b'\r') {
+                        continue;
+                    }
+                    let relative = String::from_utf8_lossy(raw);
+                    println!(
+                        "cargo:rerun-if-changed={}",
+                        repo_root.join(relative.as_ref()).display()
+                    );
+                }
+            }
+        }
+    }
+
+    if let Ok(mut command) = trusted_git_command(repo_root) {
+        if let Ok(output) = command
+            .args(["rev-parse", "--path-format=absolute", "--git-path", "index"])
+            .output()
+        {
+            if output.status.success() {
+                let index = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !index.is_empty() {
+                    println!("cargo:rerun-if-changed={index}");
+                }
+            }
+        }
+    }
+
+    if let Some(home) = std::env::var_os("HOME") {
+        let custody = PathBuf::from(home).join(".claude/vendored-sources");
+        if custody.exists() {
+            println!("cargo:rerun-if-changed={}", custody.display());
+        } else if let Some(parent) = custody.parent().filter(|path| path.exists()) {
+            println!("cargo:rerun-if-changed={}", parent.display());
+        }
+    }
+    let secrets = std::env::var_os("STONE0_SECRETS_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_SECRETS_PATH));
+    if secrets.exists() {
+        println!("cargo:rerun-if-changed={}", secrets.display());
+    } else if let Some(parent) = secrets.parent().filter(|path| path.exists()) {
+        println!("cargo:rerun-if-changed={}", parent.display());
+    }
+    println!("cargo:rerun-if-env-changed={OVERRIDE_ENV}");
+    println!("cargo:rerun-if-env-changed=STONE0_SECRETS_PATH");
+}
 
 /// The instruction block printed when the provenance scan fails with no valid override.
 pub const OVERRIDE_INSTRUCTIONS: &str = "This value has no provenance. To override you must obtain the current password from Nathan (out of band), set STONE0_OVERRIDE for a single command, and Nathan will rotate the password afterward. Do NOT write the password into the repo; CI will catch it via the tombstone list and halt.";
 
-/// The five existing python gates the provenance scan consolidates. A script that is absent is skipped
-/// silently (fail-open), so a not-yet-created gate never bricks a build.
-/// Every gate Stone 0 runs, with its arguments. An entry is `(script, args)`.
+/// The bootstrap pointer into the declarative gate authority.
 ///
-/// THE LIST WAS HALF THE GATES. It named five and omitted sources, source generation, derives, the
-/// diamond scan, the profile-override check, the floor-registry staleness check and all eight
-/// per-source provenance tests. The omission was invisible from Stone 0's own output, because a gate
-/// that is not in this list reports nothing at all: the failing Grueneisen witnesses were unseen here
-/// for exactly that reason.
-///
-/// A gate that takes an argument is listed WITH it, because `--strict` and `--check` are where several
-/// of these actually convict; running them bare is how the diamond scan passed for months without ever
-/// looking at the repository.
-const PROVENANCE_SCRIPTS: &[(&str, &[&str])] = &[
-    ("scripts/constructor_gate.py", &[]),
-    ("scripts/provenance_gate.py", &[]),
-    ("scripts/floor_provenance_gate.py", &[]),
-    ("scripts/determinism_gate.py", &[]),
-    ("scripts/quarantine_gate.py", &[]),
-    ("scripts/sources_gate.py", &[]),
-    ("scripts/gen_sources.py", &["--check"]),
-    ("scripts/derives_gate.py", &[]),
-    ("scripts/diamond_gate.py", &["--strict"]),
-    ("scripts/profile_override_gate.py", &[]),
-    ("scripts/gen_floor_registry.py", &["--check"]),
+/// Gate membership, order, arguments, timeouts, inputs, path triggers, cache policy, and self-test
+/// metadata live in `scripts/gates.toml`. Stone 0 owns this runner pointer and an exact bootstrap pin
+/// for the authority-watchdog block. The narrow duplication prevents deleting or weakening the gate
+/// that validates the inventory from also deleting its own execution.
+const PROVENANCE_RUNNER: (&str, &[&str]) = (
+    "scripts/gate_runner.py",
+    &["run", "--tier", "canonical", "--phase", "provenance"],
+);
+const MANDATORY_AUTHORITY_COMMANDS: [(&str, &[&str]); 5] = [
+    ("scripts/authority_watchdog_gate.py", &[]),
+    ("scripts/codata_floor_evidence_gate.py", &[]),
+    ("scripts/stone0_build_wiring_gate.py", &[]),
+    ("scripts/fixed_math_authority_gate.py", &[]),
+    ("scripts/external_claim_gate.py", &[]),
 ];
+const GATE_MANIFEST_PATH: &str = "scripts/gates.toml";
+const MANDATORY_AUTHORITY_GATE_BLOCK: &str = r#"[[gate]]
+id = "canonical.authority-watchdog"
+order = 65
+description = "Require independent pairs for active authority-bearing mechanical claims."
+tiers = ["canonical", "doctor", "pr", "full", "nightly", "stop"]
+phase = "provenance"
+command = ["{python}", "scripts/authority_watchdog_gate.py"]
+self_test = ["{python}", "scripts/authority_watchdog_gate.py", "--self-test"]
+timeout_seconds = 120
+cache = "content-hash"
+inputs = [
+  "scripts/gates.toml",
+  "scripts/gate_runner.py",
+  "scripts/authority_watchdog_gate.py",
+  "scripts/authority_registry_watchdog.py",
+  "scripts/authority_watchdog.toml",
+  "scripts/codata_floor_evidence_gate.py",
+  "scripts/codata_floor_evidence_watchdog.py",
+  "scripts/external_claim_gate.py",
+  "scripts/external_claim_watchdog.py",
+  "scripts/fixed_math_authority_gate.py",
+  "scripts/fixed_math_authority_watchdog.py",
+  "scripts/stone0_build_wiring_gate.py",
+  "scripts/stone0_build_wiring_watchdog.py",
+  "sources/external_claims.toml",
+  "sources/external_claim_approvers",
+  "sources/external_claim_revocations.toml",
+  "sources/registry.toml",
+  "docs/working/INDEPENDENT_AUTHORITY_RULE.md",
+  "docs/working/EXTERNAL_ADVERSE_CLAIM_RULE.md",
+  "crates",
+]
+path_triggers = [
+  "scripts/gates.toml",
+  "scripts/gate_runner.py",
+  "scripts/authority_watchdog_gate.py",
+  "scripts/authority_registry_watchdog.py",
+  "scripts/authority_watchdog.toml",
+  "scripts/codata_floor_evidence_gate.py",
+  "scripts/codata_floor_evidence_watchdog.py",
+  "scripts/external_claim_gate.py",
+  "scripts/external_claim_watchdog.py",
+  "scripts/fixed_math_authority_gate.py",
+  "scripts/fixed_math_authority_watchdog.py",
+  "scripts/stone0_build_wiring_gate.py",
+  "scripts/stone0_build_wiring_watchdog.py",
+  "sources/external_claims.toml",
+  "sources/external_claim_approvers",
+  "sources/external_claim_revocations.toml",
+  "sources/registry.toml",
+  "docs/working/INDEPENDENT_AUTHORITY_RULE.md",
+  "docs/working/EXTERNAL_ADVERSE_CLAIM_RULE.md",
+  "crates/**",
+]"#;
+const POLICY_DETECTION_MARKER: &str = "civsim.gate-runner.policy-detection.v1";
 
 /// Which run this is. `Local` runs every check including the live-password and canary scans against the
 /// secrets file. `Ci` runs the provenance, tombstone, and override-env scans only (a hosted runner has
@@ -114,9 +250,10 @@ pub enum Verdict {
 #[derive(Debug, Clone)]
 pub struct GateReport {
     pub verdict: Verdict,
-    /// Positive detections that fail the build closed.
+    /// Positive detections and mandatory authority failures that block the build.
     pub failures: Vec<String>,
-    /// Operational problems that fail open (a warning, never a block).
+    /// Non-authoritative operational notices. Canonical provenance-runner
+    /// unavailability is promoted to a failure before this report is returned.
     pub warnings: Vec<String>,
     /// Informational notices (the loud override banner text lives here).
     pub notices: Vec<String>,
@@ -135,12 +272,34 @@ impl GateReport {
 
 /// The inputs a gate run keys off. Constructed from the environment by [`run`], or by hand in tests.
 pub struct GateConfig {
-    pub repo_root: PathBuf,
-    pub secrets_path: PathBuf,
-    pub tombstones_path: PathBuf,
-    pub mode: Mode,
+    repo_root: PathBuf,
+    secrets_path: PathBuf,
+    tombstones_path: PathBuf,
+    mode: Mode,
     /// The value supplied through `STONE0_OVERRIDE`, if any (only consulted in `Local` mode).
-    pub override_value: Option<String>,
+    override_value: Option<String>,
+}
+
+impl GateConfig {
+    /// Build a scan-only configuration with no authority to override a finding.
+    ///
+    /// This is the public construction path used by tests and embedding tools.
+    /// Only [`run`] may attach the environment's owner override after validating
+    /// that the default out-of-repo trust path is in use.
+    pub fn scan_only(
+        repo_root: PathBuf,
+        secrets_path: PathBuf,
+        tombstones_path: PathBuf,
+        mode: Mode,
+    ) -> Self {
+        Self {
+            repo_root,
+            secrets_path,
+            tombstones_path,
+            mode,
+            override_value: None,
+        }
+    }
 }
 
 /// One tracked file's path and raw bytes. The password scan is byte-exact (it catches a hit even in a
@@ -336,15 +495,14 @@ pub fn override_is_valid(override_value: Option<&str>, password: &str) -> bool {
 }
 
 // ----------------------------------------------------------------------------------------------------
-// The provenance scan: shell out to the python gates, with a content-hash verdict cache.
+// The provenance scan: shell out to every authoritative Python gate.
 // ----------------------------------------------------------------------------------------------------
 
 /// What one gate run produced.
 ///
-/// `Skipped` USED TO EXIST and is deliberately gone. It absorbed three different situations that are
-/// not the same: a script missing from disk, a script that crashed, and an interpreter that could not
-/// be spawned. Only the last is operational. Folding the other two into a skip made deleting or
-/// breaking a gate the two cheapest ways to stop it convicting, and Stone 0 reported neither.
+/// `Skipped` USED TO EXIST and is deliberately gone. A missing runner, a crashing
+/// runner, and an unavailable interpreter are distinct diagnostics but share
+/// one non-overridable result: the authority did not execute, so the build fails.
 enum ScriptResult {
     Clean,
     Detected(String),
@@ -352,215 +510,625 @@ enum ScriptResult {
 }
 
 struct ProvenanceOutcome {
-    detections: Vec<String>,
-    operational: Vec<String>,
+    /// Policy detections from the ordinary declarative provenance runner.
+    ///
+    /// This is the sole bucket that the owner-password path may override.
+    override_eligible_detections: Vec<String>,
+    /// Failures whose authority semantics prohibit an owner override.
+    ///
+    /// This includes every operational failure plus both semantic detections
+    /// and operational failures from the direct mandatory authority commands.
+    non_overridable_failures: Vec<String>,
+}
+
+const PYTHON_SUCCESS_RECEIPT_SCHEMA: &str = "civsim.stone0.python-authority-success.v1";
+const PYTHON_WRAPPER: &str = r#"
+import runpy
+import sys
+
+if not (
+    sys.flags.isolated
+    and sys.flags.ignore_environment
+    and sys.flags.no_user_site
+    and sys.flags.no_site
+    and sys.flags.dont_write_bytecode
+):
+    raise SystemExit("Stone 0 requires isolated Python execution")
+
+receipt = sys.argv[1]
+script = sys.argv[2]
+sys.argv = [script, *sys.argv[3:]]
+try:
+    runpy.run_path(script, run_name="__main__")
+except SystemExit as error:
+    code = error.code
+    if code is None:
+        code = 0
+    if not isinstance(code, int) or code != 0:
+        raise
+print(receipt, file=sys.stderr)
+"#;
+const SCRUBBED_PYTHON_ENVIRONMENT: [&str; 16] = [
+    "PYTHONHOME",
+    "PYTHONPATH",
+    "PYTHONSTARTUP",
+    "PYTHONINSPECT",
+    "PYTHONUSERBASE",
+    "PYTHONWARNINGS",
+    "PYTHONBREAKPOINT",
+    "PYTHONEXECUTABLE",
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "LD_AUDIT",
+    "LD_DEBUG",
+    "LD_DEBUG_OUTPUT",
+    "LD_PROFILE",
+    "LD_USE_LOAD_BIAS",
+    "GLIBC_TUNABLES",
+];
+static PYTHON_RECEIPT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+fn python_success_receipt(script_rel: &str) -> String {
+    let sequence = PYTHON_RECEIPT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    format!(
+        "{PYTHON_SUCCESS_RECEIPT_SCHEMA}:{script_rel}:{}:{now}:{sequence}",
+        std::process::id()
+    )
+}
+
+fn has_python_success_receipt(status_success: bool, stderr: &str, expected_receipt: &str) -> bool {
+    status_success
+        && stderr
+            .lines()
+            .filter(|line| line.trim() == expected_receipt)
+            .count()
+            == 1
+}
+
+#[cfg(unix)]
+fn trusted_python_interpreters() -> Result<Vec<PathBuf>, String> {
+    use std::os::unix::fs::MetadataExt;
+
+    let mut trusted = Vec::new();
+    let mut rejected = Vec::new();
+    for candidate in [
+        Path::new("/usr/bin/python3"),
+        Path::new("/usr/local/bin/python3"),
+    ] {
+        let canonical = match fs::canonicalize(candidate) {
+            Ok(path) => path,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                rejected.push(format!("{} is absent", candidate.display()));
+                continue;
+            }
+            Err(error) => {
+                rejected.push(format!(
+                    "{} cannot be resolved ({error})",
+                    candidate.display()
+                ));
+                continue;
+            }
+        };
+        let metadata = match fs::metadata(&canonical) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                rejected.push(format!(
+                    "{} cannot be inspected ({error})",
+                    canonical.display()
+                ));
+                continue;
+            }
+        };
+        let executable_is_trusted = metadata.is_file()
+            && metadata.uid() == 0
+            && metadata.mode() & 0o022 == 0
+            && metadata.mode() & 0o6000 == 0
+            && metadata.mode() & 0o111 != 0;
+        let ancestry_is_trusted = canonical.ancestors().skip(1).all(|ancestor| {
+            fs::metadata(ancestor).is_ok_and(|metadata| {
+                metadata.is_dir() && metadata.uid() == 0 && metadata.mode() & 0o022 == 0
+            })
+        });
+        if executable_is_trusted && ancestry_is_trusted {
+            if !trusted.contains(&canonical) {
+                trusted.push(canonical);
+            }
+        } else {
+            rejected.push(format!(
+                "{} is not a root-owned, non-group-writable, non-world-writable, non-set-id \
+                 executable beneath root-controlled directories",
+                canonical.display()
+            ));
+        }
+    }
+    if trusted.is_empty() {
+        Err(format!(
+            "no independently rooted Python interpreter is available ({})",
+            rejected.join("; ")
+        ))
+    } else {
+        Ok(trusted)
+    }
+}
+
+#[cfg(not(unix))]
+fn trusted_python_interpreters() -> Result<Vec<PathBuf>, String> {
+    Err(String::from(
+        "native execution has no independently verifiable Python interpreter trust root; \
+         run the canonical Stone 0 gate inside WSL",
+    ))
+}
+
+fn trusted_git_executable() -> Result<PathBuf, String> {
+    #[cfg(unix)]
+    {
+        trusted_unix_git_executable()
+    }
+    #[cfg(not(unix))]
+    {
+        Err(String::from(
+            "native execution has no independently verifiable Git trust root; \
+             run the canonical Stone 0 gate inside WSL",
+        ))
+    }
+}
+
+#[cfg(unix)]
+fn trusted_unix_git_executable() -> Result<PathBuf, String> {
+    trusted_git_executable_from(&[
+        Path::new("/usr/bin/git"),
+        Path::new("/usr/lib/git-core/git"),
+        Path::new("/bin/git"),
+    ])
+}
+
+#[cfg(unix)]
+fn root_executable_shape_is_trusted(is_file: bool, uid: u32, mode: u32) -> bool {
+    is_file && uid == 0 && mode & 0o022 == 0 && mode & 0o6000 == 0 && mode & 0o111 != 0
+}
+
+#[cfg(unix)]
+fn root_directory_shape_is_trusted(is_dir: bool, uid: u32, mode: u32) -> bool {
+    is_dir && uid == 0 && mode & 0o022 == 0
+}
+
+#[cfg(unix)]
+fn trusted_git_executable_from(candidates: &[&Path]) -> Result<PathBuf, String> {
+    use std::os::unix::fs::MetadataExt;
+
+    let mut rejected = Vec::new();
+    let mut inspected = BTreeSet::new();
+    for candidate in candidates {
+        let canonical = match fs::canonicalize(candidate) {
+            Ok(path) => path,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                rejected.push(format!("{} is absent", candidate.display()));
+                continue;
+            }
+            Err(error) => {
+                rejected.push(format!(
+                    "{} cannot be resolved ({error})",
+                    candidate.display()
+                ));
+                continue;
+            }
+        };
+        if !inspected.insert(canonical.clone()) {
+            continue;
+        }
+        let metadata = match fs::metadata(&canonical) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                rejected.push(format!(
+                    "{} cannot be inspected ({error})",
+                    canonical.display()
+                ));
+                continue;
+            }
+        };
+        let executable_is_trusted =
+            root_executable_shape_is_trusted(metadata.is_file(), metadata.uid(), metadata.mode());
+        let mut refusals = Vec::new();
+        if !metadata.is_file() {
+            refusals.push("target is not a regular file".to_owned());
+        }
+        if metadata.uid() != 0 {
+            refusals.push(format!("target uid is {}, not 0", metadata.uid()));
+        }
+        if metadata.mode() & 0o022 != 0 {
+            refusals.push(format!(
+                "target mode {:o} permits group or world writes",
+                metadata.mode() & 0o7777
+            ));
+        }
+        if metadata.mode() & 0o6000 != 0 {
+            refusals.push(format!(
+                "target mode {:o} carries a set-id bit",
+                metadata.mode() & 0o7777
+            ));
+        }
+        if metadata.mode() & 0o111 == 0 {
+            refusals.push(format!(
+                "target mode {:o} has no execute bit",
+                metadata.mode() & 0o7777
+            ));
+        }
+        let mut ancestry_is_trusted = true;
+        for ancestor in canonical.ancestors().skip(1) {
+            match fs::metadata(ancestor) {
+                Ok(ancestor_metadata) => {
+                    ancestry_is_trusted &= root_directory_shape_is_trusted(
+                        ancestor_metadata.is_dir(),
+                        ancestor_metadata.uid(),
+                        ancestor_metadata.mode(),
+                    );
+                    if !ancestor_metadata.is_dir() {
+                        refusals.push(format!(
+                            "ancestor {} is not a directory",
+                            ancestor.display()
+                        ));
+                    }
+                    if ancestor_metadata.uid() != 0 {
+                        refusals.push(format!(
+                            "ancestor {} has uid {}, not 0",
+                            ancestor.display(),
+                            ancestor_metadata.uid()
+                        ));
+                    }
+                    if ancestor_metadata.mode() & 0o022 != 0 {
+                        refusals.push(format!(
+                            "ancestor {} mode {:o} permits group or world writes",
+                            ancestor.display(),
+                            ancestor_metadata.mode() & 0o7777
+                        ));
+                    }
+                }
+                Err(error) => {
+                    ancestry_is_trusted = false;
+                    refusals.push(format!(
+                        "ancestor {} cannot be inspected ({error})",
+                        ancestor.display()
+                    ));
+                }
+            }
+        }
+        if executable_is_trusted && ancestry_is_trusted {
+            return Ok(canonical);
+        }
+        rejected.push(format!(
+            "{} failed the root-controlled executable proof: {}",
+            canonical.display(),
+            refusals.join("; ")
+        ));
+    }
+    Err(format!(
+        "no independently rooted Git executable is available ({})",
+        rejected.join("; ")
+    ))
+}
+
+fn trusted_git_command(repository_root: &Path) -> Result<Command, String> {
+    let git = trusted_git_executable()?;
+    let mut command = Command::new(git);
+    command
+        .arg("-C")
+        .arg(repository_root)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("LC_ALL", "C");
+    Ok(command)
+}
+
+#[cfg(unix)]
+fn trusted_rust_tool_environment(
+    repository_root: &Path,
+) -> Result<(OsString, PathBuf, PathBuf), String> {
+    use std::os::unix::fs::MetadataExt;
+
+    let declared_cargo = std::env::var_os("CARGO")
+        .map(PathBuf::from)
+        .ok_or_else(|| "Cargo did not disclose the build tool that launched Stone 0".to_owned())?;
+    if !declared_cargo.is_absolute() {
+        return Err("Cargo disclosed a non-absolute executable path".to_owned());
+    }
+    let cargo = fs::canonicalize(&declared_cargo)
+        .map_err(|error| format!("the launching Cargo executable cannot be resolved ({error})"))?;
+    let tool_directory = cargo
+        .parent()
+        .ok_or_else(|| "the launching Cargo executable has no tool directory".to_owned())?;
+    let rustc = fs::canonicalize(tool_directory.join("rustc"))
+        .map_err(|error| format!("Cargo's sibling rustc cannot be resolved ({error})"))?;
+    if cargo.file_name().and_then(|name| name.to_str()) != Some("cargo")
+        || cargo.starts_with(repository_root)
+        || rustc.starts_with(repository_root)
+    {
+        return Err(
+            "the disclosed Rust toolchain is not an external cargo and sibling rustc pair"
+                .to_owned(),
+        );
+    }
+    let cargo_metadata = fs::metadata(&cargo)
+        .map_err(|error| format!("the launching Cargo executable cannot be inspected ({error})"))?;
+    let rustc_metadata = fs::metadata(&rustc)
+        .map_err(|error| format!("Cargo's sibling rustc cannot be inspected ({error})"))?;
+    let owner = cargo_metadata.uid();
+    let executable_is_stable = |metadata: &fs::Metadata| {
+        metadata.is_file()
+            && metadata.uid() == owner
+            && metadata.mode() & 0o002 == 0
+            && metadata.mode() & 0o6000 == 0
+            && metadata.mode() & 0o111 != 0
+    };
+    let ancestry_is_stable = cargo.ancestors().skip(1).all(|ancestor| {
+        fs::metadata(ancestor).is_ok_and(|metadata| {
+            metadata.is_dir()
+                && (metadata.uid() == 0 || metadata.uid() == owner)
+                && metadata.mode() & 0o002 == 0
+        })
+    });
+    if !executable_is_stable(&cargo_metadata)
+        || !executable_is_stable(&rustc_metadata)
+        || !ancestry_is_stable
+    {
+        return Err(
+            "the disclosed Rust toolchain is not a non-world-writable, non-set-id sibling pair \
+             beneath owner- or root-controlled directories"
+                .to_owned(),
+        );
+    }
+
+    let mut path = tool_directory.as_os_str().to_os_string();
+    path.push(":/usr/bin:/bin");
+    Ok((path, cargo, rustc))
 }
 
 fn run_python_gate(root: &Path, script_rel: &str, args: &[&str]) -> ScriptResult {
-    let path = root.join(script_rel);
-    if !path.exists() {
-        // A LISTED SCRIPT THAT IS ABSENT IS A FAILURE, not a skip. This list names what MUST run, so a
-        // missing entry means either the gate was deleted or the path drifted, and both should be loud.
-        // Skipping made deleting a gate the quietest way to stop it convicting.
-        return ScriptResult::Detected(format!(
-            "{script_rel} is listed in PROVENANCE_SCRIPTS but does not exist. A gate that is not there \
-             has not passed; restore it or remove its entry deliberately."
-        ));
-    }
-    let out = match Command::new("python3")
-        .arg(&path)
-        .args(args)
-        .current_dir(root)
-        .output()
-    {
-        Ok(o) => o,
-        Err(e) => {
-            return ScriptResult::Operational(format!(
-                "could not run python3 for {script_rel} ({e}); skipped"
-            ))
-        }
-    };
-    if out.status.success() {
-        return ScriptResult::Clean;
-    }
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    // A CRASHING GATE HAS NOT PASSED. These three were treated as "operational" and skipped, which made
-    // BREAKING a gate the cheapest way to silence it: introduce a syntax error, or an import of
-    // something absent, and Stone 0 reported an operational skip and moved on. The one genuinely
-    // operational case is python3 itself being unavailable, and that is handled above where the spawn
-    // fails; everything reaching here ran the interpreter and the SCRIPT failed.
-    if stderr.contains("Traceback (most recent call last)")
-        || stderr.contains("ModuleNotFoundError")
-        || stderr.contains("SyntaxError")
-    {
-        let last = stderr.lines().last().unwrap_or("");
-        return ScriptResult::Detected(format!(
-            "{script_rel} CRASHED ({last}). A gate that cannot run has not passed, and treating this as \
-             an operational skip made breaking a gate the cheapest way to silence it."
-        ));
-    }
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    ScriptResult::Detected(format!("{script_rel}:\n{}", stdout.trim_end()))
+    run_python_gate_with_environment(root, script_rel, args, &[])
 }
 
-fn provenance_scan(root: &Path) -> ProvenanceOutcome {
-    let mut detections = Vec::new();
-    let mut operational = Vec::new();
-    for (s, args) in PROVENANCE_SCRIPTS {
-        match run_python_gate(root, s, args) {
+fn run_python_gate_with_environment(
+    root: &Path,
+    script_rel: &str,
+    args: &[&str],
+    environment: &[(OsString, OsString)],
+) -> ScriptResult {
+    let path = root.join(script_rel);
+    let canonical_root = match fs::canonicalize(root) {
+        Ok(path) => path,
+        Err(error) => {
+            return ScriptResult::Operational(format!(
+                "could not canonicalize the repository root for {script_rel} ({error})"
+            ));
+        }
+    };
+    let canonical_path = match fs::canonicalize(&path) {
+        Ok(path) => path,
+        Err(error) => {
+            return ScriptResult::Operational(format!(
+                "{script_rel} is the declarative gate-authority runner but cannot be opened ({error}). \
+                 A gate runner that is unavailable has not passed."
+            ));
+        }
+    };
+    if !canonical_path.starts_with(&canonical_root)
+        || !canonical_path.is_file()
+        || fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_symlink())
+    {
+        // A LISTED SCRIPT THAT IS ABSENT IS A FAILURE, not a skip. This list names what MUST run, so a
+        // missing or redirected entry means either the gate was deleted, the path drifted, or its bytes
+        // escaped the repository boundary, and every case should be loud.
+        // Skipping made deleting a gate the quietest way to stop it convicting.
+        return ScriptResult::Operational(format!(
+            "{script_rel} does not resolve to a regular repository-owned script. A redirected gate \
+             runner has not passed; restore it deliberately."
+        ));
+    }
+    // The interpreter is part of the authority boundary. Resolving it through caller-controlled PATH
+    // would let a shim read and replay the wrapper receipt. Canonical Unix execution therefore accepts
+    // only fixed absolute candidates whose executable and complete directory ancestry are controlled by
+    // root and are not group- or world-writable. Native Windows fails closed and uses the documented WSL
+    // route until it gains an equivalent independently verifiable trust root.
+    let interpreters = match trusted_python_interpreters() {
+        Ok(interpreters) => interpreters,
+        Err(error) => return ScriptResult::Operational(format!("{script_rel}: {error}")),
+    };
+    #[cfg(unix)]
+    let (trusted_path, trusted_cargo, trusted_rustc) =
+        match trusted_rust_tool_environment(&canonical_root) {
+            Ok(environment) => environment,
+            Err(error) => return ScriptResult::Operational(format!("{script_rel}: {error}")),
+        };
+
+    let mut unavailable = Vec::new();
+    let mut selected = None;
+    for program in interpreters {
+        let expected_receipt = python_success_receipt(script_rel);
+        let mut command = Command::new(&program);
+        command
+            .args(["-I", "-E", "-s", "-S", "-B", "-c", PYTHON_WRAPPER])
+            .arg(&expected_receipt)
+            .arg(&canonical_path)
+            .args(args)
+            .current_dir(&canonical_root)
+            .envs(environment.iter().cloned())
+            .env("PYTHONSAFEPATH", "1")
+            .env("PYTHONNOUSERSITE", "1")
+            .env("PYTHONDONTWRITEBYTECODE", "1");
+        #[cfg(unix)]
+        command
+            .env("PATH", &trusted_path)
+            .env("CARGO", &trusted_cargo)
+            .env("RUSTC", &trusted_rustc);
+        for key in SCRUBBED_PYTHON_ENVIRONMENT {
+            command.env_remove(key);
+        }
+        let result = command.output();
+        match result {
+            Ok(out) => {
+                selected = Some((out, expected_receipt));
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                unavailable.push(format!("{} was not found", program.display()));
+            }
+            Err(e) => unavailable.push(format!("{} could not spawn ({e})", program.display())),
+        }
+    }
+    let Some((out, expected_receipt)) = selected else {
+        return ScriptResult::Operational(format!(
+            "could not run a Python interpreter for {script_rel} ({}); skipped",
+            unavailable.join("; ")
+        ));
+    };
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if has_python_success_receipt(out.status.success(), &stderr, &expected_receipt) {
+        return ScriptResult::Clean;
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let policy_detection = has_policy_detection_protocol(out.status.code(), &stdout, &stderr);
+    let details = match (stdout.trim(), stderr.trim()) {
+        ("", "") if out.status.success() => String::from(
+            "gate runner exited zero without its invocation-bound Python success receipt",
+        ),
+        ("", "") => String::from("gate runner exited nonzero without output"),
+        (stdout, "") => stdout.to_string(),
+        ("", stderr) => stderr.to_string(),
+        (stdout, stderr) => format!("{stdout}\n{stderr}"),
+    };
+    if policy_detection {
+        ScriptResult::Detected(format!("{script_rel}:\n{details}"))
+    } else {
+        ScriptResult::Operational(format!(
+            "{script_rel} exited without the required success receipt or policy-detection protocol marker:\n{details}"
+        ))
+    }
+}
+
+fn has_policy_detection_protocol(exit_code: Option<i32>, stdout: &str, stderr: &str) -> bool {
+    exit_code == Some(1)
+        && stdout
+            .lines()
+            .chain(stderr.lines())
+            .any(|line| line.trim() == POLICY_DETECTION_MARKER)
+}
+
+fn validate_mandatory_authority_gate_manifest(raw: &str) -> Result<(), String> {
+    let normalized = raw.replace("\r\n", "\n");
+    let blocks: Vec<String> = normalized
+        .split("[[gate]]")
+        .skip(1)
+        .map(|body| format!("[[gate]]{body}"))
+        .filter(|block| block.contains("\nid = \"canonical.authority-watchdog\"\n"))
+        .collect();
+    if blocks.len() != 1 {
+        return Err(format!(
+            "{GATE_MANIFEST_PATH} must contain exactly one canonical.authority-watchdog block; found {}",
+            blocks.len()
+        ));
+    }
+    if blocks[0].trim() != MANDATORY_AUTHORITY_GATE_BLOCK.trim() {
+        return Err(format!(
+            "{GATE_MANIFEST_PATH} canonical.authority-watchdog block differs from the independent Stone 0 bootstrap pin"
+        ));
+    }
+    Ok(())
+}
+
+fn verify_mandatory_authority_gate(root: &Path) -> Result<(), String> {
+    let path = root.join(GATE_MANIFEST_PATH);
+    let raw = fs::read_to_string(&path)
+        .map_err(|error| format!("could not read {} ({error})", path.display()))?;
+    validate_mandatory_authority_gate_manifest(&raw)
+}
+
+fn provenance_scan_with(
+    root: &Path,
+    mut execute: impl FnMut(&Path, &str, &[&str]) -> ScriptResult,
+) -> ProvenanceOutcome {
+    let mut override_eligible_detections = Vec::new();
+    let mut non_overridable_failures = Vec::new();
+    if let Err(error) = verify_mandatory_authority_gate(root) {
+        non_overridable_failures.push(format!(
+            "canonical provenance runner unavailable: {error}. A gate that cannot run has not passed."
+        ));
+        return ProvenanceOutcome {
+            override_eligible_detections,
+            non_overridable_failures,
+        };
+    }
+    let (script, args) = PROVENANCE_RUNNER;
+    match execute(root, script, args) {
+        ScriptResult::Clean => {}
+        ScriptResult::Detected(r) => override_eligible_detections.push(r),
+        ScriptResult::Operational(w) => non_overridable_failures.push(format!(
+            "canonical provenance runner unavailable: {w}. A gate that cannot run has not passed."
+        )),
+    }
+    // Execute every authority bootstrap directly as a second path. The
+    // declarative runner cannot suppress these calls by returning success or
+    // omitting a manifest entry. These calls enforce the authority boundary
+    // itself, so neither a semantic detection nor an operational failure may
+    // enter the owner-override bucket.
+    for (authority_script, authority_args) in MANDATORY_AUTHORITY_COMMANDS {
+        match execute(root, authority_script, authority_args) {
             ScriptResult::Clean => {}
-            ScriptResult::Detected(r) => detections.push(r),
-            ScriptResult::Operational(w) => operational.push(w),
+            ScriptResult::Detected(r) => non_overridable_failures.push(format!(
+                "mandatory authority command {authority_script} detected a policy violation:\n{r}"
+            )),
+            ScriptResult::Operational(w) => non_overridable_failures.push(format!(
+                "mandatory authority command {authority_script} unavailable: {w}. A gate that cannot run has not passed."
+            )),
         }
     }
     ProvenanceOutcome {
-        detections,
-        operational,
+        override_eligible_detections,
+        non_overridable_failures,
     }
 }
 
-fn fnv1a64_update(mut h: u64, data: &[u8]) -> u64 {
-    for &b in data {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    h
-}
-
-fn collect_files_with_ext(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
-    if let Ok(rd) = std::fs::read_dir(dir) {
-        for entry in rd.flatten() {
-            let p = entry.path();
-            if p.is_dir() {
-                collect_files_with_ext(&p, ext, out);
-            } else if p.extension().and_then(|e| e.to_str()) == Some(ext) {
-                out.push(p);
-            }
-        }
-    }
-}
-
-/// A content hash of everything the python gates read, so a verdict can be cached and reused when the
-/// inputs are byte-identical. FNV-1a is adequate here: the cache is a local optimization, and CI always
-/// runs on a fresh checkout with no cache, so a cache miss is the backstop.
-fn provenance_input_hash(root: &Path) -> u64 {
-    let mut files: Vec<PathBuf> = Vec::new();
-    for (s, _args) in PROVENANCE_SCRIPTS {
-        files.push(root.join(s));
-    }
-    // EVERY INPUT A GATE READS, or a cached clean verdict outlives an edit that would have convicted.
-    // The ledger and the profiles were the live gap: editing `quarantine_ledger.toml` locally could reuse
-    // a cached pass because the ledger was not hashed and the build script did not declare it as a rerun
-    // input, and the calibration profiles are what the simulation actually loads.
-    for extra in [
-        "scripts/constructor_baseline.tsv",
-        "scripts/determinism_baseline.tsv",
-        "scripts/derives_baseline.tsv",
-        "scripts/profile_override_baseline.tsv",
-        "calibration/reserved.toml",
-        "calibration/profiles/dev-fixtures.toml",
-        "calibration/profiles/mirror.toml",
-        "docs/working/quarantine_ledger.toml",
-        "docs/working/PHYSICS_FLOOR_REGISTRY.md",
-        "sources/registry.toml",
-        "sources/mirrored.toml",
-    ] {
-        files.push(root.join(extra));
-    }
-    // Every directory the python gates scan must appear here, or an edit inside one of them would not
-    // invalidate the cached verdict and a stale verdict would be reused. `crates/bio/src` and
-    // `crates/foundation/src` are the scan roots the two crate extractions added (see the CRATES lists
-    // in constructor_gate.py and determinism_gate.py); they are covered here for that reason.
-    for dir in [
-        "crates/core/src",
-        "crates/physics/src",
-        "crates/bio/src",
-        "crates/foundation/src",
-        "crates/sim/src",
-        "crates/world/src",
-    ] {
-        collect_files_with_ext(&root.join(dir), "rs", &mut files);
-    }
-    collect_files_with_ext(&root.join("crates/physics/data"), "toml", &mut files);
-    files.sort();
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for f in files {
-        if let Ok(bytes) = std::fs::read(&f) {
-            h = fnv1a64_update(h, f.to_string_lossy().as_bytes());
-            h = fnv1a64_update(h, &[0]);
-            h = fnv1a64_update(h, &bytes);
-        }
-    }
-    h
-}
-
-fn read_cache(cache_path: &Path, want_hash: u64) -> Option<Vec<String>> {
-    let text = std::fs::read_to_string(cache_path).ok()?;
-    let (hash_line, rest) = text.split_once('\n')?;
-    if hash_line.trim() != format!("{want_hash:016x}") {
-        return None;
-    }
-    let dets: Vec<String> = rest
-        .split('\u{1e}')
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect();
-    Some(dets)
-}
-
-fn write_cache(cache_path: &Path, hash: u64, detections: &[String]) {
-    if let Some(parent) = cache_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let body = detections.join("\u{1e}");
-    let _ = std::fs::write(cache_path, format!("{hash:016x}\n{body}"));
-}
-
-fn provenance_scan_cached(root: &Path, notices: &mut Vec<String>) -> ProvenanceOutcome {
-    let hash = provenance_input_hash(root);
-    let cache_path = root.join("target/stone0/provenance.cache");
-    if let Some(dets) = read_cache(&cache_path, hash) {
-        notices.push("provenance verdict served from cache (inputs unchanged)".to_string());
-        return ProvenanceOutcome {
-            detections: dets,
-            operational: Vec::new(),
-        };
-    }
-    let outcome = provenance_scan(root);
-    // Only cache when python ran (no operational error), so a transient python outage never
-    // freezes a clean verdict into the cache.
-    if outcome.operational.is_empty() {
-        write_cache(&cache_path, hash, &outcome.detections);
-    }
-    outcome
+fn provenance_scan(root: &Path) -> ProvenanceOutcome {
+    provenance_scan_with(root, run_python_gate)
 }
 
 // ----------------------------------------------------------------------------------------------------
-// Tracked-tree and index gathering (git). Every step fails open: any error returns Err and the caller
+// Worktree and index gathering (git). Every step fails open: any error returns Err and the caller
 // warns and skips, never blocks.
 // ----------------------------------------------------------------------------------------------------
 
-fn git_tracked_files(root: &Path) -> Result<Vec<RepoFile>, String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["ls-files", "-z"])
+fn git_worktree_files(root: &Path) -> Result<Vec<RepoFile>, String> {
+    let mut command =
+        trusted_git_command(root).map_err(|error| format!("trusted Git unavailable ({error})"))?;
+    let out = command
+        .args([
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ])
         .output()
         .map_err(|e| format!("git ls-files did not spawn ({e})"))?;
     if !out.status.success() {
         return Err("git ls-files exited non-zero".to_string());
     }
     let mut files = Vec::new();
+    let mut seen = BTreeSet::new();
     for rec in out.stdout.split(|&b| b == 0) {
         if rec.is_empty() {
             continue;
         }
         let rel = String::from_utf8_lossy(rec).into_owned();
+        if !seen.insert(rel.clone()) {
+            continue;
+        }
         match std::fs::read(root.join(&rel)) {
             Ok(bytes) => files.push(RepoFile { path: rel, bytes }),
             Err(_) => {
-                // A tracked path with no readable working-tree file (a submodule gitlink, a deleted but
-                // still-tracked path). Skip it; the index scan still covers its staged blob.
+                // A listed path with no readable worktree file can be a submodule gitlink or a deleted
+                // tracked path. Skip it; the index scan still covers any staged blob.
             }
         }
     }
@@ -572,9 +1140,9 @@ fn git_tracked_files(root: &Path) -> Result<Vec<RepoFile>, String> {
 /// a command line. Paths are prefixed `(index)` so a report distinguishes a staged hit from a worktree
 /// hit.
 fn git_index_blobs(root: &Path) -> Result<Vec<RepoFile>, String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(root)
+    let mut listing_command =
+        trusted_git_command(root).map_err(|error| format!("trusted Git unavailable ({error})"))?;
+    let out = listing_command
         .args(["ls-files", "-s", "-z"])
         .output()
         .map_err(|e| format!("git ls-files -s did not spawn ({e})"))?;
@@ -600,9 +1168,9 @@ fn git_index_blobs(root: &Path) -> Result<Vec<RepoFile>, String> {
         return Ok(Vec::new());
     }
     let shas: Vec<String> = sha_to_path.keys().cloned().collect();
-    let mut child = Command::new("git")
-        .arg("-C")
-        .arg(root)
+    let mut cat_file_command =
+        trusted_git_command(root).map_err(|error| format!("trusted Git unavailable ({error})"))?;
+    let mut child = cat_file_command
         .args(["cat-file", "--batch"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -717,30 +1285,40 @@ fn dedup(mut v: Vec<String>) -> Vec<String> {
     set.into_iter().collect()
 }
 
-/// Run every Stone 0 check for the given configuration and return the verdict. Never panics; every
-/// operational failure degrades to a warning and an allowed build.
+/// Run every Stone 0 check for the given configuration and return the verdict.
+///
+/// The canonical provenance runner is mandatory. Its operational failure is a
+/// build failure, not a skipped check.
 pub fn gate(cfg: &GateConfig) -> GateReport {
     let mut failures: Vec<String> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
     let mut notices: Vec<String> = Vec::new();
 
-    // Gather the tracked tree once; the laundering, tombstone, override-env, and canary scans share it.
-    let files = match git_tracked_files(&cfg.repo_root) {
+    if cfg.override_value.is_some() && cfg.secrets_path != Path::new(DEFAULT_SECRETS_PATH) {
+        failures.push(
+            "a caller-selected secrets path cannot authorize an override; use the documented default owner trust path"
+                .to_owned(),
+        );
+    }
+
+    // Gather tracked and nonignored untracked worktree files once; the laundering, tombstone,
+    // override-env, and canary scans share them.
+    let files = match git_worktree_files(&cfg.repo_root) {
         Ok(f) => Some(f),
         Err(e) => {
             warnings.push(format!(
-                "git tracked-file scan unavailable ({e}); the laundering, tombstone, override-env, and canary scans are skipped"
+                "git worktree-file scan unavailable ({e}); the laundering, tombstone, override-env, and canary scans are skipped"
             ));
             None
         }
     };
 
     // Check 1: the provenance scan (both modes).
-    let prov = provenance_scan_cached(&cfg.repo_root, &mut notices);
-    for w in prov.operational {
-        warnings.push(w);
+    let prov = provenance_scan(&cfg.repo_root);
+    for hard_failure in &prov.non_overridable_failures {
+        failures.push(hard_failure.clone());
     }
-    let provenance_failed = !prov.detections.is_empty();
+    let provenance_failed = !prov.override_eligible_detections.is_empty();
 
     // Secrets (local mode only).
     let (password, canary) = read_secrets(cfg, &mut notices);
@@ -797,7 +1375,7 @@ pub fn gate(cfg: &GateConfig) -> GateReport {
     if provenance_failed {
         let mut report =
             String::from("provenance scan found un-provenanced or fixture value(s):\n");
-        for d in &prov.detections {
+        for d in &prov.override_eligible_detections {
             report.push_str(d);
             report.push('\n');
         }
@@ -837,22 +1415,189 @@ pub fn gate(cfg: &GateConfig) -> GateReport {
 }
 
 // ----------------------------------------------------------------------------------------------------
-// The binary entry point.
+// Repository binding and binary entry points.
 // ----------------------------------------------------------------------------------------------------
 
-fn detect_repo_root() -> PathBuf {
-    if let Ok(out) = Command::new("git")
+const REPOSITORY_ROOT_MEMBERS: [&str; 6] = [
+    "Cargo.toml",
+    "Cargo.lock",
+    "crates/stone0/Cargo.toml",
+    "scripts/gates.toml",
+    "scripts/gate_runner.py",
+    TOMBSTONE_REL,
+];
+
+fn validate_regular_repository_member(root: &Path, relative: &str) -> Result<(), String> {
+    let mut path = root.to_path_buf();
+    for component in Path::new(relative).components() {
+        let std::path::Component::Normal(name) = component else {
+            return Err(format!(
+                "repository identity member has a non-normal path: {relative}"
+            ));
+        };
+        path.push(name);
+        let metadata = fs::symlink_metadata(&path).map_err(|error| {
+            format!(
+                "repository identity member {} is unavailable ({error})",
+                path.display()
+            )
+        })?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!(
+                "repository identity member traverses a symbolic link: {}",
+                path.display()
+            ));
+        }
+    }
+    let canonical = fs::canonicalize(&path).map_err(|error| {
+        format!(
+            "repository identity member {} cannot be canonicalized ({error})",
+            path.display()
+        )
+    })?;
+    if !canonical.starts_with(root) || !canonical.is_file() {
+        return Err(format!(
+            "repository identity member is not a regular file beneath the bound root: {relative}"
+        ));
+    }
+    Ok(())
+}
+
+fn trusted_git_top_level(root: &Path) -> Result<PathBuf, String> {
+    let mut command = trusted_git_command(root)?;
+    let output = command
         .args(["rev-parse", "--show-toplevel"])
         .output()
+        .map_err(|error| format!("trusted Git root check did not spawn ({error})"))?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        return Err(if detail.is_empty() {
+            "trusted Git root check exited nonzero without diagnostics".to_owned()
+        } else {
+            format!("trusted Git root check exited nonzero ({detail})")
+        });
+    }
+    let reported = String::from_utf8(output.stdout)
+        .map_err(|_| "trusted Git returned a non-UTF-8 repository root".to_owned())?;
+    let reported = reported.trim();
+    if reported.is_empty() {
+        return Err("trusted Git returned an empty repository root".to_owned());
+    }
+    fs::canonicalize(reported)
+        .map_err(|error| format!("trusted Git repository root cannot be canonicalized ({error})"))
+}
+
+fn canonicalize_and_validate_repository_root(root: &Path) -> Result<PathBuf, String> {
+    let canonical = fs::canonicalize(root).map_err(|error| {
+        format!(
+            "repository root {} cannot be canonicalized ({error})",
+            root.display()
+        )
+    })?;
+    if !canonical.is_dir() {
+        return Err(format!(
+            "repository root is not a directory: {}",
+            canonical.display()
+        ));
+    }
+    for relative in REPOSITORY_ROOT_MEMBERS {
+        validate_regular_repository_member(&canonical, relative)?;
+    }
+
+    let workspace_manifest = fs::read_to_string(canonical.join("Cargo.toml"))
+        .map_err(|error| format!("workspace manifest cannot be read ({error})"))?;
+    let stone0_manifest = fs::read_to_string(canonical.join("crates/stone0/Cargo.toml"))
+        .map_err(|error| format!("Stone 0 manifest cannot be read ({error})"))?;
+    if !workspace_manifest
+        .lines()
+        .any(|line| line.trim() == "[workspace]")
+        || !workspace_manifest.contains("\"crates/stone0\"")
+        || !stone0_manifest
+            .lines()
+            .any(|line| line.trim() == "name = \"civsim-stone0\"")
     {
-        if out.status.success() {
-            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !s.is_empty() {
-                return PathBuf::from(s);
+        return Err(
+            "repository root does not carry the expected workspace and Stone 0 identities"
+                .to_owned(),
+        );
+    }
+
+    let git_root = trusted_git_top_level(&canonical)?;
+    if git_root != canonical {
+        return Err(format!(
+            "explicit repository root {} does not equal trusted Git top level {}",
+            canonical.display(),
+            git_root.display()
+        ));
+    }
+    Ok(canonical)
+}
+
+fn has_repository_root_shape(candidate: &Path) -> bool {
+    [
+        "Cargo.toml",
+        "crates/stone0/Cargo.toml",
+        "scripts/gates.toml",
+    ]
+    .iter()
+    .all(|relative| candidate.join(relative).is_file())
+}
+
+fn discover_repository_root_from(start: &Path) -> Result<PathBuf, String> {
+    let canonical_start = fs::canonicalize(start).map_err(|error| {
+        format!(
+            "repository-root search start {} cannot be canonicalized ({error})",
+            start.display()
+        )
+    })?;
+    let start_directory = if canonical_start.is_dir() {
+        canonical_start
+    } else {
+        canonical_start
+            .parent()
+            .ok_or_else(|| "repository-root search start has no parent directory".to_owned())?
+            .to_path_buf()
+    };
+    let mut rejected = Vec::new();
+    for candidate in start_directory.ancestors() {
+        if has_repository_root_shape(candidate) {
+            match canonicalize_and_validate_repository_root(candidate) {
+                Ok(root) => return Ok(root),
+                Err(error) => rejected.push(format!("{} ({error})", candidate.display())),
             }
         }
     }
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    if rejected.is_empty() {
+        Err(format!(
+            "no repository root was found above {}",
+            start_directory.display()
+        ))
+    } else {
+        Err(format!(
+            "no valid repository root was found above {}: {}",
+            start_directory.display(),
+            rejected.join("; ")
+        ))
+    }
+}
+
+fn resolve_cli_repository_root() -> Result<PathBuf, String> {
+    let current_directory = std::env::current_dir()
+        .map_err(|error| format!("current directory is unavailable ({error})"))?;
+    match discover_repository_root_from(&current_directory) {
+        Ok(root) => Ok(root),
+        Err(current_error) => {
+            let executable = std::env::current_exe().map_err(|error| {
+                format!("{current_error}; current executable is unavailable ({error})")
+            })?;
+            discover_repository_root_from(&executable).map_err(|executable_error| {
+                format!(
+                    "repository root could not be resolved from the current directory or executable: \
+                     current directory: {current_error}; executable: {executable_error}"
+                )
+            })
+        }
+    }
 }
 
 fn emit_report(report: &GateReport) {
@@ -884,22 +1629,23 @@ fn emit_report(report: &GateReport) {
     }
 }
 
-/// The binary entry point: build the config from the environment, run the gate, print the report, and
-/// return the process exit code.
-pub fn run(mode: Mode) -> i32 {
-    if mode == Mode::SelfTest {
-        return self_test();
-    }
-    let repo_root = detect_repo_root();
-    let secrets_path = std::env::var("STONE0_SECRETS_PATH")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(DEFAULT_SECRETS_PATH));
-    let tombstones_path = repo_root.join(TOMBSTONE_REL);
+fn run_at_canonical_repository_root(mode: Mode, repo_root: PathBuf) -> i32 {
     let override_value = if mode == Mode::Local {
         std::env::var(OVERRIDE_ENV).ok()
     } else {
         None
     };
+    let secrets_path = match select_secrets_path(
+        std::env::var("STONE0_SECRETS_PATH").ok().as_deref(),
+        override_value.as_deref(),
+    ) {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("stone0: FAIL: {error}");
+            return 1;
+        }
+    };
+    let tombstones_path = repo_root.join(TOMBSTONE_REL);
     let cfg = GateConfig {
         repo_root,
         secrets_path,
@@ -910,6 +1656,63 @@ pub fn run(mode: Mode) -> i32 {
     let report = gate(&cfg);
     emit_report(&report);
     report.exit_code()
+}
+
+/// Run Stone 0 against one caller-bound repository root.
+///
+/// The path is canonicalized, checked against repository identity members, and
+/// required to equal the top level reported by an independently rooted Git
+/// executable with a scrubbed environment. Any mismatch or unavailable trust
+/// root fails closed before a gate mode runs.
+pub fn run_at_repository_root(mode: Mode, repo_root: &Path) -> i32 {
+    let repo_root = match canonicalize_and_validate_repository_root(repo_root) {
+        Ok(root) => root,
+        Err(error) => {
+            eprintln!("stone0: FAIL: repository-root binding refused: {error}");
+            return 1;
+        }
+    };
+    if mode == Mode::SelfTest {
+        return self_test();
+    }
+    run_at_canonical_repository_root(mode, repo_root)
+}
+
+/// Resolve the repository without invoking ambient `git`, run the gate, print
+/// the report, and return the process exit code.
+///
+/// `SelfTest` is repository-independent. Build scripts must use
+/// [`run_at_repository_root`] so their authority root comes from the calling
+/// build anchor rather than process location.
+pub fn run(mode: Mode) -> i32 {
+    if mode == Mode::SelfTest {
+        return self_test();
+    }
+    let repo_root = match resolve_cli_repository_root() {
+        Ok(root) => root,
+        Err(error) => {
+            eprintln!("stone0: FAIL: repository-root resolution refused: {error}");
+            return 1;
+        }
+    };
+    run_at_canonical_repository_root(mode, repo_root)
+}
+
+fn select_secrets_path(
+    configured_path: Option<&str>,
+    override_value: Option<&str>,
+) -> Result<PathBuf, String> {
+    match configured_path {
+        Some(path) if path.trim().is_empty() => {
+            Err("STONE0_SECRETS_PATH is empty; refusing an ambiguous secrets authority".to_owned())
+        }
+        Some(_) if override_value.is_some() => Err(
+            "STONE0_SECRETS_PATH and STONE0_OVERRIDE cannot be supplied together; a caller-selected secrets file cannot authorize that caller's override"
+                .to_owned(),
+        ),
+        Some(path) => Ok(PathBuf::from(path)),
+        None => Ok(PathBuf::from(DEFAULT_SECRETS_PATH)),
+    }
 }
 
 // ----------------------------------------------------------------------------------------------------
@@ -948,6 +1751,575 @@ fn self_test() -> i32 {
         "override rejects empty password",
         !override_is_valid(Some(""), ""),
     );
+    check(
+        "caller-selected secrets cannot authorize caller override",
+        select_secrets_path(Some("synthetic.pass"), Some("synthetic override")).is_err(),
+    );
+    check(
+        "custom secrets path remains usable without an override",
+        select_secrets_path(Some("synthetic.pass"), None) == Ok(PathBuf::from("synthetic.pass")),
+    );
+    check(
+        "empty secrets path is rejected",
+        select_secrets_path(Some(""), None).is_err(),
+    );
+    check(
+        "marked policy detection is override-eligible",
+        has_policy_detection_protocol(Some(1), "", POLICY_DETECTION_MARKER),
+    );
+    check(
+        "unmarked nonzero exit is authority failure",
+        !has_policy_detection_protocol(Some(1), "gate failed", ""),
+    );
+    check(
+        "wrong exit code cannot claim policy detection",
+        !has_policy_detection_protocol(Some(2), POLICY_DETECTION_MARKER, ""),
+    );
+    let python_receipt = "civsim.stone0.python-authority-success.v1:fixture";
+    check(
+        "exact Python success receipt accepted",
+        has_python_success_receipt(true, python_receipt, python_receipt),
+    );
+    check(
+        "missing Python success receipt fails closed",
+        !has_python_success_receipt(true, "", python_receipt),
+    );
+    check(
+        "duplicate Python success receipt fails closed",
+        !has_python_success_receipt(
+            true,
+            &format!("{python_receipt}\n{python_receipt}"),
+            python_receipt,
+        ),
+    );
+    check(
+        "nonzero Python exit cannot claim success",
+        !has_python_success_receipt(false, python_receipt, python_receipt),
+    );
+    check(
+        "wrong Python success receipt fails closed",
+        !has_python_success_receipt(
+            true,
+            "civsim.stone0.python-authority-success.v1:other",
+            python_receipt,
+        ),
+    );
+    check(
+        "mandatory authority commands retain the independent direct path",
+        MANDATORY_AUTHORITY_COMMANDS
+            == [
+                ("scripts/authority_watchdog_gate.py", &[] as &[&str]),
+                ("scripts/codata_floor_evidence_gate.py", &[] as &[&str]),
+                ("scripts/stone0_build_wiring_gate.py", &[] as &[&str]),
+                ("scripts/fixed_math_authority_gate.py", &[] as &[&str]),
+                ("scripts/external_claim_gate.py", &[] as &[&str]),
+            ],
+    );
+
+    let exact_gate = format!("{MANDATORY_AUTHORITY_GATE_BLOCK}\n");
+    check(
+        "mandatory authority gate exact block accepted",
+        validate_mandatory_authority_gate_manifest(&exact_gate).is_ok(),
+    );
+    for (label, old, replacement) in [
+        (
+            "mandatory authority id mutation caught",
+            "id = \"canonical.authority-watchdog\"",
+            "id = \"canonical.authority-watchdog-weakened\"",
+        ),
+        (
+            "mandatory authority order mutation caught",
+            "order = 65",
+            "order = 64",
+        ),
+        (
+            "mandatory authority description mutation caught",
+            "description = \"Require independent pairs for active authority-bearing mechanical claims.\"",
+            "description = \"Weakened authority claim.\"",
+        ),
+        (
+            "mandatory authority tiers mutation caught",
+            "tiers = [\"canonical\", \"doctor\", \"pr\", \"full\", \"nightly\", \"stop\"]",
+            "tiers = [\"canonical\", \"doctor\", \"pr\", \"full\", \"nightly\"]",
+        ),
+        (
+            "mandatory authority phase mutation caught",
+            "phase = \"provenance\"",
+            "phase = \"post\"",
+        ),
+        (
+            "mandatory authority command mutation caught",
+            "command = [\"{python}\", \"scripts/authority_watchdog_gate.py\"]",
+            "command = [\"{python}\", \"scripts/authority_watchdog_gate.py\", \"--weakened\"]",
+        ),
+        (
+            "mandatory authority self-test mutation caught",
+            "self_test = [\"{python}\", \"scripts/authority_watchdog_gate.py\", \"--self-test\"]",
+            "self_test = [\"{python}\", \"scripts/authority_watchdog_gate.py\"]",
+        ),
+        (
+            "mandatory authority timeout mutation caught",
+            "timeout_seconds = 120",
+            "timeout_seconds = 1",
+        ),
+        (
+            "mandatory authority cache mutation caught",
+            "cache = \"content-hash\"",
+            "cache = \"never\"",
+        ),
+        (
+            "mandatory authority no-cache metadata mutation caught",
+            "cache = \"content-hash\"",
+            "cache = \"content-hash\"\nno_cache_reason = \"bypass\"",
+        ),
+        (
+            "mandatory authority input mutation caught",
+            "  \"scripts/gate_runner.py\",",
+            "  \"scripts/gate_runner-weakened.py\",",
+        ),
+        (
+            "mandatory authority path-trigger mutation caught",
+            "  \"crates/**\",",
+            "  \"crates/units/**\",",
+        ),
+    ] {
+        let changed = exact_gate.replacen(old, replacement, 1);
+        check(
+            label,
+            changed != exact_gate
+                && validate_mandatory_authority_gate_manifest(&changed).is_err(),
+        );
+    }
+    check(
+        "mandatory authority removal caught",
+        validate_mandatory_authority_gate_manifest("").is_err(),
+    );
+    let duplicate_gate = format!("{exact_gate}{exact_gate}");
+    check(
+        "mandatory authority duplicate caught",
+        validate_mandatory_authority_gate_manifest(&duplicate_gate).is_err(),
+    );
+
+    let integration_root = std::env::temp_dir().join(format!(
+        "civsim-stone0-authority-self-test-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&integration_root);
+    let integration = (|| -> Result<
+        (
+            Vec<String>,
+            ProvenanceOutcome,
+            ProvenanceOutcome,
+            ProvenanceOutcome,
+        ),
+        String,
+    > {
+        fs::create_dir_all(integration_root.join("scripts"))
+            .map_err(|error| format!("could not create integration fixture: {error}"))?;
+        fs::write(
+            integration_root.join(GATE_MANIFEST_PATH),
+            MANDATORY_AUTHORITY_GATE_BLOCK,
+        )
+        .map_err(|error| format!("could not write integration fixture: {error}"))?;
+        let mut observed = Vec::new();
+        let outcome = provenance_scan_with(&integration_root, |_root, script, args| {
+            let mut command = vec![script.to_owned()];
+            command.extend(args.iter().map(|argument| (*argument).to_owned()));
+            observed.push(command.join(" "));
+            if script == "scripts/fixed_math_authority_gate.py" {
+                ScriptResult::Operational("synthetic direct authority failure".to_owned())
+            } else {
+                ScriptResult::Clean
+            }
+        });
+        let detected_outcome =
+            provenance_scan_with(&integration_root, |_root, script, _args| {
+                if script == "scripts/fixed_math_authority_gate.py" {
+                    ScriptResult::Detected("synthetic direct authority detection".to_owned())
+                } else {
+                    ScriptResult::Clean
+                }
+            });
+        let ordinary_detection_outcome =
+            provenance_scan_with(&integration_root, |_root, script, _args| {
+                if script == PROVENANCE_RUNNER.0 {
+                    ScriptResult::Detected("synthetic ordinary provenance detection".to_owned())
+                } else {
+                    ScriptResult::Clean
+                }
+            });
+        Ok((
+            observed,
+            outcome,
+            detected_outcome,
+            ordinary_detection_outcome,
+        ))
+    })();
+    let _ = fs::remove_dir_all(&integration_root);
+    match integration {
+        Ok((observed, outcome, detected_outcome, ordinary_detection_outcome)) => {
+            check(
+                "provenance scan executes the runner and every direct authority command",
+                observed
+                    == [
+                        "scripts/gate_runner.py run --tier canonical --phase provenance",
+                        "scripts/authority_watchdog_gate.py",
+                        "scripts/codata_floor_evidence_gate.py",
+                        "scripts/stone0_build_wiring_gate.py",
+                        "scripts/fixed_math_authority_gate.py",
+                        "scripts/external_claim_gate.py",
+                    ],
+            );
+            check(
+                "direct authority operational failure propagates closed",
+                outcome.override_eligible_detections.is_empty()
+                    && outcome.non_overridable_failures
+                        == ["mandatory authority command scripts/fixed_math_authority_gate.py unavailable: synthetic direct authority failure. A gate that cannot run has not passed.".to_owned()],
+            );
+            check(
+                "direct authority detection is never override eligible",
+                detected_outcome.override_eligible_detections.is_empty()
+                    && detected_outcome.non_overridable_failures
+                        == ["mandatory authority command scripts/fixed_math_authority_gate.py detected a policy violation:\nsynthetic direct authority detection".to_owned()],
+            );
+            check(
+                "ordinary provenance detection remains override eligible",
+                ordinary_detection_outcome.override_eligible_detections
+                    == ["synthetic ordinary provenance detection".to_owned()]
+                    && ordinary_detection_outcome
+                        .non_overridable_failures
+                        .is_empty(),
+            );
+        }
+        Err(error) => check(
+            &format!("direct authority integration fixture failed: {error}"),
+            false,
+        ),
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        check(
+            "root executable metadata canaries preserve every acceptance predicate",
+            root_executable_shape_is_trusted(true, 0, 0o755)
+                && !root_executable_shape_is_trusted(false, 0, 0o755)
+                && !root_executable_shape_is_trusted(true, 1, 0o755)
+                && !root_executable_shape_is_trusted(true, 0, 0o775)
+                && !root_executable_shape_is_trusted(true, 0, 0o757)
+                && !root_executable_shape_is_trusted(true, 0, 0o4755)
+                && !root_executable_shape_is_trusted(true, 0, 0o2755)
+                && !root_executable_shape_is_trusted(true, 0, 0o644),
+        );
+        check(
+            "root directory metadata canaries preserve every ancestry predicate",
+            root_directory_shape_is_trusted(true, 0, 0o755)
+                && !root_directory_shape_is_trusted(false, 0, 0o755)
+                && !root_directory_shape_is_trusted(true, 1, 0o755)
+                && !root_directory_shape_is_trusted(true, 0, 0o775)
+                && !root_directory_shape_is_trusted(true, 0, 0o757),
+        );
+
+        let packaged_git_core = Path::new("/usr/lib/git-core/git");
+        if packaged_git_core.exists() {
+            let expected_packaged_git = fs::canonicalize(packaged_git_core);
+            let observed_packaged_git =
+                trusted_git_executable_from(&[Path::new("/usr"), packaged_git_core]);
+            check(
+                "a rejected fixed candidate falls through to the package-internal Git root",
+                expected_packaged_git.as_ref().is_ok_and(|expected| {
+                    observed_packaged_git
+                        .as_ref()
+                        .is_ok_and(|observed| observed == expected)
+                }),
+            );
+        }
+
+        let manifest_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let dedup_root = std::env::temp_dir().join(format!(
+            "civsim-stone0-git-dedup-self-test-{}",
+            std::process::id()
+        ));
+        let dedup_result = (|| -> Result<bool, String> {
+            let candidate = dedup_root.join("untrusted-git");
+            let alias = dedup_root.join("untrusted-git-alias");
+            fs::create_dir_all(&dedup_root)
+                .map_err(|error| format!("could not create Git-dedup fixture: {error}"))?;
+            fs::write(&candidate, "#!/bin/sh\nexit 0\n")
+                .map_err(|error| format!("could not write Git-dedup fixture: {error}"))?;
+            let mut permissions = fs::metadata(&candidate)
+                .map_err(|error| format!("could not inspect Git-dedup fixture: {error}"))?
+                .permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&candidate, permissions)
+                .map_err(|error| format!("could not arm Git-dedup fixture: {error}"))?;
+            std::os::unix::fs::symlink(&candidate, &alias)
+                .map_err(|error| format!("could not link Git-dedup fixture: {error}"))?;
+            let canonical = fs::canonicalize(&candidate)
+                .map_err(|error| format!("could not canonicalize Git-dedup fixture: {error}"))?;
+            let error = match trusted_git_executable_from(&[&candidate, &alias]) {
+                Ok(_) => return Ok(false),
+                Err(error) => error,
+            };
+            Ok(error.matches(&canonical.display().to_string()).count() == 1)
+        })();
+        match dedup_result {
+            Ok(deduplicated) => check(
+                "canonical aliases are inspected once before a trust refusal",
+                deduplicated,
+            ),
+            Err(error) => check(&format!("Git-dedup fixture failed: {error}"), false),
+        }
+        let _ = fs::remove_dir_all(&dedup_root);
+
+        let root_binding_fixture = manifest_root.join(format!(
+            ".civsim-stone0-root-binding-self-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root_binding_fixture);
+        let root_binding = (|| -> Result<(PathBuf, PathBuf, bool, bool, bool, bool), String> {
+            let fake_bin = root_binding_fixture.join("bin");
+            let fake_git = fake_bin.join("git");
+            let fake_git_sentinel = fake_bin.join("ambient-git-ran");
+            fs::create_dir_all(&fake_bin)
+                .map_err(|error| format!("could not create root-binding fixture: {error}"))?;
+            fs::write(
+                &fake_git,
+                "#!/bin/sh\n\
+                 : > \"${0%/*}/ambient-git-ran\"\n\
+                 printf '/tmp/redirected-stone0-root\\n'\n\
+                 exit 0\n",
+            )
+            .map_err(|error| format!("could not write fake Git: {error}"))?;
+            let mut permissions = fs::metadata(&fake_git)
+                .map_err(|error| format!("could not inspect fake Git: {error}"))?
+                .permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&fake_git, permissions)
+                .map_err(|error| format!("could not arm fake Git: {error}"))?;
+
+            let decoy_root = root_binding_fixture.join("decoy-root");
+            fs::create_dir_all(decoy_root.join("crates/stone0"))
+                .and_then(|_| fs::create_dir_all(decoy_root.join("scripts")))
+                .and_then(|_| {
+                    fs::write(
+                        decoy_root.join("Cargo.toml"),
+                        "[workspace]\nmembers = [\"crates/stone0\"]\n",
+                    )
+                })
+                .and_then(|_| fs::write(decoy_root.join("Cargo.lock"), ""))
+                .and_then(|_| {
+                    fs::write(
+                        decoy_root.join("crates/stone0/Cargo.toml"),
+                        "[package]\nname = \"civsim-stone0\"\n",
+                    )
+                })
+                .and_then(|_| fs::write(decoy_root.join("scripts/gates.toml"), ""))
+                .and_then(|_| fs::write(decoy_root.join("scripts/gate_runner.py"), ""))
+                .and_then(|_| fs::write(decoy_root.join(TOMBSTONE_REL), ""))
+                .map_err(|error| format!("could not create repository-shaped decoy: {error}"))?;
+            let canonical_decoy = fs::canonicalize(&decoy_root)
+                .map_err(|error| format!("could not canonicalize repository decoy: {error}"))?;
+            let expected_root = fs::canonicalize(&manifest_root)
+                .map_err(|error| format!("could not canonicalize real repository root: {error}"))?;
+            let decoy_has_identity = has_repository_root_shape(&canonical_decoy)
+                && REPOSITORY_ROOT_MEMBERS.iter().all(|relative| {
+                    validate_regular_repository_member(&canonical_decoy, relative).is_ok()
+                });
+
+            let original_path = std::env::var_os("PATH");
+            std::env::set_var("PATH", &fake_bin);
+            let explicit = canonicalize_and_validate_repository_root(&manifest_root);
+            let discovered = discover_repository_root_from(Path::new(env!("CARGO_MANIFEST_DIR")));
+            let decoy_git_root = trusted_git_top_level(&canonical_decoy);
+            let decoy_git_root_is_parent = decoy_git_root
+                .as_ref()
+                .is_ok_and(|observed| observed == &expected_root && observed != &canonical_decoy);
+            let decoy_refused =
+                canonicalize_and_validate_repository_root(&canonical_decoy).is_err();
+            match original_path {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+            let explicit =
+                explicit.map_err(|error| format!("explicit root binding failed: {error}"))?;
+            let discovered =
+                discovered.map_err(|error| format!("root discovery failed: {error}"))?;
+            Ok((
+                explicit,
+                discovered,
+                fake_git_sentinel.exists(),
+                decoy_has_identity,
+                decoy_git_root_is_parent,
+                decoy_refused,
+            ))
+        })();
+        match root_binding {
+            Ok((
+                explicit,
+                discovered,
+                fake_git_ran,
+                decoy_has_identity,
+                decoy_git_root_is_parent,
+                decoy_refused,
+            )) => {
+                let expected =
+                    fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."));
+                check(
+                    "manifest-derived explicit root remains exact under a fake PATH Git",
+                    expected
+                        .as_ref()
+                        .is_ok_and(|expected| expected == &explicit)
+                        && explicit == discovered
+                        && !fake_git_ran,
+                );
+                check(
+                    "repository decoy satisfies the non-Git identity and file-shape checks",
+                    decoy_has_identity,
+                );
+                check(
+                    "trusted Git resolves the repository decoy to the distinct real parent root",
+                    decoy_git_root_is_parent,
+                );
+                check(
+                    "repository-shaped decoy is refused because it is not the trusted Git top level",
+                    decoy_refused,
+                );
+            }
+            Err(error) => check(
+                &format!("repository-root binding fixture failed: {error}"),
+                false,
+            ),
+        }
+        check(
+            "a nested crate directory is not accepted as an explicit repository root",
+            canonicalize_and_validate_repository_root(Path::new(env!("CARGO_MANIFEST_DIR")))
+                .is_err(),
+        );
+        let _ = fs::remove_dir_all(&root_binding_fixture);
+
+        let python_boundary_root = std::env::temp_dir().join(format!(
+            "civsim-stone0-python-boundary-self-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&python_boundary_root);
+        let python_boundary = (|| -> Result<bool, String> {
+            let scripts = python_boundary_root.join("scripts");
+            let poison = python_boundary_root.join("poison");
+            fs::create_dir_all(&scripts)
+                .and_then(|_| fs::create_dir_all(&poison))
+                .map_err(|error| format!("could not create Python-boundary fixture: {error}"))?;
+            fs::write(
+                scripts.join("pass.py"),
+                "import json\n\
+                 import os\n\
+                 assert json.__name__ == \"json\"\n\
+                 assert \"PYTHONPATH\" not in os.environ\n\
+                 assert \"LD_PRELOAD\" not in os.environ\n",
+            )
+            .and_then(|_| fs::write(poison.join("json.py"), "raise RuntimeError('poisoned')\n"))
+            .map_err(|error| format!("could not write Python-boundary fixture: {error}"))?;
+            let poisoned_environment = [
+                (
+                    OsString::from("PYTHONPATH"),
+                    poison.as_os_str().to_os_string(),
+                ),
+                (
+                    OsString::from("LD_PRELOAD"),
+                    poison.join("missing.so").into_os_string(),
+                ),
+            ];
+            Ok(matches!(
+                run_python_gate_with_environment(
+                    &python_boundary_root,
+                    "scripts/pass.py",
+                    &[],
+                    &poisoned_environment,
+                ),
+                ScriptResult::Clean
+            ))
+        })();
+        match python_boundary {
+            Ok(clean) => check(
+                "Python import and dynamic-loader injection are removed before authority execution",
+                clean,
+            ),
+            Err(error) => check(
+                &format!("Python-boundary integration fixture failed: {error}"),
+                false,
+            ),
+        }
+        let _ = fs::remove_dir_all(&python_boundary_root);
+
+        let shim_root = std::env::temp_dir().join(format!(
+            "civsim-stone0-python-shim-self-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&shim_root);
+        let shim_result = (|| -> Result<bool, String> {
+            let scripts = shim_root.join("scripts");
+            let bin = shim_root.join("bin");
+            let sentinel = shim_root.join("shim-ran");
+            fs::create_dir_all(&scripts)
+                .and_then(|_| fs::create_dir_all(&bin))
+                .map_err(|error| format!("could not create Python-shim fixture: {error}"))?;
+            fs::write(scripts.join("pass.py"), "raise SystemExit(0)\n")
+                .and_then(|_| {
+                    fs::write(
+                        bin.join("python3"),
+                        "#!/bin/sh\n\
+                         : > \"$CIVSIM_STONE0_SHIM_SENTINEL\"\n\
+                         for argument in \"$@\"; do\n\
+                           case \"$argument\" in\n\
+                             civsim.stone0.python-authority-success.v1:*)\n\
+                               printf '%s\\n' \"$argument\" >&2\n\
+                               exit 0\n\
+                               ;;\n\
+                           esac\n\
+                         done\n\
+                         exit 0\n",
+                    )
+                })
+                .map_err(|error| format!("could not write Python-shim fixture: {error}"))?;
+            let mut permissions = fs::metadata(bin.join("python3"))
+                .map_err(|error| format!("could not inspect Python shim: {error}"))?
+                .permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(bin.join("python3"), permissions)
+                .map_err(|error| format!("could not arm Python shim: {error}"))?;
+            let shim_environment = [
+                (OsString::from("PATH"), bin.as_os_str().to_os_string()),
+                (
+                    OsString::from("CIVSIM_STONE0_SHIM_SENTINEL"),
+                    sentinel.as_os_str().to_os_string(),
+                ),
+            ];
+            let result = run_python_gate_with_environment(
+                &shim_root,
+                "scripts/pass.py",
+                &[],
+                &shim_environment,
+            );
+            Ok(matches!(result, ScriptResult::Clean) && !sentinel.exists())
+        })();
+        match shim_result {
+            Ok(ignored) => check(
+                "receipt-replaying PATH Python shim cannot enter the authority boundary",
+                ignored,
+            ),
+            Err(error) => check(
+                &format!("Python-shim integration fixture failed: {error}"),
+                false,
+            ),
+        }
+        let _ = fs::remove_dir_all(&shim_root);
+    }
+    #[cfg(not(unix))]
+    check(
+        "native platform without an interpreter trust root fails closed",
+        trusted_python_interpreters().is_err(),
+    );
 
     // password laundering: literal and base64 detection.
     let pw = "correct horse";
@@ -979,7 +2351,7 @@ fn self_test() -> i32 {
     let tombs = vec!["retired phrase alpha".to_string()];
     let tfiles = vec![
         RepoFile::new(
-            "calibration/stone0_tombstones.txt",
+            "scripts/stone0_tombstones.txt",
             b"retired phrase alpha\n".to_vec(),
         ),
         RepoFile::new(
@@ -996,7 +2368,7 @@ fn self_test() -> i32 {
         "tombstone list itself not flagged",
         !thits
             .iter()
-            .any(|(p, _)| p == "calibration/stone0_tombstones.txt"),
+            .any(|(p, _)| p == "scripts/stone0_tombstones.txt"),
     );
 
     // override-env-name detection across shell, env, and yaml forms; prose is not flagged.

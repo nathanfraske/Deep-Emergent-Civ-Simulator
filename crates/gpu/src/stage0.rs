@@ -32,9 +32,11 @@
 //! confined op set agrees bit-for-bit. The device gate (`tests/stage0_gate.rs`) is the empirical
 //! confirmation and the guard against an implementation bug in the emulation.
 
+#[cfg(feature = "cpu-backend")]
 use cubecl::cpu::{CpuDevice, CpuRuntime};
 use cubecl::cuda::{CudaDevice, CudaRuntime};
 use cubecl::prelude::*;
+#[cfg(feature = "vulkan-backend")]
 use cubecl::wgpu::{init_setup, RuntimeOptions, Vulkan, WgpuDevice, WgpuRuntime};
 
 use crate::prim::{q32_div, q32_mul};
@@ -49,17 +51,80 @@ pub fn cuda_client() -> CudaClient {
 }
 
 /// The concrete CubeCL CPU-backend compute client type.
+#[cfg(feature = "cpu-backend")]
 pub type CpuClient = ComputeClient<CpuRuntime>;
 
 /// A CubeCL CPU-backend compute client. It runs the same `#[cube]` kernels through a completely
 /// independent codegen path (MLIR/LLVM, no GPU), so agreement between this and the CUDA backend is
-/// cross-backend bit-identity evidence (the multi-vendor Stage 0 residual). Needs no device.
+/// implementation-diversity evidence. Needs no device and is compiled only in the sparse CPU lane.
+#[cfg(feature = "cpu-backend")]
 pub fn cpu_client() -> CpuClient {
     CpuRuntime::client(&CpuDevice)
 }
 
 /// The concrete CubeCL wgpu (Vulkan/SPIR-V) compute client type.
+#[cfg(feature = "vulkan-backend")]
 pub type WgpuClient = ComputeClient<WgpuRuntime>;
+
+/// Identity evidence for the exact Vulkan adapter registered with CubeCL.
+#[cfg(feature = "vulkan-backend")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WgpuAdapterReceipt {
+    pub name: String,
+    pub vendor_id: u32,
+    pub device_id: u32,
+    pub device_type: String,
+    pub driver: String,
+    pub driver_info: String,
+    pub backend: String,
+}
+
+#[cfg(feature = "vulkan-backend")]
+impl WgpuAdapterReceipt {
+    /// Stable, injection-safe text retained by hardware evidence workflows.
+    pub fn canonical_text(&self) -> String {
+        fn hex(value: &str) -> String {
+            value
+                .as_bytes()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect()
+        }
+
+        format!(
+            "schema=civsim.gpu.vulkan-adapter-receipt.v1\nname_utf8_hex={}\nvendor_id={}\ndevice_id={}\ndevice_type_utf8_hex={}\ndriver_utf8_hex={}\ndriver_info_utf8_hex={}\nbackend_utf8_hex={}",
+            hex(&self.name),
+            self.vendor_id,
+            self.device_id,
+            hex(&self.device_type),
+            hex(&self.driver),
+            hex(&self.driver_info),
+            hex(&self.backend),
+        )
+    }
+
+    /// Reject known software adapters and CPU devices in hardware evidence lanes.
+    pub fn is_software_adapter(&self) -> bool {
+        let identity = format!(
+            "{} {} {} {}",
+            self.name, self.device_type, self.driver, self.driver_info
+        )
+        .to_ascii_lowercase();
+        self.device_type.eq_ignore_ascii_case("cpu")
+            || ["lavapipe", "llvmpipe", "swiftshader", "software rasterizer"]
+                .iter()
+                .any(|marker| identity.contains(marker))
+    }
+
+    /// Match the Vulkan PCI vendor identifier used by the selected evidence lane.
+    pub fn matches_vendor(&self, expected: &str) -> bool {
+        match expected.to_ascii_lowercase().as_str() {
+            "amd" => self.vendor_id == 0x1002,
+            "intel" => self.vendor_id == 0x8086,
+            _ => false,
+        }
+    }
+}
 
 /// A CubeCL wgpu compute client on the Vulkan/SPIR-V backend, a third independent codegen path (direct
 /// SPIR-V via cubecl-spirv, distinct from CUDA/NVRTC and the CPU MLIR/LLVM path). On this WSL2 box the
@@ -67,11 +132,28 @@ pub type WgpuClient = ComputeClient<WgpuRuntime>;
 /// but is too slow to compile and run the large unrolled transcendental shaders in practical time; a
 /// hardware Vulkan ICD would carry those too, since SPIR-V Int64 is supported (a native-i64 probe ran
 /// in milliseconds). Call only where a Vulkan adapter is present (the wgpu gate opts in via env).
+#[cfg(feature = "vulkan-backend")]
 pub fn wgpu_client() -> WgpuClient {
+    wgpu_client_with_adapter_receipt().0
+}
+
+/// Initialize the Vulkan client and retain identity for the same selected adapter.
+#[cfg(feature = "vulkan-backend")]
+pub fn wgpu_client_with_adapter_receipt() -> (WgpuClient, WgpuAdapterReceipt) {
     let device = WgpuDevice::DefaultDevice;
     // Force the Vulkan backend and register the client for this device key (synchronous).
-    let _ = init_setup::<Vulkan>(&device, RuntimeOptions::default());
-    WgpuRuntime::client(&device)
+    let setup = init_setup::<Vulkan>(&device, RuntimeOptions::default());
+    let info = setup.adapter.get_info();
+    let receipt = WgpuAdapterReceipt {
+        name: info.name,
+        vendor_id: info.vendor,
+        device_id: info.device,
+        device_type: format!("{:?}", info.device_type),
+        driver: info.driver,
+        driver_info: info.driver_info,
+        backend: format!("{:?}", info.backend),
+    };
+    (WgpuRuntime::client(&device), receipt)
 }
 
 /// Whether a CubeCL backend has a proven-safe native 64-bit integer path for the Stage 0 transport.
@@ -103,12 +185,14 @@ impl Stage0Transport for CudaRuntime {
     const SAFE_NATIVE_I64: bool = true;
 }
 
+#[cfg(feature = "cpu-backend")]
 impl Stage0Transport for CpuRuntime {
     // Held on the u32-limb floor: cubecl-cpu's constant-propagation pass has an i64 overflow bug (the
     // class the cross-backend note records), so the native transport is not sound on this backend.
     const SAFE_NATIVE_I64: bool = false;
 }
 
+#[cfg(feature = "vulkan-backend")]
 impl Stage0Transport for WgpuRuntime {
     // SPIR-V has Int64 (a native-i64 probe ran in milliseconds), but the native transport is not yet
     // gate-proven on a hardware Vulkan device from here (the only local adapter is software lavapipe),

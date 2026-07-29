@@ -434,6 +434,11 @@ pub fn disk_gas_opacity(
 mod tests {
     use super::*;
 
+    fn execution() -> civsim_units::constants::SiExecutionMagnitudes {
+        civsim_units::constants::canonical_si_execution_magnitudes()
+            .expect("the sealed floor projects")
+    }
+
     fn close(a: f64, b: f64, tol: f64) -> bool {
         (a - b).abs() < tol
     }
@@ -662,14 +667,17 @@ mod tests {
             ("Na", crate::saha::ln_of_decimal("7277").unwrap()),
             ("K", crate::saha::ln_of_decimal("448").unwrap()),
         ];
+        let execution = execution();
         let state =
-            crate::saha::electron_density_saha(Fixed::from_int(10000), &species, &tbl).unwrap();
+            crate::saha::electron_density_saha(&execution, Fixed::from_int(10000), &species, &tbl)
+                .unwrap();
         assert!(
             !state.no_free_electrons,
             "10000 K low-density gas is ionized"
         );
         let ln_ne = state.ln_electron_density_cm3;
         let closure = crate::opacity::total_gas_rosseland_opacity(
+            &execution,
             Fixed::from_int(10000),
             Fixed::ZERO, // rho ~ 1e-14 underflows Fixed; ff is negligible here and es reads ln rho
             ln_rho,
@@ -759,6 +767,7 @@ mod tests {
         ];
         let mut ratios = Vec::new();
         for (t, rho_s, nh, nmg, nca, nna, nk) in sweep {
+            let execution = execution();
             let temp = Fixed::from_int(t);
             let log_t = log10(temp).unwrap();
             let aesopus = grid.rosseland_opacity(log_t, Fixed::from_int(1)).unwrap();
@@ -771,9 +780,11 @@ mod tests {
                 ("Na", crate::saha::ln_of_decimal(nna).unwrap()),
                 ("K", crate::saha::ln_of_decimal(nk).unwrap()),
             ];
-            let state = crate::saha::electron_density_saha(temp, &species, &tbl).unwrap();
+            let state =
+                crate::saha::electron_density_saha(&execution, temp, &species, &tbl).unwrap();
             let ln_ne = state.ln_electron_density_cm3;
             let closure = crate::opacity::total_gas_rosseland_opacity(
+                &execution,
                 temp,
                 rho,
                 ln_rho,
