@@ -178,6 +178,31 @@ def inspect(root: pathlib.Path) -> None:
         stone0_source,
         "trusted Git command section",
     ).group(0)
+    platform_selector = _one(
+        r"(?ms)^fn trusted_git_executable\(\).*?^\}\s*$",
+        stone0_source,
+        "trusted Git platform selector",
+    ).group(0)
+    executable_selector = _one(
+        r"(?ms)^fn trusted_unix_git_executable\(\).*?^\}\s*$",
+        stone0_source,
+        "trusted Git executable selector",
+    ).group(0)
+    candidate_proof = _one(
+        r"(?ms)^fn trusted_git_executable_from\(.*?^\}\s*$",
+        stone0_source,
+        "trusted Git candidate proof",
+    ).group(0)
+    executable_predicate = _one(
+        r"(?ms)^fn root_executable_shape_is_trusted\(.*?^\}\s*$",
+        stone0_source,
+        "root executable metadata predicate",
+    ).group(0)
+    directory_predicate = _one(
+        r"(?ms)^fn root_directory_shape_is_trusted\(.*?^\}\s*$",
+        stone0_source,
+        "root directory metadata predicate",
+    ).group(0)
 
     _one(
         r"canonicalize_and_validate_repository_root\(repo_root\)",
@@ -220,6 +245,62 @@ def inspect(root: pathlib.Path) -> None:
     ]
     if command_positions != sorted(command_positions):
         raise WatchdogError("trusted Git command steps changed order")
+
+    selector_patterns = (
+        r"trusted_git_executable_from\(\s*&\[",
+        r'Path::new\("/usr/bin/git"\)',
+        r'Path::new\("/usr/lib/git-core/git"\)',
+        r'Path::new\("/bin/git"\)',
+    )
+    _one(
+        r"trusted_unix_git_executable\(\)",
+        platform_selector,
+        "Unix Git trust route",
+    )
+    selector_positions = [
+        _one(pattern, executable_selector, f"fixed Git selector step {index}").start()
+        for index, pattern in enumerate(selector_patterns)
+    ]
+    if (
+        selector_positions != sorted(selector_positions)
+        or len(re.findall(r"Path::new\(", executable_selector)) != 3
+    ):
+        raise WatchdogError("fixed Git candidate selector changed")
+
+    _one(
+        r"is_file\s*&&\s*uid\s*==\s*0\s*&&\s*mode\s*&\s*0o022\s*==\s*0"
+        r"\s*&&\s*mode\s*&\s*0o6000\s*==\s*0\s*&&\s*mode\s*&\s*0o111\s*!=\s*0",
+        executable_predicate,
+        "root executable trust conjunction",
+    )
+    _one(
+        r"is_dir\s*&&\s*uid\s*==\s*0\s*&&\s*mode\s*&\s*0o022\s*==\s*0",
+        directory_predicate,
+        "root directory trust conjunction",
+    )
+    if "||" in executable_predicate or "||" in directory_predicate:
+        raise WatchdogError("root metadata trust predicate gained a disjunction")
+
+    proof_patterns = (
+        r"let\s+mut\s+inspected\s*=\s*BTreeSet::new\(\);",
+        r"fs::canonicalize\(candidate\)",
+        r"if\s+!inspected\.insert\(canonical\.clone\(\)\)\s*\{",
+        r"fs::metadata\(&canonical\)",
+        r"let\s+executable_is_trusted\s*=\s*root_executable_shape_is_trusted\(",
+        r"let\s+mut\s+ancestry_is_trusted\s*=\s*true;",
+        r"canonical\.ancestors\(\)\.skip\(1\)",
+        r"ancestry_is_trusted\s*&=\s*root_directory_shape_is_trusted\(",
+        r"if\s+executable_is_trusted\s*&&\s*ancestry_is_trusted\s*\{",
+        r"return\s+Ok\(canonical\);",
+    )
+    proof_positions = [
+        _one(pattern, candidate_proof, f"trusted Git proof step {index}").start()
+        for index, pattern in enumerate(proof_patterns)
+    ]
+    if proof_positions != sorted(proof_positions) or "||" in candidate_proof:
+        raise WatchdogError(
+            "trusted Git proof lost canonical dedup, metadata checks, ancestry checks, or conjunctive acceptance"
+        )
 
     library = _text(root, f"{ANCHOR_PATH}/src/lib.rs")
     required_library_fragments = (
@@ -294,6 +375,31 @@ def self_test() -> None:
                 "let git = trusted_git_executable()?;",
                 'let git = PathBuf::from("git");',
             ),
+            (
+                "crates/stone0/src/lib.rs",
+                'Path::new("/usr/lib/git-core/git"),',
+                'Path::new("/usr/local/bin/git"),',
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                "is_file && uid == 0 && mode & 0o022 == 0 && mode & 0o6000 == 0 && mode & 0o111 != 0",
+                "is_file && uid == 0 && mode & 0o022 == 0 && mode & 0o4000 == 0 && mode & 0o111 != 0",
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                "is_dir && uid == 0 && mode & 0o022 == 0",
+                "is_dir && uid <= 0 && mode & 0o022 == 0",
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                "ancestry_is_trusted &= root_directory_shape_is_trusted(",
+                "ancestry_is_trusted |= root_directory_shape_is_trusted(",
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                "if executable_is_trusted && ancestry_is_trusted {\n            return Ok(canonical);",
+                "if executable_is_trusted || ancestry_is_trusted {\n            return Ok(canonical);",
+            ),
             (f"{ANCHOR_PATH}/build.rs", "if code != 0", "if false"),
             (f"{ANCHOR_PATH}/src/lib.rs", TOKEN, "replacement-token"),
             ("crates/planet-substrate/build.rs", "assert_guard_linked", "skip_guard"),
@@ -307,7 +413,9 @@ def self_test() -> None:
             except WatchdogError:
                 pass
             else:
-                raise AssertionError(f"watchdog wiring canary survived: {relative}")
+                raise AssertionError(
+                    f"watchdog wiring canary survived: {relative}: {old}"
+                )
             path.write_text(held, encoding="utf-8")
     print("Stone 0 build wiring watchdog self-test: PASS")
 

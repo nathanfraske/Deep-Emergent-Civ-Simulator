@@ -76,7 +76,7 @@ EXPECTED_PROFILE: tuple[tuple[str, str, str | None, str, str], ...] = (
         "authority",
         "governance",
         "active",
-        "ff8dc217d4473b4264bc1a15ed6ad541e78455e0e95dedae5b3fdd89aba197c8",
+        "dd2fd45fa3257bfff9105cfb11d2a329915c310e3e384bbba5ebcb9075cd9005",
     ),
     (
         "planet.charged-profile-admission",

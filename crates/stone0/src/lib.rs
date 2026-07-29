@@ -662,12 +662,46 @@ fn trusted_python_interpreters() -> Result<Vec<PathBuf>, String> {
     ))
 }
 
-#[cfg(unix)]
 fn trusted_git_executable() -> Result<PathBuf, String> {
+    #[cfg(unix)]
+    {
+        trusted_unix_git_executable()
+    }
+    #[cfg(not(unix))]
+    {
+        Err(String::from(
+            "native execution has no independently verifiable Git trust root; \
+             run the canonical Stone 0 gate inside WSL",
+        ))
+    }
+}
+
+#[cfg(unix)]
+fn trusted_unix_git_executable() -> Result<PathBuf, String> {
+    trusted_git_executable_from(&[
+        Path::new("/usr/bin/git"),
+        Path::new("/usr/lib/git-core/git"),
+        Path::new("/bin/git"),
+    ])
+}
+
+#[cfg(unix)]
+fn root_executable_shape_is_trusted(is_file: bool, uid: u32, mode: u32) -> bool {
+    is_file && uid == 0 && mode & 0o022 == 0 && mode & 0o6000 == 0 && mode & 0o111 != 0
+}
+
+#[cfg(unix)]
+fn root_directory_shape_is_trusted(is_dir: bool, uid: u32, mode: u32) -> bool {
+    is_dir && uid == 0 && mode & 0o022 == 0
+}
+
+#[cfg(unix)]
+fn trusted_git_executable_from(candidates: &[&Path]) -> Result<PathBuf, String> {
     use std::os::unix::fs::MetadataExt;
 
     let mut rejected = Vec::new();
-    for candidate in [Path::new("/usr/bin/git"), Path::new("/bin/git")] {
+    let mut inspected = BTreeSet::new();
+    for candidate in candidates {
         let canonical = match fs::canonicalize(candidate) {
             Ok(path) => path,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -682,6 +716,9 @@ fn trusted_git_executable() -> Result<PathBuf, String> {
                 continue;
             }
         };
+        if !inspected.insert(canonical.clone()) {
+            continue;
+        }
         let metadata = match fs::metadata(&canonical) {
             Ok(metadata) => metadata,
             Err(error) => {
@@ -692,38 +729,84 @@ fn trusted_git_executable() -> Result<PathBuf, String> {
                 continue;
             }
         };
-        let executable_is_trusted = metadata.is_file()
-            && metadata.uid() == 0
-            && metadata.mode() & 0o022 == 0
-            && metadata.mode() & 0o6000 == 0
-            && metadata.mode() & 0o111 != 0;
-        let ancestry_is_trusted = canonical.ancestors().skip(1).all(|ancestor| {
-            fs::metadata(ancestor).is_ok_and(|ancestor_metadata| {
-                ancestor_metadata.is_dir()
-                    && ancestor_metadata.uid() == 0
-                    && ancestor_metadata.mode() & 0o022 == 0
-            })
-        });
+        let executable_is_trusted =
+            root_executable_shape_is_trusted(metadata.is_file(), metadata.uid(), metadata.mode());
+        let mut refusals = Vec::new();
+        if !metadata.is_file() {
+            refusals.push("target is not a regular file".to_owned());
+        }
+        if metadata.uid() != 0 {
+            refusals.push(format!("target uid is {}, not 0", metadata.uid()));
+        }
+        if metadata.mode() & 0o022 != 0 {
+            refusals.push(format!(
+                "target mode {:o} permits group or world writes",
+                metadata.mode() & 0o7777
+            ));
+        }
+        if metadata.mode() & 0o6000 != 0 {
+            refusals.push(format!(
+                "target mode {:o} carries a set-id bit",
+                metadata.mode() & 0o7777
+            ));
+        }
+        if metadata.mode() & 0o111 == 0 {
+            refusals.push(format!(
+                "target mode {:o} has no execute bit",
+                metadata.mode() & 0o7777
+            ));
+        }
+        let mut ancestry_is_trusted = true;
+        for ancestor in canonical.ancestors().skip(1) {
+            match fs::metadata(ancestor) {
+                Ok(ancestor_metadata) => {
+                    ancestry_is_trusted &= root_directory_shape_is_trusted(
+                        ancestor_metadata.is_dir(),
+                        ancestor_metadata.uid(),
+                        ancestor_metadata.mode(),
+                    );
+                    if !ancestor_metadata.is_dir() {
+                        refusals.push(format!(
+                            "ancestor {} is not a directory",
+                            ancestor.display()
+                        ));
+                    }
+                    if ancestor_metadata.uid() != 0 {
+                        refusals.push(format!(
+                            "ancestor {} has uid {}, not 0",
+                            ancestor.display(),
+                            ancestor_metadata.uid()
+                        ));
+                    }
+                    if ancestor_metadata.mode() & 0o022 != 0 {
+                        refusals.push(format!(
+                            "ancestor {} mode {:o} permits group or world writes",
+                            ancestor.display(),
+                            ancestor_metadata.mode() & 0o7777
+                        ));
+                    }
+                }
+                Err(error) => {
+                    ancestry_is_trusted = false;
+                    refusals.push(format!(
+                        "ancestor {} cannot be inspected ({error})",
+                        ancestor.display()
+                    ));
+                }
+            }
+        }
         if executable_is_trusted && ancestry_is_trusted {
             return Ok(canonical);
         }
         rejected.push(format!(
-            "{} is not a root-owned, non-group-writable, non-world-writable, non-set-id \
-             executable beneath root-controlled directories",
-            canonical.display()
+            "{} failed the root-controlled executable proof: {}",
+            canonical.display(),
+            refusals.join("; ")
         ));
     }
     Err(format!(
         "no independently rooted Git executable is available ({})",
         rejected.join("; ")
-    ))
-}
-
-#[cfg(not(unix))]
-fn trusted_git_executable() -> Result<PathBuf, String> {
-    Err(String::from(
-        "native execution has no independently verifiable Git trust root; \
-         run the canonical Stone 0 gate inside WSL",
     ))
 }
 
@@ -1918,7 +2001,78 @@ fn self_test() -> i32 {
     {
         use std::os::unix::fs::PermissionsExt;
 
+        check(
+            "root executable metadata canaries preserve every acceptance predicate",
+            root_executable_shape_is_trusted(true, 0, 0o755)
+                && !root_executable_shape_is_trusted(false, 0, 0o755)
+                && !root_executable_shape_is_trusted(true, 1, 0o755)
+                && !root_executable_shape_is_trusted(true, 0, 0o775)
+                && !root_executable_shape_is_trusted(true, 0, 0o757)
+                && !root_executable_shape_is_trusted(true, 0, 0o4755)
+                && !root_executable_shape_is_trusted(true, 0, 0o2755)
+                && !root_executable_shape_is_trusted(true, 0, 0o644),
+        );
+        check(
+            "root directory metadata canaries preserve every ancestry predicate",
+            root_directory_shape_is_trusted(true, 0, 0o755)
+                && !root_directory_shape_is_trusted(false, 0, 0o755)
+                && !root_directory_shape_is_trusted(true, 1, 0o755)
+                && !root_directory_shape_is_trusted(true, 0, 0o775)
+                && !root_directory_shape_is_trusted(true, 0, 0o757),
+        );
+
+        let packaged_git_core = Path::new("/usr/lib/git-core/git");
+        if packaged_git_core.exists() {
+            let expected_packaged_git = fs::canonicalize(packaged_git_core);
+            let observed_packaged_git =
+                trusted_git_executable_from(&[Path::new("/usr"), packaged_git_core]);
+            check(
+                "a rejected fixed candidate falls through to the package-internal Git root",
+                expected_packaged_git.as_ref().is_ok_and(|expected| {
+                    observed_packaged_git
+                        .as_ref()
+                        .is_ok_and(|observed| observed == expected)
+                }),
+            );
+        }
+
         let manifest_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let dedup_root = std::env::temp_dir().join(format!(
+            "civsim-stone0-git-dedup-self-test-{}",
+            std::process::id()
+        ));
+        let dedup_result = (|| -> Result<bool, String> {
+            let candidate = dedup_root.join("untrusted-git");
+            let alias = dedup_root.join("untrusted-git-alias");
+            fs::create_dir_all(&dedup_root)
+                .map_err(|error| format!("could not create Git-dedup fixture: {error}"))?;
+            fs::write(&candidate, "#!/bin/sh\nexit 0\n")
+                .map_err(|error| format!("could not write Git-dedup fixture: {error}"))?;
+            let mut permissions = fs::metadata(&candidate)
+                .map_err(|error| format!("could not inspect Git-dedup fixture: {error}"))?
+                .permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&candidate, permissions)
+                .map_err(|error| format!("could not arm Git-dedup fixture: {error}"))?;
+            std::os::unix::fs::symlink(&candidate, &alias)
+                .map_err(|error| format!("could not link Git-dedup fixture: {error}"))?;
+            let canonical = fs::canonicalize(&candidate)
+                .map_err(|error| format!("could not canonicalize Git-dedup fixture: {error}"))?;
+            let error = match trusted_git_executable_from(&[&candidate, &alias]) {
+                Ok(_) => return Ok(false),
+                Err(error) => error,
+            };
+            Ok(error.matches(&canonical.display().to_string()).count() == 1)
+        })();
+        match dedup_result {
+            Ok(deduplicated) => check(
+                "canonical aliases are inspected once before a trust refusal",
+                deduplicated,
+            ),
+            Err(error) => check(&format!("Git-dedup fixture failed: {error}"), false),
+        }
+        let _ = fs::remove_dir_all(&dedup_root);
+
         let root_binding_fixture = manifest_root.join(format!(
             ".civsim-stone0-root-binding-self-test-{}",
             std::process::id()

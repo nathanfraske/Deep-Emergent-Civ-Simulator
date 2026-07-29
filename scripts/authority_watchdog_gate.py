@@ -119,7 +119,7 @@ REQUIRED_PROFILE_DIGESTS: dict[str, str] = {
     "floor.pi-budget": "3ed6c43390a43cf921e96c600525a89da95cb62c522306acc725af93bc55d2f1",
     "governance.authority-inventory": "c2a6095c66f8dc4d9b2384a3b46c5da06142b27fad99b10ce6fc34239f5c5100",
     "governance.external-adverse-claim-release": "a8a74e0c6032ee15d125b7c2e00e4accf77de2c9ac7f9e675f5848f80f38295d",
-    "governance.stone0-build-wiring": "ff8dc217d4473b4264bc1a15ed6ad541e78455e0e95dedae5b3fdd89aba197c8",
+    "governance.stone0-build-wiring": "dd2fd45fa3257bfff9105cfb11d2a329915c310e3e384bbba5ebcb9075cd9005",
     "planet.charged-profile-admission": "bf25f00fdf77165403022377797dd2b320a825849bbb449a7d51a880a347b4c2",
     "planet.completed-snapshot": "5c09a8d95b7de145110a9f97f773bb0e0a63d6d6dc0f964eeb8beb62efff5575",
     "planet.confining-profile-admission": "ebb6f778511e67a8ea2794cacbf296f03ec0912d904d84185948ca472baa48aa",

@@ -1,3 +1,15 @@
+> # PR #215 HOSTED STONE 0 ROOTED GIT TRUST PARITY (2026-07-29, `claude/thermoelastic-rung3`, draft PR #215).
+>
+> **RESULT.** The hosted Ubuntu runner exposed a valid package-layout case that the Stone 0 Git resolver did not admit. The resolver now considers only the fixed package-internal candidates `/usr/bin/git`, `/usr/lib/git-core/git`, and `/bin/git`. A refused first candidate can fall through to another fixed candidate; `PATH`, caller input, and repository content cannot nominate an executable.
+>
+> **SECURITY BOUNDARY.** Every candidate is canonicalized and deduplicated before inspection. Acceptance requires a regular root-owned executable with no group or world write bits, no set-id bits, at least one execute bit, and a complete root-owned, non-writable directory ancestry. File type, owner, mode, ancestry, or metadata failure produces a precise refusal. The final decision remains the conjunction of executable and ancestry trust.
+>
+> **CROSS-CHECKERS.** The Stone 0 producer gate and its independent watchdog now inspect the fixed candidate set, canonical alias suppression, executable predicate, ancestry predicate, and conjunctive acceptance through separate structural routes. Live mutation canaries refuse fallback substitution, owner or mode weakening, ancestry weakening, deduplication removal, and acceptance disjunction. The authority profile pin is updated in both inventory implementations.
+>
+> **VALIDATION.** The bounded independent audit reports no remaining finding. All 12 Stone 0 tests, both build-wiring self-tests, the Stone 0 self-test and CI route, both authority-watchdog self-tests and live gates, warnings-denied Stone 0 Clippy, and `check-fast` pass. The complete accelerated `check-pr` route passes in 202.14 seconds with all 46 compiled test binaries, 2,131 listed tests, canonical GPU gates, Clippy, private-item Rustdoc, and doctests.
+>
+> **REMOTE NEXT.** Push the repair and require both the short Stone 0 job and the canonical planet-quality job to reach a terminal pass. A hosted refusal must be diagnosed from its exact predicate rather than bypassed or converted into an ambient-path fallback.
+>
 > # PR #215 CONFINING CONSTITUENT INPUT FRONTIER (2026-07-29, `claude/thermoelastic-rung3`, draft PR #215).
 >
 > **RESULT.** A paired non-authorizing frontier now translates the admitted confining carrier profile into one opaque internal seed and eight exact upstream authority gaps. Independent forward-capability and reverse-obligation implementations agree on canonical input, decision, result, trace, bounded-resource, and outer receipt evidence. The repository remains at 125 artifacts and four local members.

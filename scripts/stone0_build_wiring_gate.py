@@ -88,6 +88,19 @@ def _validate_stone0_root_binding(root: pathlib.Path) -> None:
     )
     git_top_level = _rust_function_section(source, "fn trusted_git_top_level(")
     git_command = _rust_function_section(source, "fn trusted_git_command(")
+    git_executable = _rust_function_section(source, "fn trusted_git_executable(")
+    unix_git_executable = _rust_function_section(
+        source, "fn trusted_unix_git_executable("
+    )
+    git_executable_from = _rust_function_section(
+        source, "fn trusted_git_executable_from("
+    )
+    executable_shape = _rust_function_section(
+        source, "fn root_executable_shape_is_trusted("
+    )
+    directory_shape = _rust_function_section(
+        source, "fn root_directory_shape_is_trusted("
+    )
 
     explicit_call = "canonicalize_and_validate_repository_root(repo_root)"
     if explicit_route.count(explicit_call) != 1:
@@ -140,6 +153,55 @@ def _validate_stone0_root_binding(root: pathlib.Path) -> None:
     ):
         raise WiringError(
             "trusted Git command lost its rooted executable, cleared environment, or fixed PATH"
+        )
+
+    fixed_candidates = (
+        "trusted_git_executable_from(&[",
+        'Path::new("/usr/bin/git")',
+        'Path::new("/usr/lib/git-core/git")',
+        'Path::new("/bin/git")',
+    )
+    if git_executable.count("trusted_unix_git_executable()") != 1:
+        raise WiringError("trusted Git platform selector bypasses the Unix trust route")
+    candidate_positions = [unix_git_executable.find(step) for step in fixed_candidates]
+    if (
+        any(position < 0 for position in candidate_positions)
+        or candidate_positions != sorted(candidate_positions)
+        or any(unix_git_executable.count(step) != 1 for step in fixed_candidates)
+        or unix_git_executable.count("Path::new(") != 3
+    ):
+        raise WiringError("trusted Git fixed-candidate route changed")
+
+    expected_executable_shape = (
+        "is_file && uid == 0 && mode & 0o022 == 0 && "
+        "mode & 0o6000 == 0 && mode & 0o111 != 0"
+    )
+    expected_directory_shape = "is_dir && uid == 0 && mode & 0o022 == 0"
+    if " ".join(executable_shape.split()).count(expected_executable_shape) != 1:
+        raise WiringError("trusted Git executable metadata predicate changed")
+    if " ".join(directory_shape.split()).count(expected_directory_shape) != 1:
+        raise WiringError("trusted Git ancestry metadata predicate changed")
+
+    trust_steps = (
+        "let mut inspected = BTreeSet::new();",
+        "let canonical = match fs::canonicalize(candidate)",
+        "if !inspected.insert(canonical.clone()) {",
+        "let metadata = match fs::metadata(&canonical)",
+        "root_executable_shape_is_trusted(",
+        "let mut ancestry_is_trusted = true;",
+        "for ancestor in canonical.ancestors().skip(1) {",
+        "ancestry_is_trusted &= root_directory_shape_is_trusted(",
+        "if executable_is_trusted && ancestry_is_trusted {",
+        "return Ok(canonical);",
+    )
+    trust_positions = [git_executable_from.find(step) for step in trust_steps]
+    if (
+        any(position < 0 for position in trust_positions)
+        or trust_positions != sorted(trust_positions)
+        or any(git_executable_from.count(step) != 1 for step in trust_steps)
+    ):
+        raise WiringError(
+            "trusted Git candidate proof lost canonical dedup, metadata checks, ancestry checks, or conjunctive acceptance"
         )
 
 
@@ -290,6 +352,31 @@ def self_test() -> None:
                 ".env_clear()",
                 '.env_remove("GIT_DIR")',
             ),
+            (
+                "crates/stone0/src/lib.rs",
+                'Path::new("/usr/lib/git-core/git"),',
+                'Path::new("/tmp/git"),',
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                "is_file && uid == 0 && mode & 0o022 == 0 && mode & 0o6000 == 0 && mode & 0o111 != 0",
+                "is_file && uid == uid && mode & 0o022 == 0 && mode & 0o6000 == 0 && mode & 0o111 != 0",
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                "is_dir && uid == 0 && mode & 0o022 == 0",
+                "is_dir && uid == 0 && mode & 0o002 == 0",
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                "if !inspected.insert(canonical.clone()) {",
+                "if false {",
+            ),
+            (
+                "crates/stone0/src/lib.rs",
+                "if executable_is_trusted && ancestry_is_trusted {\n            return Ok(canonical);",
+                "if executable_is_trusted || ancestry_is_trusted {\n            return Ok(canonical);",
+            ),
             (f"{ANCHOR}/build.rs", "if code != 0", "if false"),
             (f"{ANCHOR}/src/lib.rs", MARKER_ENV, "UNBOUND_MARKER"),
             ("crates/planet/build.rs", "assert_guard_linked", "guard_was_skipped"),
@@ -303,7 +390,9 @@ def self_test() -> None:
             except WiringError:
                 pass
             else:
-                raise AssertionError(f"producer wiring canary survived: {relative}")
+                raise AssertionError(
+                    f"producer wiring canary survived: {relative}: {old}"
+                )
             path.write_text(held, encoding="utf-8")
 
         result = subprocess.run(
