@@ -1,0 +1,55 @@
+# Copyright 2026 Nathan M. Fraske
+# Licensed under the Apache License, Version 2.0; see LICENSE.
+name: Fleet GPU correctness
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [fleet/test-fleet-20260928]
+    paths:
+      - .github/workflows/fleet-gpu.yml
+      - scripts/fleet-rtx5070-check.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fleet-gpu-rtx5070
+  cancel-in-progress: false
+
+jobs:
+  rtx5070:
+    name: RTX 5070 numerical correctness
+    runs-on: [self-hosted, Linux, X64, fleet-gpu-rtx5070]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify device through the job runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$FLEET_GPU" = rtx5070
+          test "$(id -u)" -ne 0
+          test -c /dev/dxg
+          mkdir -p gpu-results
+          python3 scripts/fleet-rtx5070-check.py > gpu-results/rtx5070.json
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          d = json.loads(Path('gpu-results/rtx5070.json').read_text())
+          assert d['passed'] and d['mismatches'] == 0 and d['guard_unchanged']
+          assert d['device_uuid_hex'] == '421031804e812dfea372691328548bd2'
+          for key in ['GITHUB_REPOSITORY', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_SHA', 'GITHUB_JOB', 'RUNNER_NAME']:
+              assert d['job'][key] == os.environ[key]
+          print(json.dumps(d, indent=2))
+          PY
+      - name: Retain numerical and source evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rtx5070-${{ github.run_id }}-${{ github.run_attempt }}
+          path: gpu-results/rtx5070.json
+          if-no-files-found: error
+          retention-days: 14

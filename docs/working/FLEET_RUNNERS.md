@@ -25,13 +25,23 @@ spanning machines requires explicit distribution in the application; these
 runners do not combine host RAM or GPU memory into one address space. Preserve
 the project's existing calibration rules when adding scientific campaigns.
 
-GPU qualification is separate. The current fleet CI does not set `CIVSIM_GPU`;
-CUDA device tests therefore retain their existing opt-in behavior. On 28
-September 2026, the RTX 5070 on DESKTOP-BISE755 had a working host driver but
-its Hyper-V runner had neither a GPU partition nor a passed-through device.
-No CUDA runner label is advertised. Enabling it requires a dedicated GPU-capable
-execution environment and a real `CIVSIM_GPU=1` comparison against the CPU
-oracle. A CPU CI pass does not establish GPU readiness.
+The full CPU fleet retest [36468661142](https://github.com/nathanfraske/Deep-Emergent-Civ-Simulator/actions/runs/36468661142)
+passed all four jobs, including the slow suite, at commit
+`949269753c0f6e6ca2ff31c2d3972d018457fee6`. The permanent Linux runner and
+optional laptop served the jobs. Earlier fleet failures are retained separately.
+
+The dedicated `fleet-gpu.yml` workflow requests
+`[self-hosted, Linux, X64, fleet-gpu-rtx5070]`. Its native WSL runner uses a
+6-CPU, 10-GiB job limit, a disposable OS clone and persistent caches. The check
+runs a CUDA kernel through the driver API, compares every output with an
+independent CPU calculation, checks an overrun guard and retains the physical
+GPU UUID, source hash and GitHub execution identity. It needs no CUDA toolkit.
+Runner qualification and clean retirement are still in progress.
+
+The simulator's `CIVSIM_GPU` tests remain a separate qualification. The driver
+check does not prove CubeCL or NVRTC compatibility and ordinary CI does not set
+`CIVSIM_GPU`. The ATC B70 single-card and dual-card profiles are being prepared;
+they are not advertised as ready by this workflow.
 
 Rollback: restore the prior workflow and remove this repository's exact workflow
 entry from the controller's native routing and optional-laptop allowlists.
