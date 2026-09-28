@@ -3,10 +3,12 @@
 # Licensed under the Apache License, Version 2.0; see LICENSE.
 """Verify physical GPU selection, isolated execution and a compiled SYCL kernel."""
 import datetime
+import errno
 import hashlib
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import time
@@ -16,6 +18,31 @@ PROFILES = {
     'b70-b': {'0000:08:00.0': 'renderD130'},
     'b70-pair': {'0000:04:00.0': 'renderD129', '0000:08:00.0': 'renderD130'},
 }
+
+
+def verify_private_home(path=Path('/root')):
+    """Accept absence or systemd's inaccessible mount, never an exposed home."""
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return {'kind': 'absent'}
+    assert stat.S_ISDIR(metadata.st_mode) and metadata.st_uid == 0
+    assert stat.S_IMODE(metadata.st_mode) == 0
+    assert not os.access(path, os.R_OK | os.X_OK)
+    mounts = [line.split() for line in Path('/proc/self/mountinfo').read_text().splitlines()]
+    matches = [fields for fields in mounts if fields[4] == str(path)]
+    assert len(matches) == 1
+    fields = matches[0]
+    assert fields[3].endswith('/systemd/inaccessible/dir')
+    assert 'ro' in fields[5].split(',') and fields[fields.index('-') + 1] == 'tmpfs'
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError as error:
+        assert error.errno == errno.EACCES
+    else:
+        os.close(descriptor)
+        raise AssertionError('Private home can be opened')
+    return {'kind': 'inaccessible-mount', 'mode': 0, 'uid': 0, 'open_denied': True}
 
 
 def main():
@@ -29,7 +56,8 @@ def main():
         assert (Path('/sys/class/drm') / node / 'device').resolve().name == pci
         fd = os.open('/dev/dri/' + node, os.O_RDWR)
         os.close(fd)
-    for hidden in ['/root', '/home/atcadmin', '/var/lib/test-fleet/protected',
+    private_home = verify_private_home()
+    for hidden in ['/home/atcadmin', '/var/lib/test-fleet/protected',
                    '/var/lib/test-fleet/client-atc', '/dev/dri/renderD128']:
         assert not Path(hidden).exists(), hidden
     assert os.environ.get('ONEAPI_DEVICE_SELECTOR') == 'level_zero:gpu'
@@ -55,6 +83,7 @@ def main():
             break
         time.sleep(2)
     result.update(profile=profile, uid=os.geteuid(), selected_nodes=selected,
+        private_home=private_home,
         started_utc=start, completed_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
         samples=samples, compiler=compiler,
         source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
