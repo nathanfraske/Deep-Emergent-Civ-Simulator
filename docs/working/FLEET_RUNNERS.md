@@ -36,12 +36,44 @@ The dedicated `fleet-gpu.yml` workflow requests
 runs a CUDA kernel through the driver API, compares every output with an
 independent CPU calculation, checks an overrun guard and retains the physical
 GPU UUID, source hash and GitHub execution identity. It needs no CUDA toolkit.
-Runner qualification and clean retirement are still in progress.
+Run [36479431435](https://github.com/nathanfraske/Deep-Emergent-Civ-Simulator/actions/runs/36479431435)
+passed the numerical check at `e6f2ed8f904f91c966825b1004e690fae39290bf`.
+The controller then removed the ephemeral runner and reset its environment;
+the fresh clone was stopped, its cache intact and its work directory empty.
+This profile now accepts this repository's owner push and manual GPU jobs.
 
 The simulator's `CIVSIM_GPU` tests remain a separate qualification. The driver
 check does not prove CubeCL or NVRTC compatibility and ordinary CI does not set
-`CIVSIM_GPU`. The ATC B70 single-card and dual-card profiles are being prepared;
-they are not advertised as ready by this workflow.
+`CIVSIM_GPU`.
+
+The `fleet-b70.yml` workflow exposes a manual choice of `b70-a`, `b70-b`,
+`b70-pair` or `all`. Its qualification remains in progress. The two single-card
+jobs can overlap when the workstation has capacity. A paired job reserves both
+cards and waits for either single-card reservation to retire.
+
+| Runner label | Devices | Job allocation | Available runtime |
+| --- | --- | --- | --- |
+| `fleet-gpu-rtx5070` | RTX 5070 | 6 CPUs, 10 GiB RAM | CUDA driver API, Python |
+| `fleet-gpu-b70-a` | B70 at `0000:04:00.0` | 8 CPUs, 32 GiB RAM | Intel oneAPI 2026.1, SYCL/Level Zero, `icpx` |
+| `fleet-gpu-b70-b` | B70 at `0000:08:00.0` | 8 CPUs, 32 GiB RAM | Intel oneAPI 2026.1, SYCL/Level Zero, `icpx` |
+| `fleet-gpu-b70-pair` | Both B70s | 16 CPUs, 64 GiB RAM | Intel oneAPI 2026.1, SYCL/Level Zero, `icpx` |
+
+Use `[self-hosted, Linux, X64, <runner-label>]` in the corresponding admitted
+GPU workflow. The controller creates these runners on demand, so an idle
+machine need not appear as a permanently registered GitHub runner. Ordinary
+CPU labels do not request a GPU. GPU jobs run natively in the isolated job
+environment. The B70 compiler and runtime are already on `PATH`; the selected
+profile, device count and PCI addresses are exposed as `FLEET_GPU_PROFILE`,
+`FLEET_GPU_COUNT` and `FLEET_GPU_PCI`. The integrated GPU is excluded.
+
+The B70 example compiles a SYCL kernel, verifies every integer output against
+a CPU reference, checks guard values and records the physical PCI identity of
+each device. Paired mode submits work to both devices. It does not combine
+their VRAM automatically. Application code must distribute work explicitly.
+Per-profile compiler/download caches persist; job work directories and runner
+credentials are disposable. Save scientific results with Actions artifacts.
+Additional compute frameworks and the simulator's GPU backend need their own
+dependency recipe and numerical qualification.
 
 Rollback: restore the prior workflow and remove this repository's exact workflow
 entry from the controller's native routing and optional-laptop allowlists.

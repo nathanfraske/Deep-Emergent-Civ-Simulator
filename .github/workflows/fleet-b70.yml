@@ -1,0 +1,69 @@
+# Copyright 2026 Nathan M. Fraske
+# Licensed under the Apache License, Version 2.0; see LICENSE.
+name: Fleet B70 correctness
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: GPU allocation to check
+        type: choice
+        default: all
+        options: [all, b70-a, b70-b, b70-pair]
+  push:
+    branches: [fleet/test-fleet-20260928]
+    paths:
+      - .github/workflows/fleet-b70.yml
+      - scripts/fleet-b70-check.cpp
+      - scripts/fleet-b70-check.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fleet-b70-correctness
+  cancel-in-progress: false
+
+jobs:
+  single:
+    name: B70 ${{ matrix.card }} numerical correctness
+    if: github.event_name == 'push' || inputs.mode != 'b70-pair'
+    strategy:
+      fail-fast: false
+      matrix:
+        card: ${{ fromJSON(inputs.mode == 'b70-a' && '["a"]' || inputs.mode == 'b70-b' && '["b"]' || '["a","b"]') }}
+    runs-on: [self-hosted, Linux, X64, "fleet-gpu-b70-${{ matrix.card }}"]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify selected GPU through the runner
+        if: github.event_name == 'push' || inputs.mode == 'all' || inputs.mode == format('b70-{0}', matrix.card)
+        run: python3 scripts/fleet-b70-check.py
+      - uses: actions/upload-artifact@v4
+        if: always() && (github.event_name == 'push' || inputs.mode == 'all' || inputs.mode == format('b70-{0}', matrix.card))
+        with:
+          name: b70-${{ matrix.card }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: gpu-results/b70-${{ matrix.card }}.json
+          if-no-files-found: error
+          retention-days: 14
+  pair:
+    name: Two B70s numerical correctness
+    needs: single
+    if: always() && (github.event_name == 'push' || inputs.mode == 'all' || inputs.mode == 'b70-pair') && (needs.single.result == 'success' || needs.single.result == 'skipped')
+    runs-on: [self-hosted, Linux, X64, fleet-gpu-b70-pair]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify both selected GPUs through the runner
+        run: python3 scripts/fleet-b70-check.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: b70-pair-${{ github.run_id }}-${{ github.run_attempt }}
+          path: gpu-results/b70-pair.json
+          if-no-files-found: error
+          retention-days: 14
