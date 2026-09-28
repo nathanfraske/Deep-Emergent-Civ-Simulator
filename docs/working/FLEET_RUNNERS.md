@@ -1,5 +1,10 @@
 # Fleet execution
 
+The integration is published on `fleet/test-fleet-20260928` in
+[PR 216](https://github.com/nathanfraske/Deep-Emergent-Civ-Simulator/pull/216).
+The runner profiles are enabled; merging the repository changes into `main`
+remains a separate step. Use this branch for the manual commands below.
+
 Owner pushes, scheduled runs and manual CI runs use the fleet's Linux runners.
 Pull requests and forks use GitHub-hosted runners. The workflow's existing
 document, format, lint, doc-link, provenance, Stone 0 and test gates are retained,
@@ -47,12 +52,24 @@ check does not prove CubeCL or NVRTC compatibility and ordinary CI does not set
 `CIVSIM_GPU`.
 
 The `fleet-b70.yml` workflow exposes a manual choice of `b70-a`, `b70-b`,
-`b70-pair` or `all`. Its qualification remains in progress. The two single-card
-jobs can overlap when the workstation has capacity. A paired job reserves both
-cards and waits for either single-card reservation to retire.
+`b70-pair` or `all`. Run
+[36487091816](https://github.com/nathanfraske/Deep-Emergent-Civ-Simulator/actions/runs/36487091816)
+passed all three profiles at `da1643b4dcc3e38af338f59af354a2d2b176dad2`.
+The saved artifacts identify each selected physical B70 and verify 262,147
+outputs per device with zero mismatches and unchanged guard values. The two
+single-card check windows overlapped for 36.50 seconds. The paired listener
+started after both individual reservations had retired. Every runner then
+retired automatically, with credentials removed and persistent caches intact.
+Both earlier failed runs remain recorded separately.
+
+The two single-card jobs can overlap when the workstation has capacity. A
+paired job reserves both cards and waits until both cards are free. These GPU
+profiles now accept this repository's owner push and
+manual jobs through their admitted workflows.
 
 | Runner label | Devices | Job allocation | Available runtime |
 | --- | --- | --- | --- |
+| `fleet-general-linux` | CPU fleet | Capacity assigned per job | Workflow's pinned Rust container |
 | `fleet-gpu-rtx5070` | RTX 5070 | 6 CPUs, 10 GiB RAM | CUDA driver API, Python |
 | `fleet-gpu-b70-a` | B70 at `0000:04:00.0` | 8 CPUs, 32 GiB RAM | Intel oneAPI 2026.1, SYCL/Level Zero, `icpx` |
 | `fleet-gpu-b70-b` | B70 at `0000:08:00.0` | 8 CPUs, 32 GiB RAM | Intel oneAPI 2026.1, SYCL/Level Zero, `icpx` |
@@ -75,6 +92,31 @@ credentials are disposable. Save scientific results with Actions artifacts.
 Additional compute frameworks and the simulator's GPU backend need their own
 dependency recipe and numerical qualification.
 
-Rollback: restore the prior workflow and remove this repository's exact workflow
-entry from the controller's native routing and optional-laptop allowlists.
-Existing repository routes, caches and machine resource reservations are retained.
+Run the paired B70 check from a machine with GitHub CLI access to the repository:
+
+```sh
+gh workflow run fleet-b70.yml -R nathanfraske/Deep-Emergent-Civ-Simulator --ref fleet/test-fleet-20260928 -f mode=b70-pair
+```
+
+Use `mode=b70-a` or `mode=b70-b` for one card. `mode=all` runs both
+single-card jobs together, then the paired check. The RTX 5070 workflow is:
+
+```sh
+gh workflow run fleet-gpu.yml -R nathanfraske/Deep-Emergent-Civ-Simulator --ref fleet/test-fleet-20260928
+```
+
+For scientific work, keep the allocation label and replace the numerical
+fixture step in the corresponding admitted workflow with the workload and its
+result upload. Independent experiments can use a matrix with a separate card
+label for each job. New workflow filenames need an explicit controller routing
+entry; a matching runner label alone does not admit an unregistered workflow.
+The paired runtime exposes both devices to one process so a SYCL application
+can select and distribute work between them. No implicit multi-GPU execution
+or shared VRAM is supplied by GitHub Actions.
+
+For GPU rollback, disable the affected profile's admission in the fleet
+controller and let active reservations retire before reverting its runtime or
+workflow. For CPU rollback, restore the prior workflow and remove this
+repository's exact workflow entry from the controller's native routing and
+optional-laptop allowlists. Retain other repository routes, caches and machine
+resource reservations.
