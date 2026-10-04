@@ -1,0 +1,24 @@
+name: Extended native rotating cloud
+on:
+  push:
+    branches: [compute/native-heavy-20261004-de5ff2b51baa]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  collapse:
+    runs-on: ${{ format('fleet-v2-linux-{0}-{1}-collapse', github.run_id, github.run_attempt) }}
+    timeout-minutes: 960
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Checked twelve-hour original-gas evolution
+        run: python3 -B compute/launch.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: native-heavy-${{ github.run_id }}
+          path: compute/results/
+          if-no-files-found: error
+          retention-days: 14
