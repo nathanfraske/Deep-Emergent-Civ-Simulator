@@ -54,11 +54,11 @@ def plans(probe=False):
     gas_slots=4;thermal_slots=max(4,(capacity-2*gas_slots)//2)
     result=[];folder=OUT/('probe' if probe else 'experiment');inputs=folder/'inputs';inputs.mkdir(parents=True)
     source_state=(SOURCE/'declared-controls/compact.state').read_text();source_num=(SOURCE/'declared-controls/long.numerics').read_text()
-    gas_specs=[('rotating-original',16,16,5),('rotating-finer',16,32,4),('rotating-large',32,32,2)]
+    gas_specs=[('rotating-original',16,16,5),('rotating-finer',32,32,4),('rotating-large',64,64,4)]
     for name,nr,nz,priority in (gas_specs[:1] if probe else gas_specs):
         state=inputs/(name+'.state');numerics=inputs/(name+'.numerics');state.write_text(source_state)
         text=source_num.replace('radial_cells=16','radial_cells='+str(nr)).replace('vertical_cells=16','vertical_cells='+str(nz))
-        if probe:text=text.replace('max_steps=32768','max_steps=128').replace('sample_every=256','sample_every=16')
+        if probe:text=text.replace('sample_every=256','sample_every=16')
         numerics.write_text(text);case=folder/'cases'/name;case.mkdir(parents=True)
         if nr==nz==16:shutil.copyfile(SOURCE/'declared-controls/initial-kernel.json',case/'kernel.json')
         command=[sys.executable,'-B','-m','scripts.compute.run_gas','--exact-binary',str(OUT/'exact_reduce'),
@@ -67,7 +67,7 @@ def plans(probe=False):
                  '--state',str(state),'--numerics',str(numerics),'--floor-receipt',str(SOURCE/'floor.json'),
                  '--journal',str(case/'frames.jsonl'),'--kernel-cache',str(case/'kernel.json'),'--workers',str(gas_slots),
                  '--wall-seconds',str(45 if probe else 10800)]
-        result.append(dict(name=name,kind='rotating',cpu_slots=gas_slots,priority=priority*4000,
+        result.append(dict(name=name,kind='rotating',cpu_slots=gas_slots,priority=priority*4000,peak_memory_bytes=(24 if nr>=64 else 6)*1024**3,
                            estimate_seconds=4000,hard_wall_seconds=180 if probe else 14400,command=command))
     template=json.loads((SOURCE/'examples/stellar-formation/uniform-cloud.json').read_text())
     thermal_specs=[('thermal24',24,'.02',5),('thermal32',32,'.02',5),('thermal48',48,'.02',4),
@@ -75,7 +75,7 @@ def plans(probe=False):
                    ('thermal16-half',16,'.01',4),('thermal24-half',24,'.01',3),('thermal32-half',32,'.01',3),
                    ('thermal16-no-burning',16,'.02',4),('thermal24-no-burning',24,'.02',4),
                    ('thermal48-half',48,'.01',2),('thermal64-half',64,'.01',2)]
-    for name,cells,change,priority in (thermal_specs[:3] if probe else thermal_specs):
+    for name,cells,change,priority in (thermal_specs[:5] if probe else thermal_specs):
         cfg=json.loads(json.dumps(template));cfg['numerics'].update(cells=cells,relative_step_change=change,
             max_wall_seconds=45 if probe else 10800,max_steps=100000,save_every=25)
         if 'no-burning' in name:cfg['interactions']['pp_i']=False
@@ -124,7 +124,9 @@ def prepare():
     command([sys.executable,'-B','-m','scripts.compute.check_device','--source-root',str(SOURCE),'--binary',str(OUT/'field_worker'),'--output',str(probe/'gpu-controls')],probe/'gpu-controls-command',300)
     command([sys.executable,'-B','-m','scripts.compute.test_thermal_parallel',str(probe/'thermal-controls'),'--workers','6'],probe/'thermal-controls-command',300)
     from scripts.compute.work_queue import execute
-    result=execute(plans(True),probe/'queue',150)
+    result=execute(plans(True),probe/'queue',180,opportunistic=True)
+    if result['pending'] or any(x['exit_code'] for x in result['completed']):
+        raise RuntimeError('short physical probe failed; inspect every retained queue status')
     (probe/'preparation.json').write_text(json.dumps(dict(accepted=True,host=host,queue=result,
         exact_binary_sha256=sha(OUT/'exact_reduce'),gpu_binary_sha256=sha(OUT/'field_worker'),
         scope='Physical controls and short cold gas progress before the heavy unordered experiment. GPU timings are recorded per actual PCI address.'),indent=2)+'\n')
@@ -133,7 +135,7 @@ def prepare():
 def experiment():
     env();assert json.loads((OUT/'probe/preparation.json').read_text())['accepted'] is True
     from scripts.compute.work_queue import execute
-    result=execute(plans(False),OUT/'experiment/queue',21600)
+    result=execute(plans(False),OUT/'experiment/queue',21600,opportunistic=True)
     # Saved checks remain independent and are applied once to each available
     # thermal trajectory. A numerical refusal remains a recorded negative.
     for case in (OUT/'experiment/cases').glob('thermal*'):
