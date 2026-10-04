@@ -13,8 +13,11 @@ def sha(path):
 
 
 def env():
-    os.environ['PYTHONPATH']=str(SOURCE)
+    paths=[SOURCE]
+    if (RUNTIME/'site').exists():paths.insert(0,RUNTIME/'site')
+    os.environ['PYTHONPATH']=os.pathsep.join(map(str,paths))
     if str(SOURCE) not in sys.path:sys.path.insert(0,str(SOURCE))
+    if (RUNTIME/'site').exists() and str(RUNTIME/'site') not in sys.path:sys.path.insert(0,str(RUNTIME/'site'))
     for key in ('OPENBLAS_NUM_THREADS','MKL_NUM_THREADS','OMP_NUM_THREADS'):os.environ[key]='1'
     os.environ['OMP_SCHEDULE']='dynamic,1'
 
@@ -99,6 +102,17 @@ def prepare():
               contract='fleet-gpu-b70-pair-all plus fleet-resources-all; exclusive workstation, measured capacity with host headroom')
     (probe/'host.json').write_text(json.dumps(host,indent=2)+'\n')
     (OUT/'payload.json').write_text(json.dumps(manifest,indent=2)+'\n')
+    (probe/'python.json').write_text(json.dumps(dict(version=sys.version,executable=sys.executable))+'\n')
+    # Bootstrap pip from one held public wheel, install only into this job's
+    # disposable directory, and retain every resolved scientific wheel.
+    bootstrap=next((RUNTIME/'deps').glob('pip-*.whl'))
+    os.environ['PYTHONPATH']=str(bootstrap)+os.pathsep+str(SOURCE)
+    command([sys.executable,'-B','-m','pip','download','--disable-pip-version-check','--no-cache-dir','--only-binary=:all:',
+             '--dest',str(OUT/'python-wheels'),'numpy','scipy','mpmath'],probe/'python-download',600)
+    command([sys.executable,'-B','-m','pip','install','--disable-pip-version-check','--no-cache-dir','--no-index','--no-compile',
+             '--find-links',str(OUT/'python-wheels'),'--target',str(RUNTIME/'site'),'numpy','scipy','mpmath'],probe/'python-install',300)
+    env()
+    (probe/'python-wheels.json').write_text(json.dumps({p.name:dict(bytes=p.stat().st_size,sha256=sha(p)) for p in (OUT/'python-wheels').iterdir()},indent=2)+'\n')
     # Public LGPL headers are held in the packet. Link the installed replaceable
     # GMP runtime directly; the read-only sandbox needs no package installation.
     library=next((p for p in (Path('/usr/lib/x86_64-linux-gnu/libgmp.so.10'),Path('/usr/lib64/libgmp.so.10')) if p.exists()),None)
