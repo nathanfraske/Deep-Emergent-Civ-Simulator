@@ -1,0 +1,24 @@
+name: B70 resident gas development
+on:
+  push:
+    branches: [compute/b70-resident-20261004-c311a319bc0c]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  gravity:
+    runs-on: [self-hosted, Linux, X64, fleet-gpu-b70-pair]
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Exact dual B70 controls then four-hour gas evolution
+        run: python3 -B compute/launch.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: b70-resident-${{ github.run_id }}
+          path: compute/results/
+          if-no-files-found: error
+          retention-days: 14
