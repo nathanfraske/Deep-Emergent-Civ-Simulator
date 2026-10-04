@@ -1,0 +1,24 @@
+name: Parallel gas and cold formation studies
+on:
+  push:
+    branches: [compute/parallel-b70-20261004-093f541c8401]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  parallel:
+    runs-on: [self-hosted, Linux, X64, fleet-gpu-b70-pair]
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Parallel exact controls, measured B70 kernels and concurrent formation studies
+        run: python3 -B compute/launch.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: parallel-b70-${{ github.run_id }}
+          path: compute/results/
+          if-no-files-found: error
+          retention-days: 14
