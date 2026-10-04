@@ -14,6 +14,7 @@ def sha(path):
 
 def env():
     os.environ['PYTHONPATH']=str(SOURCE)
+    if str(SOURCE) not in sys.path:sys.path.insert(0,str(SOURCE))
     for key in ('OPENBLAS_NUM_THREADS','MKL_NUM_THREADS','OMP_NUM_THREADS'):os.environ[key]='1'
     os.environ['OMP_SCHEDULE']='dynamic,1'
 
