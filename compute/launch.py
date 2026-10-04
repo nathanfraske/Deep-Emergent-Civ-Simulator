@@ -58,7 +58,10 @@ def plans(probe=False):
     for name,nr,nz,priority in (gas_specs[:1] if probe else gas_specs):
         state=inputs/(name+'.state');numerics=inputs/(name+'.numerics');state.write_text(source_state)
         text=source_num.replace('radial_cells=16','radial_cells='+str(nr)).replace('vertical_cells=16','vertical_cells='+str(nz))
-        if probe:text=text.replace('sample_every=256','sample_every=16')
+        # The canonical frame and remesh budgets remain valid even for the
+        # short wall probe; changing just one bound can violate the contract.
+        from scripts.rotating_core import run as gas
+        gas.inputs.numerics(text);gas.inputs.state(source_state)
         numerics.write_text(text);case=folder/'cases'/name;case.mkdir(parents=True)
         if nr==nz==16:shutil.copyfile(SOURCE/'declared-controls/initial-kernel.json',case/'kernel.json')
         command=[sys.executable,'-B','-m','scripts.compute.run_gas','--exact-binary',str(OUT/'exact_reduce'),
