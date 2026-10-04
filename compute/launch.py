@@ -54,16 +54,17 @@ def plans(probe=False):
     gas_slots=4;thermal_slots=max(4,(capacity-2*gas_slots)//2)
     result=[];folder=OUT/('probe' if probe else 'experiment');inputs=folder/'inputs';inputs.mkdir(parents=True)
     source_state=(SOURCE/'declared-controls/compact.state').read_text();source_num=(SOURCE/'declared-controls/long.numerics').read_text()
-    gas_specs=[('rotating-original',16,16,5),('rotating-finer',32,32,4),('rotating-large',64,64,4)]
-    for name,nr,nz,priority in (gas_specs[:1] if probe else gas_specs):
+    gas_specs=[('rotating-original',16,16,128,16,5),('rotating-finer',16,32,128,16,4),('rotating-large',32,16,160,64,4)]
+    for name,nr,nz,bits,angles,priority in (gas_specs[:1] if probe else gas_specs):
         state=inputs/(name+'.state');numerics=inputs/(name+'.numerics');state.write_text(source_state)
         text=source_num.replace('radial_cells=16','radial_cells='+str(nr)).replace('vertical_cells=16','vertical_cells='+str(nz))
+        text=text.replace('fraction_bits=128','fraction_bits='+str(bits)).replace('angular_nodes=16','angular_nodes='+str(angles))
         # The canonical frame and remesh budgets remain valid even for the
         # short wall probe; changing just one bound can violate the contract.
         from scripts.rotating_core import run as gas
         gas.inputs.numerics(text);gas.inputs.state(source_state)
         numerics.write_text(text);case=folder/'cases'/name;case.mkdir(parents=True)
-        if nr==nz==16:shutil.copyfile(SOURCE/'declared-controls/initial-kernel.json',case/'kernel.json')
+        if nr==nz==16 and bits==128 and angles==16:shutil.copyfile(SOURCE/'declared-controls/initial-kernel.json',case/'kernel.json')
         command=[sys.executable,'-B','-m','scripts.compute.run_gas','--exact-binary',str(OUT/'exact_reduce'),
                  '--gpu-binary',str(OUT/'field_worker'),'--gpu-policy','device','--execution-workers',str(gas_slots),
                  '--execution-record-dir',str(case/'execution'),'--model','axisymmetric_bate1998_barotropic_finite_cloud_v1',
