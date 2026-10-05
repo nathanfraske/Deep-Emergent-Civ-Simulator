@@ -1,0 +1,187 @@
+"""Exclusive ATC preparation, unordered useful work, and owned cleanup."""
+from pathlib import Path,PurePosixPath
+import argparse,hashlib,json,os,shutil,subprocess,sys,tarfile,time,traceback
+
+BASE=Path(__file__).resolve().parent;OUT=BASE/'results';RUNTIME=BASE/'runtime';SOURCE=RUNTIME/'source'
+
+
+def sha(path):
+    h=hashlib.sha256()
+    with Path(path).open('rb') as f:
+        for chunk in iter(lambda:f.read(1024**2),b''):h.update(chunk)
+    return h.hexdigest()
+
+
+def env():
+    paths=[SOURCE]
+    if (RUNTIME/'site').exists():paths.insert(0,RUNTIME/'site')
+    os.environ['PYTHONPATH']=os.pathsep.join(map(str,paths))
+    if str(SOURCE) not in sys.path:sys.path.insert(0,str(SOURCE))
+    if (RUNTIME/'site').exists() and str(RUNTIME/'site') not in sys.path:sys.path.insert(0,str(RUNTIME/'site'))
+    for key in ('OPENBLAS_NUM_THREADS','MKL_NUM_THREADS','OMP_NUM_THREADS'):os.environ[key]='1'
+    os.environ['OMP_SCHEDULE']='dynamic,1'
+
+
+def command(command,folder,timeout):
+    folder.mkdir(parents=True,exist_ok=False);began=time.monotonic()
+    with (folder/'stdout.txt').open('wb') as stdout,(folder/'stderr.txt').open('wb') as stderr:
+        try:result=subprocess.run(command,stdout=stdout,stderr=stderr,timeout=timeout)
+        except subprocess.TimeoutExpired:
+            (folder/'status.json').write_text(json.dumps(dict(exit_code=124,elapsed_s=time.monotonic()-began))+'\n');raise
+    row=dict(command=command,exit_code=result.returncode,elapsed_s=time.monotonic()-began)
+    (folder/'status.json').write_text(json.dumps(row,indent=2)+'\n')
+    print('CIVSIM_PREPARATION '+json.dumps(row),flush=True)
+    if result.returncode:raise RuntimeError('preparation failed: '+str(folder))
+
+
+def extract():
+    manifest=json.loads((BASE/'payload.json').read_text());assert sha(BASE/'payload.tar.gz')==manifest['payload_sha256']
+    RUNTIME.mkdir(exist_ok=False)
+    with tarfile.open(BASE/'payload.tar.gz','r:gz') as archive:
+        members=archive.getmembers();assert len(members)==len(manifest['files']) and {m.name for m in members}==set(manifest['files'])
+        for m in members:
+            path=PurePosixPath(m.name);assert m.isfile() and not path.is_absolute() and '..' not in path.parts and '\\' not in m.name
+            raw=archive.extractfile(m).read();fact=manifest['files'][m.name]
+            assert len(raw)==fact['bytes'] and hashlib.sha256(raw).hexdigest()==fact['sha256']
+            target=RUNTIME/m.name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(raw)
+    return manifest
+
+
+def plans(probe=False):
+    from scripts.compute.exact_reduce import available_cpus
+    capacity=available_cpus();assert capacity>=16,'exclusive workstation did not expose enough CPU capacity'
+    gas_slots=4;thermal_slots=max(4,(capacity-2*gas_slots)//2)
+    result=[];folder=OUT/('probe' if probe else 'experiment');inputs=folder/'inputs';inputs.mkdir(parents=True)
+    source_state=(SOURCE/'declared-controls/compact.state').read_text()
+    source_num=(SOURCE/'declared-controls/long.numerics').read_text()
+    # Same cold cloud at two vertical resolutions. Both start at clock zero.
+    for name,nr,nz in ([('rotating-original',16,16)] if probe else
+                       [('rotating-original',16,16),('rotating-finer',16,32)]):
+        state=inputs/(name+'.state');numerics=inputs/(name+'.numerics');state.write_text(source_state)
+        text=source_num.replace('radial_cells=16','radial_cells='+str(nr)).replace('vertical_cells=16','vertical_cells='+str(nz))
+        text=text.replace('max_steps=32768','max_steps=65536').replace('sample_every=256','sample_every=512')
+        text=text.replace('max_pair_steps=549755813888','max_pair_steps=1099511627776')
+        from scripts.rotating_core import run as gas
+        gas.inputs.numerics(text);gas.inputs.state(source_state)
+        numerics.write_text(text);case=folder/'cases'/name;case.mkdir(parents=True)
+        if nr==nz==16:shutil.copyfile(SOURCE/'declared-controls/initial-kernel.json',case/'kernel.json')
+        argv=[sys.executable,'-B','-m','scripts.compute.run_gas','--exact-binary',str(OUT/'exact_reduce'),
+              '--gpu-binary',str(OUT/'field_worker'),'--gpu-policy','device','--execution-workers',str(gas_slots),
+              '--execution-record-dir',str(case/'execution'),'--model','axisymmetric_bate1998_barotropic_finite_cloud_v1',
+              '--state',str(state),'--numerics',str(numerics),'--floor-receipt',str(SOURCE/'floor.json'),
+              '--journal',str(case/'frames.jsonl'),'--disk-journal',str(case/'disk.jsonl'),
+              '--kernel-cache',str(case/'kernel.json'),'--workers',str(gas_slots),
+              '--wall-seconds',str(45 if probe else 25200)]
+        result.append(dict(name=name,kind='rotating',cpu_slots=gas_slots,priority=20000,
+            peak_memory_bytes=8*1024**3,estimate_seconds=25200,hard_wall_seconds=180 if probe else 25320,command=argv))
+    template=json.loads((SOURCE/'examples/stellar-formation/uniform-cloud.json').read_text())
+    # Calibration roles are bookkeeping only and never simulation inputs.
+    specs=[('thermal24-half',24,'.01','2e30','5e12','300','baseline',8,7200),
+           ('thermal32-half',32,'.01','2e30','5e12','300','baseline',8,7200),
+           ('thermal48',48,'.02','2e30','5e12','300','resolution',5,14400),
+           ('thermal64',64,'.02','2e30','5e12','300','resolution',3,14400),
+           ('thermal96',96,'.02','2e30','5e12','300','resolution',2,14400),
+           ('thermal24-no-burning',24,'.01','2e30','5e12','300','reaction-control',8,7200)]
+    if not probe:
+        for mass,role in [('1.2e30','training'),('1.4e30','withheld'),('1.6e30','training'),
+                          ('1.8e30','withheld'),('2.2e30','withheld'),('2.4e30','training')]:
+            specs.append(('thermal32-mass-'+mass,32,'.01',mass,'5e12','300',role,6,7200))
+        for radius,role in [('4e12','training'),('6e12','training'),('5.5e12','withheld')]:
+            specs.append(('thermal32-radius-'+radius,32,'.01','2e30',radius,'300',role,5,7200))
+        for temp in ('150','600'):
+            specs.append(('thermal32-cold-'+temp,32,'.01','2e30','5e12',temp,'initial-temperature-control',4,7200))
+        specs.append(('thermal48-half',48,'.01','2e30','5e12','300','time-refinement',2,14400))
+    for name,cells,change,mass,radius,temp,role,priority,wall in (specs[:2] if probe else specs):
+        cfg=json.loads(json.dumps(template));cfg['numerics'].update(cells=cells,relative_step_change=change,
+            max_wall_seconds=45 if probe else wall,max_steps=100000,save_every=25)
+        cfg['state'].update(mass_kg=mass,radius_m=radius,temperature_K=temp,
+            description='Declared cold gas for an unordered ATC reference campaign. No supplied star or requested endpoint.')
+        if role=='reaction-control':cfg['interactions']['pp_i']=False
+        from scripts.stellar_formation.run import validate
+        validate(cfg)
+        path=inputs/(name+'.json');path.write_text(json.dumps(cfg,indent=2)+'\n')
+        case=folder/'cases'/name;case.mkdir(parents=True)
+        argv=[sys.executable,'-B','-m','scripts.compute.thermal_parallel','--workers',str(thermal_slots),
+              '--unordered','--execution-record-dir',str(case/'execution'),str(path),str(case/'run')]
+        result.append(dict(name=name,kind='thermal',cpu_slots=thermal_slots,priority=priority*1000,
+            peak_memory_bytes=2*1024**3,estimate_seconds=1200 if cells<=32 else wall,
+            hard_wall_seconds=180 if probe else wall+120,command=argv,calibration_role=role))
+    (inputs/'design.json').write_text(json.dumps([dict(name=j['name'],kind=j['kind'],
+        calibration_role=j.get('calibration_role','rotation-resolution'),cpu_slots=j['cpu_slots']) for j in result],indent=2)+'\n')
+    return result
+
+def prepare():
+    assert not OUT.exists();OUT.mkdir();probe=OUT/'probe';probe.mkdir()
+    assert shutil.disk_usage(BASE).free>=16*1024**3
+    manifest=extract();env()
+    from scripts.compute.work_queue import physical_memory
+    from scripts.compute.exact_reduce import available_cpus
+    host=dict(cpu_affinity=len(os.sched_getaffinity(0)),allocated_cpus=available_cpus(),memory_bytes=physical_memory(),
+              cgroup=Path('/proc/self/cgroup').read_text(),runner=os.environ.get('RUNNER_NAME'),
+              fleet_cpu=os.environ.get('FLEET_CPU_COUNT'),fleet_memory_mib=os.environ.get('FLEET_MEMORY_MIB'),
+              gpu_pci=os.environ.get('FLEET_GPU_PCI'),unordered=True,
+              contract='fleet-gpu-b70-pair-all plus fleet-resources-all; exclusive workstation, measured capacity with host headroom')
+    (probe/'host.json').write_text(json.dumps(host,indent=2)+'\n')
+    (OUT/'payload.json').write_text(json.dumps(manifest,indent=2)+'\n')
+    (probe/'python.json').write_text(json.dumps(dict(version=sys.version,executable=sys.executable))+'\n')
+    # Bootstrap pip from one held public wheel, install only into this job's
+    # disposable directory, and retain every resolved scientific wheel.
+    bootstrap=next((RUNTIME/'deps').glob('pip-*.whl'))
+    os.environ['PYTHONPATH']=str(bootstrap)+os.pathsep+str(SOURCE)
+    command([sys.executable,'-B','-m','pip','download','--disable-pip-version-check','--no-cache-dir','--only-binary=:all:',
+             '--dest',str(OUT/'python-wheels'),'numpy','scipy','mpmath'],probe/'python-download',600)
+    command([sys.executable,'-B','-m','pip','install','--disable-pip-version-check','--no-cache-dir','--no-index','--no-compile',
+             '--find-links',str(OUT/'python-wheels'),'--target',str(RUNTIME/'site'),'numpy','scipy','mpmath'],probe/'python-install',300)
+    env()
+    (probe/'python-wheels.json').write_text(json.dumps({p.name:dict(bytes=p.stat().st_size,sha256=sha(p)) for p in (OUT/'python-wheels').iterdir()},indent=2)+'\n')
+    # Public LGPL headers are held in the packet. Link the installed replaceable
+    # GMP runtime directly; the read-only sandbox needs no package installation.
+    library=next((p for p in (Path('/usr/lib/x86_64-linux-gnu/libgmp.so.10'),Path('/usr/lib64/libgmp.so.10')) if p.exists()),None)
+    if library is None:raise RuntimeError('installed GMP runtime missing')
+    (probe/'gmp-runtime.json').write_text(json.dumps(dict(path=str(library),resolved=str(library.resolve()),sha256=sha(library)))+'\n')
+    command(['g++','-O3','-std=c++17','-fopenmp','-I'+str(RUNTIME/'deps/include'),str(SOURCE/'scripts/compute/exact_reduce.cpp'),str(library),'-o',str(OUT/'exact_reduce')],probe/'cpu-build',300)
+    command(['icpx','-O3','-std=c++17','-pthread','-fsycl',str(SOURCE/'scripts/compute/field_worker.cpp'),'-o',str(OUT/'field_worker')],probe/'gpu-build',600)
+    command([sys.executable,'-B','-m','scripts.compute.test_exact_parallel',str(OUT/'exact_reduce'),str(probe/'exact-controls'),'--workers',str(min(16,available_cpus()))],probe/'exact-controls-command',300)
+    command([sys.executable,'-B','-m','scripts.compute.check_device','--source-root',str(SOURCE),'--binary',str(OUT/'field_worker'),'--output',str(probe/'gpu-controls')],probe/'gpu-controls-command',300)
+    command([sys.executable,'-B','-m','scripts.compute.test_thermal_parallel',str(probe/'thermal-controls'),'--workers','6'],probe/'thermal-controls-command',300)
+    command([sys.executable,'-B','-m','unittest','scripts.stellar_formation.test_ignition_observe','scripts.rotating_core.test_disk_stream'],probe/'observer-controls-command',300)
+    from scripts.compute.work_queue import execute
+    result=execute(plans(True),probe/'queue',180,opportunistic=True)
+    if result['pending'] or any(x['exit_code'] for x in result['completed']):
+        raise RuntimeError('short physical probe failed; inspect every retained queue status')
+    (probe/'preparation.json').write_text(json.dumps(dict(accepted=True,host=host,queue=result,
+        exact_binary_sha256=sha(OUT/'exact_reduce'),gpu_binary_sha256=sha(OUT/'field_worker'),
+        scope='Physical controls and short cold gas progress before the heavy unordered experiment. GPU timings are recorded per actual PCI address.'),indent=2)+'\n')
+
+
+def experiment():
+    env();assert json.loads((OUT/'probe/preparation.json').read_text())['accepted'] is True
+    from scripts.compute.work_queue import execute
+    result=execute(plans(False),OUT/'experiment/queue',28800,opportunistic=True)
+    # Saved checks remain independent and are applied once to each available
+    # thermal trajectory. A numerical refusal remains a recorded negative.
+    for case in (OUT/'experiment/cases').glob('thermal*'):
+        if (case/'run/receipt.json').exists():
+            target=case/'independent';target.mkdir()
+            with (target/'stdout.txt').open('wb') as stdout,(target/'stderr.txt').open('wb') as stderr:
+                p=subprocess.run([sys.executable,'-B','-m','scripts.stellar_formation.ignition_observe',str(case/'run'),str(case/'ignition.json'),'--source-root',str(SOURCE)],stdout=stdout,stderr=stderr,timeout=300)
+            (target/'status.json').write_text(json.dumps(dict(exit_code=p.returncode))+'\n')
+    (OUT/'experiment-result.json').write_text(json.dumps(result,indent=2)+'\n')
+
+
+def cleanup():
+    removed=False
+    if RUNTIME.exists():
+        resolved=RUNTIME.resolve();assert resolved.parent==BASE.resolve() and not RUNTIME.is_symlink()
+        shutil.rmtree(resolved);removed=True
+    OUT.mkdir(exist_ok=True)
+    (OUT/'cleanup.json').write_text(json.dumps(dict(owned_runtime_removed=removed or not RUNTIME.exists(),free_bytes=shutil.disk_usage(BASE).free))+'\n')
+    files={str(p.relative_to(OUT)):dict(bytes=p.stat().st_size,sha256=sha(p)) for p in OUT.rglob('*') if p.is_file()}
+    (OUT/'completion.json').write_text(json.dumps(dict(schema='civsim.atc-all-evidence.v1',files=files,unordered=True,stellar_admission=False,completed_system=False),indent=2)+'\n')
+
+
+if __name__=='__main__':
+    p=argparse.ArgumentParser();p.add_argument('phase',choices=('prepare','run','cleanup'));args=p.parse_args()
+    try:{'prepare':prepare,'run':experiment,'cleanup':cleanup}[args.phase]()
+    except Exception:
+        OUT.mkdir(exist_ok=True);(OUT/(args.phase+'-error.txt')).write_text(traceback.format_exc());raise

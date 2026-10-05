@@ -1,0 +1,35 @@
+name: Cold-gas ignition and disk reference campaign
+on:
+  push:
+    branches: [compute/ignition-disk-20261005-595eaf3135cd]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  workstation:
+    runs-on: [self-hosted, Linux, X64, fleet-gpu-b70-pair-all, fleet-resources-all]
+    timeout-minutes: 630
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Build, independent controls and measured parallel gas probe
+        run: python3 -B compute/launch.py prepare
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: atc-all-probe-${{ github.run_id }}
+          path: compute/results/probe/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Eight-hour reference queue with allocated CPU and both B70s
+        run: python3 -B compute/launch.py run
+      - name: Remove owned runtime source and preserve evidence
+        if: always()
+        run: python3 -B compute/launch.py cleanup
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: atc-all-${{ github.run_id }}
+          path: compute/results/
+          if-no-files-found: error
+          retention-days: 14
